@@ -29,8 +29,21 @@ export const erpnext: ErpnextSettings = {
       priceP10: 'bw_price_p10', priceP90: 'bw_price_p90', leadWeeksP10: 'bw_lead_weeks_p10', leadWeeksP90: 'bw_lead_weeks_p90',
       qualified: 'bw_qualified', primary: 'bw_primary', allocation: 'bw_allocation',
     },
-    bom: { changeOrder: 'bw_eco', releasedOn: 'bw_released_on' },
+    bom: { changeOrder: 'bw_eco', releasedOn: 'bw_released_on', decision: 'bw_decision_url' },
     purchaseOrder: { externalId: 'bw_po_id' },
+    // The write-back's tags. bw_eco on the BOM is the seed's; the rest are added by bowman/erp/eco-setup.ts.
+    itemPrice: { changeOrder: 'bw_eco', decision: 'bw_decision_url' },
+    journalEntry: { changeOrder: 'bw_eco', entry: 'bw_eco_entry', decision: 'bw_decision_url' },
+  },
+  // The ECO write-back's journal entries name accounts by role; these are Bowman's. All three are in ERPNext's US chart
+  // except the reserve, which bowman/erp/eco-setup.ts adds: with perpetual inventory a journal entry cannot credit
+  // 11410 - Inventory on Hand, so a stock write-down is booked to a reserve until the stock is issued out.
+  write: {
+    accounts: {
+      scrapExpense: '51900 - Inventory Shrinkage and Adjustments - BWA',
+      inventoryReserve: '11420 - Reserve for Obsolete Inventory - BWA',
+      accruedLiability: '21210 - Accrued Expenses - BWA',
+    },
   },
   // No `fallback`: the volume plan is a Master Production Schedule and the built aircraft are Serial Nos in
   // Bowman's ERPNext (bowman/erp/seed-planning.ts).

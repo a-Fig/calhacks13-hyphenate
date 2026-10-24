@@ -1,6 +1,6 @@
-# ERPNext connector (read side)
+# ERPNext connector
 
-Written 2026-10-24 for issue #40 (the PLM half is separate). Norn's read-only view of a company's ERPNext: one call returns the production baseline in the shape the checks library reads, plus four history reads for agents. Plain TypeScript on Node 24 (erasable syntax), no runtime dependencies. Nothing in `src/` names a company; a company supplies its names as options (Bowman's: `bowman/norn-config/erpnext.ts`).
+Written 2026-10-24 for issue #40 (the PLM half is separate). Norn's view of a company's ERPNext: one call returns the production baseline in the shape the checks library reads, plus four history reads for agents, and (issue #44, section "ECO write-back") the write-back of a released ECO. Plain TypeScript on Node 24 (erasable syntax), no runtime dependencies. Nothing in `src/` names a company; a company supplies its names as options (Bowman's: `bowman/norn-config/erpnext.ts`).
 
 ## Run it
 
@@ -69,6 +69,70 @@ Reads the baseline twice (cold, then again) and compares it with `bowman/data/bo
 
 Result 2026-10-24: 28 of 28 pass; read 0.60 s for 12 requests, second read 0.51 s, hash identical. A negative control (a copy of the dataset with seven values changed) failed the six expected checks. The stock check covers the 209 items the dataset has stock rows for; the baseline has 211 (the two aircraft top items, zero everywhere).
 
+## ECO write-back (`src/write.ts`, issue #44)
+
+Written 2026-10-24. When an ECO is released, Norn writes its effects into ERPNext as the Norn Agent user: the new standard cost, a new BOM version replaced in the parent assemblies, and draft journal entries. Each document carries the ECO number and a link to Norn's decision.
+
+```ts
+planEcoRelease(conn, settings, release): Promise<EcoPlan>        // reads ERPNext, writes nothing
+applyEcoRelease(conn, settings, plan, run?): Promise<ApplyResult> // executes it; returns doctype, name and link of each document
+formatPlan(plan): string                                          // the plan as text for a person
+```
+
+`conn` is the Norn token (`ErpnextConnection`), `settings` the company's `ErpnextSettings`. `connect(opts)` binds both as `planEcoRelease(release)` and `applyEcoRelease(plan)`.
+
+**The release** (`EcoRelease`) is what Norn's assessment hands over: `eco`, `ecr`, `decision: { id, url }`, `effectiveDate` (first day of the new standard cost; also the journal posting date unless `postingDate` is set), `items` (item, new `rev`, new `standardCost`), optional `bomChanges` (`add`, `remove`, `set_qty` on the default BOM of a parent), and `journals`: each a `key`, a `title` and lines of `amount`, a `debit` account role, a `credit` account role and a `memo`. The connector never computes a journal amount. Account roles are looked up in `settings.write.accounts`; Bowman's are in `bowman/norn-config/erpnext.ts`.
+
+**The plan** is plain data: `steps` in order, each with `id`, `kind`, `doctype`, a one-line `summary`, `amounts`, and a `status` (`todo`; `done` when the ECO's own earlier write was found; `conflict`), plus `effects` (the estimated change in each program's unit cost, from the BOM lines), `warnings` and `problems`. `applyEcoRelease` refuses a plan with problems (a missing or stock-type account, a journal entry already written for another amount, a price row that starts after the effective date).
+
+**Order** (the one verified in `bowman/erp/NOTES.md`; retiring before replacing is a 417): close the old price row, write the new one; then for each BOM that holds a repriced item (or a `bomChanges` parent), children first: new version (submitted, default, costed from the standard-cost list), replace it in the parent BOMs with `enqueue_replace_bom` (waits for the BOM Update Log to complete, then checks no active parent still points at the old one), retire the old version; then the journal entries, as drafts.
+
+**Idempotent.** Every document carries the ECO number (`bw_eco`), and a journal entry also its `key` (`bw_eco_entry`). Each step looks for its own earlier write first and skips it (`action: 'existing'`), whatever the plan said, so a stale plan, a retry after a failure, or a second apply writes nothing twice. A failure throws `EcoApplyError` with what was written; applying again continues from there. Cancelled documents do not count as written, so the demo reset (below) lets the release run again. Verified live: a second `--apply` wrote nothing.
+
+### What a finance user sees in ERPNext
+
+| Document | Carries |
+|---|---|
+| BOM | Released by ECO (`bw_eco`), Released on, Norn decision (`bw_decision_url`, a link field). Created By "Norn Agent". |
+| Item Price | Released by ECO, Norn decision, and the `note`: "ECO-0319 (ECR-0417); Norn decision DEC-ECR-0417: <url>. BW-5120-210 Rev C standard cost 221.00 from 2026-10-24, was 186.40." The old row is closed the day before, not edited otherwise. |
+| Journal Entry | Title "ECO-0319: <what>", Released by ECO, ECO entry, Norn decision, `user_remark` with the same in words, and a memo on each row. Status Draft. |
+
+Screenshots of the three, taken in headless Edge as Administrator: `screenshots/` (`bowman/erp/screenshot-eco.ts`). Two things the screenshots show that are ERPNext's doing: `user_remark` is hidden in the Journal Entry form (v16 marks it hidden, and `remark` stays empty on a draft), so the visible trace is the three custom fields and the title; and the item-price form puts the seed's supplier-quote custom fields above the price, so the ECO fields sit lower on the page.
+
+Not traceable from ERPNext, by design of Norn's role: the **Item's revision** (`bw_rev`) stays `B`, because Norn has no write on Item. The new revision is in the descriptions only. In a real deployment the PLM-to-ERP gateway owns it (`docs/PLAN.md` section 2).
+
+### Journal entries: the finance logic (ECR-0417; Tyler to confirm)
+
+Bowman carries stock at standard cost: a Rev B bracket is $186.40 in the ledger (`valuation_rate` was seeded from it). Rev B failed fatigue (NCR-0119), so none of it can be used up. The dataset's answer key (`bowman/data/scenarios.ts`, S1) writes the scrap down net of an estimated scrap value of **$2.85 per bracket** (not stated there; it is what the key's totals imply: 324 x 186.40 - 59,470.20, over 324). So each bracket's loss is 186.40 - 2.85 = **$183.55**, a write-down to net realisable value (lower of cost and NRV). All three entries debit **51900 Inventory Shrinkage and Adjustments** (role `scrapExpense`), so the cost of the ECO sums in one account; the chart has no better one. The posting date is the effective date, 2026-10-24.
+
+1. **Scrap of Stores and WIP stock**: Stores 96 x 183.55 = 17,620.80 and WIP 48 x 183.55 = 8,810.40, **26,431.20**. Dr 51900; Cr **11420 Reserve for Obsolete Inventory**. The credit cannot be 11410 Inventory on Hand: with perpetual inventory on, ERPNext rejects it (tested live: 417 `StockAccountInvalidTransaction`, "can only be updated via Stock Transactions", even as a draft). As I remember ERPNext's source the check only fires while the account balance equals the stock ledger's value; I did not test the other case. The textbook allowance method fits: the loss is booked when it is known, the bracket stays in stock at cost with the reserve against it, and when stores physically scrap it a Stock Entry (Material Issue) with 11420 as its difference account relieves both. The US chart has no inventory reserve, so `bowman/erp/eco-setup.ts` adds 11420 under 11400 Inventory (the one account this work adds). What is left of the reserve after that Stock Entry is the 144 x 2.85 = 410.40 scrap value, until the scrap is sold. Finance decides how to carry that.
+2. **Supplier-finished units Bowman must still pay for**: 60 finished at Halden, not shipped, on the open PO-26-0144 line due 2026-11-02. 60 x 183.55 = **11,013.00**. Dr 51900; Cr **21210 Accrued Expenses**. Bowman owes Halden the full 11,184.00 when they ship and invoice; the bracket is worth 171.00 as scrap. A loss on a firm purchase commitment is recognised when it is known, measured like an inventory loss (ASC 330-10-35-17), so the 11,013.00 is accrued now and cleared when the invoice arrives (Dr 21210 11,013.00, Dr inventory 171.00, Cr Accounts Payable 11,184.00). Accounts Payable itself is not used: it needs a supplier party and an invoice.
+3. **Cancellation charge**: the 60 Rev B brackets not started, cancelled at Halden's 10% (quote Q-HAL-26-1187): 60 x 18.64 = **1,118.40**. Dr 51900; Cr 21210 Accrued Expenses, for Halden's invoice. It is recognised when the cancellation is decided, which is this decision.
+
+Total expense 38,562.60. The answer key's 59,470.20 + 1,118.40 = 60,588.60 also includes the 120 brackets installed on S/N 001-010, **22,026.00 at 183.55**. They are not in these entries: installed brackets are not in ERPNext's stock or ledger (the baseline derives them), so there is nothing to credit, and the loss arises when the retrofit removes them. `bowman/erp/ecr-0417-release.ts` prints this reconciliation.
+
+**Flagged, not guessed:**
+- **Net or gross of scrap value.** Entries follow the answer key (net). If finance books the full 186.40 and recognises scrap proceeds on sale, change the line amounts in the release; no connector change.
+- **The 60 supplier-finished units are on the books twice.** `seed.ts` put them in the `At Supplier - BWA` warehouse at 186.40 (11,184.00 in 11410, the difference posted to Cost of Goods Sold) and also left them on the open PO line. If finance regards them as already in inventory, entry 2 should credit 11420 like entry 1 (change its `credit` role); either way, receiving the PO line later would add them again. This is the seed's modelling, not something the write-back can resolve.
+- **Standard cost change on stock that is not scrapped.** Standard costing would revalue stock on hand of a repriced item. Here all Rev B stock is scrapped, so there is none. Assemblies in stock or WIP that contain the bracket are not revalued, and the first lot at $239.50 against the new $221.00 standard will show as purchase price variance ($18.50 each) when received, as for any purchase.
+- **Ancestors' standard cost rows.** The BOM replace recosts every BOM above the bracket (BOM total cost of Vesper rises by exactly 12 x 34.60 = 415.20, Meridian by 8 x 34.60 = 276.80), but the `Standard Cost` price rows of BW-5120-000 and the assemblies above it keep their old roll-ups; a cost roll is a finance step, or more `items` in the release. While an ECO is applied the connector's roll-up checks in `check.ts` therefore fail; after the reset they pass.
+- **Journal entries cannot be amended by Norn** (no write on Journal Entry). A changed release that no longer matches a written draft is a `conflict`; delete the draft in ERPNext and apply again.
+- **The decision URL** in the demo release is a stand-in (`norn.bowman.example`) until `norn/web` has decision pages; `release-eco.ts --decision-url` overrides it.
+
+### Setup, run and reset (all in `bowman/erp/`, Node 24)
+
+```
+node bowman/erp/eco-setup.ts                  # once, as Administrator: the custom fields bw_eco / bw_decision_url / bw_eco_entry and account 11420
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON bowman/erp/release-eco.ts            # dry run: print the ECR-0417 plan, write nothing
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON bowman/erp/release-eco.ts --apply    # apply it as Norn, then read the numbers back
+node bowman/erp/screenshot-eco.ts ECO-0319 norn/connectors/erpnext/screenshots   # headless Edge as Administrator
+node bowman/erp/reset-eco.ts ECO-0319         # undo it as Administrator so the demo can run again (--dry-run lists the steps)
+```
+
+`reset-eco.ts` reactivates the previous BOM as default and replaces the ECO's version with it in the parents (ERPNext recosts everything above), cancels the BOM Update Logs that link the ECO's BOM (ERPNext will not cancel a BOM while a submitted log links it) and then the BOM, deletes the ECO's price row and reopens the row it closed, and deletes the draft journal entries. A submitted journal entry has posted, so it is left and reported. What stays: the cancelled BOM and logs (ERPNext keeps them, so the next release is BOM `-004`, `-005`...), Version history. After a reset `check.ts` passes 28 of 28 with the same baseline hash as before the ECO.
+
+Verified live on 2026-10-24, twice (apply, reset, `check.ts`): the apply of ECR-0417 takes about 6 s for 8 writes; the replace cascades through all five levels and both paths to Vesper and Meridian in one BOM Update Log, and the totals are exact.
+
 ## What differs from the research (`docs/research/software-options.md`)
 
 1. **Standard cost is a price list, not the item's valuation rate.** v16 has no standard-costing method, and `valuation_rate` drifts once stock moves. The connector reads the `Standard Cost` Item Price rows, as the seed wrote them.
@@ -87,7 +151,7 @@ Other things that surprised me:
 
 ## Not done
 
-- Writes (the ECO write-back) are the other half of #40's ERP work, not this.
+- Writes are in `src/write.ts` (section "ECO write-back"). `bowman/erp/NOTES.md` still describes the call sequence; its Norn Agent permission table is unchanged.
 - `baseline.ts` mirrors `norn/checks/src/types.ts` (the checks library, #41, is not on this branch). Replace it with an import when #41 lands; the shapes are identical today (copied from the working tree of that branch on 2026-10-24).
 - History reads are not paged or cached; each is two or three requests.
 - A Mac or Colima restart, and a tunnel drop mid-read: not tried. The client throws `ErpnextError` (status and path, never a header) after a 30 s timeout and does not retry.
