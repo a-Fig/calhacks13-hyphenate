@@ -193,8 +193,8 @@ async function scripts() {
   for (const [name, dt, file] of client) {
     await ensure('Client Script', name, { dt, view: 'Form', enabled: 1, script: read(file) }, true);
   }
-  for (const [dt, file] of [['ECR', 'client-scripts/list-ecr.js'], ['NCR', 'client-scripts/list-ncr.js']]) {
-    await ensure('Client Script', `${dt} list`, { dt, view: 'List', enabled: 1, script: read(file) }, true);
+  for (const [dt, file] of [['ECR', 'client-scripts/list-ecr.js'], ['NCR', 'client-scripts/list-ncr.js'], ['Engineering BOM', 'client-scripts/list-ebom.js']]) {
+    await ensure('Client Script', dt === 'Engineering BOM' ? 'EBOM list' : `${dt} list`, { dt, view: 'List', enabled: 1, script: read(file) }, true);
   }
   for (const gone of ['ECO list']) { // an earlier version applied the ID prefix to lists that already lead with the ID
     if (await plm.exists('Client Script', gone)) await plm.del(`/api/resource/Client Script/${enc(gone)}`);
@@ -318,6 +318,21 @@ async function webhooks() {
     timeout: 20,
     enabled: 1,
   };
+  // Link the ECO back onto its ECR in the next step, as the same bot: Frappe's sandbox cannot write a second document from
+  // one hook, and this way the ECR's modified and modified_by move to the bot, so a poller of ECRs sees the release.
+  await plm.upsert('Webhook', 'eco.link-back', {
+    webhook_doctype: 'ECO',
+    webhook_docevent: 'after_insert',
+    request_url: 'http://frontend:8080/api/resource/ECR/{{ doc.ecr }}',
+    is_dynamic_url: 1,
+    request_method: 'PUT',
+    request_structure: 'JSON',
+    webhook_json: '{ "released_eco": "{{ doc.name }}" }',
+    webhook_headers: rel.webhook_headers,
+    enable_security: 0,
+    timeout: 20,
+    enabled: 1,
+  });
   const how2 = await plm.upsert('Webhook', 'ecr.approved', rel);
   log('  Webhook "ecr.approved" (release the ECO): ' + how2 + ' (bot key rotated, not shown)');
 }

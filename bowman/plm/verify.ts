@@ -70,6 +70,15 @@ async function main() {
   log(`  affected_items: ${show(e.affected_items.map((i: any) => ({ part: i.part, change_type: i.change_type, from: i.from_revision, to: i.to_revision })))}`);
   check(e.affected_items.length === 1 && e.affected_items[0].to_revision === 'C' && e.originating_ncr === 'NCR-0119', 'ECR-0417 affected item BW-5120-210 B -> C, NCR-0119');
 
+  const lines = (await norn.get('/api/resource/Engineering BOM Line', { parent: 'Engineering BOM', fields: ['parent', 'seq', 'part', 'qty'], limit_page_length: 0 })).body.data;
+  const got = lines.map((l: any) => `${l.parent}|${l.seq}|${l.part}|${l.qty}`).sort();
+  const want = data.bom.map((l: any) => `EBOM-${l.parent}|${l.seq}|${l.child}|${l.qty}`).sort();
+  const boms = await norn.list('Engineering BOM', { fields: ['name'] });
+  log(`  Engineering BOM (EBOM): ${boms.length} assemblies, ${lines.length} lines in the PLM; ${new Set(data.bom.map((l: any) => l.parent)).size} assemblies, ${data.bom.length} lines in bowman/data`);
+  check(got.length === want.length && got.every((x: string, i: number) => x === want[i]), "the PLM's EBOM equals bowman/data's bom, line for line (assembly, find number, part, quantity)");
+  const q409 = (await norn.get('/api/resource/ECR/ECR-0409')).body.data.supplier_quotes;
+  check(q409.length > 0 && q409.every((r: any) => r.firmness === 'Budgetary') && e.supplier_quotes.every((r: any) => r.firmness === 'Firm'), 'supplier quote firmness: ECR-0409 Budgetary, ECR-0417 Firm, read by Norn');
+
   log('3. Write its impact assessment (the only thing Norn may write)');
   const body = {
     impact_report_level: '1', impact_recommendation: 'Approve with conditions', impact_change_class: 'Class I',
@@ -159,6 +168,18 @@ async function main() {
   for (let i = 0; i < 10 && !ecos.length; i++) { await sleep(2000); ecos = await admin.list('ECO', { fields: ['name', 'ecr', 'status', 'released_on', 'released_by', 'decided_by'], filters: [['ecr', '=', t.name]] }); }
   log(`  ${t.name}: Draft -> Submitted -> In CM Review -> CCB Review -> Approved; ECO: ${show(ecos)}`);
   check(ecos.length === 1 && ecos[0].released_by === 'rafael.quintero@bowman-aviation.example' && ecos[0].status === 'Released', 'ECO released by the approving chair');
+  // The ECO is linked back onto the ECR by the same bot, so a poller of ECRs sees the release.
+  const approvedAt = Date.now();
+  let linked: any = {};
+  for (let i = 0; i < 15 && !linked.released_eco; i++) { linked = (await norn.get(`/api/resource/ECR/${t.name}`)).body.data; if (!linked.released_eco) await sleep(1000); }
+  log(`  ECR after release: released_eco ${linked.released_eco}, modified_by ${linked.modified_by}, state ${linked.workflow_state} (first read ${Math.round((Date.now() - approvedAt) / 1000)} s after the ECO was seen)`);
+  check(linked.released_eco === ecos[0]?.name, 'the ECR carries released_eco = its ECO, read by Norn');
+  check(linked.modified_by === 'eco-release@bowman-aviation.example', "the link moved the ECR's modified_by to the release bot (not Norn), so a poller reports it");
+  const wr = await norn.put(`/api/resource/ECR/${t.name}`, { released_eco: 'ECO-0001' }, { allow: true });
+  const still7 = (await norn.get(`/api/resource/ECR/${t.name}`)).body.data;
+  log(`  PUT released_eco as Norn -> ${wr.status} (Frappe drops writes to a permission level the user cannot write); released_eco is still ${still7.released_eco}`);
+  check(still7.released_eco === ecos[0]?.name, 'Norn cannot change released_eco (the write is ignored)');
+  await admin.put(`/api/resource/ECR/${t.name}`, { released_eco: null }); // an ECO cannot be deleted while an ECR links to it
   for (const x of ecos) await admin.del(`/api/resource/ECO/${x.name}`);
   await admin.del(`/api/resource/ECR/${t.name}`);
   await setSeries('ECR-', 424);

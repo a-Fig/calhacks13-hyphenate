@@ -2,6 +2,10 @@
 
 Written 2026-10-24 (Saturday). Bowman's PLM, standing in for Siemens Teamcenter. Part of Bowman's world, never pitched (#19, #21). Norn talks to it only through REST, webhooks and comments.
 
+## EBOM and MBOM
+
+The PLM holds the **EBOM**, the aircraft as designed: the Engineering BOM records here (47 assemblies, 257 lines, labelled "Engineering BOM (EBOM)" in the sidebar, the list and the home page; the DocType keeps the name `Engineering BOM` because that is its API path). **ERPNext holds the MBOM** (#70, built separately): the same parts, with the top level regrouped into build stations. Norn never writes to the ERP (#71, #72); changes reach it by people or by the plant's own gateway. `verify.ts` checks that the PLM's EBOM equals `bowman/data`'s `bom` line for line (assembly, find number, part, quantity). #69.
+
 ## What runs where
 
 A second Frappe site (Frappe v16.53.0, `frappe/erpnext:v16.52.1` image, only the `frappe` app installed) on Tyler's home-server Mac, compose project `bowman-plm`, directory `~/bowman/plm`, port `127.0.0.1:8082`. The ERP (`bowman-erp`, 8081) is a separate stack: its own database, Redis and volumes. Nothing of it was touched.
@@ -59,13 +63,13 @@ Field shapes follow `bowman/data/types.ts`; enumerations keep the dataset's valu
 | cost basis `supplier_quote/engineer_estimate/not_provided` | `Supplier quote`, `Engineer estimate`, `Not provided` |
 | inventory location and disposition | `Stores`, `WIP`, `Finished goods`, `Supplier finished`, `On order`, `In field`; `Use until depleted`, `Mandatory install`, `Rework`, `Scrap`, `Cancel`, `TBD` |
 | `ItemChange.changes[]` `{field, from, to}` | `field_changes` rows `{part, field, from_value, to_value}` (values as text) |
-| `SupplierQuote.lines[]` | `supplier_quotes` rows, one per line, quote header repeated (`quote_id`, `supplier`, `valid_until`, `lead_time_weeks`) |
+| `SupplierQuote.lines[]` | `supplier_quotes` rows, one per line, quote header repeated (`quote_id`, `supplier`, `valid_until`, `lead_time_weeks`) plus `firmness`: `Firm` or `Budgetary`. The dataset has no such field: a quote is Budgetary where its own note says so (ECR-0409's Halvorsen quote, "Budgetary, plus or minus 20%"), Firm otherwise |
 
 - **Part** `part_number` (the record name), `part_name`, `revision`, `lifecycle_state` (Proposed/Released/Obsolete), `make_buy`, `kind`, `program`, `design_owner`, `safety_critical`, `uom`, `default_supplier`, `revision_history` rows `{revision, released_on, eco, note}`. The dataset has no owner: `design_owner` is invented by area, and the originator of an open ECR owns the parts it revises. The form's Connections show the part's BOM, where it is used, and ECRs and NCRs that touch it.
 - **Engineering BOM** named `EBOM-<part>`: `part`, `status`, `line_count`, `lines` rows `{seq, part, qty, ...fetched name, revision, uom, make_buy}`.
 - **NCR** `NCR-nnnn`: `part`, `part_revision`, `location_found`, `quantity_affected`, `status`, `opened_on`, `opened_by`, `description`, `mrb_disposition`, `linked_ecr`.
 - **ECR** `ECR-nnnn`, five tabs:
-  - *Request*: title, program, originator, filed on, needed by, originating NCR, ECP revision, status, priority, justification code, company class, FAA class, FAA rationale, classification note, description, need, consequences of disapproval, alternatives, failure data, test and requalification.
+  - *Request*: title, program, originator, filed on, needed by, originating NCR, ECP revision, status, **released ECO** (`released_eco`, a read-only Link to the ECO; permission level 3: everyone reads it including Norn, only the release automation writes it), priority, justification code, company class, FAA class, FAA rationale, classification note, description, need, consequences of disapproval, alternatives, failure data, test and requalification.
   - *Impact assessment* (below).
   - *Affected items*: `affected_items` `{part, change_type, from_revision, to_revision}`, `field_changes`, `bom_changes`, effectivity (`production_basis/from/note`, `retrofit_basis/from/to/note`, `interchangeable`), `inventory`, `supplier_quotes`.
   - *Cost page*: four tables, `cost_production`, `cost_retrofit`, `cost_logistics`, `cost_other`, rows `{label, basis, one_time, unit_cost, quantity, recurring_total, line_total, note}`, then `net_one_time`, `net_recurring`, `net_total`. Totals are computed on the server (one-time plus unit cost times quantity; savings negative; "Not provided" rows count as zero, so ECR-0417 reads $87,605 until the blank rows are filled).
@@ -88,7 +92,7 @@ Draft, Submitted, In CM Review, CCB Review, Approved, Rejected, Sent Back.
 | CCB Review | Approve, Reject | Approved, Rejected | CCB Chair |
 | Sent Back | Resubmit | Submitted | Design Engineer |
 
-Approval releases the ECO: the transition runs the `ecr.approved` webhook as a workflow task, which POSTs the new ECO to the PLM's own REST API as the release-automation user. `released_by` is the approver. Roles: Design Engineer (reads all; creates and edits their own ECRs), CM Analyst, CCB Member (reads; files NCRs), CCB Chair, PLM Viewer (the CFO, read-only), Norn Integration, ECO Release Automation. Role of each person comes from the dataset's seat and CCB role; anyone who files an ECR (the cost engineer files three) also gets Design Engineer.
+Approval releases the ECO in two steps, both as the release-automation user (`eco-release@`): the transition runs the `ecr.approved` webhook as a workflow task, which POSTs the new ECO to the PLM's own REST API; the ECO's insert then fires `eco.link-back`, a second self-webhook that PUTs `released_eco` onto the ECR. Frappe's sandbox cannot write two documents from one hook, so the link-back is a chained second step, normally within a second or two. It also moves the ECR's `modified` and `modified_by` to the bot, so a poller of ECRs reports the release and can tell it from Norn's own writes. Until then the ECR is Approved with an empty `released_eco`. `released_by` is the approver. Roles: Design Engineer (reads all; creates and edits their own ECRs), CM Analyst, CCB Member (reads; files NCRs), CCB Chair, PLM Viewer (the CFO, read-only), Norn Integration, ECO Release Automation. Role of each person comes from the dataset's seat and CCB role; anyone who files an ECR (the cost engineer files three) also gets Design Engineer.
 
 ## The Norn user and its permissions
 
@@ -110,7 +114,7 @@ Five, named by their `X-Bowman-PLM-Event` header: `ncr.inserted`, `ncr.updated`,
 
 Filing an ECR sends `ecr.inserted` (state Draft) and then `ecr.updated` for each workflow step, so Norn learns "Submitted" from an `ecr.updated` with `workflow_state: "Submitted"`. Failed deliveries are in the desk under Webhook Request Log.
 
-## Verified calls (`verify.ts`, 26 checks, 2026-10-24, all passed)
+## Verified calls (`verify.ts`, 31 checks, 2026-10-24, all passed)
 
 As Norn:
 
@@ -121,6 +125,7 @@ As Norn:
 5. `POST /api/resource/Comment {comment_type: "Comment", reference_doctype: "ECR", reference_name: "ECR-0417", content}` returned 200.
 6. Webhook: with the hooks pointed at a throwaway receiver on the Mac's PLM network (`webhook-sink.mjs`), Dana's edit of ECR-0417 delivered `ecr.updated` with a valid signature; Norn's own `PUT` delivered nothing.
 7. Approval: a temporary ECR went Draft to Approved through four people; ECO-0319 appeared, released by Rafael. ECR and ECO were deleted and the naming series put back.
+9. `released_eco`: a throwaway ECR approved through four people carried `released_eco` = its ECO on the first read after the ECO appeared, with `modified_by` = the release bot; Norn read it, and its own `PUT` of the field was ignored (Frappe drops writes to a permission level the user cannot write). The link was cleared, the ECO and ECR deleted, the series restored. Also checked: the PLM's EBOM equals `bowman/data`'s `bom` line for line, and quote firmness (ECR-0409 Budgetary, ECR-0417 Firm).
 8. Holes an Opus review found, each reproduced with the Norn token and now refused (on a throwaway ECR made as Administrator): `rename_doc` (417), `upload_file` against the ECR (403), `assign_to.add` (403), a comment sent as another user (stored as Norn), a comment of type Edit (refused), a read of `decision_note` and `ccb_meeting` (absent), and the version history (403).
 
 Screenshots in `screenshots/`, taken as Rafael through the tunnel: `before-*` (ECR-0417 with no assessment) and `after-*` (after the Norn write above): `ecr-list`, `ecr-0417-request`, `-impact`, `-affected`, `-cost`, plus `home`, `part-list`, `part-bracket`, `ebom-vesper`, `ncr-list`, `eco-list`.

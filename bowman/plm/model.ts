@@ -157,7 +157,8 @@ const supplierQuote: DocTypeDef = {
   fields: finish([
     f('Data', 'quote_id', 'Quote', { in_list_view: 1, columns: 2 }),
     f('Data', 'supplier', 'Supplier', { in_list_view: 1, columns: 2 }),
-    f('Data', 'description', 'Line', { reqd: 1, in_list_view: 1, columns: 3 }),
+    f('Data', 'description', 'Line', { reqd: 1, in_list_view: 1, columns: 2 }),
+    f('Select', 'firmness', 'Firmness', { options: opts(['Firm', 'Budgetary']), default: 'Firm', in_list_view: 1, columns: 1, description: 'Firm: a quote the supplier will hold. Budgetary: an estimate, usually plus or minus 20%.' }),
     f('Currency', 'unit_price', 'Unit price', { in_list_view: 1, columns: 1 }),
     f('Float', 'qty', 'Qty', { in_list_view: 1, columns: 1 }),
     f('Currency', 'one_time', 'One-time', { in_list_view: 1, columns: 1 }),
@@ -254,8 +255,8 @@ const part: DocTypeDef = {
   ],
   props: { module: MODULE, track_changes: 1, sort_field: 'modified', sort_order: 'DESC', search_fields: 'part_name,program' },
   links: [
-    { link_doctype: 'Engineering BOM', link_fieldname: 'part', group: 'Structure' },
-    { link_doctype: 'Engineering BOM Line', link_fieldname: 'part', parent_doctype: 'Engineering BOM', table_fieldname: 'lines', is_child_table: 1, group: 'Where used' },
+    { link_doctype: 'Engineering BOM', link_fieldname: 'part', group: 'Engineering BOM (EBOM)' },
+    { link_doctype: 'Engineering BOM Line', link_fieldname: 'part', parent_doctype: 'Engineering BOM', table_fieldname: 'lines', is_child_table: 1, group: 'Where used (EBOM)' },
     { link_doctype: 'ECR Affected Item', link_fieldname: 'part', parent_doctype: 'ECR', table_fieldname: 'affected_items', is_child_table: 1, group: 'Changes' },
     { link_doctype: 'NCR', link_fieldname: 'part', group: 'Changes' },
   ],
@@ -273,7 +274,7 @@ const ebom: DocTypeDef = {
     f('Select', 'status', 'Status', { options: opts(['Draft', 'Released', 'Obsolete']), default: 'Released', reqd: 1, in_list_view: 1, in_standard_filter: 1 }),
     f('Select', 'program', 'Program', { options: opts(PROGRAMS_OR_BOTH), fetch_from: 'part.program', in_list_view: 1, in_standard_filter: 1 }),
     f('Int', 'line_count', 'Components', { read_only: 1, in_list_view: 1 }),
-    sec('Bill of materials'),
+    sec('Engineering BOM (EBOM): the aircraft as designed'),
     f('Table', 'lines', 'Components', { options: 'Engineering BOM Line' }),
   ]),
   permissions: [
@@ -343,6 +344,7 @@ const ecr: DocTypeDef = {
     f('Data', 'ecr_revision', 'ECP revision', { default: 'A' }),
     f('Link', 'workflow_state', 'Status', { options: 'Workflow State', read_only: 1, no_copy: 1, allow_on_submit: 1, in_standard_filter: 1 }),
     f('Datetime', 'decided_on', 'Decided on', { read_only: 1 }),
+    f('Link', 'released_eco', 'Released ECO', { options: 'ECO', read_only: 1, no_copy: 1, permlevel: 3, in_standard_filter: 1, description: 'Set by the release automation when the approval creates the ECO.' }),
     sec('Classification'),
     f('Select', 'priority', 'Priority', { options: opts(PRIORITIES), reqd: 1, default: 'Routine', in_list_view: 1, in_standard_filter: 1, description: 'Emergency: line stopper now. Urgent: within 30 days. Routine: everything else.' }),
     f('Select', 'justification_code', 'Justification code', { options: opts(JUSTIFICATION), reqd: 1, description: 'B interface, C compatibility, D deficiency, O operational, P production stoppage, R cost reduction, S safety, V value engineering.' }),
@@ -429,7 +431,7 @@ const ecr: DocTypeDef = {
     { role: ROLES.chair, ...RW },
     { role: ROLES.viewer, ...R },
     { role: ROLES.norn, ...RW },
-    { role: ROLES.releaser, read: 1 },
+    { role: ROLES.releaser, ...RW }, // the release automation links the ECO back (released_eco); the guard script limits it to that field
     ...[ROLES.designer, ROLES.cm, ROLES.member, ROLES.chair, ROLES.viewer].map((role) => ({ role, permlevel: 1, read: 1 }) as PermRow),
     { role: ROLES.norn, permlevel: 1, read: 1, write: 1 },
     ...[ROLES.designer, ROLES.member, ROLES.viewer].map((role) => ({ role, permlevel: 2, read: 1 }) as PermRow), // not Norn: the CCB's deliberation is private
@@ -438,6 +440,10 @@ const ecr: DocTypeDef = {
     sysman,
     { role: 'System Manager', permlevel: 1, read: 1, write: 1 },
     { role: 'System Manager', permlevel: 2, read: 1, write: 1 },
+    // Permission level 3: released_eco. Everyone reads it, including Norn; only the release automation writes it.
+    ...[ROLES.designer, ROLES.cm, ROLES.member, ROLES.chair, ROLES.viewer, ROLES.norn].map((role) => ({ role, permlevel: 3, read: 1 }) as PermRow),
+    { role: ROLES.releaser, permlevel: 3, read: 1, write: 1 },
+    { role: 'System Manager', permlevel: 3, read: 1, write: 1 },
   ],
   props: {
     module: MODULE,

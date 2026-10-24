@@ -1,7 +1,8 @@
 # Server Script: ECR, Before Validate.
-# The Norn Integration user may write only the impact assessment fields. Frappe needs it to hold
-# write permission on the whole document, so this script is what limits it to those fields: any
-# other change (a field, a table row, the workflow status) is refused with a 403.
+# Two service users are limited to named fields: the Norn Integration user to the impact assessment
+# fields, and the ECO release automation to released_eco. Frappe needs each to hold write
+# permission on the whole document, so this script is what limits it to those fields: any other
+# change (a field, a table row, the workflow status) is refused with a 403.
 # It also stamps "Last updated" when the impact assessment changes and Norn did not send a time.
 # Keep IMPACT in step with IMPACT_FIELDS in model.ts.
 NORN = "norn@bowman-aviation.example"
@@ -9,19 +10,23 @@ IMPACT = [
     "impact_report_level", "impact_recommendation", "impact_change_class", "impact_approval_route",
     "impact_norn_url", "impact_updated_on", "impact_statement",
 ]
+BOT = "eco-release@bowman-aviation.example"
 SKIP = ["modified", "modified_by", "creation", "owner"]
+LIMITS = {NORN: IMPACT, BOT: ["released_eco"]}
+user = frappe.session.user
+limit = LIMITS.get(user)
 
 before = doc.get_doc_before_save()
 
-if frappe.session.user == NORN and not before:
-    frappe.throw("The Norn integration cannot create ECRs.", frappe.PermissionError)
+if limit and not before:
+    frappe.throw("This service user cannot create ECRs.", frappe.PermissionError)
 
 if before:
     old = before.as_dict()
     new = doc.as_dict()
     bad = []
     for key in new:
-        if key in SKIP or key in IMPACT:
+        if key in SKIP or (limit and key in limit):
             continue
         a = old.get(key)
         b = new.get(key)
@@ -36,9 +41,9 @@ if before:
         elif a != b:
             bad.append(key)
 
-    if frappe.session.user == NORN and bad:
+    if limit and bad:
         frappe.throw(
-            "The Norn integration may write only the impact assessment fields. Not allowed to change: "
+            "This integration may write only " + ("the impact assessment fields" if user == NORN else "released_eco") + ". Not allowed to change: "
             + ", ".join(sorted(set(bad))),
             frappe.PermissionError,
         )
