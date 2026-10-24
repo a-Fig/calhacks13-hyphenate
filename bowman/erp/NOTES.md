@@ -7,7 +7,7 @@ Written 2026-10-24, from the standup and a full verification run the same mornin
 - ERPNext **16.52.1** (Frappe 16.53.0), MariaDB 11.8, Redis 6.2, from `frappe/erpnext:v16.52.1` (amd64, Docker Hub, pushed 2026-10-22).
 - On Tyler's home-server Mac, in Colima, compose project `bowman-erp`, directory `~/bowman/erp`. Published on the Mac's `127.0.0.1:8081` only. About 0.9 GB RAM, about 5 GB of images on disk (`frappe/erpnext` is 4.5 GB), 0.3 GB of data so far. The Colima VM had 21 GB free before the pull.
 - Site name `frontend`. Company **Bowman Aviation** (`BWA`), USD, US chart of accounts (numbered, e.g. `11410 - Inventory on Hand - BWA`), fiscal years 2025-2027, warehouses `Stores - BWA`, `Work In Progress - BWA`, `Finished Goods - BWA` (plus ERPNext's `Goods In Transit - BWA`). Item groups `Aircraft`, `Assemblies`, `Purchased Parts` (and ERPNext's own `Raw Material`, `Sub Assemblies`). Buying price list `Standard Cost`.
-- The instance holds no items, BOMs or transactions: seeding comes next.
+- Seeded from `bowman/data/bowman.json` on 2026-10-24 (see Seed below): 214 items, 47 BOMs, 144 purchase orders, stock.
 
 ## Start, stop, log in
 
@@ -20,6 +20,8 @@ bowman/erp/up.sh status     # container state and a ping
 bowman/erp/up.sh tunnel     # laptop 127.0.0.1:8081 -> Mac 127.0.0.1:8081, runs until Ctrl-C
 node bowman/erp/bootstrap.mjs   # company, price list, Norn role and user (idempotent; tunnel must be open)
 node bowman/erp/verify.mjs      # the call sequence below, then removes its test documents
+node bowman/erp/seed.ts         # load bowman/data/bowman.json as Administrator (re-runnable; phases can be named)
+node bowman/erp/verify-seed.ts  # read the seed back as Norn and compare with the dataset
 ```
 
 With the tunnel open, browse `http://127.0.0.1:8081` and log in as `Administrator` with `ERPNEXT_ADMIN_PASSWORD` from `.env`. 8081 is used on both ends because the laptop cannot bind 8080.
@@ -40,9 +42,10 @@ User `norn@bowman.example` (System User, only role `Norn Agent`, no password, AP
 | Item Price | yes | yes | yes | n/a | no |
 | Journal Entry | yes | **no** | yes | **no** | no |
 | BOM Update Log (not on the brief's list) | yes | no | yes | yes | no |
+| Purchase Receipt (not on the brief's list) | yes | no | no | no | no |
 | Account (not on the brief's list) | yes | no | no | no | no |
 
-Why the two extras: `enqueue_replace_bom` and `enqueue_update_cost` create and submit a BOM Update Log, and without that grant both return 403 (verified); Account read lets Norn pick accounts for a draft Journal Entry (create works without it, but Norn could not list the chart). Because Journal Entry has no write, Norn cannot edit or replace its own draft; Bowman can add write if wanted. Also verified: Norn cannot submit a Journal Entry (403, draft stays draft), create an Item, cancel or delete a BOM, or read other users. It cannot read Cost Center or Fiscal Year. It can read UOM and Item Group (ERPNext default) and its own User record.
+Why the two extras: `enqueue_replace_bom` and `enqueue_update_cost` create and submit a BOM Update Log, and without that grant both return 403 (verified); Account read lets Norn pick accounts for a draft Journal Entry (create works without it, but Norn could not list the chart); Purchase Receipt read gives the receipt dates that make up realised lead times. Because Journal Entry has no write, Norn cannot edit or replace its own draft; Bowman can add write if wanted. Also verified: Norn cannot submit a Journal Entry (403, draft stays draft), create an Item, cancel or delete a BOM, or read other users. It cannot read Cost Center or Fiscal Year. It can read UOM and Item Group (ERPNext default) and its own User record.
 
 ## Verified call sequence (ECO release)
 
@@ -61,6 +64,38 @@ Base `ERPNEXT_URL`, header `Authorization: token <key>:<secret>`, JSON bodies. T
 7. **Draft Journal Entry.** `POST /api/resource/Journal Entry` `{"voucher_type":"Journal Entry","company":"Bowman Aviation","posting_date":"2026-10-24","user_remark":"...","accounts":[{"account":"51900 - Inventory Shrinkage and Adjustments - BWA","debit_in_account_currency":100},{"account":"21210 - Accrued Expenses - BWA","credit_in_account_currency":100}]}`. Returns `docstatus:0`, number `ACC-JV-<year>-00001`; cost center `Main - BWA` is filled in.
 8. **History.** `GET /api/resource/Version?filters=[["ref_doctype","=","BOM"],["docname","=","<name>"]]&fields=["name","creation","owner","docname","data"]&order_by=creation asc&limit_page_length=0`; same for `Item Price`. `data` is a JSON string.
 
+## Seed (2026-10-24)
+
+`seed.ts` reads `bowman/data/bowman.json` (PR #51) and creates everything through REST as Administrator, in phases `fields masters prices boms pos receipts stock`. Every phase looks up what exists first, so a second run created nothing (verified). A full run takes about 8 minutes, most of it the 222 purchase receipts. `verify-seed.ts` then reads it back as Norn and passed all checks.
+
+| Loaded | Count |
+|---|---|
+| Items | 214 (47 make, 167 buy), 17 item groups, 3 proposed items disabled |
+| Suppliers | 14 |
+| Item Price on `Standard Cost` | 225 rows: 214 current plus 11 earlier rows for items an ECO repriced |
+| Item Price on `Standard Buying` | 172 supplier quotes (price p50, lead time p50 in days) |
+| Item Price on `Standard Cost before ECO-xxxx` | 80 rows in 10 price lists, used only to cost earlier BOM versions |
+| BOMs | 47 items, 62 submitted versions (15 earlier versions, inactive), all costed from a price list |
+| Purchase orders | 144 (42 open, 102 received), 386 lines, 222 purchase receipts |
+| Stock | 192 opening rows and 71 reconciliation rows in 7 entries; 293 Bins |
+| Custom fields | 24 (listed in `seed.ts`) |
+
+Verified as Norn: Vesper V4's default BOM `BOM-BW-0001-000-001` has 12 top-level lines and 125 exploded items, and ERPNext's own `total_cost` is **2,800,019.00** (material 2,720,019 plus operating 80,000), equal to the dataset roll-up. Meridian M6 is 5,007,356.80, also equal. All 47 default BOMs match their item's roll-up to within $1. BW-5120-210: Standard Cost 186.40 from 2025-11-20 (175.20 before), Halden quote 186.40 (p10 182.67, p90 193.86) with a 63-day lead time and MOQ 25, stock Stores 96 / WIP 48 / At Supplier 60, open PO-26-0144 for 60 due 2026-11-02 and 60 due 2026-12-07, and seven realised lead times from 49 to 80 days.
+
+Mapping decisions:
+
+- **Labor is operating cost.** Each work center is a Workstation whose hour rate is its labor rate, filed under the `Wages` operating component (v16 builds the rate from `workstation_costs`; a plain rate field no longer exists), plus one Operation. A make item's BOM has one operation of `laborHours x 60` minutes. Sub-assembly rows take the child BOM's cost, so the roll-up equals the dataset's. Without operations Vesper would read $2.408M.
+- **Costing method.** `rm_cost_as_per = "Price List"`, `buying_price_list = "Standard Cost"` on current BOMs. The `Standard Cost` list holds every item (make items too) at the dataset's `standardCost`.
+- **Earlier BOM versions** (15, from the 10 released ECOs). Every ECO is a revise-with-price-change, so BOM lines never differ between versions; only cost does. A BOM that directly contains a repriced item gets one version per ECO plus the current one. The earlier versions are inactive and costed from a price list `Standard Cost before ECO-xxxx`, because v16 has no manual rate: `rm_cost_as_per` accepts only Valuation Rate, Last Purchase Rate and Price List ("Manual" raises a server error), and rates sent on BOM rows are overwritten. `bw_eco` and `bw_released_on` on each BOM record the ECO. Not done: the ancestors of an affected BOM are not re-versioned, and version timestamps are the seed time, not the ECO date.
+- **Default BOMs.** Each item has one current BOM; it is submitted, active and default, including Vesper's and Meridian's top-level ones.
+- **Items.** Code, name and group as in the dataset. "Raw material" maps to ERPNext's existing "Raw Material" (names compare case-insensitively). UOMs: `Nos`, `kg` to `Kg`, `m2` to `Square Meter`, `L` to `Litre`. Revision, lifecycle status, cost group, safety-critical and programs are custom fields. Lead time and MOQ come from the primary quote. The 3 proposed items (ECR-0409's 4-blade parts) are disabled, with prices and no BOM, stock or POs.
+- **Supplier prices.** One `Standard Buying` Item Price per quote, valid 2026-01-01 to `priceValidUntil` (the dataset gives no start date). The p10 and p90 price and lead time, MOQ, qualified, sole-source, months to requalify, primary, allocation and capacity are custom fields on Item Price. Supplier performance and the single-source flag are custom fields on the Supplier, and payment terms are text in `supplier_details`; no Payment Terms templates were created.
+- **Price history.** An item an ECO repriced has an earlier `Standard Cost` row (valid 2025-01-15 to the day before the ECO) and a current one from the ECO's release date. Supplier quotes have no history; the purchase orders carry the price over time.
+- **Purchase orders and receipts.** Each PO keeps its order date, required dates and unit prices, and its dataset id in `bw_po_id` (ERPNext numbers them itself). Each received line becomes a Purchase Receipt on its received date, one per PO and date, created in date order so ERPNext needs no backdated stock repost. Receipt date minus PO date is the realised lead time.
+- **Stock.** Stores, Work In Progress and Finished Goods quantities map to the three stock warehouses; `supplierFinished` goes to a new `At Supplier - BWA` warehouse; `onOrder` is not stock (open POs fill the Bin `ordered_qty`, which equals `onOrder + supplierFinished`); `inField` (installed on aircraft) is not loaded. Items never received on a PO got an Opening Stock entry dated 2025-01-14 against `Temporary Opening`. The rest were set to the dataset quantity by a Stock Reconciliation dated 2026-10-24, with the difference posted to Cost of Goods Sold. Valuation rate is the standard cost, so FIFO or moving-average valuation will drift from it once ERPNext starts moving stock.
+- **Not loaded** (no natural ERPNext home, or Norn takes them from the PLM side): people, change-control policy, volume plan, built aircraft, NCRs, ECRs, ECOs as documents, supplier constraints, rate factors, scenarios.
+- **GL side effects.** The receipts credit `Inventory Received But Not Billed` and nothing clears it, because no purchase invoices were created. Reconciliation differences sit in Cost of Goods Sold and Temporary Opening.
+
 ## Differences from the research doc
 
 1. **Retire-then-replace fails for sub-assemblies.** Research section 6 retires the old BOM (step 4) before replacing it in parents (step 5). `PUT is_active:0` on a BOM that an active parent BOM uses returns 417 "Cannot deactivate or cancel BOM as it is linked with other BOMs". Replace first, then retire.
@@ -76,5 +111,5 @@ Base `ERPNEXT_URL`, header `Authorization: token <key>:<secret>`, JSON bodies. T
 ## Gotchas found
 
 - **Scheduler did not run until 17:15.** The Scheduled Job Types are created at install in a different time zone from the one the wizard then sets, so their `creation` was hours in the future and ERPNext (which times the next run from `creation` while `last_execution` is empty) ran nothing, including the BOM cost cron. `bootstrap.mjs` sets `last_execution` on those 84 rows; a fresh site needs that step again.
-- `verify.mjs` removes everything it creates: documents, Version rows, Deleted Document rows and "Deleted" comments. Frappe also winds a naming series back when the last document in it is deleted, so counters are as before (every run produced `ACC-JV-2026-00001`). After the last run the instance holds only what the setup wizard and `bootstrap.mjs` created.
-- Not tested: stock-moving documents (Purchase Receipt, stock entries), Norn reads of Supplier Quotation, Purchase Order, Bin, Stock Ledger Entry and GL Entry with data in them (the tables were empty, only access was checked), `if_owner` rules, whether Norn can read the Version rows of a doctype it cannot read, a Mac or Colima restart.
+- `verify.mjs` was run on the empty instance before seeding. On the seeded one its `ZZ-` test items do not collide, but its `enqueue_update_cost` call would recost the real BOMs. It removes everything it creates: documents, Version rows, Deleted Document rows and "Deleted" comments. Frappe also winds a naming series back when the last document in it is deleted, so counters are as before (every run produced `ACC-JV-2026-00001`).
+- Not tested: `if_owner` rules, whether Norn can read the Version rows of a doctype it cannot read, a Mac or Colima restart, Supplier Quotation reads (none exist), GL Entry and Stock Ledger Entry reads beyond access (458 and 486 rows now).

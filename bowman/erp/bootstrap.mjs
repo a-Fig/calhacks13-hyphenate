@@ -35,6 +35,7 @@ export const GRANTS = {
   // Beyond the list Tyler gave. Both were needed by calls verify.mjs makes:
   "BOM Update Log": ["read", "create", "submit"], // enqueue_replace_bom and enqueue_update_cost create and submit one
   Account: ["read"], // to pick accounts for a draft Journal Entry
+  "Purchase Receipt": ["read"], // receipt date minus PO date is the realised lead time (research section 5)
 };
 
 const log = (...a) => console.log(...a);
