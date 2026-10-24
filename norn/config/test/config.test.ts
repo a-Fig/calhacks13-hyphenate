@@ -3,10 +3,10 @@
 // names the field to fix.
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { before, describe, it } from 'node:test';
+import { join, resolve } from 'node:path';
+import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { company } from '../../../bowman/data/company.ts';
 import { run } from '../src/cli.ts';
@@ -96,7 +96,7 @@ describe("what Bowman's file takes from the dataset and how it says so", () => {
     assert.ok(byId(good.approval.fastTrack.requireAll, 'same_supplier_no_tooling').text.includes('first-article'));
   });
 
-  it('the Technical Review Committee is the one the data lists, with its first seat as chair', () => {
+  it('the Technical Review Committee is the one the data lists, with the director of engineering as chair', () => {
     const trc = byId(good.approval.bodies, 'trc');
     assert.equal(trc.chairRole, 'engineering_director');
     assert.deepEqual(trc.memberRoles, ['quality', 'certification', 'cm_analyst']);
@@ -142,6 +142,29 @@ describe("what Bowman's file takes from the dataset and how it says so", () => {
     for (const action of ['write_bom', 'draft_journal_entry', 'post_journal_entry']) assert.equal(rule(action).carriesOutApproval, undefined, action);
     assert.equal(rule('draft_journal_entry').level, 'approve');
     assert.equal(rule('post_journal_entry').level, 'recommend');
+  });
+
+  it('reads the fast-track approvers, the board chair and the committee\'s reach from the data', () => {
+    assert.deepEqual(good.approval.fastTrack.approvers, [
+      { role: 'cm_analyst', mustOwnTheChange: false },
+      { role: 'design_engineer', mustOwnTheChange: true },
+    ]);
+    const chair = company.changeControl.approvalTiers.find((t) => t.approver.startsWith('Change Control Board'))!;
+    assert.match(chair.approver, /chaired by the Vesper program manager/);
+    assert.equal(byId(good.approval.bodies, 'ccb').chairRole, 'ccb_chair');
+    assert.equal(good.approval.tiers[0]!.alsoReviewsAbove, true);
+  });
+
+  it('the fast track has the three kinds of change the data lists, and not the supplier-notified change', () => {
+    assert.deepEqual(good.approval.fastTrack.requireOneOf.map((t) => t.id), ['authorized_equivalent', 'obsolescence_replacement', 'documentation_fix']);
+  });
+
+  it('keeps reviewer notes out of the stored config', () => {
+    assert.ok(!/to confirm/i.test(canonicalJson(good)), 'a note to a reviewer is in a stored string');
+  });
+
+  it('has its own sample seed', () => {
+    assert.equal(good.autonomy.sampleSeed, 'norn-sample-1');
   });
 
   it('says one thing about who decides the company class', () => {
@@ -309,7 +332,14 @@ describe('a malformed file is rejected with the path of the bad field', () => {
 
   it('a fallback level more autonomous than the level it falls back from', () => {
     const at = ruleIndex('update_standard_cost'); // approve_sampled, otherwise recommend
-    assertOne((c) => (c.autonomy.actions[at].otherwise = 'approve'), 'autonomy.actions[' + at + '].otherwise', 'expected a level no more autonomous than "approve_sampled", got "approve"');
+    assertOne((c) => (c.autonomy.actions[at].otherwise = 'approve'), 'autonomy.actions[' + at + '].otherwise', 'expected a level less autonomous than "approve_sampled"');
+  });
+
+  it('a fallback level equal to the level it falls back from, which limits nothing', () => {
+    const at = ruleIndex('update_standard_cost'); // approve_sampled, otherwise recommend
+    assertOne((c) => (c.autonomy.actions[at].otherwise = 'approve_sampled'), 'autonomy.actions[' + at + '].otherwise', 'expected a level less autonomous than "approve_sampled"');
+    const approving = ruleIndex('release_eco'); // approve, otherwise recommend
+    assertOne((c) => (c.autonomy.actions[approving].otherwise = 'approve'), 'autonomy.actions[' + approving + '].otherwise', 'expected a level less autonomous than "approve"');
   });
 
   it('a fallback level with no limits to pass', () => {
@@ -375,19 +405,33 @@ describe('a malformed file is rejected with the path of the bad field', () => {
     assert.ok(found.every((p) => p.includes('"cm_analyst", which nobody in people holds')));
   });
 
-  it('carrying out an approval on an action that gives or prepares one', () => {
-    for (const action of ['approve_ecr_at_tier', 'approve_fast_track_ecr', 'set_company_class', 'file_ecr']) {
+  it('carrying out an approval on an action that is not release_eco or update_standard_cost', () => {
+    for (const action of ['approve_ecr_at_tier', 'approve_fast_track_ecr', 'set_company_class', 'file_ecr', 'write_bom', 'draft_journal_entry']) {
       const at = ruleIndex(action);
-      assertOne((c) => (c.autonomy.actions[at].carriesOutApproval = true), 'autonomy.actions[' + at + '].carriesOutApproval', 'expected nothing, because ' + action + ' gives or prepares a decision');
+      assertOne((c) => (c.autonomy.actions[at].carriesOutApproval = true), 'autonomy.actions[' + at + '].carriesOutApproval', 'expected nothing, because only release_eco and update_standard_cost carry out an approval and ' + action + ' does not');
     }
+    // The ledger keeps its human step: a posting rule that acts within a limit may not be waived past it.
+    const post = ruleIndex('post_journal_entry');
+    assertOne(
+      (c) => (c.autonomy.actions[post] = { action: 'post_journal_entry', level: 'approve', limits: { maxCost: 1 }, carriesOutApproval: true, why: 'x' }),
+      'autonomy.actions[' + post + '].carriesOutApproval',
+      'expected nothing, because only release_eco and update_standard_cost carry out an approval and post_journal_entry does not'
+    );
     // Even false is refused: the field does not belong on these actions at all.
     const at = ruleIndex('approve_ecr_at_tier');
     assertOne((c) => (c.autonomy.actions[at].carriesOutApproval = false), 'autonomy.actions[' + at + '].carriesOutApproval', 'expected nothing');
   });
 
   it('carrying out an approval with no limits to waive', () => {
-    const at = ruleIndex('draft_journal_entry'); // follows an approval, has no limits
-    assertOne((c) => (c.autonomy.actions[at].carriesOutApproval = true), 'autonomy.actions[' + at + '].carriesOutApproval', 'expected limits to be set');
+    const at = ruleIndex('release_eco'); // follows an approval
+    assertOne(
+      (c) => {
+        delete c.autonomy.actions[at].limits;
+        delete c.autonomy.actions[at].otherwise;
+      },
+      'autonomy.actions[' + at + '].carriesOutApproval',
+      'expected limits to be set'
+    );
   });
 
   it('a date that is not a real date is reported, not thrown', () => {
@@ -450,6 +494,150 @@ describe('a malformed file is rejected with the path of the bad field', () => {
 
   it('an unsupported schema version', () => {
     assertOne((c) => (c.schemaVersion = 2), 'schemaVersion', 'expected one of 1, got 2');
+  });
+
+  it('a recommendation that no role can receive', () => {
+    const at = ruleIndex('post_journal_entry'); // recommend
+    assertOne(
+      (c) => {
+        const accountant = c.roles.find((r: any) => r.id === 'cost_accountant');
+        accountant.can = accountant.can.filter((a: string) => a !== 'post_journal_entry');
+      },
+      'autonomy.actions[' + at + '].level',
+      'expected a role that can post_journal_entry'
+    );
+  });
+
+  it('a recommendation whose only possible recipient is nobody', () => {
+    const post = ruleIndex('post_journal_entry');
+    const cost = ruleIndex('update_standard_cost'); // recommends past its limit
+    const found = problems((c) => (c.people = c.people.filter((p: any) => p.role !== 'cost_accountant')));
+    assert.deepEqual(found.map((p) => p.split(': ')[0]).sort(), ['autonomy.actions[' + post + '].level', 'autonomy.actions[' + cost + '].otherwise'].sort(), found.join('\n'));
+    assert.ok(found.every((p) => p.includes('expected a person in a role that can ') && p.includes('nobody in people holds "cost_accountant"')), found.join('\n'));
+  });
+
+  it('a fallback recommendation, written or filled in, that no role can receive', () => {
+    const release = ruleIndex('release_eco'); // otherwise: 'recommend', written out
+    assertOne(
+      (c) => c.roles.forEach((r: any) => (r.can = r.can.filter((a: string) => a !== 'release_eco'))),
+      'autonomy.actions[' + release + '].otherwise',
+      'once a limit is passed'
+    );
+    const cost = ruleIndex('update_standard_cost');
+    const found = problems((c) => {
+      delete c.autonomy.actions[cost].otherwise; // the loader fills in 'recommend'
+      c.people = c.people.filter((p: any) => p.role !== 'cost_accountant');
+    });
+    assert.ok(found.some((p) => p.startsWith('autonomy.actions[' + cost + '].limits: expected a person in a role that can update_standard_cost')), found.join('\n'));
+  });
+
+  it('limits that are all undefined are not limits', () => {
+    const at = ruleIndex('write_bom');
+    assertOne((c) => (c.autonomy.actions[at].limits = { maxCost: undefined }), 'autonomy.actions[' + at + '].limits', 'expected at least one limit, got none');
+    assertOne((c) => (c.autonomy.actions[at].limits = {}), 'autonomy.actions[' + at + '].limits', 'expected at least one limit, got none');
+    // Waiving limits that do not exist is the case that mattered: it must not pass either.
+    const release = ruleIndex('release_eco');
+    const found = problems((c) => (c.autonomy.actions[release].limits = { maxCost: undefined }));
+    assert.ok(found.some((p) => p.startsWith('autonomy.actions[' + release + '].limits: expected at least one limit')), found.join('\n'));
+  });
+
+  it('a field of the ECR form with options that is not a choice', () => {
+    assertOne(
+      (c) => (c.ecrForm.sections[0].fields[0].options = [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }]),
+      'ecrForm.sections[0].fields[0].options',
+      'expected no options, because kind is "text"'
+    );
+  });
+
+  it('a kind Norn reads that appears twice on the ECR form', () => {
+    const next = good.ecrForm.sections[0]!.fields.length;
+    assertOne(
+      (c) => c.ecrForm.sections[0].fields.push({ id: 'priority_again', label: 'Priority again', kind: 'priority', required: 'submit' }),
+      'ecrForm.sections[0].fields[' + next + '].kind',
+      'expected each field of kind "priority" to appear once, already used at ecrForm.sections[0].fields[2].kind'
+    );
+  });
+
+  it('a secretary role that does not exist', () => {
+    const pmc = bodyIndex('pmc'); // the board has people sitting on it; this body does not
+    assertOne((c) => (c.approval.bodies[pmc].secretaryRole = 'wizard'), 'approval.bodies[' + pmc + '].secretaryRole', 'expected a role defined in this file');
+  });
+
+  it('a test id reused across the fast-track and never-fast-track lists', () => {
+    assertOne(
+      (c) => (c.approval.neverFastTrack[0].id = c.approval.fastTrack.requireAll[0].id),
+      'approval.neverFastTrack[0].id',
+      'duplicate id "company_class_ii", already used at approval.fastTrack.requireAll[0].id'
+    );
+  });
+
+  it('a person who reports to themselves', () => {
+    assertOne((c) => (c.people[3].reportsTo = c.people[3].id), 'people[3].reportsTo', 'expected another person, got the person themselves');
+  });
+
+  it('a sample rate on a rule that never samples', () => {
+    const at = ruleIndex('post_impact_statement'); // approve
+    assertOne((c) => (c.autonomy.actions[at].sampleRate = 0.3), 'autonomy.actions[' + at + '].sampleRate', 'expected no sample rate, because no level is approve_sampled');
+  });
+
+  it('a deep review class that does not exist', () => {
+    assertOne((c) => (c.reviewDepth.deepReview.autoFor[0].value = 'severe'), 'reviewDepth.deepReview.autoFor[0].value', 'expected a regulatory class');
+  });
+
+  it('a likelihood word that ends before it starts', () => {
+    const last = good.postingStandards.likelihoodScale.length - 1;
+    assertOne((c) => (c.postingStandards.likelihoodScale[last].toPct = 90), 'postingStandards.likelihoodScale[' + last + '].toPct', 'expected a number above fromPct (95), got 90');
+  });
+
+  it('a sample seed that is missing or empty', () => {
+    assertOne((c) => delete c.autonomy.sampleSeed, 'autonomy.sampleSeed', 'required, but missing');
+    assertOne((c) => (c.autonomy.sampleSeed = ''), 'autonomy.sampleSeed', 'expected a non-empty string');
+  });
+
+  it('a fast track with no conditions or no kinds of change', () => {
+    assertOne((c) => (c.approval.fastTrack.requireAll = []), 'approval.fastTrack.requireAll', 'expected at least 1 entry, got 0');
+    assertOne((c) => (c.approval.fastTrack.requireOneOf = []), 'approval.fastTrack.requireOneOf', 'expected at least 1 entry, got 0');
+  });
+
+  it('a body that decides two tiers', () => {
+    assertOne((c) => (c.approval.tiers[2].body = 'ccb'), 'approval.tiers[2].body', 'but "ccb" already decides approval.tiers[1]');
+  });
+
+  it('a fast-track approver listed twice', () => {
+    assertOne(
+      (c) => c.approval.fastTrack.approvers.push({ role: 'cm_analyst' }),
+      'approval.fastTrack.approvers[2].role',
+      'duplicate role "cm_analyst", already used at approval.fastTrack.approvers[0].role'
+    );
+  });
+
+  it('a second chair of the board', () => {
+    const next = good.people.length;
+    assertOne(
+      (c) => c.people.push({ id: 'EMP-99', name: 'Pat Example', title: 'Deputy chair', role: 'ccb_chair', ccbRole: 'chair' }),
+      'people[' + next + '].ccbRole',
+      'expected one chair at most, but people[0].ccbRole is already the chair'
+    );
+  });
+
+  it('a board seat that disagrees with the board\'s roles', () => {
+    const ccb = bodyIndex('ccb');
+    const chair = good.people.findIndex((p) => p.ccbRole === 'chair');
+    assertOne((c) => (c.approval.bodies[ccb].chairRole = 'cfo'), 'people[' + chair + '].ccbRole', 'expected a person in the board\'s chair role ("cfo"), got role "ccb_chair"');
+    const secretary = good.people.findIndex((p) => p.ccbRole === 'secretary');
+    assertOne((c) => (c.approval.bodies[ccb].secretaryRole = 'program_manager'), 'people[' + secretary + '].ccbRole', 'expected a person in the board\'s secretary role ("program_manager"), got role "cm_analyst"');
+    const member = good.people.findIndex((p) => p.ccbRole === 'member' && p.role === 'quality');
+    assertOne(
+      (c) => (c.approval.bodies[ccb].memberRoles = c.approval.bodies[ccb].memberRoles.filter((r: string) => r !== 'quality')),
+      'people[' + member + '].ccbRole',
+      'expected a person in one of the board\'s member roles'
+    );
+  });
+
+  it('a board seat when no approval body is the board', () => {
+    const ccb = bodyIndex('ccb');
+    const first = good.people.findIndex((p) => p.ccbRole !== undefined);
+    assertOne((c) => (c.approval.bodies[ccb].name = 'Board of Review'), 'people[' + first + '].ccbRole', 'expected exactly one approval body named "Change Control Board" (vocabulary.terms.board)');
   });
 
   it('reports every error, not only the first', () => {
@@ -559,6 +747,82 @@ describe('the output for set_config', () => {
     const out: string[] = [];
     assert.equal(await run([BOWMAN, '--json'], (l) => out.push(l), () => {}), 0);
     assert.deepEqual(JSON.parse(out.join('\n')), configEntries(good));
+  });
+
+  it('--json output validates again, as does the stored copy of a file that leaves optional values undefined', async () => {
+    const out: string[] = [];
+    assert.equal(await run([BOWMAN, '--json'], (l) => out.push(l), () => {}), 0);
+    const stored = JSON.parse((JSON.parse(out.join('\n')) as { key: string; value: string }[])[0]!.value);
+    const again = validateConfig(stored);
+    assert.ok(again.ok, again.ok ? '' : again.issues.map(formatIssue).join('\n'));
+    assert.equal(canonicalJson(again.config), canonicalJson(good));
+
+    // A limit, an escalation or a rate set to undefined is the same as leaving it out, before and after storing.
+    const copy = structuredClone(good) as any;
+    const fast = copy.autonomy.actions[ruleIndex('approve_fast_track_ecr')];
+    fast.limits.maxP90SlipDays = undefined;
+    copy.autonomy.actions[ruleIndex('write_bom')].escalateTo = undefined;
+    const first = validateConfig(copy);
+    assert.ok(first.ok, first.ok ? '' : first.issues.map(formatIssue).join('\n'));
+    const second = validateConfig(JSON.parse(canonicalJson(first.config)));
+    assert.ok(second.ok, second.ok ? '' : second.issues.map(formatIssue).join('\n'));
+  });
+});
+
+describe("when the dataset's wording changes", () => {
+  // Copies the files Bowman's config reads into a temp directory, lets the test reword the copy of
+  // company.ts, and loads the copy. The repository's own files are never touched.
+  const root = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
+  const base = mkdtempSync(join(tmpdir(), 'norn-drift-'));
+  after(() => rmSync(base, { recursive: true, force: true }));
+  let n = 0;
+
+  async function loadWith(reword: (companyTs: string) => string) {
+    const dir = join(base, 'c' + n++);
+    cpSync(join(root, 'bowman', 'data'), join(dir, 'bowman', 'data'), { recursive: true, filter: (from) => !from.endsWith('bowman.json') });
+    cpSync(join(root, 'bowman', 'norn-config'), join(dir, 'bowman', 'norn-config'), { recursive: true });
+    cpSync(join(root, 'norn', 'config', 'src'), join(dir, 'norn', 'config', 'src'), { recursive: true });
+    cpSync(join(root, 'norn', 'config', 'package.json'), join(dir, 'norn', 'config', 'package.json'));
+    const file = join(dir, 'bowman', 'data', 'company.ts');
+    const original = readFileSync(file, 'utf8');
+    const reworded = reword(original);
+    assert.notEqual(reworded, original, 'the test did not change the copy of company.ts');
+    writeFileSync(file, reworded);
+    return loadConfigFile(join(dir, 'bowman', 'norn-config', 'bowman.config.ts'));
+  }
+
+  /** Asserts the copy no longer loads, with a message that contains `text`. */
+  async function refuses(reword: (companyTs: string) => string, text: string): Promise<void> {
+    const result = await loadWith(reword);
+    assert.ok(!result.ok, 'the reworded data still loaded');
+    assert.ok(result.issues[0]!.message.includes(text), 'expected "' + text + '" in: ' + result.issues[0]!.message);
+  }
+
+  it('still loads when only the order of the never-fast-track rules changes (the control)', async () => {
+    const safety = "'Anything touching safety or a flight-safety part'";
+    const faa = "'FAA-major changes (14 CFR 21.93)'";
+    const result = await loadWith((s) => s.replace(safety, '@@A@@').replace(faa, safety).replace('@@A@@', faa));
+    assert.ok(result.ok, result.ok ? '' : result.issues.map(formatIssue).join('\n'));
+    assert.ok(result.config.approval.neverFastTrack.find((t) => t.id === 'safety_part')!.text.includes('safety'));
+    assert.ok(result.config.approval.neverFastTrack.find((t) => t.id === 'faa_major')!.text.includes('FAA-major'));
+  });
+
+  it('refuses a committee that no longer also reviews everything above', async () => {
+    await refuses((s) => s.replace('; also reviews everything above', ''), 'also reviews everything above');
+  });
+
+  it('refuses fast-track approvers that are not the two the file has roles for', async () => {
+    await refuses((s) => s.replace('The CM analyst and the owning design engineer, without convening the board', 'The CM analyst alone, without convening the board'), 'CM analyst alone');
+    await refuses((s) => s.replace('The CM analyst and the owning design engineer', 'The CM analyst and the CFO'), 'which this file has no role for');
+  });
+
+  it('refuses a board chaired by someone the data does not seat as chair', async () => {
+    await refuses((s) => s.replace('chaired by the Vesper program manager', 'chaired by the Meridian program manager'), 'should have ccbRole "chair"');
+    await refuses((s) => s.replace('chaired by the Vesper program manager', 'chaired by the CFO'), 'the board chair "CFO"');
+  });
+
+  it('refuses a committee that no longer lists the seat the file makes its chair', async () => {
+    await refuses((s) => s.replace('(engineering director, quality,', '(quality,'), 'engineering_director');
   });
 });
 

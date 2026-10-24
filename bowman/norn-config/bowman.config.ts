@@ -45,6 +45,40 @@ const ccbTier = tierOf('Change Control Board');
 const pmcTier = tierOf('Program Management Committee');
 expectShape(pmcTier.approver.includes('CFO'), 'the Program Management Committee should be chaired by the CFO');
 
+// Three facts below are read from the policy text rather than restated, so rewording the text stops
+// the file from loading instead of leaving the old fact in place.
+
+// "...; also reviews everything above": the committee also sees the changes the tiers above decide.
+const TRC_ALSO_REVIEWS_ABOVE = 'also reviews everything above';
+findOne([trcTier.approver], TRC_ALSO_REVIEWS_ABOVE, 'bowman/data/company.ts changeControl.approvalTiers[Technical Review Committee]');
+
+// "Change Control Board (chaired by the Vesper program manager)": the person whose title says so.
+const chairedBy = /chaired by the ([^)]+)/.exec(ccbTier.approver)?.[1];
+expectShape(chairedBy !== undefined, 'the Change Control Board tier should say who chairs it ("chaired by the ...")');
+const ccbChair = findOne(
+  staff,
+  chairedBy!.toLowerCase().split(/\s+/),
+  `bowman/data/company.ts people: the one whose title matches the board chair "${chairedBy}"`,
+  (p) => p.title.toLowerCase()
+);
+expectShape(ccbChair.ccbRole === 'chair', `${ccbChair.name}, whom the tier text names as chair, should have ccbRole "chair" in people`);
+
+// "The CM analyst and the owning design engineer, without convening the board": who must sign.
+const APPROVER_FOR_PHRASE: Record<string, { role: string; mustOwnTheChange?: true }> = {
+  'CM analyst': { role: 'cm_analyst' },
+  'owning design engineer': { role: 'design_engineer', mustOwnTheChange: true },
+};
+const fastTrackApprovers = policy.fastTrackApprover
+  .split(', without ')[0]!
+  .replace(/^The /, '')
+  .split(/ and the | and |, the |, /)
+  .map((phrase) => {
+    const approver = APPROVER_FOR_PHRASE[phrase.trim()];
+    expectShape(approver !== undefined, `the fast-track approvers include "${phrase.trim()}", which this file has no role for`);
+    return approver!;
+  });
+expectShape(fastTrackApprovers.length >= 1, 'the fast-track approver text should name who signs');
+
 /** The never-fast-track rule that mentions `word`. */
 const neverFastTrackRule = (word: string): string => findOne(policy.neverFastTrack, word, 'bowman/data/company.ts changeControl.neverFastTrack');
 /** The fast-track criterion that mentions every one of `words`. */
@@ -57,7 +91,9 @@ fastTrackCriterion('pre-authorized', 'obsolescence', 'documentation');
 
 // The Technical Review Committee is named in the tier-1 approver text, in brackets, as seats:
 // "Technical Review Committee (engineering director, quality, certification, CM analyst); ...".
-// The data names no chair, so the seat listed first chairs it.
+// The data names no chair. This file makes it the director of engineering, who is also the first
+// seat listed, and refuses to load if the data stops listing that seat.
+const TRC_CHAIR = 'engineering_director';
 const SEAT_FOR_PHRASE: Record<string, string> = {
   'engineering director': 'engineering_director',
   quality: 'quality',
@@ -70,6 +106,7 @@ const trcSeats: string[] = (/\(([^)]*)\)/.exec(trcTier.approver)?.[1] ?? '').spl
   return seat!;
 });
 expectShape(trcSeats.length >= 2, 'the Technical Review Committee should list a chair and members in brackets');
+expectShape(trcSeats.includes(TRC_CHAIR), `the Technical Review Committee should list the ${TRC_CHAIR} seat, which this file makes its chair`);
 
 /** The data stores "no upper limit" as the largest safe integer. The config says null. */
 const limit = (usd: number): number | null => (usd >= Number.MAX_SAFE_INTEGER ? null : usd);
@@ -283,28 +320,30 @@ const config = {
   // The tiers, CCB dates and the fast-track and never-fast-track rules come from the dataset.
   approval: {
     // One measure of what a change costs, used to pick the tier below and to bound every autonomy
-    // limit. The upper tail of the forecast over the first year of production, so a change that
-    // might cost more than a limit goes to the body above it. Savings do not net off: a change with
-    // 1.8M of tooling that saves more than that still routes as 1.8M of spend, and no agent limit
-    // sees it as small.
+    // limit, by its size: the absolute value. The upper tail of the forecast over the first year of
+    // production, so a change that might cost more than a limit goes to the body above it. Savings do
+    // not net off spend: the size is the larger of the spend and the saving. A change with 1.8M of
+    // tooling that saves 1M routes as 1.8M, one that saves 3M routes as 3M, and no agent limit sees
+    // either as small.
+    // Proposed, for Tyler to confirm. Kept out of `prov`, which is stored with the config.
     costMeasure: {
       percentile: 'p90',
       horizonMonths: 12,
       savingsOffset: false,
-      prov: inv('Invented for Bowman: the dataset gives dollar tiers but not how a change\'s cost is measured against them. Tyler to confirm.'),
+      prov: inv('Invented for Bowman: the dataset gives dollar tiers but not how a change\'s cost is measured against them.'),
     },
     bodies: [
       {
         id: 'trc',
         name: 'Technical Review Committee',
-        chairRole: trcSeats[0]!,
-        memberRoles: trcSeats.slice(1),
-        prov: src('bowman/data/company.ts changeControl.approvalTiers', 'The members are the seats the dataset lists for the committee. It names no chair; the seat listed first is taken as chair.'),
+        chairRole: TRC_CHAIR,
+        memberRoles: trcSeats.filter((seat) => seat !== TRC_CHAIR),
+        prov: src('bowman/data/company.ts changeControl.approvalTiers', 'The members are the seats the dataset lists for the committee. It names no chair; the director of engineering, the seat listed first, is taken as chair.'),
       },
       {
         id: 'ccb',
         name: 'Change Control Board',
-        chairRole: ccbSeats('chair')[0]!,
+        chairRole: ccbChair.seat,
         memberRoles: ccbSeats('member'),
         secretaryRole: ccbSeats('secretary')[0]!,
         cadence: policy.ccbCadence,
@@ -320,13 +359,13 @@ const config = {
       },
     ],
     tiers: [
-      { id: 'technical_review', upTo: limit(trcTier.upToUsd), body: 'trc', alsoReviewsAbove: true },
+      { id: 'technical_review', upTo: limit(trcTier.upToUsd), body: 'trc', alsoReviewsAbove: true }, // guarded by TRC_ALSO_REVIEWS_ABOVE above
       { id: 'board', upTo: limit(ccbTier.upToUsd), body: 'ccb' },
       { id: 'program_management', upTo: limit(pmcTier.upToUsd), body: 'pmc' },
     ],
     fastTrack: {
-      // "The CM analyst and the owning design engineer, without convening the board."
-      approvers: [{ role: 'cm_analyst' }, { role: 'design_engineer', mustOwnTheChange: true }],
+      // Who signs is read from the dataset's fastTrackApprover text, above.
+      approvers: fastTrackApprovers,
       requireAll: [
         // The first criterion in the data, "Company Class II and FAA minor", as two class checks.
         { id: 'company_class_ii', text: 'Company Class II', whenClass: { axis: 'company', value: 'II' } },
@@ -335,13 +374,12 @@ const config = {
         { id: 'same_supplier_no_tooling', text: fastTrackCriterion('first-article') },
       ],
       // The dataset lists these kinds as one criterion: "Swaps from the pre-authorized equivalents
-      // list, obsolescence replacements and documentation fixes". The supplier-notified change is
-      // added from docs/IN-PRACTICE.md §4 ("Minor supplier changes notified, not approved").
+      // list, obsolescence replacements and documentation fixes". docs/IN-PRACTICE.md §4 also lists
+      // minor supplier changes notified, not approved; the dataset does not, so this file does not.
       requireOneOf: [
         { id: 'authorized_equivalent', text: 'A swap from the pre-authorized equivalents list' },
         { id: 'obsolescence_replacement', text: 'An obsolescence replacement' },
         { id: 'documentation_fix', text: 'A documentation fix' },
-        { id: 'supplier_notified_change', text: 'A minor supplier change that is notified, not approved' },
       ],
     },
     neverFastTrack: [
@@ -363,11 +401,14 @@ const config = {
   // certification and open on routine work; widen a rule when forecast-versus-actual results and
   // override rates support it. Every maxCost below is measured by approval.costMeasure.
   //
-  // approve_sampled: a second agent recomputes blind, and the sample is drawn from the ECR id and
-  // the deployment's seed. recommend: the roles that hold the action receive it. The never-fast-track
+  // approve_sampled: a second agent recomputes blind, and the sample is drawn from the ECR id, the
+  // action and sampleSeed. recommend: the roles that hold the action receive it. The never-fast-track
   // rules above are checked first, so they win over the escalation triggers on approve_fast_track_ecr.
   autonomy: {
     actingFor: 'stricter',
+    // Bowman's own seed, apart from the forecast `seed` in the state layer, so re-seeding forecasts
+    // does not re-draw the samples. Changing this string is a governance change.
+    sampleSeed: 'norn-sample-1',
     actions: [
       {
         action: 'file_ecr',
@@ -472,8 +513,9 @@ const config = {
 
   // -------------------------------------------------------------- materiality (#30)
   // The restraint of a good analyst in front of the CFO: no nitpicks, no inflating. The relative
-  // bar is a share of the unit's current standard cost (about $2.8M for Vesper), so 0.01 percent is
-  // about $280 per aircraft.
+  // bar is a share of the end item's standard cost: one finished Vesper aircraft, about $2.8M, never
+  // the changed part's. So 0.01 percent is about $280 per aircraft, and ECR-0423's saving of $11.40
+  // an aircraft is well under both bars.
   materiality: {
     unitCost: { absolute: 250, relativePct: 0.01 },
     oneTimeCost: 10_000,

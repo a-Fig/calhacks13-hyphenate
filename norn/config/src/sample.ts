@@ -1,10 +1,12 @@
 // Which actions an `approve_sampled` rule sends for a blind second check, decided the same way every
-// time. The draw is a pure function of the deployment's seed, the ECR id and the action, so replaying
-// an ECR samples the same actions, and no state or random number generator is involved.
+// time. The draw is a pure function of the config's `autonomy.sampleSeed`, the ECR id and the action,
+// so replaying an ECR samples the same actions, and no state or random number generator is involved.
+// The seed is the config's own, not the state layer's forecast `seed`: re-seeding forecasts must not
+// change which actions get a second check.
 //
 // The algorithm is written out so any other implementation, such as the state-layer module, can
 // reproduce it exactly and be checked against the pinned values in test/sample.test.ts:
-//   1. text  = JSON.stringify([seed, ecrId, action])
+//   1. text  = JSON.stringify([sampleSeed, ecrId, action])
 //   2. h     = 32-bit FNV-1a over the UTF-8 bytes of text
 //   3. h     = murmur3's 32-bit finalizer applied to h (FNV-1a alone mixes its last bytes poorly)
 //   4. value = h / 2^32, a number from 0 up to but not including 1
@@ -28,16 +30,16 @@ export function hash32(text: string): number {
 }
 
 export interface SampleKey {
-  /** The deployment's `seed` setting. */
-  seed: string;
+  /** The config's `autonomy.sampleSeed`. */
+  sampleSeed: string;
   ecrId: string;
   /** The action id, such as 'approve_fast_track_ecr'. */
   action: string;
 }
 
 /** Where this ECR and action fall in [0, 1). The same inputs always give the same number. */
-export function sampleValue({ seed, ecrId, action }: SampleKey): number {
-  return hash32(JSON.stringify([seed, ecrId, action])) / 2 ** 32;
+export function sampleValue({ sampleSeed, ecrId, action }: SampleKey): number {
+  return hash32(JSON.stringify([sampleSeed, ecrId, action])) / 2 ** 32;
 }
 
 /** Whether this ECR's action is one of the share `rate` (0 to 1) that wait for a blind second check. */

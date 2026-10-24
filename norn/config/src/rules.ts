@@ -106,14 +106,19 @@ export const rules: Rule[] = [
     },
   },
   {
-    // Tiers run from cheap to dear, the last has no limit, and each names a body that exists.
+    // Tiers run from cheap to dear, the last has no limit, and each names a body that exists, one body to a tier.
     needs: ['approval'],
     run({ approval }, issues) {
       const bodies = approval.bodies.map((b) => b.id);
+      const tierOfBody = new Map<string, number>();
       approval.tiers.forEach((tier, i) => {
         const path = `approval.tiers[${i}]`;
         const last = i === approval.tiers.length - 1;
-        mustExist(tier.body, bodies, 'an approval body', `${path}.body`, issues);
+        if (mustExist(tier.body, bodies, 'an approval body', `${path}.body`, issues)) {
+          const first = tierOfBody.get(tier.body);
+          if (first === undefined) tierOfBody.set(tier.body, i);
+          else issues.push({ path: `${path}.body`, message: `expected a body that no other tier uses, but ${JSON.stringify(tier.body)} already decides approval.tiers[${first}]` });
+        }
         if (!last && tier.upTo === null) {
           issues.push({ path: `${path}.upTo`, message: 'expected a number, because only the last tier has no limit, got null' });
         } else if (last && tier.upTo !== null) {
@@ -209,7 +214,8 @@ export const rules: Rule[] = [
         const path = `autonomy.actions[${i}]`;
         const levels = [rule.level, ...(rule.otherwise ? [rule.otherwise] : [])];
         const acts = rule.level === 'approve' || rule.level === 'approve_sampled';
-        if (rule.limits && Object.keys(rule.limits).length === 0) {
+        // A limit left undefined is not a limit: it would be dropped when the config is stored, and the stored copy refused.
+        if (rule.limits && Object.values(rule.limits).every((v) => v === undefined)) {
           issues.push({ path: `${path}.limits`, message: 'expected at least one limit, got none' });
         }
         if (rule.limits && !acts) {
@@ -217,7 +223,7 @@ export const rules: Rule[] = [
         }
         if (rule.carriesOutApproval !== undefined) {
           if (!FOLLOWS_APPROVAL.includes(rule.action)) {
-            issues.push({ path: `${path}.carriesOutApproval`, message: `expected nothing, because ${rule.action} gives or prepares a decision and only ${FOLLOWS_APPROVAL.join(', ')} carry one out, got ${rule.carriesOutApproval}` });
+            issues.push({ path: `${path}.carriesOutApproval`, message: `expected nothing, because only ${FOLLOWS_APPROVAL.join(' and ')} carry out an approval and ${rule.action} does not, got ${rule.carriesOutApproval}` });
           } else if (!rule.limits) {
             issues.push({ path: `${path}.carriesOutApproval`, message: 'expected limits to be set, because carrying out an approval only waives limits, got no limits' });
           }
@@ -225,8 +231,8 @@ export const rules: Rule[] = [
         if (rule.otherwise && !rule.limits) {
           issues.push({ path: `${path}.otherwise`, message: 'expected limits to be set, because otherwise only applies once a limit is passed, got no limits' });
         }
-        if (rule.otherwise && LEVEL_RANK[rule.otherwise] > LEVEL_RANK[rule.level]) {
-          issues.push({ path: `${path}.otherwise`, message: `expected a level no more autonomous than ${JSON.stringify(rule.level)}, got ${JSON.stringify(rule.otherwise)}` });
+        if (rule.otherwise && LEVEL_RANK[rule.otherwise] >= LEVEL_RANK[rule.level]) {
+          issues.push({ path: `${path}.otherwise`, message: `expected a level less autonomous than ${JSON.stringify(rule.level)}, because a fallback that is not lower takes no authority away once a limit is passed, got ${JSON.stringify(rule.otherwise)}` });
         }
         if (levels.includes('approve_sampled') && rule.sampleRate === undefined) {
           issues.push({ path: `${path}.sampleRate`, message: 'expected a sample rate, because a level is approve_sampled, got nothing' });
@@ -266,6 +272,56 @@ export const rules: Rule[] = [
       autonomy.actions.forEach((rule, i) => {
         if (rule.escalateTo) needsSomeone(rule.escalateTo, `autonomy.actions[${i}].escalateTo`, 'receives escalations');
       });
+    },
+  },
+  {
+    // A recommendation is read by a role that holds the action, so some person must be in such a role.
+    needs: ['autonomy', 'roles', 'people'],
+    run({ autonomy, roles, people }, issues) {
+      const held = new Set(people.map((p) => p.role));
+      autonomy.actions.forEach((rule, i) => {
+        const path = `autonomy.actions[${i}]`;
+        // The loader fills in 'recommend' as the fallback of a rule with limits, so that counts too.
+        const fallback = rule.otherwise ?? (rule.limits ? 'recommend' : undefined);
+        let where: string;
+        let because: string;
+        if (rule.level === 'recommend') [where, because] = [`${path}.level`, 'the agent recommends it'];
+        else if (fallback === 'recommend') [where, because] = [rule.otherwise ? `${path}.otherwise` : `${path}.limits`, 'the agent recommends it once a limit is passed'];
+        else return;
+        const holders = roles.filter((r) => r.can.includes(rule.action));
+        if (holders.length === 0) {
+          issues.push({ path: where, message: `expected a role that can ${rule.action}, because ${because} and the recommendation goes to a role that holds it, got none (no role's can lists it)` });
+        } else if (!holders.some((r) => held.has(r.id))) {
+          issues.push({ path: where, message: `expected a person in a role that can ${rule.action}, because ${because}, got none (nobody in people holds ${quote(holders.map((r) => r.id))})` });
+        }
+      });
+    },
+  },
+  {
+    // The board is the approval body that vocabulary.terms.board names. A person's seat on it must agree with its roles.
+    needs: ['people', 'approval', 'vocabulary'],
+    run({ people, approval, vocabulary }, issues) {
+      const seated = people.flatMap((person, i) => (person.ccbRole === undefined ? [] : [{ person, path: `people[${i}].ccbRole` }]));
+      if (seated.length === 0) return;
+      const boardName = vocabulary.terms.board.name;
+      const boards = approval.bodies.filter((b) => b.name === boardName);
+      if (boards.length !== 1) {
+        issues.push({ path: seated[0]!.path, message: `expected exactly one approval body named ${JSON.stringify(boardName)} (vocabulary.terms.board), because people sit on it, got ${boards.length}` });
+        return;
+      }
+      const board = boards[0]!;
+      let chairAt: string | undefined;
+      for (const { person, path } of seated) {
+        if (person.ccbRole === 'chair') {
+          if (chairAt !== undefined) issues.push({ path, message: `expected one chair at most, but ${chairAt} is already the chair` });
+          else chairAt = path;
+          if (person.role !== board.chairRole) issues.push({ path, message: `expected a person in the board's chair role (${JSON.stringify(board.chairRole)}), got role ${JSON.stringify(person.role)}` });
+        } else if (person.ccbRole === 'secretary') {
+          if (person.role !== board.secretaryRole) issues.push({ path, message: `expected a person in the board's secretary role (${board.secretaryRole === undefined ? 'none is set' : JSON.stringify(board.secretaryRole)}), got role ${JSON.stringify(person.role)}` });
+        } else if (!board.memberRoles.includes(person.role)) {
+          issues.push({ path, message: `expected a person in one of the board's member roles (${quote(board.memberRoles)}), got role ${JSON.stringify(person.role)}` });
+        }
+      }
     },
   },
   {

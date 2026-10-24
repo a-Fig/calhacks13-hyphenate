@@ -37,18 +37,19 @@ export type ActionId = keyof typeof ACTIONS;
 export const ACTION_IDS = Object.keys(ACTIONS) as ActionId[];
 
 /**
- * Actions that carry out a decision already made, rather than make or prepare one. Only these can
- * be set to `carriesOutApproval`.
+ * Actions that carry out the decision of an approval body, and so can hold their level past their
+ * cost limits once it has decided. Only these can be set to `carriesOutApproval`. Posting a
+ * journal entry is deliberately not here: the ledger keeps its human step whatever was approved.
  */
-export const FOLLOWS_APPROVAL: readonly ActionId[] = ['release_eco', 'write_bom', 'update_standard_cost', 'draft_journal_entry', 'post_journal_entry'];
+export const FOLLOWS_APPROVAL: readonly ActionId[] = ['release_eco', 'update_standard_cost'];
 
 /**
  * What an agent may do with an action (#24). Ordered from most to least autonomous.
  *
  * - `approve_sampled`: for the share of actions chosen by the rule's `sampleRate`, a second agent
  *   recomputes the result blind, without seeing the first agent's output, and the action waits for
- *   that check. The sample is drawn deterministically from the deployment's `seed` setting, the ECR
- *   id and the action (`isSampled` in sample.ts), so the same ECR is always or never sampled.
+ *   that check. The sample is drawn deterministically from `autonomy.sampleSeed`, the ECR id and the
+ *   action (`isSampled` in sample.ts), so the same ECR is always or never sampled.
  * - `recommend`: the recommendation goes to the role or roles whose `can` holds the action.
  */
 export const AUTONOMY_LEVELS = {
@@ -303,8 +304,9 @@ const approvalBody = obj({
 const approvalTier = obj({
   id: id(),
   /**
-   * The tier takes changes whose cost, by `approval.costMeasure`, is up to this amount in the
-   * company's currency. `null` means no upper limit, and only the last tier may have it.
+   * The tier takes changes whose cost, by `approval.costMeasure` (its size, whether the change
+   * spends or saves), is up to this amount in the company's currency. `null` means no upper limit,
+   * and only the last tier may have it. Each body sits on one tier.
    */
   upTo: nullable(num({ min: 0 })),
   body: id(),
@@ -317,10 +319,16 @@ const approvalTier = obj({
  * autonomy limit (`autonomy.actions[].limits.maxCost`), so the two cannot disagree about whether a
  * change is "over".
  *
- * The cost is the change's one-time spend plus its recurring cost increases over the first
- * `horizonMonths` of production, read at `percentile` of Norn's forecast. With `savingsOffset: false`
- * savings (a lower recurring cost, a credit for old stock) are not netted off: a change that spends
- * 1.8 million on tooling and saves more than that still costs 1.8 million here. With `true` they net.
+ * What is compared is the size of the amount, its absolute value, so a saving counts as much as a
+ * spend: the tiers and the autonomy limits both compare it, and a change that saves 3 million is
+ * routed and limited as a 3 million change.
+ *
+ * The amount is built from two parts over the first `horizonMonths` of production, read at
+ * `percentile` of Norn's forecast: the spend (one-time cost plus recurring cost increases) and the
+ * saving (a lower recurring cost, a credit for old stock). With `savingsOffset: true` they net and
+ * the size is that difference. With `false` they do not net: the size is the larger of the spend
+ * and the saving. A change that spends 1.8 million on tooling and saves 1 million is 1.8 million,
+ * and one that only saves 3 million is 3 million, so a saving never makes a big change look small.
  */
 const costMeasure = obj({
   percentile: oneOf(['p50', 'p90']),
@@ -335,12 +343,12 @@ const approval = obj({
   /** In ascending order of cost. The last tier has no limit. */
   tiers: arr(approvalTier, { min: 1, uniqueBy: 'id' }),
   fastTrack: obj({
-    /** Everyone listed must sign. `mustOwnTheChange` means the person must own the changed item; the loader fills in false. */
-    approvers: arr(obj({ role: id(), mustOwnTheChange: opt(bool()) }), { min: 1 }),
-    /** All of these hold. */
-    requireAll: arr(test),
-    /** At least one of these holds (the kinds of change the fast track is for). */
-    requireOneOf: arr(test),
+    /** Everyone listed must sign, each role once. `mustOwnTheChange` means the person must own the changed item; the loader fills in false. */
+    approvers: arr(obj({ role: id(), mustOwnTheChange: opt(bool()) }), { min: 1, uniqueBy: 'role' }),
+    /** All of these hold. At least one, or the fast track would have no conditions. */
+    requireAll: arr(test, { min: 1 }),
+    /** At least one of these holds (the kinds of change the fast track is for). At least one, or nothing could qualify. */
+    requireOneOf: arr(test, { min: 1 }),
   }),
   /**
    * If any of these holds, the ECR never takes the fast track, whatever its class. This is a hard
@@ -370,8 +378,9 @@ const person = obj({
   role: id(),
   reportsTo: opt(id()),
   /**
-   * Their seat on the Change Control Board (`vocabulary.terms.board`), if any. It records only that
-   * board. Who sits on the other approval bodies is `approval.bodies[].memberRoles`.
+   * Their seat on the Change Control Board, if any. It records only that board: the approval body
+   * named by `vocabulary.terms.board`, whose chair, secretary and member roles it must agree with, and
+   * which has one chair at most. Who sits on the other approval bodies is `approval.bodies[].memberRoles`.
    */
   ccbRole: opt(oneOf(['chair', 'secretary', 'member'])),
 });
@@ -380,10 +389,10 @@ const person = obj({
 
 const limits = obj({
   /**
-   * The agent holds its level only while the change's cost stays at or under this amount in the
-   * company's currency. The cost is `approval.costMeasure`, the same measure that routes the tiers.
-   * An action marked `carriesOutApproval` holds its level past these limits once the change is
-   * approved.
+   * The agent holds its level only while the size of the change's cost (the absolute value of
+   * `approval.costMeasure`, so a saving counts like a spend) stays at or under this amount in the
+   * company's currency. It is the same measure that routes the tiers. An action marked
+   * `carriesOutApproval` holds its level past these limits once the change is approved.
    */
   maxCost: opt(num({ min: 0 })),
   /** ... and the p90 slip of the cut-in date stays at or under this many days. */
@@ -396,15 +405,20 @@ const actionRule = obj({
   action: oneOf(ACTION_IDS),
   level: oneOf(LEVEL_IDS),
   limits: opt(limits),
-  /** The level once a limit is passed. Only with `limits`. The loader fills in 'recommend' when it is left out. */
+  /**
+   * The level once a limit is passed. Only with `limits`, and less autonomous than `level`: a
+   * fallback at the same level would limit nothing. The loader fills in 'recommend' when it is left out.
+   */
   otherwise: opt(oneOf(LEVEL_IDS)),
   /**
    * Carrying out a decision that has already been made. Only for the actions in FOLLOWS_APPROVAL, and
-   * only with `limits`. When an approval body whose tier covers the change (by
-   * `approval.costMeasure`) has approved the ECR, Norn may take the action at `level` whatever the
-   * `limits` say: the body's decision carried the authority and this action only carries it out. The
-   * limits apply when no such approval exists, as when a change took the fast track. `escalateOn`
-   * triggers still apply either way.
+   * only with `limits`. When an approval body whose tier covers the change has approved the ECR,
+   * Norn may take the action at `level` whatever the `limits` say: the body's decision carried the
+   * authority and this action only carries it out. The cost that decides which tier covers the change
+   * is the one the body approved, by `approval.costMeasure` on that revision of the ECR. A revision
+   * filed after the approval needs a new approval, and until it has one the limits apply. They apply
+   * too when no such approval exists, as when a change took the fast track. `escalateOn` triggers
+   * still apply either way.
    */
   carriesOutApproval: opt(bool()),
   /**
@@ -417,7 +431,7 @@ const actionRule = obj({
   escalateTo: opt(id()),
   /**
    * The share of actions that wait for a blind second check, from just above 0 to 1. For
-   * approve_sampled. Which actions are drawn is deterministic: see AUTONOMY_LEVELS.
+   * approve_sampled. Which actions are drawn is deterministic: see AUTONOMY_LEVELS and `sampleSeed`.
    */
   sampleRate: opt(num({ above: 0, max: 1 })),
   /** Why the company set it this way, in a line. */
@@ -430,6 +444,14 @@ const autonomy = obj({
   actingFor: oneOf(['stricter']),
   /** One rule for every action in ACTIONS. */
   actions: arr(actionRule, { uniqueBy: 'action' }),
+  /**
+   * The text that, with the ECR id and the action, decides which actions the `approve_sampled` rules
+   * send for a blind second check (`isSampled` in sample.ts). It is the company's own and separate
+   * from the forecast `seed` the state layer keeps on purpose: changing that seed re-checks every
+   * open ECR's forecast inputs, and this one must not move with it. Changing this seed re-draws
+   * every sample, so a change to it is a governance change, recorded like any other config change.
+   */
+  sampleSeed: str(),
   prov: opt(provenance),
 });
 
@@ -456,9 +478,10 @@ const reviewDepth = obj({
 
 const materiality = obj({
   /**
-   * A change to the cost of one unit is raised when it clears either bar. `absolute` is an amount in
-   * the company's currency; `relativePct` is a share of the unit's standard cost. All amounts in this
-   * section are in the company's currency.
+   * A change to the cost of one end item, the finished unit the program sells (an aircraft for an
+   * aircraft maker), is raised when it clears either bar. `absolute` is an amount in the company's
+   * currency; `relativePct` is a share of the end item's standard cost, never of the changed part's.
+   * All amounts in this section are in the company's currency.
    */
   unitCost: obj({ absolute: num({ above: 0 }), relativePct: num({ above: 0, max: 100 }) }),
   oneTimeCost: num({ above: 0 }),
