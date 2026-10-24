@@ -249,6 +249,14 @@ check('closing the second ECR drops it from the peers of the first ECR', await h
 const s4A4 = current(PA.id, 's4_supply')!;
 await R.setPrStatus({ prId: PB.id, status: 'draft' });
 check('reopening it adds it back', await holds(() => current(PA.id, 's4_supply')!.id !== s4A4.id && peersOf(PA.id).some(n => n.pr === String(PB.id))), JSON.stringify(peersOf(PA.id)));
+const s4A5 = current(PA.id, 's4_supply')!;
+const revA5 = pr(PA.id).revision;
+await R.recordAssumption({ prId: PB.id, key: `decision:${plmB}`, distJson: '{"kind":"fixed","value":60}', source: 'given', rationale: 'check: the board is assumed to take 60 weeks on the second ECR', affects: ['s4_supply'], expectedRev: 0 });
+const assumedB = await until(() => [...db.assumption.iter()].find(a => a.prId === PB.id && a.key === `decision:${plmB}` && a.current), 3000, 'the assumption on the second ECR');
+const namedAssumptions = (id: bigint) => (JSON.parse(current(id, 's4_supply')!.inputsJson).peers ?? []).find((n: { pr: string }) => n.pr === String(PB.id))?.assumptions ?? [];
+check('an assumption recorded on the second ECR re-runs the s4 of the first ECR, which names it', await holds(() => current(PA.id, 's4_supply')!.id !== s4A5.id && run(s4A5.id).status === 'stale' && namedAssumptions(PA.id).some((a: { id: string; rev: number }) => a.id === String(assumedB.id) && a.rev === 1)), `${JSON.stringify(namedAssumptions(PA.id))}, old s4 ${run(s4A5.id).status}`);
+check('...and the first ECR revision and approval stay as they were', pr(PA.id).revision === revA5 && pr(PA.id).status === 'approved', `rev ${revA5} -> ${pr(PA.id).revision}, ${pr(PA.id).status}`);
+check('...while s1, s2 and s3 of the first ECR do not run again', ['s1_bom_delta', 's2_cost', 's3_timeline'].every(st => run(current(PA.id, st)!.id).status !== 'stale'));
 
 // ---- impact statements: the run they were written from, and the publication lease (#80) --------------------
 await subscribe(A.conn, ['SELECT * FROM impact_statement', 'SELECT * FROM publication_claim']);

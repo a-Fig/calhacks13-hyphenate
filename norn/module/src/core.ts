@@ -171,7 +171,8 @@ export type StageInputs = {
   // s4_supply: the other open ECRs' current change requests, which it compares this one with
   // (qualification slots and bundle terms at a shared supplier). pr is the ECR's id, overlay its
   // change request digest. A peer filed, edited, closed or reopened changes this and re-runs s4.
-  peers?: { pr: string; revision: number; overlay: string }[];
+  // assumptions: the peer's own recorded assumptions that s4 applies to the peer (what a peer's decision lag is assumed to be changes the comparison).
+  peers?: { pr: string; revision: number; overlay: string; assumptions: { id: string; key: string; rev: number }[] }[];
   upstream?: Record<string, string>; // stage -> its hash, for the stages this one reads
 };
 export type StageInfo = { hash: string; inputs: StageInputs };
@@ -200,7 +201,13 @@ export function peerSnapshot(ctx: Ctx, prId: bigint): NonNullable<StageInputs['p
   for (const other of ctx.db.pullRequest.iter()) {
     if (other.id === prId || !OPEN_PR.includes(other.status as PrStatus)) continue;
     const rev = currentRevision(ctx, other.id);
-    if (rev) out.push({ pr: String(other.id), revision: rev.seq, overlay: rev.digest });
+    if (rev) {
+      const assumptions = [...ctx.db.assumption.prId.filter(other.id)]
+        .filter(a => a.current && (a.affects.length === 0 || a.affects.includes('s4_supply')))
+        .map(a => ({ id: String(a.id), key: a.key, rev: a.rev }))
+        .sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
+      out.push({ pr: String(other.id), revision: rev.seq, overlay: rev.digest, assumptions });
+    }
   }
   return out.sort((a, b) => (BigInt(a.pr) < BigInt(b.pr) ? -1 : 1));
 }

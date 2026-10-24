@@ -35,7 +35,7 @@ export type Inputs = {
   erpBaselineAsOf?: string;
   assumptions?: { id: string; key: string; rev: number }[];
   /** s4: the other open ECRs' change requests it compared this one with. */
-  peers?: { pr: string; revision: number; overlay: string }[];
+  peers?: { pr: string; revision: number; overlay: string; assumptions?: { id: string; key: string; rev: number }[] }[];
 };
 
 /** The stages this file computes for real, on ECRs with a change request. */
@@ -126,16 +126,26 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
   }
 
   /** The run's assumptions, by the ids its inputs name, as the library takes them. */
-  function assumptionsOf(inputs: Inputs) {
+  function assumptionsOf(inputs: Inputs, withPeers = false) {
     const overrides: AssumptionOverride[] = [];
     const problems: { key: string; id: string; problem: string }[] = [];
-    for (const a of inputs.assumptions ?? []) {
+    const seenIds = new Set<string>();
+    const seenKeys = new Set<string>();
+    const read = (a: { id: string }) => {
+      if (seenIds.has(a.id)) return; // a baseline assumption every ECR shares is read once
+      seenIds.add(a.id);
       const row = conn.db.assumption.id.find(BigInt(a.id));
       if (!row) throw new AbortedError(); // not in the cache yet, or replaced: the run is stale
+      if (withPeers && seenKeys.has(row.key)) return; // the ECR being checked wins a key it shares with a peer
       const o = toOverride(row);
       if (typeof o === 'string') problems.push({ key: row.key, id: a.id, problem: o });
       else overrides.push(o);
-    }
+      seenKeys.add(row.key);
+    };
+    for (const a of inputs.assumptions ?? []) read(a);
+    // s4 compares this ECR with the other open ones as each of them is assumed to go (its decision lag, its
+    // quote). The inputs name those assumptions too, so a retry reads the same ones.
+    if (withPeers) for (const peer of inputs.peers ?? []) for (const a of peer.assumptions ?? []) read(a);
     return { overrides, problems };
   }
 
@@ -200,7 +210,7 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
     s4_supply: async (ctx: RunCtx): Promise<Result[]> => {
       const p = await prepare(ctx);
       if (!p) return HANDLERS.s4_supply!(ctx);
-      const { overrides, problems } = assumptionsOf(p.inputs);
+      const { overrides, problems } = assumptionsOf(p.inputs, true);
       const peers = peersNamed(p.inputs);
       const t0 = Date.now();
       const r = supplyCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs), peers });

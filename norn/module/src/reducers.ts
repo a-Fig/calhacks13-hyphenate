@@ -712,6 +712,9 @@ export const recordAssumption = write(
       outcome = `baseline v${main.parent} -> v${main.version}, re-checked ${reconcileAllOpen(ctx, call, `baseline assumption ${key} rev ${row.rev}`)} open ECR(s)`;
     } else {
       outcome = reconcile(ctx, a.prId);
+      // The other open ECRs' s4 compares them with this one under its assumptions.
+      const others = reconcileAllOpen(ctx, call, `ECR ${a.prId} assumption ${key} rev ${row.rev}`, a.prId);
+      if (others) outcome += `; ${others} other open ECR(s) checked against it`;
     }
     return {
       prId: a.prId,

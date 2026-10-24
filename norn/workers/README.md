@@ -57,6 +57,10 @@ NORN_DB=norn-cfg npm run check:config                # end to end on a scratch d
    check decides. This does not change the ECR's own revision or withdraw an approval: the peer list
    is left out of the digest an approval stands on. A named revision the worker doesn't have, or has
    with another digest, drops the run (stale). The `detail` row lists the peers it compared with.
+   Each named peer also carries its own assumptions that s4 applies (a decision lag recorded on it,
+   say), by id and revision. The worker reads them with the ECR's own, the ECR's own winning a key
+   they share, so an assumption recorded on one ECR re-runs s4 on every other open ECR. A peer it
+   cannot read is skipped and flagged, not fatal.
 6. **Code version.** `code_version` (default `checks-0.3.0`) is part of every hash. Set it to the
    checks library's `CHECKS_CODE_VERSION` when the library changes. The worker warns when the two
    disagree.

@@ -14,12 +14,13 @@ const ecr = (id: string): ChangeRequest => structuredClone(bowman.ecrs.find(x =>
 type Rev = { prId: bigint; seq: number; digest: string; changeRequestJson: string };
 const revision = (prId: bigint, e: ChangeRequest, digest: string): Rev => ({ prId, seq: 1, digest, changeRequestJson: JSON.stringify(e) });
 
-/** A connection holding only what the handler reads: ecr_revision by pr id, and no assumptions. */
-function fakeConn(cache: Rev[]) {
+type Row = { id: bigint; key: string; distJson: string; source: string; rationale: string };
+/** A connection holding only what the handler reads: ecr_revision by pr id, and assumptions by id. */
+function fakeConn(cache: Rev[], assumptions: Row[] = []) {
   return {
     db: {
       ecrRevision: { prId: { filter: (id: bigint) => cache.filter(r => r.prId === id) } },
-      assumption: { id: { find: () => undefined } },
+      assumption: { id: { find: (id: bigint) => assumptions.find(a => a.id === id) } },
     },
   } as never;
 }
@@ -73,5 +74,40 @@ describe('s4 reads the peers its run names', () => {
     const handlers = impactHandlers(fakeConn([self, { ...peer, digest: 'edited' }]), baselines);
     await assert.rejects(handlers.s4_supply(run({ peers: [named] })), AbortedError);
     await assert.rejects(impactHandlers(fakeConn([self]), baselines).s4_supply(run({ peers: [named] })), AbortedError);
+  });
+});
+
+describe('s4 applies the assumptions of its peers', () => {
+  const self = revision(SELF, ecr('ECR-0419'), 'd419');
+  const peer = revision(2n, ecr('ECR-0421'), 'd421');
+  const late: Row = { id: 7n, key: 'decision:ECR-0421', distJson: JSON.stringify({ kind: 'point', value: 70, replacesGiven: true }), source: 'agent_estimated', rationale: 'the board will not see it until the spring' };
+  const named = (assumptions: { id: string; key: string; rev: number }[]) => ({ pr: '2', revision: 1, overlay: 'd421', assumptions });
+
+  it('reads a decision lag recorded on the peer, so the comparison changes with it', async () => {
+    const without = await impactHandlers(fakeConn([self, peer], [late]), baselines).s4_supply(run({ peers: [named([])] }));
+    const withIt = await impactHandlers(fakeConn([self, peer], [late]), baselines).s4_supply(run({ peers: [named([{ id: '7', key: late.key, rev: 1 }])] }));
+    assert.notEqual(rowsText(withIt), rowsText(without), 'an assumption on the peer reaches the s4 of this ECR');
+    assert.ok(!withIt.some(r => r.key === 'assumption_errors'));
+  });
+
+  it('drops a run whose named peer assumption is gone', async () => {
+    await assert.rejects(impactHandlers(fakeConn([self, peer], []), baselines).s4_supply(run({ peers: [named([{ id: '7', key: late.key, rev: 1 }])] })), AbortedError);
+  });
+
+  it('reads an assumption shared with a peer once, and the own assumption wins a shared key', async () => {
+    const own: Row = { ...late, id: 8n, distJson: JSON.stringify({ kind: 'point', value: 4, replacesGiven: true }) };
+    const handlers = impactHandlers(fakeConn([self, peer], [late, own]), baselines);
+    const both = await handlers.s4_supply(run({ assumptions: [{ id: '8', key: own.key, rev: 1 }], peers: [named([{ id: '7', key: late.key, rev: 1 }, { id: '8', key: own.key, rev: 1 }])] }));
+    const ownOnly = await handlers.s4_supply(run({ assumptions: [{ id: '8', key: own.key, rev: 1 }], peers: [named([])] }));
+    assert.equal(rowsText(both), rowsText(ownOnly));
+  });
+});
+
+describe('s4 skips a peer it cannot read', () => {
+  it('runs for the ECR itself and says which peer it left out', async () => {
+    const self = revision(SELF, ecr('ECR-0419'), 'd419');
+    const draft = revision(3n, { id: 'ECR-DRAFT' } as ChangeRequest, 'dd');
+    const rows = await impactHandlers(fakeConn([self, draft]), baselines).s4_supply(run({ peers: [{ pr: '3', revision: 1, overlay: 'dd' }] }));
+    assert.ok(detail(rows).flags.some((f: { kind: string; ref: string }) => f.kind === 'unreadable_peer' && f.ref === 'ECR-DRAFT'));
   });
 });
