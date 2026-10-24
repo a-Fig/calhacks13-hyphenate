@@ -1,9 +1,9 @@
 // Screenshots of the ERPNext pages a finance user opens to follow an ECO back to Norn's decision, taken with headless Edge
 // logged in as Administrator, at desktop width.
 //
-//   node bowman/erp/screenshot-eco.ts ECO-0319 norn/connectors/erpnext/screenshots
+//   node bowman/erp/screenshot-eco.ts ECO-0319 <output folder>
 //
-// Finds the documents the write-back tagged with the ECO number, so run it between the release and the reset. Drives Edge over
+// Finds the documents entered for the ECO and tagged with its number, so run it between entering the change package and the reset. Drives Edge over
 // the DevTools protocol with Node's built-in WebSocket (no dependencies). Needs the tunnel and ERPNEXT_ADMIN_PASSWORD (ENV_FILE or
 // the repo-root .env). Node 24, erasable TypeScript syntax only.
 import { spawn } from "node:child_process";

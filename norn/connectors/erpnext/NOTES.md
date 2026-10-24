@@ -1,6 +1,6 @@
 # ERPNext connector
 
-Written 2026-10-24 for issue #40 (the PLM half is separate). Norn's view of a company's ERPNext: one call returns the production baseline in the shape the checks library reads, plus four history reads for agents, and (issue #44, section "ECO write-back") the write-back of a released ECO. Plain TypeScript on Node 24 (erasable syntax), no runtime dependencies. Nothing in `src/` names a company; a company supplies its names as options (Bowman's: `bowman/norn-config/erpnext.ts`).
+Written 2026-10-24 for issue #40 (the PLM half is separate). Norn's view of a company's ERPNext: one call returns the production baseline in the shape the checks library reads, plus four history reads for agents, and (issues #44 and #73, section "ERP change package") the ERP change package of a released ECO: what a person enters in ERPNext, checked against what is there. The connector only reads; Norn never writes to the ERP (Tyler, 2026-10-24, #71). Plain TypeScript on Node 24 (erasable syntax), no runtime dependencies. Nothing in `src/` names a company; a company supplies its names as options (Bowman's: `bowman/norn-config/erpnext.ts`).
 
 ## Run it
 
@@ -9,9 +9,11 @@ The ERP is on Tyler's home-server Mac and reachable only through the laptop's SS
 ```
 cd norn/connectors/erpnext && npm install   # typescript and @types/node only
 npm run typecheck                           # tsc, strict, erasableSyntaxOnly
-npm test                                    # offline: a stubbed REST API, no ERPNext needed
+npm test                                    # offline: a stubbed REST API (GET only), no ERPNext needed
 # from the repo root, with the tunnel open: read the baseline and compare it with the dataset
 node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON norn/connectors/erpnext/check.ts --config bowman/norn-config/erpnext.ts
+# the same, for a released ECO: print its ERP change package and which lines are already entered (reads only)
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON bowman/erp/eco-package.ts
 ```
 
 The warning flag is only there until `bowman/norn-config/` has a `package.json` with `"type": "module"` (the config session is adding one).
@@ -24,7 +26,9 @@ priceHistory(opts, item, priceList?)  -> PricePoint[]   // Item Price rows, olde
 realisedLeadTimes(opts, item)         -> LeadTime[]     // receipt date minus PO date
 openOrders(opts, item)                -> OpenOrder[]    // submitted PO lines with quantity still to come
 bomVersions(opts, item)               -> BomVersion[]   // every submitted BOM version with its lines and cost
-connect(opts)                         // the five above bound to opts
+buildErpChangePackage(conn, settings, release) -> ErpChangePackage  // see "ERP change package" below
+formatErpChangePackage(pkg)           -> string                      // the package as markdown
+connect(opts)                         // the five reads and erpChangePackage(release) bound to opts
 connectionFromEnv(), loadEnvFile()    // the three ERPNEXT_* variables
 ```
 
@@ -69,37 +73,46 @@ Reads the baseline twice (cold, then again) and compares it with `bowman/data/bo
 
 Result 2026-10-24: 28 of 28 pass; read 0.60 s for 12 requests, second read 0.51 s, hash identical. A negative control (a copy of the dataset with seven values changed) failed the six expected checks. The stock check covers the 209 items the dataset has stock rows for; the baseline has 211 (the two aircraft top items, zero everywhere).
 
-## ECO write-back (`src/write.ts`, issue #44)
+## ERP change package (`src/package.ts`, issues #44, #71, #72, #73)
 
-Written 2026-10-24. When an ECO is released, Norn writes its effects into ERPNext as the Norn Agent user: the new standard cost, a new BOM version replaced in the parent assemblies, and draft journal entries. Each document carries the ECO number and a link to Norn's decision.
+Written 2026-10-24. Norn never writes to the ERP, not even drafts (Tyler, #71). A released ECO instead carries an ERP change package: every line a person enters in ERPNext, with the exact values, traced to the ECO, the ECR and Norn's decision (#72). Issue #44 first built this as a write-back that created the documents as the Norn Agent user, and ran it live the same day. #73 kept its planner and its verified order, turned the plan into the package, and removed every write path: `applyEcoRelease`, its error and result types, the client's `post` and `put`, the write grants on the role and `release-eco.ts`.
 
 ```ts
-planEcoRelease(conn, settings, release): Promise<EcoPlan>        // reads ERPNext, writes nothing
-applyEcoRelease(conn, settings, plan, run?): Promise<ApplyResult> // executes it; returns doctype, name and link of each document
-formatPlan(plan): string                                          // the plan as text for a person
+buildErpChangePackage(conn, settings, release): Promise<ErpChangePackage>  // reads ERPNext (GET only) and returns the package
+formatErpChangePackage(pkg): string                                         // the package as markdown, in business words
 ```
 
-`conn` is the Norn token (`ErpnextConnection`), `settings` the company's `ErpnextSettings`. `connect(opts)` binds both as `planEcoRelease(release)` and `applyEcoRelease(plan)`.
+`conn` is the Norn token (`ErpnextConnection`), `settings` the company's `ErpnextSettings`; `connect(opts).erpChangePackage(release)` binds both. A test keeps the connector read-only: every request the fake ERPNext sees must be an explicit GET without a body, the client has only `get` and `list`, and no source file names another HTTP method.
 
-**The release** (`EcoRelease`) is what Norn's assessment hands over: `eco`, `ecr`, `decision: { id, url }`, `effectiveDate` (first day of the new standard cost; also the journal posting date unless `postingDate` is set), `items` (item, new `rev`, new `standardCost`), optional `bomChanges` (`add`, `remove`, `set_qty` on the default BOM of a parent), and `journals`: each a `key`, a `title` and lines of `amount`, a `debit` account role, a `credit` account role and a `memo`. The connector never computes a journal amount. Account roles are looked up in `settings.write.accounts`; Bowman's are in `bowman/norn-config/erpnext.ts`.
+**The release** (`EcoRelease`, unchanged from the write-back, because Norn's side of #72 calls it) is what Norn's assessment hands over: `eco`, `ecr`, `decision: { id, url }`, `effectiveDate` (first day of the new standard cost; also the journal posting date unless `postingDate` is set), `items` (item, new `rev`, new `standardCost`), optional `bomChanges` (`add`, `remove`, `set_qty` on the default BOM of a parent), and `journals`: each a `key`, a `title` and lines of `amount`, a `debit` account role, a `credit` account role and a `memo`. The connector never computes a journal amount. Account roles are looked up in `settings.changePackage.accounts`; Bowman's are in `bowman/norn-config/erpnext.ts`.
 
-**The plan** is plain data: `steps` in order, each with `id`, `kind`, `doctype`, a one-line `summary`, `amounts`, and a `status` (`todo`; `done` when the ECO's own earlier write was found; `conflict`), plus `effects` (the estimated change in each program's unit cost, from the BOM lines), `warnings` and `problems`. `applyEcoRelease` refuses a plan with problems (a missing or stock-type account, a journal entry already written for another amount, a price row that starts after the effective date).
+**The package** (`ErpChangePackage`, `version: 1`) is plain data that survives `JSON.stringify`: the `release`, `erpUrl`, `readAt`, `lines` in the order to enter them, `counts` (total, entered, toEnter, conflict), `effects` (the estimated change in each program's unit cost, from the BOM lines), `warnings` and `problems`. A problem means the package cannot be followed as it stands (a missing, disabled, group or stock-type account, an item that is not in ERPNext, a price row that starts after the effective date); a conflict sits on its own line. Each `ChangeLine` has a stable `id`, a `title`, the seat that enters it (`cost accountant` or `manufacturing engineer`), the `doctype` and `document` to open, how (`new`, `edit`, `duplicate` from an existing BOM, or `tool` for the BOM Update Tool), a `path` relative to the ERP address, one `instruction` sentence, the exact `fields` (ERPNext field name, form label, value, money flag) and child `tables` (BOM items, journal accounts), `amounts`, the `trace` (ECO, ECR, decision id and link), a `status`, the document `found` for it, and a `note` saying why a line is a conflict or a draft. A value that is a document the package itself creates (the new BOM on the replace line and on a parent BOM's sub-assembly row) is `null` with `from` naming the line, and is filled in once that BOM exists.
 
-**Order** (the one verified in `bowman/erp/NOTES.md`; retiring before replacing is a 417): close the old price row, write the new one; then for each BOM that holds a repriced item (or a `bomChanges` parent), children first: new version (submitted, default, costed from the standard-cost list), replace it in the parent BOMs with `enqueue_replace_bom` (waits for the BOM Update Log to complete, then checks no active parent still points at the old one), retire the old version; then the journal entries, as drafts.
+**Order** (the one verified in `bowman/erp/NOTES.md`; retiring before replacing is a 417). Line ids: `standard-cost-close:ITEM` and `standard-cost:ITEM` (close the old price row, add the new one); then for each BOM that holds a repriced item (or a `bomChanges` parent), children first, `bom:ITEM` (new version: duplicate the old one, set the fields and ECO tags, submit), `bom-replace:ITEM` (BOM Update Tool, only when an active parent BOM uses it) and `bom-retire:ITEM` (untick Is Active, after the replace); then `journal-entry:KEY` for each journal.
 
-**Idempotent.** Every document carries the ECO number (`bw_eco`), and a journal entry also its `key` (`bw_eco_entry`). Each step looks for its own earlier write first and skips it (`action: 'existing'`), whatever the plan said, so a stale plan, a retry after a failure, or a second apply writes nothing twice. A failure throws `EcoApplyError` with what was written; applying again continues from there. Cancelled documents do not count as written, so the demo reset (below) lets the release run again. Verified live: a second `--apply` wrote nothing.
+**Status comes from a read of ERPNext** that finds each entry by the ECO number the person types into the ECO fields (`bw_eco`, and `bw_eco_entry` on a journal entry). Run the build again after entering lines and each moves from `to-enter` to `entered`:
+- *Close line*: entered when the old row's `valid_upto` is the day before the effective date; to enter while open or running longer; conflict if closed earlier.
+- *Standard cost line*: the Item Price row tagged with the ECO. Entered when its rate and `valid_from` match; conflict when either differs (the note says which).
+- *BOM line*: the BOM tagged with the ECO (found even if it left out the repriced item). Entered when submitted and its lines match the package's (quantities of one item are added up); a saved draft stays to enter, with a note; a missing item, another quantity or an extra line is a conflict.
+- *Replace line*: entered when no active parent BOM uses the old BOM any more; to enter while one does.
+- *Retire line*: entered when the old BOM is inactive.
+- *Journal entry line*: the entry with the ECO and the key. Entered when submitted and its total and posting date match; a draft stays to enter; a different total or date is a conflict.
 
-### What a finance user sees in ERPNext
+A journal entry with the ECO number that the release does not contain is a warning.
+
+**Not verified live.** Everything in the package was tested offline against a fake ERPNext only (the connector has not touched the live ERP since the change, by design of #73). In particular: the labels of ERPNext's own fields (for example "Rate Of Materials Based On", "Valid Upto", "Accounting Entries") are from memory of v16 and unchecked; the BOM Update Tool path `/app/bom-update-tool` and the Duplicate route are unchecked; a Duplicate copies the old BOM's ECO tag, so the person must overwrite it, which the field table says; and the package's wording of a step is untested on a person. `bowman/erp/eco-setup.ts` makes the ECO fields editable (they were read-only for the write-back) and has not been re-run either.
+
+### What a person enters, and what Norn recognises
 
 | Document | Carries |
 |---|---|
-| BOM | Released by ECO (`bw_eco`), Released on, Norn decision (`bw_decision_url`, a link field). Created By "Norn Agent". |
+| BOM | Released by ECO (`bw_eco`), Released on, Norn decision (`bw_decision_url`, a link field). |
 | Item Price | Released by ECO, Norn decision, and the `note`: "ECO-0319 (ECR-0417); Norn decision DEC-ECR-0417: <url>. BW-5120-210 Rev C standard cost 221.00 from 2026-10-24, was 186.40." The old row is closed the day before, not edited otherwise. |
-| Journal Entry | Title "ECO-0319: <what>", Released by ECO, ECO entry, Norn decision, `user_remark` with the same in words, and a memo on each row. Status Draft. |
+| Journal Entry | Title "ECO-0319: <what>", Released by ECO, ECO entry, Norn decision, and a remark on each account row. |
 
-Screenshots of the three, taken in headless Edge as Administrator: `screenshots/` (`bowman/erp/screenshot-eco.ts`). Two things the screenshots show that are ERPNext's doing: `user_remark` is hidden in the Journal Entry form (v16 marks it hidden, and `remark` stays empty on a draft), so the visible trace is the three custom fields and the title; and the item-price form puts the seed's supplier-quote custom fields above the price, so the ECO fields sit lower on the page.
+The first screenshots of these three, taken in headless Edge as Administrator after Norn's own write-back, were removed from the repo with the write path, because they showed Norn writing. Two things they showed are ERPNext's doing: `user_remark` on the Journal Entry itself is hidden in the form (v16 marks it hidden), so the visible trace is the three custom fields and the title; and the item-price form puts the seed's supplier-quote custom fields above the price, so the ECO fields sit lower on the page. `bowman/erp/screenshot-eco.ts` takes new ones of whatever is entered.
 
-Not traceable from ERPNext, by design of Norn's role: the **Item's revision** (`bw_rev`) stays `B`, because Norn has no write on Item. The new revision is in the descriptions only. In a real deployment the PLM-to-ERP gateway owns it (`docs/PLAN.md` section 2).
+The **Item's revision** (`bw_rev`) stays `B`: the package does not change the Item. The new revision is in the descriptions only. In a real deployment the PLM-to-ERP gateway owns it (`docs/PLAN.md` section 2).
 
 ### Journal entries: the finance logic (ECR-0417; Tyler to confirm)
 
@@ -113,25 +126,25 @@ Total expense 38,562.60. The answer key's 59,470.20 + 1,118.40 = 60,588.60 also 
 
 **Flagged, not guessed:**
 - **Net or gross of scrap value.** Entries follow the answer key (net). If finance books the full 186.40 and recognises scrap proceeds on sale, change the line amounts in the release; no connector change.
-- **The 60 supplier-finished units are on the books twice.** `seed.ts` put them in the `At Supplier - BWA` warehouse at 186.40 (11,184.00 in 11410, the difference posted to Cost of Goods Sold) and also left them on the open PO line. If finance regards them as already in inventory, entry 2 should credit 11420 like entry 1 (change its `credit` role); either way, receiving the PO line later would add them again. This is the seed's modelling, not something the write-back can resolve.
+- **The 60 supplier-finished units are on the books twice.** `seed.ts` put them in the `At Supplier - BWA` warehouse at 186.40 (11,184.00 in 11410, the difference posted to Cost of Goods Sold) and also left them on the open PO line. If finance regards them as already in inventory, entry 2 should credit 11420 like entry 1 (change its `credit` role); either way, receiving the PO line later would add them again. This is the seed's modelling, not something the change package can resolve.
 - **Standard cost change on stock that is not scrapped.** Standard costing would revalue stock on hand of a repriced item. Here all Rev B stock is scrapped, so there is none. Assemblies in stock or WIP that contain the bracket are not revalued, and the first lot at $239.50 against the new $221.00 standard will show as purchase price variance ($18.50 each) when received, as for any purchase.
-- **Ancestors' standard cost rows.** The BOM replace recosts every BOM above the bracket (BOM total cost of Vesper rises by exactly 12 x 34.60 = 415.20, Meridian by 8 x 34.60 = 276.80), but the `Standard Cost` price rows of BW-5120-000 and the assemblies above it keep their old roll-ups; a cost roll is a finance step, or more `items` in the release. While an ECO is applied the connector's roll-up checks in `check.ts` therefore fail; after the reset they pass.
-- **Journal entries cannot be amended by Norn** (no write on Journal Entry). A changed release that no longer matches a written draft is a `conflict`; delete the draft in ERPNext and apply again.
-- **The decision URL** in the demo release is a stand-in (`norn.bowman.example`) until `norn/web` has decision pages; `release-eco.ts --decision-url` overrides it.
+- **Ancestors' standard cost rows.** The BOM replace recosts every BOM above the bracket (BOM total cost of Vesper rises by exactly 12 x 34.60 = 415.20, Meridian by 8 x 34.60 = 276.80), but the `Standard Cost` price rows of BW-5120-000 and the assemblies above it keep their old roll-ups; a cost roll is a finance step, or more `items` in the release. While an ECO is entered the connector's roll-up checks in `check.ts` therefore fail (seen in the 2026-10-24 write-back run, before Norn stopped writing); after the reset they pass.
+- **A journal entry that no longer matches the release** (another amount or posting date) is a `conflict` on its line. Norn cannot change it; the person corrects or cancels it in ERPNext.
+- **The decision URL** in the demo release is a stand-in (`norn.bowman.example`) until `norn/web` has decision pages; `eco-package.ts --decision-url` overrides it.
 
 ### Setup, run and reset (all in `bowman/erp/`, Node 24)
 
 ```
-node bowman/erp/eco-setup.ts                  # once, as Administrator: the custom fields bw_eco / bw_decision_url / bw_eco_entry and account 11420
-node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON bowman/erp/release-eco.ts            # dry run: print the ECR-0417 plan, write nothing
-node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON bowman/erp/release-eco.ts --apply    # apply it as Norn, then read the numbers back
-node bowman/erp/screenshot-eco.ts ECO-0319 norn/connectors/erpnext/screenshots   # headless Edge as Administrator
-node bowman/erp/reset-eco.ts ECO-0319         # undo it as Administrator so the demo can run again (--dry-run lists the steps)
+node bowman/erp/eco-setup.ts                  # once, as Administrator: the editable ECO fields (bw_eco / bw_decision_url / bw_eco_entry) and account 11420
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON bowman/erp/eco-package.ts            # print the ECR-0417 package as markdown; reads only
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON bowman/erp/eco-package.ts --json     # the same as JSON
+node bowman/erp/screenshot-eco.ts ECO-0319 <folder>   # headless Edge as Administrator, of what has been entered
+node bowman/erp/reset-eco.ts ECO-0319         # undo what was entered, as Administrator, so the demo can run again (--dry-run lists the steps)
 ```
 
-`reset-eco.ts` reactivates the previous BOM as default and replaces the ECO's version with it in the parents (ERPNext recosts everything above), cancels the BOM Update Logs that link the ECO's BOM (ERPNext will not cancel a BOM while a submitted log links it) and then the BOM, deletes the ECO's price row and reopens the row it closed, and deletes the draft journal entries. A submitted journal entry has posted, so it is left and reported. What stays: the cancelled BOM and logs (ERPNext keeps them, so the next release is BOM `-004`, `-005`...), Version history. After a reset `check.ts` passes 28 of 28 with the same baseline hash as before the ECO.
+`reset-eco.ts` stays: a rehearsal enters the package more than once, so the demo needs a way back, and it never was Norn's. It reactivates the previous BOM as default and replaces the ECO's version with it in the parents (ERPNext recosts everything above), cancels the BOM Update Logs that link the ECO's BOM (ERPNext will not cancel a BOM while a submitted log links it) and then the BOM, deletes the ECO's price row and reopens the row it closed, and deletes the draft journal entries. A submitted journal entry has posted, so it is left and reported. What stays: the cancelled BOM and logs (ERPNext keeps them, so the next release is BOM `-004`, `-005`...), Version history. It finds documents by the ECO tag, so it works the same on what a person entered. After a reset `check.ts` passed 28 of 28 with the same baseline hash as before the ECO (measured on the write-back run).
 
-Verified live on 2026-10-24, twice (apply, reset, `check.ts`): the apply of ECR-0417 takes about 6 s for 8 writes; the replace cascades through all five levels and both paths to Vesper and Meridian in one BOM Update Log, and the totals are exact.
+Measured on 2026-10-24 on the write-back run, twice (apply, reset, `check.ts`), and the basis of the order and the estimated effects above: the replace cascades through all five levels and both paths to Vesper and Meridian in one BOM Update Log, and the totals are exact (Vesper rises by 12 x 34.60 = 415.20, Meridian by 8 x 34.60 = 276.80). That run wrote the documents as Norn, which no longer can; the package has not been entered by hand on the live ERP yet.
 
 ## What differs from the research (`docs/research/software-options.md`)
 
@@ -151,7 +164,7 @@ Other things that surprised me:
 
 ## Not done
 
-- Writes are in `src/write.ts` (section "ECO write-back"). `bowman/erp/NOTES.md` still describes the call sequence; its Norn Agent permission table is unchanged.
+- The change package is untested on the live ERP and on a person (section "ERP change package"). The live role still holds the old write grants until `bowman/erp/bootstrap.mjs` is run once more (`bowman/erp/NOTES.md`).
 - `baseline.ts` mirrors `norn/checks/src/types.ts` (the checks library, #41, is not on this branch). Replace it with an import when #41 lands; the shapes are identical today (copied from the working tree of that branch on 2026-10-24).
 - History reads are not paged or cached; each is two or three requests.
 - A Mac or Colima restart, and a tunnel drop mid-read: not tried. The client throws `ErpnextError` (status and path, never a header) after a 30 s timeout and does not retry.

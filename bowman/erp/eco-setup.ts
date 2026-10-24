@@ -1,12 +1,14 @@
-// One-off setup for the ECO write-back (norn/connectors/erpnext/src/write.ts), as Administrator. Re-runnable:
-// it looks up what exists and creates only what is missing.
+// One-off setup for the ERP change package of a released ECO (norn/connectors/erpnext/src/package.ts), as Administrator.
+// Re-runnable: it looks up what exists and creates only what is missing.
 //
 //   node bowman/erp/eco-setup.ts
 //
 // Adds, so that a finance user can follow a change from ERPNext back to the ECO and Norn's decision:
 //   - custom fields "Released by ECO" (bw_eco) and "Norn decision" (bw_decision_url, a clickable link) on BOM, Item Price
 //     and Journal Entry; the BOM already has bw_eco from seed.ts, so it gets only the link. Journal Entry also gets
-//     "ECO entry" (bw_eco_entry), the key that lets Norn find its own entry again on a retry.
+//     "ECO entry" (bw_eco_entry), the key that lets Norn recognise the entry a person made. The fields are editable: the
+//     person entering the package types them, and Norn only reads them. (An earlier version made them read-only, which
+//     would have stopped that; any still read-only are made editable.)
 //   - the account "11420 - Reserve for Obsolete Inventory" under "11400 - Inventory". The US chart has no inventory
 //     reserve, and with perpetual inventory ERPNext refuses a journal entry that credits "11410 - Inventory on Hand"
 //     ("can only be updated via Stock Transactions"), so a stock write-down needs a non-stock account to credit.
@@ -36,8 +38,13 @@ const exists = async (doctype: string, name: string): Promise<boolean> =>
 
 for (const f of FIELDS) {
   const name = `${f.dt}-${f.fieldname}`;
-  if (await exists("Custom Field", name)) { console.log(`field ${name}: already there`); continue; }
-  await erp.post("/api/resource/Custom%20Field", { ...f, read_only: 1 });
+  if (await exists("Custom Field", name)) {
+    const have = (await erp.get(`/api/resource/Custom%20Field/${enc(name)}`)).body.data;
+    if (have.read_only) { await erp.put(`/api/resource/Custom%20Field/${enc(name)}`, { read_only: 0 }); console.log(`field ${name}: made editable`); }
+    else console.log(`field ${name}: already there`);
+    continue;
+  }
+  await erp.post("/api/resource/Custom%20Field", f);
   console.log(`field ${name}: created`);
 }
 

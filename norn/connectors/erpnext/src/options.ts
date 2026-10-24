@@ -34,27 +34,27 @@ export interface CustomFieldNames {
     allocation?: string;
   };
   bom?: {
-    /** Name of the change order that released this BOM version. History reads, and the write-back's tag. */
+    /** Name of the change order that released this BOM version. History reads, and the change package's tag. */
     changeOrder?: string;
-    /** Date the version was released. History reads, and the write-back stamps it. Default: its creation date. */
+    /** Date the version was released. History reads, and the change package asks for it. Default: its creation date. */
     releasedOn?: string;
-    /** Link to the Norn decision that caused the version. Write-back only; a BOM has no free-text field to fall back on. */
+    /** Link to the Norn decision that caused the version. Change package only; a BOM has no free-text field to fall back on. */
     decision?: string;
   };
-  /** Write-back: tags on the Item Price rows Norn writes. */
+  /** Change package: tags a person enters on the Item Price rows of an ECO. Norn reads them to recognise the entry. */
   itemPrice?: {
-    /** Change order that wrote the row. Required to write: it is how Norn finds its own earlier rows. */
+    /** Change order that caused the row. Required for a change package: it is how Norn finds the row once it is entered. */
     changeOrder?: string;
     /** Link to the Norn decision (the row's `note` also says it in words). */
     decision?: string;
   };
-  /** Write-back: tags on the Journal Entries Norn writes. */
+  /** Change package: tags a person enters on the Journal Entries of an ECO. Norn reads them to recognise the entry. */
   journalEntry?: {
-    /** Change order that caused the entry. Required to write. */
+    /** Change order that caused the entry. Required for a change package. */
     changeOrder?: string;
-    /** Which of the release's entries this is (its `key`). Required to write: with the change order it makes a retry find the entry. */
+    /** Which of the release's entries this is (its `key`). Required for a change package: with the change order it identifies the entry. */
     entry?: string;
-    /** Link to the Norn decision (`user_remark` also says it in words). */
+    /** Link to the Norn decision. */
     decision?: string;
   };
   purchaseOrder?: {
@@ -69,8 +69,8 @@ export interface Fallback {
   builtAircraft?: BuiltUnit[];
 }
 
-/** What the write-back needs beyond the read settings. */
-export interface WriteSettings {
+/** What the ERP change package needs beyond the read settings. */
+export interface PackageSettings {
   /**
    * ERPNext account for each role a release's journal lines name (for example scrapExpense, inventoryReserve,
    * accruedLiability). The roles are the company's to define; the connector only looks them up.
@@ -104,8 +104,8 @@ export interface ErpnextSettings {
   /** Serial No to the integer serial the checks use. Default: the trailing digits of the serial number. */
   serialNumber?: (serialNo: string) => number | undefined;
   customFields?: CustomFieldNames;
-  /** Only needed to write an ECO release back (write.ts). */
-  write?: WriteSettings;
+  /** Only needed to build the ERP change package of a released ECO (package.ts). */
+  changePackage?: PackageSettings;
   /**
    * Master Production Schedule to read the volume plan from. Default: the company's most recently
    * modified one.
