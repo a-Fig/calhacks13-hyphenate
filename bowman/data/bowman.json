@@ -32,6 +32,10 @@
       "ref": "docs/research/archer-public-data.md §1 and \"Suggested basis for Bowman\"",
       "note": "Architecture follows Midnight (12-tilt-6, composite, in-house powertrain). Every quantity and part number invented."
     },
+    "mbom": {
+      "basis": "invented",
+      "note": "Derived in code (mbom.ts) from the engineering BOM: the top level regrouped into build stations; everything below is shared. The station split and hours are invented."
+    },
     "ecrs": {
       "basis": "sourced",
       "ref": "docs/IN-PRACTICE.md §1; docs/research/practice-impact-assessment.md §1a",
@@ -8843,6 +8847,446 @@
       "seq": 50
     }
   ],
+  "mbom": {
+    "items": [
+      {
+        "code": "BW-0001-S10",
+        "name": "Vesper V4, Station 10: structure join",
+        "itemGroup": "Build stations",
+        "costGroup": "other",
+        "kind": "assembly",
+        "uom": "Nos",
+        "makeBuy": "make",
+        "rev": "A",
+        "status": "released",
+        "workCenter": "WC-FINAL",
+        "laborHours": 120,
+        "safetyCritical": false,
+        "programs": [
+          "vesper"
+        ],
+        "standardCost": 637958,
+        "standardCostMaterial": 622958,
+        "standardCostLabor": 15000,
+        "revHistory": [
+          {
+            "rev": "A",
+            "date": "2025-01-15",
+            "note": "ERP-only build station. The manufacturing BOM groups the top-level systems by station."
+          }
+        ],
+        "prov": {
+          "basis": "invented",
+          "note": "Station split invented: which systems are installed at which point of the final assembly line, and the hours at each. The hours add up to the aircraft's own final-assembly hours."
+        }
+      },
+      {
+        "code": "BW-0001-S20",
+        "name": "Vesper V4, Station 20: propulsion and energy install",
+        "itemGroup": "Build stations",
+        "costGroup": "other",
+        "kind": "assembly",
+        "uom": "Nos",
+        "makeBuy": "make",
+        "rev": "A",
+        "status": "released",
+        "workCenter": "WC-FINAL",
+        "laborHours": 200,
+        "safetyCritical": false,
+        "programs": [
+          "vesper"
+        ],
+        "standardCost": 1060372,
+        "standardCostMaterial": 1035372,
+        "standardCostLabor": 25000,
+        "revHistory": [
+          {
+            "rev": "A",
+            "date": "2025-01-15",
+            "note": "ERP-only build station. The manufacturing BOM groups the top-level systems by station."
+          }
+        ],
+        "prov": {
+          "basis": "invented",
+          "note": "Station split invented: which systems are installed at which point of the final assembly line, and the hours at each. The hours add up to the aircraft's own final-assembly hours."
+        }
+      },
+      {
+        "code": "BW-0001-S30",
+        "name": "Vesper V4, Station 30: systems and avionics",
+        "itemGroup": "Build stations",
+        "costGroup": "other",
+        "kind": "assembly",
+        "uom": "Nos",
+        "makeBuy": "make",
+        "rev": "A",
+        "status": "released",
+        "workCenter": "WC-FINAL",
+        "laborHours": 220,
+        "safetyCritical": false,
+        "programs": [
+          "vesper"
+        ],
+        "standardCost": 998240,
+        "standardCostMaterial": 970740,
+        "standardCostLabor": 27500,
+        "revHistory": [
+          {
+            "rev": "A",
+            "date": "2025-01-15",
+            "note": "ERP-only build station. The manufacturing BOM groups the top-level systems by station."
+          }
+        ],
+        "prov": {
+          "basis": "invented",
+          "note": "Station split invented: which systems are installed at which point of the final assembly line, and the hours at each. The hours add up to the aircraft's own final-assembly hours."
+        }
+      },
+      {
+        "code": "BW-0001-S40",
+        "name": "Vesper V4, Station 40: interior and final",
+        "itemGroup": "Build stations",
+        "costGroup": "other",
+        "kind": "assembly",
+        "uom": "Nos",
+        "makeBuy": "make",
+        "rev": "A",
+        "status": "released",
+        "workCenter": "WC-FINAL",
+        "laborHours": 100,
+        "safetyCritical": false,
+        "programs": [
+          "vesper"
+        ],
+        "standardCost": 103449,
+        "standardCostMaterial": 90949,
+        "standardCostLabor": 12500,
+        "revHistory": [
+          {
+            "rev": "A",
+            "date": "2025-01-15",
+            "note": "ERP-only build station. The manufacturing BOM groups the top-level systems by station."
+          }
+        ],
+        "prov": {
+          "basis": "invented",
+          "note": "Station split invented: which systems are installed at which point of the final assembly line, and the hours at each. The hours add up to the aircraft's own final-assembly hours."
+        }
+      },
+      {
+        "code": "BW-M000-S10",
+        "name": "Meridian M6, Station 10: structure join",
+        "itemGroup": "Build stations",
+        "costGroup": "other",
+        "kind": "assembly",
+        "uom": "Nos",
+        "makeBuy": "make",
+        "rev": "A",
+        "status": "released",
+        "workCenter": "WC-FINAL",
+        "laborHours": 180,
+        "safetyCritical": false,
+        "programs": [
+          "meridian"
+        ],
+        "standardCost": 1099060,
+        "standardCostMaterial": 1076560,
+        "standardCostLabor": 22500,
+        "revHistory": [
+          {
+            "rev": "A",
+            "date": "2025-01-15",
+            "note": "ERP-only build station. The manufacturing BOM groups the top-level systems by station."
+          }
+        ],
+        "prov": {
+          "basis": "invented",
+          "note": "Station split invented: which systems are installed at which point of the final assembly line, and the hours at each. The hours add up to the aircraft's own final-assembly hours."
+        }
+      },
+      {
+        "code": "BW-M000-S20",
+        "name": "Meridian M6, Station 20: propulsion and energy install",
+        "itemGroup": "Build stations",
+        "costGroup": "other",
+        "kind": "assembly",
+        "uom": "Nos",
+        "makeBuy": "make",
+        "rev": "A",
+        "status": "released",
+        "workCenter": "WC-FINAL",
+        "laborHours": 280,
+        "safetyCritical": false,
+        "programs": [
+          "meridian"
+        ],
+        "standardCost": 2028136.8,
+        "standardCostMaterial": 1993136.8,
+        "standardCostLabor": 35000,
+        "revHistory": [
+          {
+            "rev": "A",
+            "date": "2025-01-15",
+            "note": "ERP-only build station. The manufacturing BOM groups the top-level systems by station."
+          }
+        ],
+        "prov": {
+          "basis": "invented",
+          "note": "Station split invented: which systems are installed at which point of the final assembly line, and the hours at each. The hours add up to the aircraft's own final-assembly hours."
+        }
+      },
+      {
+        "code": "BW-M000-S30",
+        "name": "Meridian M6, Station 30: systems and avionics",
+        "itemGroup": "Build stations",
+        "costGroup": "other",
+        "kind": "assembly",
+        "uom": "Nos",
+        "makeBuy": "make",
+        "rev": "A",
+        "status": "released",
+        "workCenter": "WC-FINAL",
+        "laborHours": 260,
+        "safetyCritical": false,
+        "programs": [
+          "meridian"
+        ],
+        "standardCost": 1582760,
+        "standardCostMaterial": 1550260,
+        "standardCostLabor": 32500,
+        "revHistory": [
+          {
+            "rev": "A",
+            "date": "2025-01-15",
+            "note": "ERP-only build station. The manufacturing BOM groups the top-level systems by station."
+          }
+        ],
+        "prov": {
+          "basis": "invented",
+          "note": "Station split invented: which systems are installed at which point of the final assembly line, and the hours at each. The hours add up to the aircraft's own final-assembly hours."
+        }
+      },
+      {
+        "code": "BW-M000-S40",
+        "name": "Meridian M6, Station 40: interior and final",
+        "itemGroup": "Build stations",
+        "costGroup": "other",
+        "kind": "assembly",
+        "uom": "Nos",
+        "makeBuy": "make",
+        "rev": "A",
+        "status": "released",
+        "workCenter": "WC-FINAL",
+        "laborHours": 180,
+        "safetyCritical": false,
+        "programs": [
+          "meridian"
+        ],
+        "standardCost": 297400,
+        "standardCostMaterial": 274900,
+        "standardCostLabor": 22500,
+        "revHistory": [
+          {
+            "rev": "A",
+            "date": "2025-01-15",
+            "note": "ERP-only build station. The manufacturing BOM groups the top-level systems by station."
+          }
+        ],
+        "prov": {
+          "basis": "invented",
+          "note": "Station split invented: which systems are installed at which point of the final assembly line, and the hours at each. The hours add up to the aircraft's own final-assembly hours."
+        }
+      }
+    ],
+    "bom": [
+      {
+        "parent": "BW-0001-000",
+        "child": "BW-0001-S10",
+        "qty": 1,
+        "seq": 10
+      },
+      {
+        "parent": "BW-0001-S10",
+        "child": "BW-1000-000",
+        "qty": 1,
+        "seq": 10
+      },
+      {
+        "parent": "BW-0001-S10",
+        "child": "BW-2000-000",
+        "qty": 1,
+        "seq": 20
+      },
+      {
+        "parent": "BW-0001-000",
+        "child": "BW-0001-S20",
+        "qty": 1,
+        "seq": 20
+      },
+      {
+        "parent": "BW-0001-S20",
+        "child": "BW-3000-000",
+        "qty": 1,
+        "seq": 30
+      },
+      {
+        "parent": "BW-0001-S20",
+        "child": "BW-3500-000",
+        "qty": 1,
+        "seq": 40
+      },
+      {
+        "parent": "BW-0001-S20",
+        "child": "BW-6000-000",
+        "qty": 1,
+        "seq": 50
+      },
+      {
+        "parent": "BW-0001-000",
+        "child": "BW-0001-S30",
+        "qty": 1,
+        "seq": 30
+      },
+      {
+        "parent": "BW-0001-S30",
+        "child": "BW-7000-000",
+        "qty": 1,
+        "seq": 60
+      },
+      {
+        "parent": "BW-0001-S30",
+        "child": "BW-8000-000",
+        "qty": 1,
+        "seq": 70
+      },
+      {
+        "parent": "BW-0001-S30",
+        "child": "BW-8200-000",
+        "qty": 1,
+        "seq": 80
+      },
+      {
+        "parent": "BW-0001-S30",
+        "child": "BW-9100-000",
+        "qty": 1,
+        "seq": 90
+      },
+      {
+        "parent": "BW-0001-S30",
+        "child": "BW-9300-100",
+        "qty": 1,
+        "seq": 100
+      },
+      {
+        "parent": "BW-0001-000",
+        "child": "BW-0001-S40",
+        "qty": 1,
+        "seq": 40
+      },
+      {
+        "parent": "BW-0001-S40",
+        "child": "BW-9400-000",
+        "qty": 1,
+        "seq": 110
+      },
+      {
+        "parent": "BW-0001-S40",
+        "child": "BW-9600-000",
+        "qty": 1,
+        "seq": 120
+      },
+      {
+        "parent": "BW-M000-000",
+        "child": "BW-M000-S10",
+        "qty": 1,
+        "seq": 10
+      },
+      {
+        "parent": "BW-M000-S10",
+        "child": "BW-M100-000",
+        "qty": 1,
+        "seq": 10
+      },
+      {
+        "parent": "BW-M000-S10",
+        "child": "BW-M200-100",
+        "qty": 1,
+        "seq": 20
+      },
+      {
+        "parent": "BW-M000-000",
+        "child": "BW-M000-S20",
+        "qty": 1,
+        "seq": 20
+      },
+      {
+        "parent": "BW-M000-S20",
+        "child": "BW-M300-000",
+        "qty": 1,
+        "seq": 30
+      },
+      {
+        "parent": "BW-M000-S20",
+        "child": "BW-M400-000",
+        "qty": 1,
+        "seq": 40
+      },
+      {
+        "parent": "BW-M000-S20",
+        "child": "BW-M500-000",
+        "qty": 1,
+        "seq": 50
+      },
+      {
+        "parent": "BW-M000-S20",
+        "child": "BW-M600-000",
+        "qty": 1,
+        "seq": 60
+      },
+      {
+        "parent": "BW-M000-000",
+        "child": "BW-M000-S30",
+        "qty": 1,
+        "seq": 30
+      },
+      {
+        "parent": "BW-M000-S30",
+        "child": "BW-M700-000",
+        "qty": 1,
+        "seq": 70
+      },
+      {
+        "parent": "BW-M000-S30",
+        "child": "BW-M800-000",
+        "qty": 1,
+        "seq": 80
+      },
+      {
+        "parent": "BW-M000-S30",
+        "child": "BW-M900-000",
+        "qty": 1,
+        "seq": 90
+      },
+      {
+        "parent": "BW-M000-000",
+        "child": "BW-M000-S40",
+        "qty": 1,
+        "seq": 40
+      },
+      {
+        "parent": "BW-M000-S40",
+        "child": "BW-M950-000",
+        "qty": 1,
+        "seq": 100
+      },
+      {
+        "parent": "BW-M000-S40",
+        "child": "BW-M990-100",
+        "qty": 1,
+        "seq": 110
+      }
+    ]
+  },
   "sourcing": [
     {
       "item": "BW-1110-100",

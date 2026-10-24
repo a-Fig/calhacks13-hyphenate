@@ -7,8 +7,10 @@
 //   NORN_ERP_SETTINGS=<module exporting erpnext>   the company's ERPNext settings; the connection comes from the .env
 //   NORN_BASELINE_FILE=<baseline.json>             a test baseline instead of the ERP
 //   NORN_BASELINE_POLL_MS                          how often to re-read the baseline (default 60000)
+//   NORN_COMPANY_CONFIG=<file>                     the company's Norn configuration, validated at start-up and stored (config.ts)
 import { BaselineStore, baselineSourceFromEnv } from './baseline.ts';
 import { classify, connect, subscribe, withRetry } from './connect.ts';
+import { applyStartupConfig, loadStartupConfig, refusalLines } from './config.ts';
 import { CHECKS_CODE_VERSION } from '../../checks/src/index.ts';
 import { REAL_STAGES, impactHandlers } from './impact.ts';
 import { sleep } from './sim.ts';
@@ -21,6 +23,14 @@ const leaseMs = Number(process.env.NORN_LEASE_MS ?? 10_000);
 
 const log = (msg: string) => console.log(`${new Date().toISOString().slice(11, 23)} [${name}] ${msg}`);
 
+// The company config (#59, config.ts) is read and validated before anything connects, so a malformed
+// file stops Norn with the validator's problems and nothing changed. NORN_COMPANY_CONFIG=<file>
+const startupConfig = await loadStartupConfig();
+if (startupConfig.kind === 'invalid') {
+  for (const line of refusalLines(startupConfig)) console.error(`[${name}] ${line}`);
+  process.exit(1);
+}
+
 const client = await connect({ kind: 'agent', name, origin: 'norn', spawnedBy: 'Norn' });
 const { conn, identity, R } = client;
 const baselines = new BaselineStore(await baselineSourceFromEnv(), r =>
@@ -31,7 +41,7 @@ const baselines = new BaselineStore(await baselineSourceFromEnv(), r =>
 );
 const HANDLERS: Record<string, (ctx: RunCtx) => Promise<Result[]>> = { ...MOCK_HANDLERS, ...impactHandlers(conn, baselines) };
 log(
-  `connected as ${identity.toHexString().slice(0, 12)}; stages ${handled.join(',')}; s1 and s2 are Norn's impact checks on ECRs with a change request, ` +
+  `connected as ${identity.toHexString().slice(0, 12)}; stages ${handled.join(',')}; s1 to s4 are Norn's impact checks on ECRs with a change request, ` +
     `baseline from ${baselines.source?.describe ?? 'nowhere (no source configured: those runs will fail)'}; everything else is MOCK compute`
 );
 
@@ -48,6 +58,12 @@ await subscribe(conn, [
   'SELECT * FROM baseline_snapshot',
   'SELECT * FROM norn_config',
 ]);
+// Store the config if it differs from what the module holds (norn_config is in the cache now).
+await applyStartupConfig(client, startupConfig, log).catch(e => {
+  console.error(`[${name}] Norn did not start: ${e instanceof Error ? e.message : String(e)}`);
+  client.close();
+  process.exit(1);
+});
 const configured = conn.db.nornConfig.key.find('code_version')?.value ?? 'checks-0.3.0';
 if (configured !== CHECKS_CODE_VERSION)
   log(`WARNING: norn_config code_version is '${configured}' but the checks library is '${CHECKS_CODE_VERSION}': results of the old library still count as current. Set code_version to '${CHECKS_CODE_VERSION}'.`);
