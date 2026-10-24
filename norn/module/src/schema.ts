@@ -187,7 +187,7 @@ const actionLog = table(
     prId: t.u64().index('btree'), // 0 when the action is not about one ECR
     requestId: t.string().index('btree'), // the caller's id for this call; matches a call to its outcome
     reducer: t.string(),
-    outcome: t.string(), // applied | denied | downgraded
+    outcome: t.string(), // applied | denied | downgraded | rejected (a job-scoped agent's validation failure)
     entity: t.string(), // what was written, e.g. 'check_run:7'
     summary: t.string(),
     detailJson: t.string(),
@@ -239,6 +239,7 @@ const actorScope = table(
     jobId: t.string(), // the job (or credential) the grant is for
     anyEcr: t.bool(), // true: any ECR (a person's agent); the baseline is never writable
     prIds: t.array(t.u64()), // the ECRs it may write to
+    maxLevel: t.u8(), // the highest impact-statement level it may post (0: none); derived from the job's role and origin
     expiresAt: t.timestamp(),
     grantedAt: t.timestamp(),
   }

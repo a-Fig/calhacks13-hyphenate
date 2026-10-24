@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { CHEAP_MODEL, Runner, jsonlFileSink, memorySink, teeSink, type JobSpec } from '../../runner/src/index.ts';
-import { Norn, loadSigningKey, nornMcpFor, nornTools, startServer, NORN_MCP_SERVER_NAME } from '../src/index.ts';
+import { Norn, jobTokenFile, loadSigningKey, nornMcpFor, nornTools, startServer, NORN_MCP_SERVER_NAME } from '../src/index.ts';
 import { DB, URI, nornDir, recorder, resetDatabase, sleep, waitForChecks } from './kit.ts';
 
 const { check, finish } = recorder();
@@ -29,9 +29,12 @@ const ecr418 = [...norn.db.pullRequest.iter()].find(p => p.plmEcrNumber === 'BWM
 const server = await startServer({ norn, signingKey: key, port: 0, log: m => console.log(`  [server] ${m}`) });
 
 // ---- the job ---------------------------------------------------------------------------------------
-const identity = { actor: 'agent:norn/level1/BWM-ECR-0417', onBehalfOf: 'person:jeff', spawnedBy: 'norn' };
+// The job id is part of the actor name: an actor can be held by one live job at a time, so a rerun
+// within the token's life (a second rehearsal) must not be locked out by the first.
 const jobId = `e2e-mcp-${stamp}`;
-const entry = nornMcpFor(identity, { jobId, role: 'level1-writeup', ecrs: ['BWM-ECR-0417'], url: server.url, ttlSeconds: 900 });
+const identity = { actor: `agent:norn/level1/BWM-ECR-0417/${jobId}`, onBehalfOf: 'person:jeff', spawnedBy: 'norn' };
+const mcpOpts = { jobId, role: 'level1-writeup', ecrs: ['BWM-ECR-0417'], url: server.url, ttlSeconds: 900 };
+const entry = nornMcpFor(identity, mcpOpts); // the token stays in a private file; Claude Code runs a helper to read it
 const spec: JobSpec = {
   id: jobId,
   role: 'level1-writeup',
@@ -70,7 +73,7 @@ check('the agent used only Norn\'s tools', calls.length > 0 && calls.every(c => 
 check('...it read the ECR and its impact before commenting', ['get_ecr', 'get_impact'].every(t => calls.some(c => c.tool.endsWith(t))));
 check('the runner\'s log does not contain the token or the signing key', (() => {
   const text = readFileSync(logFile, 'utf8');
-  return !text.includes(entry.headers.Authorization.slice('Bearer '.length)) && !text.includes(key);
+  return !text.includes(readFileSync(jobTokenFile(jobId), 'utf8').trim()) && !text.includes(key);
 })());
 
 // ---- what Norn recorded -------------------------------------------------------------------------------
@@ -91,7 +94,7 @@ if (!refused) {
   // The model did not make the attempt. Replay it through the same credential so the refusal path is still shown.
   console.log('  the agent did not attempt the write to ECR-0418; replaying it with the same credential');
   const c = new Client({ name: 'e2e-replay', version: '0.0.0' });
-  await c.connect(new StreamableHTTPClientTransport(new URL(entry.url), { requestInit: { headers: entry.headers } }));
+  await c.connect(new StreamableHTTPClientTransport(new URL(entry.url), { requestInit: { headers: nornMcpFor(identity, { ...mcpOpts, delivery: 'header' }).headers } }));
   const r = (await c.callTool({ name: 'add_comment', arguments: { ecr: 'BWM-ECR-0418', body: 'e2e: second comment (replayed by the test)' } })) as { isError?: boolean; content: { text: string }[] };
   console.log(`  replay answer: ${r.content[0]?.text.slice(0, 200)}`);
   await c.close();
@@ -114,8 +117,8 @@ void reg;
 
 // ---- optional second session: a Level 1 impact statement -----------------------------------------------
 if (process.argv.includes('--statement')) {
-  const id2 = { actor: 'agent:norn/statement/BWM-ECR-0417', onBehalfOf: null, spawnedBy: 'norn' };
   const job2 = `e2e-stmt-${stamp}`;
+  const id2 = { actor: `agent:norn/statement/BWM-ECR-0417/${job2}`, onBehalfOf: null, spawnedBy: 'norn' };
   const entry2 = nornMcpFor(id2, { jobId: job2, role: 'level1-writeup', ecrs: ['BWM-ECR-0417'], url: server.url, ttlSeconds: 900 });
   const log2 = join(stateDir, 'e2e', `${job2}.jsonl`);
   const file2 = jsonlFileSink(log2);
@@ -136,7 +139,7 @@ running a second ${CHEAP_MODEL} session as ${id2.actor}, acting for nobody (job 
       '2. Post a Level 1 impact statement on BWM-ECR-0417 with post_impact_statement.',
       '   - Change class "Class I", route "CCB". The headline is one sentence and says the numbers are mock.',
       '   - Headline numbers: the per-unit cost change and the weeks until the change reaches the line, both as computation, using their result keys from get_impact.',
-      '   - Two drivers, as judgment. Two assumptions the numbers lean on, each with a note. One claim, as fact: that the ECR says the bracket cracked in fatigue test.',
+      '   - Two drivers, as judgment. Two assumptions the numbers lean on, each with a note. One claim, as judgment: that the ECR text describes a fatigue crack in the bracket. (Facts are not yours to label.)',
       '3. Finish with one sentence saying whether the statement was saved.',
     ].join('\n'),
     mcpServers: { [NORN_MCP_SERVER_NAME]: entry2 },

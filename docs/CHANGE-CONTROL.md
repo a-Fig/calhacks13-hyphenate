@@ -32,7 +32,7 @@ handoff is what the product replaces.
 
 ## Who writes the impact assessment
 
-| Seat | Assesses | Our forecast stage (`ARCHITECTURE.md` §5) |
+| Seat | Assesses | Our forecast stage (`norn/ARCHITECTURE.md` §5) |
 |---|---|---|
 | **Product cost engineer** (should-cost, cost estimating) | Change in cost per unit: parts, labor, tooling | S2 cost |
 | **Manufacturing / industrial engineer** | Assembly time, tooling, line changes, scrap | S2 cost, S3 timeline |

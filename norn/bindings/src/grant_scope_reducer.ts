@@ -21,5 +21,6 @@ export default {
   jobId: __t.string(),
   anyEcr: __t.bool(),
   prIds: __t.array(__t.u64()),
+  maxLevel: __t.u8(),
   expiresAt: __t.timestamp(),
 };

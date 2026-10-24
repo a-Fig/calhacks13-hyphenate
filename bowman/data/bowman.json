@@ -23992,7 +23992,8 @@
         "brackets_scrapped": 324,
         "scrapNetOfSalvageUsd": 59470.2,
         "cancellationChargeUsd": 1118.4,
-        "oneTimeTotalUsd": 147778.6
+        "oneTimeTotalUsd": 147778.6,
+        "firstLotPremiumUsd": 462.5
       },
       "prov": {
         "basis": "sourced",

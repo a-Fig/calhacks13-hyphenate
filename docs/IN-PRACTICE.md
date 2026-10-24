@@ -189,7 +189,7 @@ The phrasing in the sources is plain: "the likelihood is about 15 percent that t
 
 ## 8. What this means for Norn (recommendations)
 
-These are recommendations drawn from the sections above, not decisions. Stage names refer to `ARCHITECTURE.md` §5.
+These are recommendations drawn from the sections above, not decisions. Stage names refer to `norn/ARCHITECTURE.md` §5.
 
 1. **Shape S2 like the ECP cost page:** rows for production, retrofit and support; columns for one-time vs recurring unit x quantity; savings in parentheses. (§1)
 2. **Add an inventory disposition table** with the five locations (stores, WIP, finished goods, in field, on order) and disposition codes. Treat use-up vs scrap as a decision with its own cost swing on the tornado. (§1, §3)
