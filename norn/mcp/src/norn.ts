@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { DbConnection, type ErrorContext } from '@norn/bindings';
 import type { ActionLog, PullRequest } from '@norn/bindings/types';
 import { DisconnectedError, InternalError, SenderError, Timestamp, UnknownCallResultError, type Identity } from 'spacetimedb';
+import { securePrivateDir } from './fsutil.ts';
 import type { Claims } from './token.ts';
 
 export const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
@@ -114,10 +115,29 @@ function connectWithFile(uri: string, database: string, file: string, onDisconne
         }
         resolve({ conn, identity });
       })
-      .onConnectError((_ctx: ErrorContext, err: Error) => reject(err))
+      .onConnectError((_ctx: ErrorContext, err: Error) => reject(new Error(connectErrorText(err, uri, database))))
       .onDisconnect((_ctx: ErrorContext, err?: Error) => onDisconnect(err))
       .build();
   });
+}
+
+/** Why a connection failed, in words. The SDK's error can be empty; the address and database are not secret. */
+export function connectErrorText(err: unknown, uri: string, database: string): string {
+  const raw = err instanceof Error ? [err.name !== 'Error' ? err.name : '', err.message].filter(Boolean).join(': ') : String(err ?? '');
+  const reason = raw && raw !== '[object Object]' && raw !== '[object Event]' ? raw : 'no reason given';
+  return `${reason} (database '${database}' at ${uri}; is SpacetimeDB running and the module published?)`;
+}
+
+/**
+ * The highest impact-statement level a credential may post, from its role and origin. A job whose
+ * role is `level<N>-...` may post up to Level N; any other job role posts none (it can still
+ * comment and propose assumptions). A person's own agent is an outside agent: never Level 3,
+ * which is Norn's final verdict.
+ */
+export function maxLevelFor(claims: Pick<Claims, 'kind' | 'role'>): number {
+  if (claims.kind === 'person_agent') return 2;
+  const m = /^level([1-3])-/.exec(claims.role);
+  return m ? Number(m[1]) : 0;
 }
 
 export class Norn {
@@ -129,6 +149,11 @@ export class Norn {
 
   static async open(opts: NornOptions): Promise<Norn> {
     const log = opts.log ?? (() => {});
+    try {
+      securePrivateDir(opts.stateDir);
+    } catch (e) {
+      log(`could not restrict ${opts.stateDir} to the current user: ${e instanceof Error ? e.message : String(e)}`);
+    }
     const { conn } = await connectWithFile(opts.uri, opts.database, tokenFile(opts.stateDir, 'mirror'), e => log(`mirror disconnected${e ? `: ${e.message}` : ''}`));
     await new Promise<void>((resolve, reject) => {
       conn
@@ -225,7 +250,7 @@ export class Norn {
     try {
       h = await p;
     } catch (e) {
-      throw new ActorError(503, `could not connect to Norn's database: ${e instanceof Error ? e.message : String(e)}`);
+      throw new ActorError(503, `could not connect to Norn's database: ${e instanceof Error ? e.message : connectErrorText(e, this.opts.uri, this.opts.database)}`);
     }
     await h.exclusive(async () => {
       await this.register(h, claims);
@@ -243,7 +268,7 @@ export class Norn {
       onBehalfOf: claims.onBehalfOf ?? undefined,
     });
     if (r.error || r.row?.outcome !== 'applied')
-      throw new ActorError(409, `could not register ${claims.actor} in Norn: ${r.error?.message ?? r.row?.policy ?? 'no confirmation from the database'}`);
+      throw new ActorError(409, `could not register ${claims.actor} in Norn: ${r.error?.message ?? r.row?.policy.replace(/^deny: /, '') ?? 'no confirmation from the database'}`);
     h.registeredFor = { onBehalfOf: claims.onBehalfOf };
   }
 
@@ -260,9 +285,10 @@ export class Norn {
     }
     // The module accepts a grant for at most 24 hours; a longer-lived credential is re-granted as it runs down.
     const until = Math.min(claims.exp * 1000, Date.now() + 12 * 3600_000);
-    const sig = JSON.stringify([claims.jobId, anyEcr, prIds.map(String).sort()]);
+    const maxLevel = maxLevelFor(claims);
+    const sig = JSON.stringify([claims.jobId, anyEcr, prIds.map(String).sort(), maxLevel]);
     if (h.grant && h.grant.sig === sig && (h.grant.until >= claims.exp * 1000 || h.grant.until - Date.now() > 30 * 60_000)) return;
-    const r = await this.call(h, claims, 'grantScope', { jobId: claims.jobId, anyEcr, prIds, expiresAt: Timestamp.fromDate(new Date(until)) });
+    const r = await this.call(h, claims, 'grantScope', { jobId: claims.jobId, anyEcr, prIds, maxLevel, expiresAt: Timestamp.fromDate(new Date(until)) });
     if (r.error) throw new ActorError(409, `Norn did not accept the job's scope: ${r.error.message}`);
     if (r.row?.outcome !== 'applied') throw new ActorError(409, `Norn did not accept the job's scope: ${r.row ? r.row.policy.replace(/^deny: /, '') : 'no confirmation from the database'}`);
     h.grant = { sig, until };

@@ -24,8 +24,8 @@ console.log(`serving ${server.url}`);
 
 // ---- helpers -------------------------------------------------------------------------------------
 const ident = (actor: string, onBehalfOf: string | null = null, spawnedBy = 'norn') => ({ actor, onBehalfOf, spawnedBy });
-const entryFor = (actor: string, ecrs: string[], extra: { jobId?: string; kind?: 'job' | 'person_agent'; onBehalfOf?: string | null; spawnedBy?: string } = {}) =>
-  nornMcpFor(ident(actor, extra.onBehalfOf ?? null, extra.spawnedBy), { jobId: extra.jobId ?? `job-${stamp}-${actor.length}`, role: 'gate-check', ecrs, url: server.url, signingKey: key, kind: extra.kind });
+const entryFor = (actor: string, ecrs: string[], extra: { jobId?: string; kind?: 'job' | 'person_agent'; onBehalfOf?: string | null; spawnedBy?: string; role?: string; ttlSeconds?: number } = {}) =>
+  nornMcpFor(ident(actor, extra.onBehalfOf ?? null, extra.spawnedBy), { jobId: extra.jobId ?? `job-${stamp}-${actor.length}`, role: extra.role ?? 'level1-writeup', ecrs, url: server.url, signingKey: key, kind: extra.kind, ttlSeconds: extra.ttlSeconds });
 async function connect(entry: { url: string; headers: Record<string, string> }) {
   const c = new Client({ name: 'gate-check', version: '0.0.0' });
   await c.connect(new StreamableHTTPClientTransport(new URL(entry.url), { requestInit: { headers: entry.headers } }));
@@ -119,7 +119,7 @@ const status = await norn.call(handleA, claimsA, 'setPrStatus', { prId: ecr417.i
 check('a scoped actor cannot call a reducer outside comment, assumption and statement', status.row?.outcome === 'denied' && status.row.policy.includes('is not open to an agent'), status.row?.policy);
 const edit = await norn.call(handleA, claimsA, 'recordAssumption', { prId: 0n, key: 'scrap_rate', distJson: '{"kind":"fixed","value":0.5}', source: 'agent_estimated', rationale: 'x', affects: [], expectedRev: 1 });
 check('...or write to the production baseline', edit.row?.outcome === 'denied' && edit.row.policy.includes('baseline'), edit.row?.policy);
-const widen = await norn.call(handleA, claimsA, 'grantScope', { jobId: claimsA.jobId, anyEcr: true, prIds: [], expiresAt: Timestamp.fromDate(new Date(Date.now() + 60_000)) });
+const widen = await norn.call(handleA, claimsA, 'grantScope', { jobId: claimsA.jobId, anyEcr: true, prIds: [], maxLevel: 1, expiresAt: Timestamp.fromDate(new Date(Date.now() + 60_000)) });
 check('...or widen its own scope while the grant is live', widen.row?.outcome === 'denied' && widen.row.policy.includes('cannot be given to another job or widened'), widen.row?.policy);
 
 // impact statement
@@ -136,7 +136,7 @@ const stmtArgs = {
   ],
   drivers: [{ text: 'Requalification time', evidence: 'judgment' }],
   assumptions: [{ key: 'requalification_weeks', note: 'drives the timeline' }, { key: 'tooling_cost_usd', note: 'one-time cost' }],
-  claims: [{ text: 'The bracket cracked in the fatigue test.', evidence: 'fact' }],
+  claims: [{ text: 'The bracket cracked in the fatigue test.', evidence: 'judgment' }],
 };
 const s1 = await call(A, 'post_impact_statement', stmtArgs);
 const stored = [...norn.db.impactStatement.prId.filter(ecr417.id)][0];
@@ -160,7 +160,7 @@ const reject = (p: Promise<unknown>) => p.then(() => '', (e: Error) => e.message
 await sleep(100);
 // ---- the module on its own: what the tools never send -----------------------------------------------
 const base = { prId: ecr417.id, level: 1, changeClass: 'Class I', route: 'CCB', headline: 'x', drivers: [], claims: [] };
-const num = (p50: number) => ({ key: 'k', label: 'k', unit: 'USD', p10: wanted.p10, p50, p90: wanted.p90, evidence: 'computation', resultKey });
+const num = (p50: number) => ({ key: 'k', label: wanted.label, unit: wanted.unit, p10: wanted.p10, p50, p90: wanted.p90, evidence: 'computation', resultKey });
 const m1 = await reject(raw.R.postImpactStatement({ meta: meta('s'), ...base, numbers: [num(wanted.p50 + 0.01)], assumptions: [] }));
 check('the module refuses a computation number that is not the check result', /differs from check result/.test(m1), m1.slice(0, 160));
 const m2 = await reject(raw.R.postImpactStatement({ meta: meta('s'), ...base, numbers: [{ key: 'k', label: 'k', unit: '', p10: 1, p50: 2, p90: 3, evidence: 'judgment', resultKey: '' }], assumptions: [{ key: 'tooling_cost_usd', source: 'agent_estimated', note: '' }] }));
@@ -196,17 +196,123 @@ check('the same actor cannot be held by a second, different live job: 409', clas
 
 // ---- a person's own agent -----------------------------------------------------------------------------
 const actorP = `agent:jeff/laptop-${stamp}`;
-const P = await connect(entryFor(actorP, ['*'], { kind: 'person_agent', onBehalfOf: 'person:jeff', spawnedBy: 'person:jeff', jobId: `pat-${stamp}` }));
+const entryP = entryFor(actorP, ['*'], { kind: 'person_agent', onBehalfOf: 'person:jeff', spawnedBy: 'person:jeff', jobId: `pat-${stamp}`, role: 'person-agent' });
+const P = await connect(entryP);
 const pc = await call(P, 'add_comment', { ecr: 'BWM-ECR-0418', body: `gate check ${stamp}: from Jeff's own agent` });
 const principalP = [...norn.db.principal.iter()].find(p => p.name === actorP);
 const prow = pc.json ? logRow(pc.json.actionLogEntry) : undefined;
 check('a person\'s own agent acts as an external principal, for that person, on any ECR', !pc.isError && principalP?.origin === 'external' && principalP.onBehalfOf === 'person:jeff' && prow?.actorOrigin === 'external' && prow.onBehalfOf === 'person:jeff' && prow.prId === ecr418.id, prow?.policy);
+// ======================================================================================================
+// Review fixes (#64)
+// ======================================================================================================
+const claimsOf = (e: { headers: { Authorization: string } }) => verifyToken(e.headers.Authorization.slice('Bearer '.length), key);
+const claimsP = claimsOf(entryP);
+const handleP = await norn.actorFor(claimsP);
+const res418 = [...norn.db.checkResult.prId.filter(ecr418.id)].find(r => r.key === resultKey)!;
+const stmt = (ecrRef: string, level: number, over: Record<string, unknown> = {}) => ({
+  ecr: ecrRef, level, changeClass: 'Class II', route: 'CCB', headline: `gate check ${stamp}: level ${level}`,
+  numbers: [{ key: 'j', evidence: 'judgment', label: 'Effort', unit: 'h', p10: 1, p50: 2, p90: 3 }], drivers: [], assumptions: [], claims: [], ...over,
+});
+const direct = (prId: bigint, level: number, over: Record<string, unknown> = {}) => ({
+  prId, level, changeClass: 'Class II', route: 'CCB', headline: `direct ${stamp}`,
+  numbers: [{ key: 'j', label: 'Effort', unit: 'h', p10: 1, p50: 2, p90: 3, evidence: 'judgment', resultKey: '' }], drivers: [], assumptions: [], claims: [], ...over,
+});
+const numOf = (over: Record<string, unknown> = {}) => ({ key: 'k', label: res418.label, unit: res418.unit, p10: res418.p10, p50: res418.p50, p90: res418.p90, evidence: 'computation', resultKey, ...over });
+
+// 1. A scoped agent cannot take back a CCB approval by changing an assumption.
+const ecr419 = await waitForChecks(norn, 'BWM-ECR-0419');
+await raw.R.setPrStatus({ meta: meta('rev'), prId: ecr419.id, status: 'review' });
+await raw.R.setPrStatus({ meta: meta('appr'), prId: ecr419.id, status: 'approved' });
+for (let i = 0; i < 100 && ecr('BWM-ECR-0419').status !== 'approved'; i++) await sleep(20);
+const approved = ecr('BWM-ECR-0419');
+const ap = await call(P, 'propose_assumption', { ecr: 'BWM-ECR-0419', key: `gate_approval_${stamp}`, value: 3, rationale: 'x', sources: ['y'] });
+await sleep(200);
+check('#1 a scoped agent (even with any-ECR scope) may not change an assumption on an approved ECR: refused, and it says to comment', ap.isError && /is approved/.test(ap.text) && /[Cc]omment/.test(ap.text), ap.text.slice(0, 200));
+check('...the approval and revision are untouched, and the refusal is logged as denied', ecr('BWM-ECR-0419').status === 'approved' && ecr('BWM-ECR-0419').revision === approved.revision && [...norn.db.actionLog.prId.filter(ecr419.id)].some(l => l.actorName === actorP && l.reducer === 'record_assumption' && l.outcome === 'denied'));
+const apc = await call(P, 'add_comment', { ecr: 'BWM-ECR-0419', body: `gate check ${stamp}: comment on an approved ECR` });
+check('...it can still comment on it', !apc.isError && apc.json?.saved === true);
+
+// 2. A computation number keeps the check's own label and unit.
+const rel = await call(P, 'post_impact_statement', stmt('BWM-ECR-0418', 1, { headline: `relabel ${stamp}`, numbers: [{ key: 'fleet_tooling', evidence: 'computation', resultKey, label: 'One-time tooling cost (fleet)', unit: 'kUSD' }] }));
+const relStored = [...norn.db.impactStatement.prId.filter(ecr418.id)].find(s => s.headline === `relabel ${stamp}`);
+check("#2 the tool takes a computation number's label and unit from the check result, whatever the agent wrote", !rel.isError && relStored?.numbers[0]?.label === res418.label && relStored.numbers[0].unit === res418.unit, `${relStored?.numbers[0]?.label} / ${relStored?.numbers[0]?.unit}`);
+const relabelled = await norn.call(handleP, claimsP, 'postImpactStatement', direct(ecr418.id, 1, { numbers: [numOf({ label: 'One-time tooling cost (fleet)', unit: 'kUSD' })] }));
+check("...and the module refuses a relabelled computation number (rejected, logged, naming the result's label)", relabelled.row?.outcome === 'rejected' && /keeps the label and unit/.test(relabelled.row.summary) && relabelled.row.summary.includes(res418.label), relabelled.row?.summary);
+
+// 3. A level cap from role and origin.
+const pl3 = await call(P, 'post_impact_statement', stmt('BWM-ECR-0418', 3));
+const pl2 = await call(P, 'post_impact_statement', stmt('BWM-ECR-0418', 2));
+check("#3 a person's own agent can never post Level 3 (refused by the gate) but can post Level 2", pl3.isError && /up to Level 2/.test(pl3.text) && !pl2.isError && pl2.json?.saved === true, pl3.text.slice(0, 120));
+check('...no Level 3 statement exists', ![...norn.db.impactStatement.iter()].some(s => s.level === 3));
+const A2 = await connect(entryA);
+const a3 = await call(A2, 'post_impact_statement', stmt('BWM-ECR-0417', 3));
+const a2 = await call(A2, 'post_impact_statement', stmt('BWM-ECR-0417', 2));
+check('...a level1-writeup job gets Level 1 only (Levels 2 and 3 refused, logged)', a3.isError && /up to Level 1/.test(a3.text) && a2.isError && /up to Level 1/.test(a2.text), a3.text.slice(0, 120));
+const actorR = `agent:norn/research/${stamp}`;
+const R = await connect(entryFor(actorR, ['BWM-ECR-0418'], { role: 'researcher', onBehalfOf: null }));
+const r1 = await call(R, 'post_impact_statement', stmt('BWM-ECR-0418', 1));
+const rc = await call(R, 'add_comment', { ecr: 'BWM-ECR-0418', body: `gate check ${stamp}: a researcher comments` });
+check('...a job whose role posts no statements may comment but not post one', r1.isError && /may not post impact statements/.test(r1.text) && !rc.isError, r1.text.slice(0, 120));
+await R.close();
+
+// 4. A refused second job must not rewrite the first job's on-behalf-of, and history shows what was recorded at the time.
+const mallory = await post({ authorization: entryFor(actorA, ['BWM-ECR-0417'], { jobId: `mallory-job-${stamp}`, onBehalfOf: 'person:mallory' }).headers.Authorization });
+await sleep(300);
+const regRows = [...norn.db.actionLog.iter()].filter(l => l.actorName === actorA && l.reducer === 'register_actor');
+check('#4 a refused second job for another person does not re-register the actor: 409, still acting for the first person', mallory.status === 409 && [...norn.db.principal.iter()].find(p => p.name === actorA)?.onBehalfOf === 'person:jeff' && !regRows.some(l => l.outcome === 'applied' && l.summary.includes('mallory')) && regRows.some(l => l.outcome === 'denied'), `${mallory.status}; ${regRows.map(l => l.outcome).join(',')}`);
+const handoverPlm = `BWM-GATE-hand-${stamp}`;
+await raw.R.createPr({ meta: meta('hand'), plmEcrNumber: handoverPlm, title: `gate check handover ${stamp}`, description: 'x' });
+for (let i = 0; i < 100 && !norn.findEcr(handoverPlm).pr; i++) await sleep(20);
+const actorX = `agent:norn/handover/${stamp}`;
+const X1 = await connect(entryFor(actorX, [handoverPlm], { jobId: `x1-${stamp}`, onBehalfOf: 'person:jeff', ttlSeconds: 6 }));
+await call(X1, 'add_comment', { ecr: handoverPlm, body: 'comment from the first job' });
+await call(X1, 'post_impact_statement', stmt(handoverPlm, 1));
+await X1.close();
+await sleep(7000);
+const X2 = await connect(entryFor(actorX, [handoverPlm], { jobId: `x2-${stamp}`, onBehalfOf: 'person:ann' }));
+await call(X2, 'add_comment', { ecr: handoverPlm, body: 'comment from the second job' });
+const hist = (await call(X2, 'get_ecr_history', { ecr: handoverPlm })).json?.entries ?? [];
+const h1 = hist.find((e: any) => e.body === 'comment from the first job');
+const h2 = hist.find((e: any) => e.body === 'comment from the second job');
+const st = (await call(X2, 'get_ecr', { ecr: handoverPlm })).json?.statements?.[0];
+check('...a later job under the same actor name takes the principal over, and history keeps who each comment was for at the time', [...norn.db.principal.iter()].find(p => p.name === actorX)?.onBehalfOf === 'person:ann' && h1?.onBehalfOf === 'person:jeff' && h2?.onBehalfOf === 'person:ann', `${h1?.onBehalfOf} / ${h2?.onBehalfOf}`);
+check('...and a statement shows the on-behalf-of it was posted with', st?.postedBy?.onBehalfOf === 'person:jeff' && st.postedBy.name === actorX, JSON.stringify(st?.postedBy));
+await X2.close();
+
+// 5. An agent cannot stamp its own claims as fact.
+const factTool = await call(A2, 'post_impact_statement', stmt('BWM-ECR-0417', 1, { claims: [{ text: 'The bracket cracked.', evidence: 'fact' }] }));
+check('#5 the tool does not offer evidence "fact"', factTool.isError, factTool.text.slice(0, 100));
+const claimsA2 = claimsOf(entryA);
+const factGate = await norn.call(handleA, claimsA2, 'postImpactStatement', direct(ecr417.id, 1, { claims: [{ text: 'The bracket cracked.', evidence: 'fact' }] }));
+const factNum = await norn.call(handleA, claimsA2, 'postImpactStatement', direct(ecr417.id, 1, { numbers: [{ key: 'j', label: 'x', unit: '', p10: 1, p50: 2, p90: 3, evidence: 'fact', resultKey: '' }] }));
+check("...and the gate refuses an agent's own fact, in a claim or a number (denied, logged)", factGate.row?.outcome === 'denied' && /as fact/.test(factGate.row.policy) && factNum.row?.outcome === 'denied', factGate.row?.policy);
+await A2.close();
+
+// 6. Validation failures by a scoped agent leave an action-log row (outcome rejected); other callers still get a SenderError.
+const forgedStmt = await norn.call(handleP, claimsP, 'postImpactStatement', direct(ecr418.id, 1, { numbers: [numOf({ p50: res418.p50 + 0.01 })] }));
+check('#6 a forged computation number is rejected and logged (outcome rejected, with the reason)', forgedStmt.row?.outcome === 'rejected' && /differs from check result/.test(forgedStmt.row.summary) && forgedStmt.row.prId === ecr418.id && forgedStmt.row.actorName === actorP, forgedStmt.row?.summary);
+const conflict = await norn.call(handleP, claimsP, 'recordAssumption', { prId: ecr418.id, key: `gate_rev_${stamp}`, distJson: '{"kind":"fixed","value":1}', source: 'agent_estimated', rationale: 'x', affects: [], expectedRev: 5 });
+check('...a revision conflict is rejected and logged', conflict.row?.outcome === 'rejected' && /is at revision 0, not 5/.test(conflict.row.summary), conflict.row?.summary);
+const closedPlm = `BWM-GATE-closed-${stamp}`;
+await raw.R.createPr({ meta: meta('cl'), plmEcrNumber: closedPlm, title: `gate check closed ${stamp}`, description: 'x' });
+for (let i = 0; i < 100 && !norn.findEcr(closedPlm).pr; i++) await sleep(20);
+const closedId = norn.findEcr(closedPlm).pr!.id;
+await raw.R.setPrStatus({ meta: meta('cl2'), prId: closedId, status: 'closed' });
+for (let i = 0; i < 100 && norn.findEcr(closedPlm).pr!.status !== 'closed'; i++) await sleep(20);
+const onClosed = await call(P, 'post_impact_statement', stmt(closedPlm, 1));
+const onClosedA = await call(P, 'propose_assumption', { ecr: closedPlm, key: 'k', value: 1, rationale: 'x', sources: ['y'] });
+check('...a statement or an assumption on a closed ECR is rejected, names the ECR by number (not an internal id), and says nothing was saved', onClosed.isError && onClosed.text.includes(closedPlm) && onClosed.text.includes('Nothing was saved') && onClosedA.isError && onClosedA.text.includes(closedPlm) && !/ECR \d+ is/.test(onClosed.text + onClosedA.text), onClosed.text.slice(0, 160));
+check("...both are in the action log as rejected, and in the ECR's history", [...norn.db.actionLog.prId.filter(closedId)].filter(l => l.outcome === 'rejected').length === 2 && ((await call(P, 'get_ecr_history', { ecr: closedPlm })).json?.entries ?? []).filter((e: any) => e.outcome === 'rejected').length === 2);
+const rawClosed = await reject(raw.R.postImpactStatement({ meta: meta('rc'), ...direct(closedId, 1) }));
+check('...the same call by an unscoped client still throws, and leaves no rejected row', /frozen/.test(rawClosed) && ![...norn.db.actionLog.iter()].some(l => l.actorName === `gate-raw-${stamp}` && l.outcome === 'rejected'), rawClosed.slice(0, 100));
+const m5 = await reject(raw.R.postImpactStatement({ meta: meta('s'), ...direct(ecr418.id, 1, { numbers: [numOf({ label: 'something else' })] }) }));
+check('#2 the module refuses a relabelled computation number from any caller', /keeps the label and unit/.test(m5), m5.slice(0, 140));
 await P.close();
 
 // ---- the module on its own (continued): the grant that runs out ------------------------------------
 // a grant that runs out: the module refuses even though nothing else changed
 const expId = meta('exp');
-await raw.R.grantScope({ meta: meta('grant'), jobId: `short-${stamp}`, anyEcr: false, prIds: [ecr417.id], expiresAt: Timestamp.fromDate(new Date(Date.now() + 1500)) });
+await raw.R.grantScope({ meta: meta('grant'), jobId: `short-${stamp}`, anyEcr: false, prIds: [ecr417.id], maxLevel: 1, expiresAt: Timestamp.fromDate(new Date(Date.now() + 1500)) });
 const okC = meta('inscope');
 await raw.R.addComment({ meta: okC, prId: ecr417.id, anchor: '', body: `gate check ${stamp}: before expiry` });
 await sleep(2200);

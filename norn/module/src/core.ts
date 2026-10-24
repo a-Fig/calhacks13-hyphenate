@@ -237,7 +237,8 @@ export function digestOf(infos: Record<string, StageInfo>): string {
 // What a credential lets this connection write to (actor_scope, written by grant_scope). Set for
 // agents that come in through Norn's MCP server; null for workers and the UI, which have no limit
 // of this kind. expiresAtMicros is microseconds since the Unix epoch.
-export type ActorScope = { jobId: string; anyEcr: boolean; prIds: bigint[]; expiresAtMicros: bigint };
+// maxLevel is the highest impact-statement level the credential may post (0: none).
+export type ActorScope = { jobId: string; anyEcr: boolean; prIds: bigint[]; maxLevel: number; expiresAtMicros: bigint };
 
 export type Actor = {
   kind: 'person' | 'agent' | 'unknown';
@@ -254,7 +255,7 @@ export function resolveActor(ctx: Ctx): Actor {
   }
   const p = ctx.db.principal.identity.find(ctx.sender);
   const s = ctx.db.actorScope.identity.find(ctx.sender);
-  const scope: ActorScope | null = s ? { jobId: s.jobId, anyEcr: s.anyEcr, prIds: s.prIds, expiresAtMicros: s.expiresAt.microsSinceUnixEpoch } : null;
+  const scope: ActorScope | null = s ? { jobId: s.jobId, anyEcr: s.anyEcr, prIds: s.prIds, maxLevel: s.maxLevel, expiresAtMicros: s.expiresAt.microsSinceUnixEpoch } : null;
   if (p) return { kind: p.kind as Actor['kind'], name: p.name, origin: p.origin, onBehalfOf: p.onBehalfOf ?? null, scope };
   return { kind: 'unknown', name: `unregistered:${ctx.sender.toHexString().slice(0, 8)}`, origin: 'unknown', onBehalfOf: null, scope };
 }
@@ -301,7 +302,7 @@ export type Logged = {
   detail?: unknown;
   /** Overrides the caller's spawnedBy (worker calls on a run say 'check_run:<id>'). */
   spawnedBy?: string;
-  outcome?: 'applied' | 'denied' | 'downgraded';
+  outcome?: 'applied' | 'denied' | 'downgraded' | 'rejected';
 };
 
 export type LogWho = { requestId: string; spawnedBy: string; policy: string };
@@ -335,6 +336,11 @@ export function logAction(ctx: Ctx, actor: Actor, who: LogWho, reducer: string, 
 // Every write reducer takes this first. requestId is the caller's own id, to match its call to
 // the outcome in action_log (a denial returns normally, so the log is where it shows up).
 // spawnedBy says what started this call: 'Norn', a parent agent run, ...
+// A validation failure worth an audit row. Throw it only before the body has written anything.
+// Callers without a job scope see an ordinary SenderError (workers and the UI rely on that); a
+// job-scoped agent gets a normal return and an action-log row with outcome 'rejected' (see write()).
+export class Refusal extends SenderError {}
+
 export const CallMeta = t.object('CallMeta', { requestId: t.string(), spawnedBy: t.string() });
 
 export type Call = {
@@ -390,7 +396,19 @@ export function write<P extends RowObj>(name: string, params: P, body: Body<P>, 
       decision,
       log: e => logAction(ctx, resolveActor(ctx), who, name, e),
     };
-    const entry = body(ctx, args as InferTypeOfRow<P>, call);
+    let entry: Logged | null;
+    try {
+      entry = body(ctx, args as InferTypeOfRow<P>, call);
+    } catch (e) {
+      // A Refusal is thrown before the body has written anything. A job-scoped agent gets a normal
+      // return and a log row (outcome 'rejected', with the reason) so the refusal can be audited;
+      // every other caller gets the SenderError it always got.
+      if (e instanceof Refusal && first.scope) {
+        logAction(ctx, resolveActor(ctx), who, name, { prId, entity: 'rejected', summary: `${name} rejected: ${e.message}`, outcome: 'rejected' });
+        return;
+      }
+      throw e;
+    }
     // Resolve the actor again: register_actor changes who the sender is mid-call.
     if (entry) logAction(ctx, resolveActor(ctx), who, name, { ...entry, outcome: entry.outcome ?? (downgradeOk ? 'downgraded' : 'applied') });
   }) as any);

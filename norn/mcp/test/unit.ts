@@ -2,13 +2,16 @@
 //   npm run test:unit -w @norn/mcp
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { nornMcpFor, nornTools, READ_TOOLS, WRITE_TOOLS } from '../src/client.ts';
 import { readEnvValue } from '../src/env.ts';
+import { securePrivateDir, windowsAcl } from '../src/fsutil.ts';
+import { connectErrorText, maxLevelFor } from '../src/norn.ts';
 import { MAX_TTL_SECONDS, TokenError, signToken, verifyToken, type NewClaims } from '../src/token.ts';
 import { TOOL_NAMES } from '../src/tools.ts';
 
@@ -47,7 +50,7 @@ test('a token fails with a clear code when it was signed with another key, edite
 
 test('a signature that is the wrong length is refused, not compared', () => {
   const [p, body] = mint().split('.');
-  assert.equal(code(() => verifyToken(`${p}.${body}.AAAA`, KEY)), 'bad_signature');
+  assert.equal(code(() => verifyToken(`${p}.${body}.AAAA`, KEY)), 'malformed');
 });
 
 test('claim rules: lifetimes, person agents and the any-ECR wildcard', () => {
@@ -107,4 +110,87 @@ test('the key script appends once, keeps what was there, and never prints the ke
   assert.match(second, /already set/);
   assert.equal(readEnvValue(f, 'NORN_MCP_SIGNING_KEY'), key);
   assert.equal(readFileSync(f, 'utf8').split('NORN_MCP_SIGNING_KEY').length, 2);
+});
+
+test('a signature must be canonical base64url: padding, stray characters and unused low bits are refused', () => {
+  const t = mint();
+  const [p, body, sig] = t.split('.');
+  assert.equal(verifyToken(t, KEY).jobId, 'job-1');
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  const last = sig!.at(-1)!;
+  const i = alphabet.indexOf(last);
+  const sibling = alphabet[(i & ~3) | ((i + 1) & 3)]!; // same top four bits: a lenient decoder reads the same bytes
+  const edited = `${sig!.slice(0, -1)}${sibling}`;
+  assert.notEqual(edited, sig);
+  assert.deepEqual(Buffer.from(edited, 'base64url'), Buffer.from(sig!, 'base64url'));
+  assert.equal(code(() => verifyToken(`${p}.${body}.${edited}`, KEY)), 'bad_signature');
+  for (const bad of [`${sig}=`, `${sig}==`, `${sig}!`, `${sig!.slice(0, -1)}!`, sig!.slice(0, -1), `${sig}A`])
+    assert.equal(code(() => verifyToken(`${p}.${body}.${bad}`, KEY)), 'malformed', bad.slice(-4));
+  assert.equal(code(() => verifyToken(`${p}.${body}=.${sig}`, KEY)), 'malformed');
+});
+
+test('claims use a strict character set and no unknown fields', () => {
+  assert.throws(() => mint({ actor: 'agent:"x"' }), /actor/);
+  assert.throws(() => mint({ actor: 'agent:norn/<script>' }), /actor/);
+  assert.throws(() => mint({ ecrs: ['BWM ECR'] }), /ecrs/);
+  assert.doesNotThrow(() => mint({ actor: 'agent:norn/level1/BWM-ECR-0417/job-1', onBehalfOf: 'person:jeff', ecrs: ['BWM-ECR-0417'] }));
+  const t = mint();
+  const [p, body] = t.split('.');
+  const extra = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(body!, 'base64url').toString()), admin: true })).toString('base64url');
+  // an extra field is refused even when properly signed
+  const signed = `${p}.${extra}`;
+  const sig = createHmac('sha256', KEY).update(signed).digest('base64url');
+  assert.equal(code(() => verifyToken(`${signed}.${sig}`, KEY)), 'invalid_claims');
+});
+
+test('maxLevelFor: a level<N> job role posts up to N, other jobs none, a person\'s agent never Level 3', () => {
+  assert.equal(maxLevelFor({ kind: 'job', role: 'level1-writeup' }), 1);
+  assert.equal(maxLevelFor({ kind: 'job', role: 'level2-research' }), 2);
+  assert.equal(maxLevelFor({ kind: 'job', role: 'level3-verdict' }), 3);
+  assert.equal(maxLevelFor({ kind: 'job', role: 'researcher' }), 0);
+  assert.equal(maxLevelFor({ kind: 'job', role: 'level4-x' }), 0);
+  assert.equal(maxLevelFor({ kind: 'person_agent', role: 'level3-verdict' }), 2);
+  assert.equal(maxLevelFor({ kind: 'person_agent', role: 'person-agent' }), 2);
+});
+
+test('connect errors say something even when the SDK says nothing', () => {
+  assert.match(connectErrorText(new Error(''), 'ws://127.0.0.1:3000', 'norn'), /no reason given.*database 'norn' at ws:\/\/127\.0\.0\.1:3000/);
+  assert.match(connectErrorText(new Error('connection refused'), 'ws://h', 'd'), /^connection refused \(database 'd'/);
+  assert.match(connectErrorText(undefined, 'ws://h', 'd'), /no reason given/);
+});
+
+test('minting a person token again keeps its job id; another label gets another; the token is not printed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'norn-mint-'));
+  const out = join(dir, 't.token');
+  const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'mint-person-token.ts');
+  const tsx = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'node_modules', 'tsx', 'dist', 'cli.mjs');
+  const run = (label: string) => {
+    const stdout = execFileSync(process.execPath, [tsx, script, '--person', 'jeff', '--label', label, '--ecr', 'BWM-ECR-0417', '--out', out], { env: { ...process.env, NORN_MCP_SIGNING_KEY: KEY }, encoding: 'utf8' });
+    const token = readFileSync(out, 'utf8');
+    assert.ok(!stdout.includes(token), 'the script printed the token');
+    return verifyToken(token, KEY);
+  };
+  const a = run('laptop');
+  const b = run('laptop');
+  const c = run('desktop');
+  assert.equal(a.jobId, b.jobId);
+  assert.notEqual(a.jobId, c.jobId);
+  assert.deepEqual([a.kind, a.actor, a.onBehalfOf, a.spawnedBy, a.ecrs], ['person_agent', 'agent:jeff/laptop', 'person:jeff', 'person:jeff', ['BWM-ECR-0417']]);
+});
+
+test('on Windows the private directory is closed to other users', { skip: process.platform !== 'win32' }, () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..', '.state');
+  const dir = join(root, `acl-test-${Date.now().toString(36)}`);
+  try {
+    securePrivateDir(dir);
+    writeFileSync(join(dir, 'a.token'), 'x');
+    const me = execFileSync('whoami', { encoding: 'utf8' }).trim().toLowerCase();
+    for (const path of [dir, join(dir, 'a.token')]) {
+      const acl = windowsAcl(path);
+      assert.ok(acl.toLowerCase().includes(me), `${path} should name ${me}`);
+      assert.ok(!/BUILTIN\Users|Authenticated Users|Everyone/i.test(acl), `${path} is open to other users:\n${acl}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

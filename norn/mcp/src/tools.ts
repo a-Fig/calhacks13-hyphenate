@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { registerErpTools } from './erp.ts';
 import type { ActorHandle, Norn } from './norn.ts';
 import type { Claims } from './token.ts';
-import { affectedParts, assumptionView, bareResultKey, currentResult, currentResultKeys, ecrSummary, ecrView, effectiveAssumptions, historyOf, impactOf, partView } from './views.ts';
+import { affectedParts, assumptionView, bareResultKey, currentResult, currentResultKeys, ecrSummary, ecrView, effectiveAssumptions, historyOf, impactOf, partView, provenanceIndex } from './views.ts';
 
 export interface ToolContext {
   norn: Norn;
@@ -23,7 +23,9 @@ type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean
 const ok = (value: unknown): ToolResult => ({ content: [{ type: 'text', text: JSON.stringify(value, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)) }] });
 const fail = (message: string): ToolResult => ({ isError: true, content: [{ type: 'text', text: message }] });
 
-const Evidence = z.enum(['fact', 'assumption', 'computation', 'judgment']);
+// What an agent may label its own numbers and claims. 'fact' is not offered: a fact is read from a
+// source Norn can check, and an agent's say-so is not one (the policy gate refuses it too).
+const Evidence = z.enum(['assumption', 'computation', 'judgment']);
 const ECR = z.string().min(1).describe('The ECR number as list_ecrs shows it, e.g. "BWM-ECR-0417". A unique tail such as "ECR-0417" also works.');
 
 class ToolFailure extends Error {}
@@ -65,6 +67,7 @@ async function write(ctx: ToolContext, reducer: string, args: Record<string, unk
     return fail(`Norn could not take this write right now (${r.error.kind}). Nothing was saved. Try once more; if it fails again, say so in your answer.`);
   }
   if (!r.row) return fail('Norn accepted the call but has not confirmed it yet. Call get_ecr_history before trying again, so you do not post it twice.');
+  if (r.row.outcome === 'rejected') return fail(`Norn rejected this: ${r.row.summary.replace(/^S+ rejected: /, '')}. Nothing was saved (entry ${r.row.id} in the action log).`);
   if (r.row.outcome === 'denied')
     return fail(
       `Refused by Norn's policy gate: ${r.row.policy.replace(/^deny: /, '')}. The refusal is recorded in Norn's action log (entry ${r.row.id}). Do not retry or look for another way; report that you were refused.`
@@ -75,7 +78,7 @@ async function write(ctx: ToolContext, reducer: string, args: Record<string, unk
 export const INSTRUCTIONS = [
   "Norn's tools for engineering change requests (ECRs) at Bowman.",
   'Numbers come from checks that code ran; read them with get_impact and quote them as they are. If a result says mock, it is placeholder data and you must say so.',
-  'Label what you write by evidence class: fact (read from a source), assumption, computation (copied from a check result) or judgment (your conclusion).',
+  'Label what you write by evidence class: assumption, computation (copied from a check result) or judgment (your conclusion). You cannot label your own claim a fact; facts are what Norn holds from its sources.',
   'You act under your own name for the person named in your credential, and only on the ECRs your job names. A refusal is final; report it.',
 ].join(' ');
 
@@ -145,7 +148,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     tool(ctx, 'list_assumptions', async ({ ecr }: { ecr?: string }) => {
       const pr = ecr ? ecrOf(ctx, ecr) : undefined;
-      return ok({ ecr: pr?.plmEcrNumber ?? null, assumptions: effectiveAssumptions(norn, pr?.id ?? 0n).map(a => assumptionView(norn, a)) });
+      const prov = [provenanceIndex(norn, 0n), pr ? provenanceIndex(norn, pr.id) : new Map()];
+      return ok({ ecr: pr?.plmEcrNumber ?? null, assumptions: effectiveAssumptions(norn, pr?.id ?? 0n).map(a => assumptionView(norn, a, prov[a.prId === 0n ? 0 : 1]!)) });
     })
   );
 
@@ -222,7 +226,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     'post_impact_statement',
     {
       description:
-        'Post a structured impact statement (level 1 to 3) on an ECR: change class, proposed approval route, a headline, headline numbers with p10/p50/p90, drivers, the assumptions it rests on, and claims, each with an evidence class. A number with evidence "computation" must name the key of a result from get_impact (e.g. "unit_cost_delta") and is copied from that result: do not type its digits. Any other number needs p10, p50 and p90. Assumption sources are filled in from Norn\'s record. Use fixed likelihood words in prose (almost no chance, very unlikely, unlikely, roughly even, likely, very likely, almost certain).',
+        'Post a structured impact statement (level 1 to 3) on an ECR: change class, proposed approval route, a headline, headline numbers with p10/p50/p90, drivers, the assumptions it rests on, and claims, each with an evidence class. A number with evidence "computation" must name the key of a result from get_impact (e.g. "unit_cost_delta") and is copied from that result, with its label and unit: do not type them. You cannot post evidence "fact". Any other number needs p10, p50 and p90. Assumption sources are filled in from Norn\'s record. Use fixed likelihood words in prose (almost no chance, very unlikely, unlikely, roughly even, likely, very likely, almost certain).',
       inputSchema: {
         ecr: ECR,
         level: z.number().int().min(1).max(3).describe('1 = impact screen, 2 = researched, 3 = Norn\'s final verdict.'),
@@ -261,7 +265,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
             const keys = currentResultKeys(norn, pr.id);
             throw new ToolFailure(`Number '${n.key}': ${pr.plmEcrNumber} has no current check result '${n.resultKey}'. ${keys.length ? `Current result keys: ${keys.join(', ')}.` : 'It has no current results; call get_impact, and if they are missing or stale do not present the number as a computation.'}`);
           }
-          return { key: n.key, label: n.label ?? r.label, unit: n.unit ?? r.unit, p10: r.p10, p50: r.p50, p90: r.p90, evidence: 'computation', resultKey };
+          // A computation is the check's number under the check's own label and unit; the agent's are ignored.
+          return { key: n.key, label: r.label, unit: r.unit, p10: r.p10, p50: r.p50, p90: r.p90, evidence: 'computation', resultKey };
         }
         if (![n.p10, n.p50, n.p90].every((x: unknown) => typeof x === 'number')) throw new ToolFailure(`Number '${n.key}' is a ${n.evidence}, so it needs p10, p50 and p90.`);
         return { key: n.key, label: n.label ?? n.key, unit: n.unit ?? '', p10: n.p10, p50: n.p50, p90: n.p90, evidence: n.evidence, resultKey: n.resultKey ?? '' };

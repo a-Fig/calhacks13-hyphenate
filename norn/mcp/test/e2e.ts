@@ -29,8 +29,10 @@ const ecr418 = [...norn.db.pullRequest.iter()].find(p => p.plmEcrNumber === 'BWM
 const server = await startServer({ norn, signingKey: key, port: 0, log: m => console.log(`  [server] ${m}`) });
 
 // ---- the job ---------------------------------------------------------------------------------------
-const identity = { actor: 'agent:norn/level1/BWM-ECR-0417', onBehalfOf: 'person:jeff', spawnedBy: 'norn' };
+// The job id is part of the actor name: an actor can be held by one live job at a time, so a rerun
+// within the token's life (a second rehearsal) must not be locked out by the first.
 const jobId = `e2e-mcp-${stamp}`;
+const identity = { actor: `agent:norn/level1/BWM-ECR-0417/${jobId}`, onBehalfOf: 'person:jeff', spawnedBy: 'norn' };
 const entry = nornMcpFor(identity, { jobId, role: 'level1-writeup', ecrs: ['BWM-ECR-0417'], url: server.url, ttlSeconds: 900 });
 const spec: JobSpec = {
   id: jobId,
@@ -114,8 +116,8 @@ void reg;
 
 // ---- optional second session: a Level 1 impact statement -----------------------------------------------
 if (process.argv.includes('--statement')) {
-  const id2 = { actor: 'agent:norn/statement/BWM-ECR-0417', onBehalfOf: null, spawnedBy: 'norn' };
   const job2 = `e2e-stmt-${stamp}`;
+  const id2 = { actor: `agent:norn/statement/BWM-ECR-0417/${job2}`, onBehalfOf: null, spawnedBy: 'norn' };
   const entry2 = nornMcpFor(id2, { jobId: job2, role: 'level1-writeup', ecrs: ['BWM-ECR-0417'], url: server.url, ttlSeconds: 900 });
   const log2 = join(stateDir, 'e2e', `${job2}.jsonl`);
   const file2 = jsonlFileSink(log2);
@@ -136,7 +138,7 @@ running a second ${CHEAP_MODEL} session as ${id2.actor}, acting for nobody (job 
       '2. Post a Level 1 impact statement on BWM-ECR-0417 with post_impact_statement.',
       '   - Change class "Class I", route "CCB". The headline is one sentence and says the numbers are mock.',
       '   - Headline numbers: the per-unit cost change and the weeks until the change reaches the line, both as computation, using their result keys from get_impact.',
-      '   - Two drivers, as judgment. Two assumptions the numbers lean on, each with a note. One claim, as fact: that the ECR says the bracket cracked in fatigue test.',
+      '   - Two drivers, as judgment. Two assumptions the numbers lean on, each with a note. One claim, as judgment: that the ECR text describes a fatigue crack in the bracket. (Facts are not yours to label.)',
       '3. Finish with one sentence saying whether the statement was saved.',
     ].join('\n'),
     mcpServers: { [NORN_MCP_SERVER_NAME]: entry2 },
