@@ -400,7 +400,7 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
           <ul className="nx-side-list nx-linked">
             {a.linked.map(l => (
               <li key={l.ref}>
-                {l.ref.startsWith('NCR') ? <NcrIcon size={16} className="nx-fg-attention" /> : l.state === 'released' ? <ReleaseIcon size={16} className="nx-fg-done" /> : l.state === 'open' ? <DotFillIcon size={16} className="nx-fg-open" /> : <CheckCircleFillIcon size={16} className="nx-fg-done" />}
+                {l.kind === 'NCR' ? <NcrIcon size={16} className={l.state === 'open' ? 'nx-fg-attention' : 'nx-fg-muted'} /> : l.state === 'released' ? <ReleaseIcon size={16} className="nx-fg-done" /> : l.state === 'open' ? <DotFillIcon size={16} className="nx-fg-open" /> : <CheckCircleFillIcon size={16} className="nx-fg-done" />}
                 <span><b>{l.ref}</b> <span className="nx-fg-muted">{l.title}</span></span>
               </li>
             ))}

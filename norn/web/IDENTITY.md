@@ -28,7 +28,7 @@ From `norn/`, after `npm ci`:
 
 ```powershell
 # Start the isolated preview; saved runs and labelled mock narrative are the default.
-npm run web -- --port 5186
+npm run dev -w @norn/web -- --port 5186
 # Capture before changing the identity, into a fresh output directory.
 node web/screenshots/capture-identity.mjs before C:/path/to/media
 # Capture the final screens, exercise controls and mobile layouts, and record the demo flow.
