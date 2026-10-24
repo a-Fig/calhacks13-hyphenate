@@ -161,6 +161,8 @@ export interface CostCheckResult {
   piecePrices: { item: ItemCode; base: Money | null; head: Money | null }[];
   periods: { period: string; program: ProgramId; units: number; recurring: Money }[];
   drivers: Driver[];
+  /** The cost measures asked for in the options, in their order. */
+  measures: CostMeasure[];
   convergence: {
     seeds: [string, string];
     tolerance: number;
@@ -171,6 +173,23 @@ export interface CostCheckResult {
   flags: Flag[];
   inputs: InputRecord[];
 }
+
+/** A cost measure an approval rule asks for (a company config's `approval.costMeasure`). */
+export interface CostMeasureRequest {
+  /** Months of recurring cost counted from the cut-in. Must equal the check's window. */
+  horizonMonths: number;
+  /** Whether savings offset spend: |spend - saving| per draw. Otherwise max(spend, saving). */
+  savingsOffset: boolean;
+}
+
+/**
+ * The size of a change as an approval rule measures it, computed per draw from the cost components,
+ * never from netted totals or from quantiles: `p50` and `p90` are of the per-draw size itself.
+ * `unavailable` when the check cannot compute it (another horizon than its window).
+ */
+export type CostMeasure =
+  | { source: 'exact'; horizonMonths: number; savingsOffset: boolean; windowMonths: number; draws: number; p50: number; p90: number }
+  | { source: 'unavailable'; horizonMonths: number; savingsOffset: boolean; reason: string };
 
 export interface CostCheckOptions {
   /** The run's seed. Use the deployment's configured seed, never a hash of the head's inputs (README). */
@@ -191,6 +210,11 @@ export interface CostCheckOptions {
   convergenceTolerance?: number;
   /** Assumptions recorded on the ECR or the baseline, replacing defaults by id. */
   assumptions?: AssumptionOverride[];
+  /**
+   * Cost measures to compute exactly, per draw, for a company's approval rules (its config's
+   * `approval.costMeasure`): see CostMeasure. Each is in the result's `measures`.
+   */
+  measures?: CostMeasureRequest[];
   defaults?: Partial<CostDefaults>;
 }
 
@@ -918,6 +942,31 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     return { program: p.id, base: money(`unitCost:${p.id}/base`), head: money(`unitCost:${p.id}/head`), delta: money(`unitCost:${p.id}/delta`, paired) };
   });
 
+  // The size of the change as an approval rule measures it, per draw. The components are each row's
+  // one-time column and its unit cost x quantity, and each program's recurring change over the window:
+  // the numbers the originator states and the checks compute, never a row total that nets a spend
+  // against a saving. Spend is the sum of the positive components in a draw, saving the sum of the
+  // negative ones' sizes.
+  function measureOf(m: CostMeasureRequest): CostMeasure {
+    if (m.horizonMonths !== windowMonths)
+      return { source: 'unavailable', horizonMonths: m.horizonMonths, savingsOffset: m.savingsOffset, reason: `the check's window is ${windowMonths} months, not ${m.horizonMonths}` };
+    const keys = rows.flatMap((r) => (r.recurring ? [`${r.id}/total`] : [...(r.oneTime ? [`${r.id}/oneTime`] : []), ...(r.unit ? [`${r.id}/extended`] : [])]));
+    const comps = keys.map((k) => run1.arrays.get(k)!);
+    const size = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      let spend = 0;
+      let saving = 0;
+      for (const c of comps) {
+        const v = c[i]!;
+        if (v > 0) spend += v;
+        else saving -= v;
+      }
+      size[i] = m.savingsOffset ? Math.abs(spend - saving) : Math.max(spend, saving);
+    }
+    const sm = summarize(size);
+    return { source: 'exact', horizonMonths: m.horizonMonths, savingsOffset: m.savingsOffset, windowMonths, draws: n, p50: r2(sm.p50), p90: r2(sm.p90) };
+  }
+
   // One-at-a-time swings of the year-one total, and each disposition decision.
   const windowExpr = pending.get('windowTotal')!.expr;
   const base0 = evaluateAt(windowExpr, pointOfVar);
@@ -988,6 +1037,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     piecePrices: pieceItems.map((code) => ({ item: code, base: maybe(`piece:${code}/base`), head: maybe(`piece:${code}/head`) })),
     periods,
     drivers: drivers.slice(0, 8),
+    measures: (options.measures ?? []).map(measureOf),
     convergence: { seeds: [options.seed, seed2], tolerance: tol, converged, metrics },
     bomDelta: { ok: s.conflicts.length === 0, conflicts: s.conflicts.length },
     flags,
