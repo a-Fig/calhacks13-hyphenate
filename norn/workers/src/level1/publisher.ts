@@ -18,7 +18,10 @@
 // publishers that look at the same moment would both write. The write is therefore taken in turns
 // through a lease row in Norn's database (claim_publication, keyed by ECR): claim, read the PLM
 // again, write, release. A publisher that loses the claim writes nothing and looks again on its next
-// sweep, by which time the PLM shows the ref.
+// sweep, by which time the PLM shows the ref. With the lease held it also picks the statement again,
+// so a publisher that waited with an older candidate never overwrites a newer one. The PLM is read on
+// every sweep rather than trusting a remembered ref: a cached "done" would never repair a change made
+// since (by a person, or by a publisher that has since exited).
 import { pathToFileURL } from 'node:url';
 import type { DbConnection } from '@norn/bindings';
 import { connect, subscribe } from '../connect.ts';
@@ -45,8 +48,6 @@ export interface Lease {
 
 export interface PublishDeps {
   plm: PlmApi;
-  /** ECR number -> the ref last seen in the PLM, so a steady state costs no requests. */
-  published: Map<string, string>;
   /** Without one, nothing stops two publishers writing at once. The process always passes one. */
   lease?: Lease;
   /** Post a short comment on the ECR after a write. */
@@ -54,37 +55,51 @@ export interface PublishDeps {
   log: (m: string) => void;
 }
 
-/** Write one formatted statement onto the ECR in the PLM, unless the PLM already shows it. */
-export async function publishStatement(d: PublishDeps, ecrNumber: string, f: Formatted, prov: Pick<Provenance, 'mock'>): Promise<PublishResult> {
-  if (prov.mock) {
+export interface Publication {
+  f: Formatted;
+  prov: Pick<Provenance, 'mock'>;
+}
+
+/**
+ * Write one formatted statement onto the ECR in the PLM, unless the PLM already shows it.
+ *
+ * The PLM is always read, never a remembered ref: someone may have changed the fields since (a person,
+ * or another publisher), and a remembered "done" would never notice. Once the lease is ours,
+ * `latest` picks the statement again from Norn's database and the PLM is read again, so a publisher
+ * that paused holding an older candidate does not overwrite a newer one another publisher wrote
+ * while it waited: it writes only what is still the newest and differs from what the PLM holds.
+ */
+export async function publishStatement(d: PublishDeps, ecrNumber: string, f: Formatted, prov: Pick<Provenance, 'mock'>, latest?: () => Publication | null): Promise<PublishResult> {
+  const mock = () => {
     d.log(`${ecrNumber}: not written to the PLM, the statement rests on mock numbers`);
-    return 'mock';
-  }
-  if (d.published.get(ecrNumber) === f.ref) return 'unchanged';
+    return 'mock' as const;
+  };
+  if (prov.mock) return mock();
   const current = await d.plm.readImpact(ecrNumber);
   if (current === null) return 'missing';
-  if (alreadyPublished(current, f)) {
-    d.published.set(ecrNumber, f.ref);
-    return 'unchanged';
-  }
+  if (alreadyPublished(current, f)) return 'unchanged';
   if (d.lease && !(await d.lease.claim(Number(f.ref.split('.')[0])))) return 'busy';
   try {
+    let target = { f, prov };
     if (d.lease) {
-      // Whoever held the lease before us may have written while we waited: look again, now that it is ours.
+      // Whoever held the lease before us may have written while we waited: choose again, look again, now that it is ours.
+      if (latest) {
+        const n = latest();
+        if (!n) return 'unchanged';
+        if (n.f.ref !== f.ref) d.log(`${ecrNumber}: a newer statement (${n.f.ref}) took over from ${f.ref} while waiting for the lease`);
+        target = n;
+        if (n.prov.mock) return mock();
+      }
       const again = await d.plm.readImpact(ecrNumber);
       if (again === null) return 'missing';
-      if (alreadyPublished(again, f)) {
-        d.published.set(ecrNumber, f.ref);
-        return 'unchanged';
-      }
+      if (alreadyPublished(again, target.f)) return 'unchanged';
     }
-    const after = await d.plm.writeImpact(ecrNumber, f.fields);
+    const after = await d.plm.writeImpact(ecrNumber, target.f.fields);
     // Proof, not the status code: the PLM's answer holds our ref.
-    if (!alreadyPublished(after, f)) d.log(`${ecrNumber}: the PLM stored the statement but its answer differs from what was sent (it may have rewritten the text)`);
-    d.published.set(ecrNumber, f.ref);
+    if (!alreadyPublished(after, target.f)) d.log(`${ecrNumber}: the PLM stored the statement but its answer differs from what was sent (it may have rewritten the text)`);
     if (d.comment) {
-      const rec = f.recommendation ? ` Recommendation: ${f.recommendation}.` : '';
-      await d.plm.postComment(ecrNumber, `<p>Norn posted a Level ${f.fields.impact_report_level} impact statement on this ECR.${rec} See the Impact assessment tab.</p>`);
+      const rec = target.f.recommendation ? ` Recommendation: ${target.f.recommendation}.` : '';
+      await d.plm.postComment(ecrNumber, `<p>Norn posted a Level ${target.f.fields.impact_report_level} impact statement on this ECR.${rec} See the Impact assessment tab.</p>`);
     }
     return 'written';
   } finally {
@@ -96,24 +111,27 @@ export async function publishStatement(d: PublishDeps, ecrNumber: string, f: For
 
 type Row<T extends keyof DbConnection['db']> = DbConnection['db'][T] extends { iter(): IterableIterator<infer R> } ? R : never;
 
-/** What ranking a statement needs. `crSeq` is the change-request revision of the run it was written from, or null. */
+/** What ranking a statement needs. `crSeq` is the change-request revision of the run it was written from, or null; `prRevision` is the ECR's own revision counter the module saw when it was posted. */
 export interface Candidate {
   id: bigint;
   level: number;
-  createdMs: number;
   crSeq: number | null;
+  prRevision: number;
 }
 
 /**
- * The statement to publish for an ECR: of those for the current change-request revision, the highest
- * level, newest of that level. An earlier revision's statement never beats the current one, whatever
- * its level; with none for the current revision there is nothing to publish (the PLM keeps showing
- * the earlier one, whose text names its revision). `current` is null for an ECR with no change request.
+ * The statement to publish for an ECR: of those for the current revision, the highest level, newest
+ * of that level. A statement written from a check run is for that run's change-request revision. One
+ * that rests on no run is for the current revision only if the ECR has not changed since the module
+ * recorded it (same `prRevision`); it is never bound by when it was posted. An earlier revision's
+ * statement never beats the current one, whatever its level; with none for the current revision
+ * there is nothing to publish (the PLM keeps showing the earlier one, whose text names its revision).
  */
-export function pickStatement<T extends Candidate>(all: T[], current: { seq: number; createdMs: number } | null): T | undefined {
+export function pickStatement<T extends Candidate>(all: T[], current: { seq: number | null; prRevision: number }): T | undefined {
   let best: T | undefined;
   for (const s of all) {
-    if (current && !statementIsFor(s, current.seq, current.createdMs)) continue;
+    const forNow = s.crSeq !== null ? current.seq !== null && statementIsFor(s, current.seq) : s.prRevision === current.prRevision;
+    if (!forNow) continue;
     if (!best || s.level > best.level || (s.level === best.level && s.id > best.id)) best = s;
   }
   return best;
@@ -121,8 +139,8 @@ export function pickStatement<T extends Candidate>(all: T[], current: { seq: num
 
 export function gather(db: DbConnection['db'], pr: Row<'pullRequest'>): { statement: StatementDoc; ecr: EcrRef; prov: Provenance } | null {
   const cur = [...db.ecrRevision.prId.filter(pr.id)].find(r => r.current);
-  const candidates = [...db.impactStatement.prId.filter(pr.id)].map(s => ({ row: s, id: s.id, level: s.level, createdMs: s.createdAt.toDate().getTime(), crSeq: crSeqOfRun(db, s.checkRunId) }));
-  const picked = pickStatement(candidates, cur ? { seq: cur.seq, createdMs: cur.createdAt.toDate().getTime() } : null);
+  const candidates = [...db.impactStatement.prId.filter(pr.id)].map(s => ({ row: s, id: s.id, level: s.level, prRevision: s.prRevision, crSeq: crSeqOfRun(db, s.checkRunId) }));
+  const picked = pickStatement(candidates, { seq: cur?.seq ?? null, prRevision: pr.revision });
   if (!picked) return null;
   const s = picked.row;
   const doc: StatementDoc = {
@@ -177,19 +195,20 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const only = (process.env.NORN_PUBLISH_ECRS ?? '').split(',').map(s => s.trim()).filter(Boolean);
   const plm = plmFromConnector(await plmOptionsFromEnv());
   const { conn, R } = await connect({ kind: 'agent', name, origin: 'norn', spawnedBy: 'Norn' });
-  // One id per process: two publishers of the same name share a saved identity, so the identity cannot tell them apart.
-  const holder = `${name}-${randomUUID()}`;
+  // The module takes the holder from our connection's identity. Two publishers of the same name share a
+  // saved identity, so each process also names itself.
+  const processId = `${name}-${randomUUID()}`;
   const leaseFor = (prId: bigint): Lease => ({
     async claim(statementId) {
       try {
-        await R.claimPublication({ prId, statementId: BigInt(statementId), holder, leaseMs: LEASE_MS });
+        await R.claimPublication({ prId, statementId: BigInt(statementId), processId, leaseMs: LEASE_MS });
         return true;
       } catch (e) {
         if (/\[held\]/.test((e as Error).message)) return false;
         throw e;
       }
     },
-    release: () => R.releasePublication({ prId, holder }),
+    release: () => R.releasePublication({ prId, processId }),
   });
   await subscribe(conn, [
     'SELECT * FROM pull_request',
@@ -198,7 +217,6 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     'SELECT * FROM check_result',
     'SELECT * FROM ecr_revision',
   ]);
-  const published = new Map<string, string>();
   const missingUntil = new Map<string, number>();
   let running = false;
   let again = false;
@@ -219,7 +237,12 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
           if (!g) continue;
           try {
             const f = statementToPlmFields(g.statement, g.ecr, g.prov, { nornBaseUrl: settings.webBaseUrl });
-            const r = await publishStatement({ plm, published, lease: leaseFor(pr.id), comment: settings.publishComment, log }, pr.plmEcrNumber, f, g.prov);
+            // After the lease is ours: the newest statement again, from the freshest cache.
+            const latest = (): Publication | null => {
+              const g2 = gather(conn.db, conn.db.pullRequest.id.find(pr.id) ?? pr);
+              return g2 ? { f: statementToPlmFields(g2.statement, g2.ecr, g2.prov, { nornBaseUrl: settings.webBaseUrl }), prov: g2.prov } : null;
+            };
+            const r = await publishStatement({ plm, lease: leaseFor(pr.id), comment: settings.publishComment, log }, pr.plmEcrNumber, f, g.prov, latest);
             if (r === 'written') log(`${pr.plmEcrNumber}: wrote Level ${g.statement.level} statement ${g.statement.id} to the PLM (ref ${f.ref}${f.recommendation ? `, ${f.recommendation}` : ''})`);
             else if (r === 'busy') log(`${pr.plmEcrNumber}: another publisher is writing it; looking again later`);
             else if (r === 'missing') {

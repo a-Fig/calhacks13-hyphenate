@@ -295,13 +295,16 @@ const impactStatement = table(
 // A short lease on writing one ECR's impact statement to the PLM (#42). The PLM has no
 // compare-and-set, so two publishers that each read "not there yet" would both write. The one
 // atomic step is claim_publication: it refuses while another holder's unexpired lease stands.
-// `holder` is a random id per publisher process (a saved identity is shared by processes of one name).
+// The holder is the caller's identity (taken from the connection, never from the arguments), so only
+// it can renew or release. `processId` is a random id per publisher process, because processes of
+// one name share a saved identity and must still take turns.
 const publicationClaim = table(
   { name: 'publication_claim', public: true },
   {
     prId: t.u64().primaryKey(),
     statementId: t.u64(),
-    holder: t.string(),
+    holder: t.identity(),
+    processId: t.string(),
     expiresAt: t.timestamp(),
   }
 );

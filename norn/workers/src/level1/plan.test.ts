@@ -129,10 +129,12 @@ test('a late statement from the revision-1 session does not stand in for revisio
   assert.equal(decide(rev2({ statements: [{ level: 2, createdMs: T0 + 690_000, crSeq: 2 }] }), opts({ nowMs: T0 + 700_000 })).action, 'skip');
 });
 
-test('a statement that rests on no check run falls back to the time it was posted', () => {
+test('a statement that rests on no check run never stops a session, whenever it was posted', () => {
+  // e.g. judgment-only numbers from a scoped agent whose spawnedBy is not a check run, after revision 2 arrived
   const noRun = (createdMs: number) => ({ level: 1, createdMs, crSeq: null });
   assert.equal(decide(rev2({ statements: [noRun(T0 + 25_000)] }), opts({ nowMs: T0 + 700_000 })).action, 'dispatch');
-  assert.equal(decide(rev2({ statements: [noRun(T0 + 650_000)] }), opts({ nowMs: T0 + 700_000 })).action, 'skip');
+  assert.deepEqual(decide(rev2({ statements: [noRun(T0 + 650_000)] }), opts({ nowMs: T0 + 700_000 })), { action: 'dispatch', revision: 2, attempt: 1, s2RunId: 15 });
+  assert.deepEqual(decide(facts({ statements: [noRun(T0 + 650_000)] }), opts()), { action: 'dispatch', revision: 1, attempt: 1, s2RunId: 7 });
 });
 
 test('a session still running for revision 1 does not hold back revision 2, and is named for stopping', () => {

@@ -36,7 +36,10 @@ of the main checkout, which a worktree does not have). Run ONE dispatcher per da
   run's inputs name the change-request revision and the ERP baseline. `post_impact_statement`
   refuses a session whose run is no longer `done` (a new revision, baseline or assumption made it
   stale), so a late revision-1 session cannot post, and cannot suppress revision 2's session. The
-  dispatcher also stops running sessions of an earlier revision when the next one arrives.
+  dispatcher also stops running sessions of an earlier revision when the next one arrives. A
+  statement that rests on no run (judgment only, from an agent whose spawnedBy is not a check run) is
+  never bound by when it was posted: it does not stop a session from being dispatched, and the
+  publisher takes it only while the ECR is still at the `prRevision` the module recorded for it.
 - Sessions are keyed by ECR and revision (the job id names both), so another ECR's session never
   blocks this one.
 - Events also go to a JSONL file (`teeSink`) as a fallback if the database is unreachable.
@@ -67,21 +70,27 @@ plain fields match, nothing is written. A restart, a second publisher or a reset
 therefore writes nothing twice. A person editing a plain field gets it put back. Mock numbers
 (s3, s4 placeholders) never reach the PLM as a headline. `NORN_PUBLISH_ECRS=ECR-0417` limits it.
 
-Which statement: of those written from the ECR's current change-request revision, the highest level,
-then the newest. An earlier revision's statement is never published over the current one, and with
+Which statement: of those for the current revision (written from a run of the current change-request
+revision, or with no run and posted at the ECR's current `prRevision`), the highest level, then the newest. An earlier revision's statement is never published over the current one, and with
 none for the current revision nothing is written. The text's provenance (revision, baseline, code
 version, formulas) is read from the statement's own check run, never inferred from matching numbers.
 
 Two publishers at once: read-then-write is not atomic and the PLM cannot refuse a second identical
 write, so a write takes a lease first (`claim_publication` / `release_publication`, table
-`publication_claim`, one row per ECR, 60 s so a dead holder cannot block it). The holder reads the
-PLM again once it has the lease, writes, releases. A publisher that loses the claim writes nothing and
+`publication_claim`, one row per ECR, 60 s so a dead holder cannot block it). The holder is the
+caller's identity, taken by the module from the connection; only that identity (and process) can
+renew or release, and only Norn's own agents (principal kind agent, origin norn) can claim, which is
+as strong as the module's notion of "Norn" is (register_actor does not prove origin). Once it has the
+lease the publisher picks the newest statement again and reads the PLM again, and writes only if that
+statement is still newest and the PLM does not already show it. The PLM is read on every sweep: a
+remembered "published" ref is not trusted. A publisher that loses the claim writes nothing and
 finds the ref on its next 15 s sweep. A write that outlasts the lease could still race; none does today.
 
 ## The PLM ingest (`ingest-plm.ts`)
 
 Lists the PLM's ECRs once and takes in every one in a wanted state (`NORN_PLM_STATES`, default
-Submitted, In CM Review, CCB Review; `NORN_PLM_ECRS` limits it), then watches the PLM
+Submitted, In CM Review, CCB Review; `NORN_PLM_ECRS` limits it), one at a time: an ECR that cannot be read
+or mapped (a `PlmMappingError`) is logged by name and skipped, and the rest are still taken in. Then it watches the PLM
 (`NORN_PLM_INTERVAL_MS`, default 1000) and reports each changed ECR. Norn's own writes to the PLM
 are not offered back by the watcher. `ingest.ts` hands `ingestOnce` and `itemOf` in, because it is
 the entry module and importing it back would deadlock on its top-level await.

@@ -13,6 +13,7 @@ import {
 export default __t.row({
   prId: __t.u64().primaryKey().name("pr_id"),
   statementId: __t.u64().name("statement_id"),
-  holder: __t.string(),
+  holder: __t.identity(),
+  processId: __t.string().name("process_id"),
   expiresAt: __t.timestamp().name("expires_at"),
 });

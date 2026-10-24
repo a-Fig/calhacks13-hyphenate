@@ -580,29 +580,43 @@ export const postImpactStatement = write(
 // A lease that is not released (the holder died) ends by itself.
 // ---------------------------------------------------------------------------------------------
 
+// Only Norn's own agents publish. The module has no stronger notion of "Norn" than a registered
+// agent principal with origin 'norn' (register_actor does not prove it), so this keeps out people,
+// outside agents, unregistered connections and job-scoped agents (the scope rule already denies
+// those every reducer but comments, assumptions and statements).
+const isNornAgent = (a: { kind: string; origin: string }) => a.kind === 'agent' && a.origin === 'norn';
+
 export const claimPublication = write(
   'claim_publication',
-  { prId: t.u64(), statementId: t.u64(), holder: t.string(), leaseMs: t.u32() },
-  (ctx, a) => {
+  { prId: t.u64(), statementId: t.u64(), processId: t.string(), leaseMs: t.u32() },
+  (ctx, a, call) => {
+    if (!isNornAgent(call.actor)) throw new SenderError(`[forbidden] ${call.actor.name} is not one of Norn's own agents; only they publish to the PLM`);
     const pr = getPr(ctx, a.prId);
     if (!ctx.db.impactStatement.id.find(a.statementId)) throw new SenderError(`statement ${a.statementId} does not exist`);
-    const holder = nonEmpty(a.holder, 'holder', 64);
+    const processId = nonEmpty(a.processId, 'processId', 64);
     if (a.leaseMs < 1000 || a.leaseMs > 300_000) throw new SenderError('a publication lease lasts 1 to 300 seconds');
     const held = ctx.db.publicationClaim.prId.find(pr.id);
     const now = ctx.timestamp.microsSinceUnixEpoch;
+    const mine = held && held.holder.isEqual(ctx.sender) && held.processId === processId;
     // A thrown SenderError is the answer "someone else is writing": the caller's call rejects, atomically.
-    if (held && held.holder !== holder && held.expiresAt.microsSinceUnixEpoch > now)
+    if (held && !mine && held.expiresAt.microsSinceUnixEpoch > now)
       throw new SenderError(`[held] ${pr.plmEcrNumber} is being published by another holder until ${held.expiresAt.toISOString()}`);
-    const row = { prId: pr.id, statementId: a.statementId, holder, expiresAt: plusMs(ctx.timestamp, a.leaseMs) };
+    const row = { prId: pr.id, statementId: a.statementId, holder: ctx.sender, processId, expiresAt: plusMs(ctx.timestamp, a.leaseMs) };
     if (held) ctx.db.publicationClaim.prId.update(row);
     else ctx.db.publicationClaim.insert(row);
     return { prId: pr.id, entity: `publication_claim:${pr.id}`, summary: `claimed publishing statement ${a.statementId} to the PLM for ${a.leaseMs} ms` };
   }
 );
 
-export const releasePublication = write('release_publication', { prId: t.u64(), holder: t.string() }, (ctx, a) => {
+// Released by the connection that took it (and the process that took it); anyone else's release does
+// nothing. A lease that has run out may be cleared by any of Norn's agents, though claiming over it
+// works without that.
+export const releasePublication = write('release_publication', { prId: t.u64(), processId: t.string() }, (ctx, a, call) => {
   const held = ctx.db.publicationClaim.prId.find(a.prId);
-  if (!held || held.holder !== a.holder) return null; // not ours any more (it expired and was taken): nothing to release
+  if (!held) return null;
+  const mine = held.holder.isEqual(ctx.sender) && held.processId === a.processId;
+  const expired = held.expiresAt.microsSinceUnixEpoch <= ctx.timestamp.microsSinceUnixEpoch;
+  if (!mine && !(expired && isNornAgent(call.actor))) return null;
   ctx.db.publicationClaim.prId.delete(a.prId);
   return null;
 });

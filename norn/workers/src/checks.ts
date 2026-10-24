@@ -266,25 +266,44 @@ check('a statement posted outside a session records the run its computation numb
 await A.R.postImpactStatement({ ...body('Norn'), headline: `judgment ${stamp}`, numbers: [{ key: 'j', label: 'Effort', unit: 'h', p10: 1, p50: 2, p90: 3, evidence: 'judgment', resultKey: '' }] });
 check('...and records 0 when it rests on no run at all', await holds(() => stmts(E12.id).find(s => s.headline === `judgment ${stamp}`)?.checkRunId === 0n));
 
-// the publication lease
-const claim = (holder: string, ms = 60_000) => rejects(A.R.claimPublication({ prId: E12.id, statementId: second.id, holder, leaseMs: ms }));
-const c1 = await claim('pub-1');
-const c2 = await claim('pub-2');
-const c1b = await claim('pub-1');
-check('claim_publication: one holder at a time; the second is refused with [held], the first may renew', c1 === null && c2?.message.includes('[held]') === true && c1b === null, `${c2?.message}`);
-check('...and the claim is a row naming the holder and statement', db.publicationClaim.prId.find(E12.id)?.holder === 'pub-1' && db.publicationClaim.prId.find(E12.id)?.statementId === second.id);
-await A.R.releasePublication({ prId: E12.id, holder: 'pub-2' });
-await sleep(150);
-check('...a holder that does not hold it cannot release it', db.publicationClaim.prId.find(E12.id)?.holder === 'pub-1');
-await A.R.releasePublication({ prId: E12.id, holder: 'pub-1' });
-check('...the holder releases it, and then another can claim', await holds(() => !db.publicationClaim.prId.find(E12.id)) && (await claim('pub-2')) === null);
-await A.R.releasePublication({ prId: E12.id, holder: 'pub-2' });
-await claim('pub-1', 1000);
+// a scoped agent whose spawnedBy is not a check run: judgment only, so no run; the module records the revision it saw
+await L1.R.postImpactStatement(body('Norn', { headline: `scoped judgment ${stamp}`, numbers: [{ key: 'j', label: 'Effort', unit: 'h', p10: 1, p50: 2, p90: 3, evidence: 'judgment', resultKey: '' }] }));
+const scopedJ = await until(() => stmts(E12.id).find(s => s.headline === `scoped judgment ${stamp}`), 3000, 'the scoped judgment statement');
+check('a scoped agent\'s judgment-only statement records no run and the ECR revision the module saw when it was posted', scopedJ.checkRunId === 0n && scopedJ.prRevision === pr(E12.id).revision, `checkRunId ${scopedJ.checkRunId}, prRevision ${scopedJ.prRevision}, ECR at ${pr(E12.id).revision}`);
+
+// the publication lease: held by a connection's identity, for Norn's own agents only
+const A2 = await connect({ kind: 'agent', name: `check-a2-${stamp}`, origin: 'norn', spawnedBy: 'Norn' }, { persistToken: false, quiet: true });
+const claimAs = (who: { R: any }, processId: string, ms = 60_000) => rejects(who.R.claimPublication({ prId: E12.id, statementId: second.id, processId, leaseMs: ms }));
+const held = () => db.publicationClaim.prId.find(E12.id);
+const c1 = await claimAs(A, 'p1');
+const c2 = await claimAs(A, 'p2');
+const c1b = await claimAs(A, 'p1');
+check('claim_publication: one holder at a time, even two processes of one identity; the second is refused with [held], the first may renew', c1 === null && c2?.message.includes('[held]') === true && c1b === null, `${c2?.message}`);
+check('...and the claim is a row naming the connection\'s identity and the statement', held()?.holder.isEqual(A.identity) === true && held()?.processId === 'p1' && held()?.statementId === second.id);
+const c3 = await claimAs(A2, 'p1');
+check('...another Norn agent, even using the same process id, is refused while the lease stands', c3?.message.includes('[held]') === true, c3?.message);
+const cExt = await claimAs(C, 'x');
+const cPerson = await claimAs(P, 'x');
+check('...a person and an outside agent may not claim a lease at all', cExt?.message.includes('[forbidden]') === true && cPerson?.message.includes('[forbidden]') === true, `${cExt?.message} | ${cPerson?.message}`);
+await A2.R.releasePublication({ prId: E12.id, processId: 'p1' });
+await C.R.releasePublication({ prId: E12.id, processId: 'p1' });
+await A.R.releasePublication({ prId: E12.id, processId: 'p2' });
+await sleep(200);
+check('...copying the holder text does not release it: not another identity, not the same identity\'s other process', held()?.holder.isEqual(A.identity) === true && held()?.processId === 'p1');
+await A.R.releasePublication({ prId: E12.id, processId: 'p1' });
+check('...the holder releases it, and then another can claim', await holds(() => !held()) && (await claimAs(A2, 'q1')) === null);
+await A2.R.releasePublication({ prId: E12.id, processId: 'q1' });
+await claimAs(A, 'p1', 1000);
 await sleep(1300);
-check('a lease that is not released ends by itself', (await claim('pub-2')) === null);
-await A.R.releasePublication({ prId: E12.id, holder: 'pub-2' });
-const bad = await rejects(A.R.claimPublication({ prId: E12.id, statementId: 999999n, holder: 'x', leaseMs: 1000 }));
+check('a lease that is not released ends by itself: another Norn agent may claim over it', (await claimAs(A2, 'q1')) === null && (await holds(() => held()?.holder.isEqual(A2.identity))));
+await A2.R.releasePublication({ prId: E12.id, processId: 'q1' });
+await claimAs(A, 'p1', 1000);
+await sleep(1300);
+await A2.R.releasePublication({ prId: E12.id, processId: 'whatever' });
+check('...or clear it', await holds(() => !held()));
+const bad = await rejects(A.R.claimPublication({ prId: E12.id, statementId: 999999n, processId: 'x', leaseMs: 1000 }));
 check('claiming for a statement that does not exist is refused', bad?.message.includes('does not exist') === true, bad?.message);
+A2.close();
 L1.close();
 
 // ---- every write left a log row ---------------------------------------------------------------------

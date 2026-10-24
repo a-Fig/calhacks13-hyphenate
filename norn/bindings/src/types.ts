@@ -250,7 +250,8 @@ export type Principal = __Infer<typeof Principal>;
 export const PublicationClaim = __t.object("PublicationClaim", {
   prId: __t.u64(),
   statementId: __t.u64(),
-  holder: __t.string(),
+  holder: __t.identity(),
+  processId: __t.string(),
   expiresAt: __t.timestamp(),
 });
 export type PublicationClaim = __Infer<typeof PublicationClaim>;

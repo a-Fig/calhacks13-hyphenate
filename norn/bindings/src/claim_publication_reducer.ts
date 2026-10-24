@@ -20,6 +20,6 @@ export default {
   },
   prId: __t.u64(),
   statementId: __t.u64(),
-  holder: __t.string(),
+  processId: __t.string(),
   leaseMs: __t.u32(),
 };

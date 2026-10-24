@@ -58,6 +58,26 @@ export async function readItem(opts: PlmOptions, name: string, itemOf: typeof It
   return { ...itemOf(r.change as Record<string, any>, r.modified), title: r.record.title || name, description: r.record.text.description };
 }
 
+/**
+ * Take in the ECRs found by the first listing, one at a time. One that cannot be read or mapped (a
+ * `PlmMappingError`: a field the PLM filled in a way the connector will not guess) is logged by name
+ * and skipped; the rest are still taken in and the watcher still starts.
+ */
+export async function takeIn(names: string[], read: (name: string) => Promise<IngestItem>, report: (item: IngestItem) => Promise<void>, log: (m: string) => void): Promise<{ taken: string[]; skipped: string[] }> {
+  const taken: string[] = [];
+  const skipped: string[] = [];
+  for (const name of names) {
+    try {
+      await report(await read(name));
+      taken.push(name);
+    } catch (e) {
+      skipped.push(name);
+      log(`${name}: not taken in, skipped: ${(e as Error).message}`);
+    }
+  }
+  return { taken, skipped };
+}
+
 /** Run until the process ends. */
 export async function runPlmIngest(R: Client['R'], log: (m: string) => void, deps: { ingestOnce: typeof IngestOnce; itemOf: typeof ItemOf }, o = plmIngestOptionsFromEnv()): Promise<void> {
   const opts = await plmOptionsFromEnv();
@@ -74,7 +94,7 @@ export async function runPlmIngest(R: Client['R'], log: (m: string) => void, dep
   const mark = all.at(-1)?.modified;
   const take = all.filter(e => wanted(o, e));
   log(`the PLM has ${all.length} ECR(s); ${take.length} to take in${o.only.length ? ` (only ${o.only.join(', ')})` : ''}: ${take.map(e => `${e.name} [${e.workflowState}]`).join(', ') || 'none'}`);
-  for (const e of take) await report(await readItem(opts, e.name, deps.itemOf));
+  await takeIn(take.map(e => e.name), name => readItem(opts, name, deps.itemOf), report, log);
 
   const watcher = watchEcrs(
     opts,

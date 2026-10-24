@@ -68,12 +68,13 @@ export function jobIsFor(jobId: string, ecrNumber: string): boolean {
 }
 
 /**
- * Whether a statement is the answer for change-request revision `rev`, which reached Norn at
- * `crCreatedMs`. A statement written from a check run belongs to that run's revision, however
- * late it was posted. Only one that rests on no run falls back to the time it was posted.
+ * Whether a statement is the answer for change-request revision `rev`: it was written from a check
+ * run of that revision, however late it was posted. A statement that rests on no run (crSeq null:
+ * judgment only, or posted outside a session) is never one, and never stops a session: it says
+ * nothing about which numbers were read.
  */
-export function statementIsFor(s: { createdMs: number; crSeq: number | null }, rev: number, crCreatedMs: number): boolean {
-  return s.crSeq !== null ? s.crSeq === rev : s.createdMs >= crCreatedMs;
+export function statementIsFor(s: { crSeq: number | null }, rev: number): boolean {
+  return s.crSeq === rev;
 }
 
 export function parseJobId(jobId: string): { revision: number; attempt: number } | null {
@@ -129,7 +130,7 @@ export function decide(e: EcrFacts, o: DecideOptions): Decision {
 
   // A statement written from this revision's check run is this revision's statement (any level: a
   // Level 2 or 3 supersedes Level 1). One written for an earlier revision, however late it was posted, is not.
-  if (e.statements.some(s => statementIsFor(s, rev, e.crCreatedMs!))) return skip(`revision ${rev} already has a statement`);
+  if (e.statements.some(s => statementIsFor(s, rev))) return skip(`revision ${rev} already has a statement`);
 
   // Sessions already started for this ECR's revision (not another ECR's: ids name the ECR).
   const mine = e.jobs.filter(j => j.revision === rev && jobIsFor(j.jobId, e.number));

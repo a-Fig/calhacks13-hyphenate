@@ -19,5 +19,5 @@ export default {
     return CallMeta;
   },
   prId: __t.u64(),
-  holder: __t.string(),
+  processId: __t.string(),
 };
