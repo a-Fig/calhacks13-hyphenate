@@ -121,7 +121,7 @@ Tyler, whether Ankit can also approve is open.
   Don't retry by another route.
 - If a source or API is blocked (a 403, a CAPTCHA, a sponsor API down), say so and stop
   escalating; don't route around it (2026-09-20).
-- A device, account, VM or API key reachable from this laptop is not permission to use it.
+- A device, account, VM or API key reachable from this machine is not permission to use it.
 - A parked idea stays parked. Don't build follow-on scope unasked.
 - A rename or relabel is never the fix for something that doesn't work. Make it work.
 - Copy a pattern that works (a UI, a layout, a library) rather than inventing one.
