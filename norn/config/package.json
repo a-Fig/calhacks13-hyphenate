@@ -1,0 +1,16 @@
+{
+  "name": "@norn/config",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Norn's company-config schema, validator and loader. No runtime dependencies; Node 24 runs the .ts files directly (node src/cli.ts <file>).",
+  "scripts": {
+    "check": "node src/cli.ts ../../bowman/norn-config/bowman.config.ts",
+    "test": "node --test",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  }
+}
