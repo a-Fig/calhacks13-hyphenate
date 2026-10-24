@@ -39,6 +39,7 @@ import {
   readCompanyConfig,
   readFastTrackRequest,
   tierVerdict,
+  type ApprovedAt,
   costFromRows,
   slipFromRows,
   type FastTrackRequest,
@@ -246,6 +247,21 @@ function onInputsChanged(ctx: Ctx, pr: Pr): string | null {
   return null;
 }
 
+// The tier and body an approval was given at. A fast-track approval has no body of its own, so it is
+// held to the body its tier had then, from the decision stored with it.
+function approvedAtOf(a: Approval): ApprovedAt {
+  let bodyId: string | undefined = a.kind === 'tier' ? a.bodyId : undefined;
+  if (bodyId === undefined) {
+    try {
+      const b = JSON.parse(a.decisionJson)?.route?.bodyId;
+      if (typeof b === 'string' && b) bodyId = b;
+    } catch {
+      // No decision to read a body from: the tier id alone is held.
+    }
+  }
+  return { tierId: a.tierId, tierIndex: a.tierIndex, ...(bodyId ? { bodyId } : {}) };
+}
+
 // Called when an approved ECR may have all its checks again (after a check finishes, and at the end of
 // a reconcile). If they have: keep the approval if the tier is the one it was given at, else withdraw it.
 // Returns what happened, for the log row of the call that caused it ('' when nothing).
@@ -265,8 +281,13 @@ export function settleApproval(ctx: Ctx, prId: bigint): string {
   if (loaded.state !== 'ok') {
     reason = 'the company configuration is not available, so the tier the approval was given at cannot be confirmed';
   } else {
-    const v = tierVerdict(loaded.config, buildFacts(ctx, pr, loaded.config), a);
-    if (!v.stands) reason = v.reason;
+    const v = tierVerdict(loaded.config, buildFacts(ctx, pr, loaded.config), approvedAtOf(a));
+    if (v.verdict === 'withdraw') reason = v.reason;
+    else if (v.verdict === 'unconfirmed') {
+      // The tier cannot be confirmed without an exact cost measure: the approval waits, and a release is refused.
+      if (!a.pendingRecheck) ctx.db.approval.id.update({ ...a, pendingRecheck: true });
+      return `re-check finished without an exact cost: approval still pending (${v.reason})`;
+    }
   }
   if (reason === null) {
     if (!a.pendingRecheck) return '';
@@ -287,8 +308,8 @@ export function assertReleasable(ctx: Ctx, pr: Pr): void {
   if (!a || a.tierIndex < 0) return;
   const loaded = companyConfig(ctx);
   if (loaded.state !== 'ok') throw new SenderError(`cannot release ECR ${pr.id}: the company configuration is not available, so the tier it was approved at cannot be confirmed`);
-  const v = tierVerdict(loaded.config, buildFacts(ctx, pr, loaded.config), a);
-  if (!v.stands) throw new SenderError(`cannot release ECR ${pr.id}: ${v.reason}`);
+  const v = tierVerdict(loaded.config, buildFacts(ctx, pr, loaded.config), approvedAtOf(a));
+  if (v.verdict !== 'stands') throw new SenderError(`cannot release ECR ${pr.id}: ${v.verdict === 'unconfirmed' ? 'its approval is pending a re-check, and ' : ''}${v.reason}`);
 }
 
 APPROVAL_HOOKS.onInputsChanged = onInputsChanged;

@@ -234,18 +234,49 @@ describe('the decision', () => {
 });
 
 describe('an approval across a change of inputs', () => {
-  const approvedAt = { tierId: 'technical_review', tierIndex: 0 };
+  const approvedAt = { tierId: 'technical_review', tierIndex: 0, bodyId: 'trc' };
+  const top = { tierId: 'program_management', tierIndex: 2, bodyId: 'pmc' };
+  /** Bowman's configuration with the tiers replaced by these (the first tier's body and id are given). */
+  const withTiers = (tiers: { id: string; body: string; upTo: number | null }[]): CompanyConfig => {
+    const c: CompanyConfig = JSON.parse(canonicalJson(bowman));
+    c.approval.tiers = tiers as CompanyConfig['approval']['tiers'];
+    return c;
+  };
   it('stands while the re-checked numbers point to the same tier', () => {
-    assert.equal(tierVerdict(bowman, factsFor('ECR-0423', 5_000), approvedAt).stands, true);
+    assert.equal(tierVerdict(bowman, factsFor('ECR-0423', 5_000), approvedAt).verdict, 'stands');
   });
   it('is withdrawn, with the reason, when they point to a different tier', () => {
     const v = tierVerdict(bowman, factsFor('ECR-0423', 164_489), approvedAt);
-    assert.equal(v.stands, false);
-    if (!v.stands) assert.match(v.reason, /from the technical_review tier to the board tier/);
+    assert.equal(v.verdict, 'withdraw');
+    if (v.verdict === 'withdraw') assert.match(v.reason, /from the technical_review tier to the board tier/);
   });
-  it('is withdrawn when the re-checked cost is no longer measured', () => {
+  it('does not confirm a lower-tier approval on an unmeasured cost', () => {
     const facts = factsFor('ECR-0423', 5_000);
     delete facts.cost!.measured;
-    assert.equal(tierVerdict(bowman, facts, approvedAt).stands, false);
+    assert.equal(tierVerdict(bowman, facts, approvedAt).verdict, 'unconfirmed');
+  });
+  it('does not confirm a top-tier approval on an unmeasured cost, which routes to the top tier by default', () => {
+    const facts = factsFor('ECR-0417', 8_643_313);
+    assert.equal(tierVerdict(bowman, facts, top).verdict, 'stands');
+    delete facts.cost!.measured;
+    const v = tierVerdict(bowman, facts, top);
+    assert.equal(v.verdict, 'unconfirmed');
+    if (v.verdict === 'unconfirmed') assert.match(v.reason, /not measured exactly/);
+  });
+  it('is withdrawn when the tier it was approved at got another id, though the position is the same', () => {
+    const c = withTiers([{ id: 'program_management_2', body: 'pmc', upTo: null }]);
+    const v = tierVerdict(c, factsFor('ECR-0423', 500), approvedAt);
+    assert.equal(v.verdict, 'withdraw');
+    if (v.verdict === 'withdraw') assert.match(v.reason, /technical_review tier it was approved at is no longer/);
+  });
+  it('is withdrawn when the same tier id is now decided by another body', () => {
+    const c = withTiers([{ id: 'technical_review', body: 'pmc', upTo: null }]);
+    const v = tierVerdict(c, factsFor('ECR-0423', 500), approvedAt);
+    assert.equal(v.verdict, 'withdraw');
+    if (v.verdict === 'withdraw') assert.match(v.reason, /now decided by the pmc body, not the trc body/);
+  });
+  it('is not fooled by a tier that moved: the same id and body at another position still stands', () => {
+    const c = withTiers([{ id: 'cheap', body: 'trc2', upTo: 100 }, { id: 'technical_review', body: 'trc', upTo: null }]);
+    assert.equal(tierVerdict(c, factsFor('ECR-0423', 500), approvedAt).verdict, 'stands');
   });
 });

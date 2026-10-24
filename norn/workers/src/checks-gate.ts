@@ -69,8 +69,8 @@ const eDrawn = ecrOf('ECR-0423', drawnId);
 mkdirSync(ecrDir, { recursive: true });
 const putEcr = (e: object & { id: string }) => writeFileSync(join(ecrDir, `${e.id}.json`), JSON.stringify(e));
 for (const e of [e423, e417, eDrawn]) putEcr(e);
-const sizeOf = (b: Baseline, e: Ecr): number => {
-  const m = costCheck(b, JSON.parse(JSON.stringify(e)), { seed: SEED, measures: [MEASURE] }).measures[0]!;
+const sizeOf = (b: Baseline, e: Ecr, months = 12): number => {
+  const m = costCheck(b, JSON.parse(JSON.stringify(e)), { seed: SEED, measures: [{ ...MEASURE, horizonMonths: months }], windowMonths: months }).measures[0]!;
   if (m.source !== 'exact') throw new Error(`the library gave no exact measure: ${m.reason}`);
   return m.p90;
 };
@@ -343,6 +343,84 @@ try {
   await helen.R.setPrStatus({ prId: p417.id, status: 'approved' });
   await until(() => pr(p417.id).status === 'approved' || undefined, 5000, 'the CFO approval');
   check('the CFO, who chairs it, approves, and the approval records the tier it was given at', standing(p417.id)?.tierId === want417 && standing(p417.id)?.approverName === 'Helen Castellanos');
+
+  // ---- the cost measure and the tier an approval rests on cannot be changed away from under it ---------------------
+  const configWith = (change: (c: CompanyConfig) => void): string => {
+    const c: CompanyConfig = JSON.parse(canonicalJson(bowmanConfig));
+    change(c);
+    return canonicalJson(c);
+  };
+  const setConfig = async (value: string) => {
+    await R.setConfig({ key: COMPANY_CONFIG_KEY, value });
+    await until(() => db.nornConfig.key.find(COMPANY_CONFIG_KEY)?.value === value || undefined, 5000, 'the new configuration to show');
+  };
+  const exactRow = (prId: bigint, key: string) => {
+    const r = current(prId, 's2_cost');
+    const row = r && r.status === 'done' ? results(r.id).find(x => x.key === key && !x.mock) : undefined;
+    return row ? (JSON.parse(row.detailJson) as { source?: string; horizonMonths?: number }) : undefined;
+  };
+  const settledApproval = (prId: bigint) => until(() => (settled(prId) && standing(prId)?.pendingRecheck === false ? standing(prId) : undefined), 120000, `the approval of ECR ${prId} to settle`);
+
+  // A horizon other than 12 months still gets an exact measure: the cost check is given the window.
+  const size6 = sizeOf(bigger, e417, 6);
+  check('(six months of the large ECR still belongs to the Program Management Committee on the library numbers)', tierOf(size6) === want417, `${size6} -> ${tierOf(size6)}`);
+  await setConfig(configWith(c => { c.approval.costMeasure.horizonMonths = 6; }));
+  const sixPending = standing(p417.id)?.pendingRecheck;
+  const kept6 = await settledApproval(p417.id);
+  const m6 = exactRow(p417.id, 'cost_measure:6:larger');
+  check(
+    'a six-month horizon gets an exact six-month measure, and the approval stands on it',
+    m6?.source === 'exact' && m6.horizonMonths === 6 && kept6.status === 'standing' && kept6.tierId === want417 && pr(p417.id).status === 'approved' && sixPending === true,
+    `${JSON.stringify(m6)} ${kept6.status} ${pr(p417.id).status} pending-at-change ${sixPending}`,
+  );
+
+  // An approval is confirmed on an exact cost only. The cost check finishes without one (played by this
+  // script, since the real worker now always measures): the approval stays pending and cannot be released.
+  await stopCost();
+  await setConfig(configWith(c => { c.approval.costMeasure.horizonMonths = 3; }));
+  const queued = await until(() => (current(p417.id, 's2_cost')?.status === 'queued' ? current(p417.id, 's2_cost') : undefined), 30000, 'the cost check for the three-month horizon to be queued');
+  const lastDone = [...db.checkRun.iter()].filter(r => r.prId === p417.id && r.stage === 's2_cost' && r.id !== queued.id && results(r.id).length > 0).sort((a, b) => Number(a.id - b.id)).at(-1)!;
+  const rows = results(lastDone.id)
+    .filter(r => !r.key.startsWith('cost_measure:'))
+    .map(r => ({ key: r.key, label: r.label, unit: r.unit, p10: r.p10, p50: r.p50, p90: r.p90, detailJson: r.detailJson, mock: r.mock }));
+  await A.R.claimCheck({ checkRunId: queued.id, leaseMs: 60000 });
+  const claimed = await until(() => (run(queued.id).status === 'running' ? run(queued.id) : undefined), 5000, 'the cost check to show as running');
+  m = mark();
+  await A.R.completeCheck({ checkRunId: queued.id, attempt: claimed.attempts, results: rows });
+  await until(() => run(queued.id).status === 'done' || undefined, 5000, 'the cost check to show as done');
+  await settledOn(p417.id);
+  const unconf = await until(() => logs(l => l.id > m && l.prId === p417.id && /still pending/.test(l.summary))[0], 5000, 'the log row for the unconfirmed approval').catch(() => undefined);
+  m = mark();
+  const noExact = await rejects(dana.R.setPrStatus({ prId: p417.id, status: 'merged' }));
+  const noExactLog = logAfter(m, p417.id, 'set_pr_status')[0];
+  check(
+    'a re-check that finishes without an exact cost does not confirm the approval: it stays pending and the release is refused, with the reason',
+    rows.length > 0 && !rows.some(r => r.key.startsWith('cost_measure:')) && standing(p417.id)?.pendingRecheck === true && pr(p417.id).status === 'approved'
+      && unconf !== undefined && ((noExact !== null && /pending a re-check.*not measured exactly/.test(noExact.message)) || (noExactLog !== undefined && noExactLog.outcome !== 'applied' && /not measured exactly/.test(noExactLog.summary))),
+    `${rows.length} rows, pending ${standing(p417.id)?.pendingRecheck}, ${pr(p417.id).status}, ${noExact?.message ?? 'accepted'} ${noExactLog?.outcome ?? ''} ${noExactLog?.summary.slice(0, 160) ?? ''}`,
+  );
+
+  // Back to Bowman's configuration, with the cost worker measuring again: the approval stands once it has.
+  startCost();
+  await setConfig(bowmanText);
+  const back = await settledApproval(p417.id);
+  check('...and it stands again once the cost is measured exactly under the restored configuration', back.status === 'standing' && pr(p417.id).status === 'approved' && exactRow(p417.id, 'cost_measure:12:larger')?.source === 'exact', `${back.status} ${pr(p417.id).status}`);
+
+  // A tier that got another id is not the tier that approved: array position is not its identity.
+  m = mark();
+  await setConfig(configWith(c => { c.approval.tiers.find(t => t.id === want417)!.id = `${want417}_renamed`; }));
+  await until(() => approvals(p417.id).at(-1)!.status === 'withdrawn' || undefined, 30000, 'the approval to be withdrawn for the renamed tier');
+  const renamed = approvals(p417.id).at(-1)!;
+  check(
+    'a configuration that gives the approving tier another id withdraws the approval, back to review, with the reason',
+    pr(p417.id).status === 'review' && new RegExp(`${want417} tier it was approved at is no longer`).test(renamed.endedReason),
+    `${pr(p417.id).status} ${renamed.endedReason}`,
+  );
+  await setConfig(bowmanText);
+  await settledOn(p417.id);
+  await helen.R.setPrStatus({ prId: p417.id, status: 'approved' });
+  await until(() => (pr(p417.id).status === 'approved' && standing(p417.id) ? true : undefined), 5000, 'the CFO to approve again');
+
   m = mark();
   await dana.R.setPrStatus({ prId: p417.id, status: 'merged' });
   const released = await until(() => logAfter(m, p417.id, 'set_pr_status')[0], 5000, 'the log row for the release');

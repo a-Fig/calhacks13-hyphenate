@@ -198,7 +198,7 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
       const { overrides, problems } = assumptionsOf(conn, p.inputs);
       const t0 = Date.now();
       const measures = p.inputs.costMeasure ? [p.inputs.costMeasure] : [];
-      const r = costCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs), measures });
+      const r = costCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs), measures, ...(p.inputs.costMeasure ? { windowMonths: p.inputs.costMeasure.horizonMonths } : {}) });
       // Assumptions the library could not be given are reported, never dropped silently.
       const rows = withProblems(real(costCheckRows(r)), problems);
       ctx.log(`s2 on ${p.ecr.id} rev ${p.inputs.revision}: ${r.draws} draws in ${Date.now() - t0} ms, converged ${r.convergence.converged}, ${overrides.length} assumption(s)${problems.length ? `, ${problems.length} unreadable` : ''}`);

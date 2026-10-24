@@ -339,23 +339,50 @@ export function judge(config: CompanyConfig, configHashOf: string, input: { acti
 // An approval that stands while the checks are repeated
 // ---------------------------------------------------------------------------------------------
 
-/** What an approval recorded about the tier it was given at. */
+/**
+ * What an approval recorded about the tier it was given at. A tier's identity is its id and the body
+ * that decides it, never its position in the configuration: a configuration can put another tier, or
+ * another body, in the same place. `bodyId` is absent when the approval did not record one.
+ */
 export interface ApprovedAt {
   tierId: string;
   tierIndex: number;
+  bodyId?: string;
 }
 
+export type TierVerdict =
+  /** The re-checked, exactly measured numbers still point to the tier and body the approval was given by. */
+  | { verdict: 'stands'; route: RouteSummary }
+  /** They point elsewhere, or the tier or body is no longer what it was: the approval ends, for this reason. */
+  | { verdict: 'withdraw'; route: RouteSummary; reason: string }
+  /** The cost is not measured exactly, so the numbers cannot confirm the tier: the approval stays pending its re-check. */
+  | { verdict: 'unconfirmed'; route: RouteSummary; reason: string };
+
 /**
- * Once an approved ECR's checks have finished again: does the approval still stand? It does if the
- * re-checked numbers still point to the tier it was given at, and is withdrawn, with this reason, if
- * they point to any other.
+ * Once an approved ECR's checks have finished again: does the approval still stand?
+ * - The tier it was given at must still exist in the configuration with the same id and the same
+ *   deciding body; if not it is withdrawn, whatever the cost.
+ * - It is confirmed only on an exact cost measure that points to that tier. An unmeasured cost routes
+ *   to the top tier, which would "confirm" a top-tier approval by default, so without an exact
+ *   measure the answer is "unconfirmed" and the approval stays pending.
+ * - An exact measure that points to another tier withdraws it.
  */
-export function tierVerdict(config: CompanyConfig, facts: EcrFacts, approvedAt: ApprovedAt): { stands: true; route: RouteSummary } | { stands: false; route: RouteSummary; reason: string } {
+export function tierVerdict(config: CompanyConfig, facts: EcrFacts, approvedAt: ApprovedAt): TierVerdict {
   const route = routeEcr(config, facts);
   const summary = summarizeRoute(route);
-  if (route.tier.tierIndex === approvedAt.tierIndex) return { stands: true, route: summary };
+  const tier = config.approval.tiers.find((t) => t.id === approvedAt.tierId);
+  if (!tier) {
+    return { verdict: 'withdraw', route: summary, reason: `the ${approvedAt.tierId} tier it was approved at is no longer in the company configuration` };
+  }
+  if (approvedAt.bodyId !== undefined && tier.body !== approvedAt.bodyId) {
+    return { verdict: 'withdraw', route: summary, reason: `the ${approvedAt.tierId} tier is now decided by the ${tier.body} body, not the ${approvedAt.bodyId} body that approved it` };
+  }
+  if (route.cost.basis !== 'measured') {
+    return { verdict: 'unconfirmed', route: summary, reason: `the cost is not measured exactly on the current inputs (${route.cost.why}), so the ${approvedAt.tierId} tier cannot be confirmed` };
+  }
+  if (route.tier.tierId === approvedAt.tierId) return { verdict: 'stands', route: summary };
   return {
-    stands: false,
+    verdict: 'withdraw',
     route: summary,
     reason: `the re-checked numbers move the ECR from the ${approvedAt.tierId} tier to the ${route.tier.tierId} tier. ${route.tier.why}`,
   };
