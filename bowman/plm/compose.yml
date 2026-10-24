@@ -15,8 +15,9 @@
 #      only the `frappe` app, so no ERPNext module is active in the PLM. mariadb:11.8 and
 #      redis:6.2-alpine are as upstream.
 #   4. create-site does not pass `--install-app erpnext` (the site gets frappe only), and after the
-#      site exists it sets `server_script_enabled`. Server Scripts are off by default in Frappe;
-#      the PLM uses three small ones (see NOTES.md). The flag lives in this stack's own
+#      site exists it sets `server_script_enabled` in common_site_config.json (Frappe reads that flag
+#      only from the bench-wide file). Server Scripts are off by default;
+#      the PLM uses three small ones (see NOTES.md). The file lives in this stack's own
 #      sites volume, so it cannot touch the ERP.
 #   5. Passwords come from the environment instead of the literal `admin`:
 #        PLM_ADMIN_PASSWORD             -> Administrator login (create-site service)
@@ -116,7 +117,7 @@ services:
         else
           bench new-site --mariadb-user-host-login-scope='%' --admin-password=$$ADMIN_PASSWORD --db-root-username=root --db-root-password=$$MYSQL_ROOT_PASSWORD --set-default frontend;
         fi;
-        bench --site frontend set-config -p server_script_enabled 1;
+        bench set-config -gp server_script_enabled 1;
 
   db:
     image: mariadb:11.8

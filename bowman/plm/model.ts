@@ -312,7 +312,8 @@ const ncr: DocTypeDef = {
   permissions: [
     { role: ROLES.designer, ...RWC },
     { role: ROLES.cm, ...RWC },
-    ...[ROLES.member, ROLES.chair, ROLES.viewer, ROLES.norn].map((role) => ({ role, ...R })),
+    { role: ROLES.member, ...RWC }, // quality engineers file NCRs
+    ...[ROLES.chair, ROLES.viewer, ROLES.norn].map((role) => ({ role, ...R })),
     sysman,
   ],
   props: { module: MODULE, track_changes: 1, sort_field: 'modified', sort_order: 'DESC', search_fields: 'part,part_name,location_found' },
@@ -340,7 +341,7 @@ const ecr: DocTypeDef = {
     col(),
     f('Data', 'ecr_revision', 'ECP revision', { default: 'A' }),
     f('Link', 'workflow_state', 'Status', { options: 'Workflow State', read_only: 1, no_copy: 1, allow_on_submit: 1, in_standard_filter: 1 }),
-    f('Date', 'decided_on', 'Decided on', { read_only: 1 }),
+    f('Datetime', 'decided_on', 'Decided on', { read_only: 1 }),
     sec('Classification'),
     f('Select', 'priority', 'Priority', { options: opts(PRIORITIES), reqd: 1, default: 'Routine', in_list_view: 1, in_standard_filter: 1, description: 'Emergency: line stopper now. Urgent: within 30 days. Routine: everything else.' }),
     f('Select', 'justification_code', 'Justification code', { options: opts(JUSTIFICATION), reqd: 1, in_standard_filter: 1, description: 'B interface, C compatibility, D deficiency, O operational, P production stoppage, R cost reduction, S safety, V value engineering.' }),
@@ -519,7 +520,7 @@ export const DOCTYPES: DocTypeDef[] = [
   part, ebom, ncr, ecr, eco,
 ];
 
-export const REVIEW_FUNCTIONS = ['Cost engineer', 'Buyer', 'Production planner', 'Cost accountant', 'Quality', 'Certification', 'Manufacturing engineer'];
+export const REVIEW_FUNCTIONS = ['CM analyst', 'Cost engineer', 'Buyer', 'Production planner', 'Cost accountant', 'Quality', 'Certification', 'Manufacturing engineer'];
 
 // ---------------------------------------------------------------- workflow
 

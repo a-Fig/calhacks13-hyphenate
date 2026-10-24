@@ -149,7 +149,7 @@ async function workflow() {
       state: s.state,
       doc_status: '0',
       allow_edit: s.edit,
-      ...(s.stamp ? { update_field: 'decided_on', update_value: 'frappe.utils.today()', evaluate_as_expression: 1 } : {}),
+      ...(s.stamp ? { update_field: 'decided_on', update_value: 'frappe.utils.now()', evaluate_as_expression: 1 } : {}),
     })),
     transitions: WORKFLOW.transitions.map((t) => ({
       state: t.state,
