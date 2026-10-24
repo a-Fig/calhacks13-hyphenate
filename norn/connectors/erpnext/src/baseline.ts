@@ -87,6 +87,31 @@ export interface BuiltUnit {
   completed: DateStr;
 }
 
+/**
+ * A supplier-side limit that two open changes can compete for. Mirrors `SupplierConstraint` in
+ * norn/checks/src/types.ts (branch claude/timeline-supply-checks, not on main yet). `supplier` is the ERPNext
+ * supplier name, the same string `Sourcing.supplier` carries.
+ */
+export interface SupplierConstraint {
+  id: string;
+  supplier: SupplierId;
+  kind: 'qualification_slot' | 'capacity';
+  items: ItemCode[];
+  /** Capacity per year in the items' unit, for a capacity constraint. */
+  capacityPerYear?: number;
+  /** When it applies. For a qualification slot, the first slot opens at `from` and the last opens by `to`. */
+  window?: { from: DateStr; to: DateStr };
+  description?: string;
+  /** Qualification slot: months between slot openings, one lot per slot. Unset: read from the description, else 3. */
+  slotCadenceMonths?: number;
+  /**
+   * Qualification slot: a second part number qualified within this many weeks of the first costs this share
+   * less, and ordering two part numbers inside the window earns this price break on the raw material.
+   * Unset: read from the description when it states them.
+   */
+  bundle?: { withinWeeks: number; secondQualificationDiscount?: number; priceBreak?: number };
+}
+
 export interface Baseline {
   programs: Program[];
   workCenters: WorkCenter[];
@@ -96,4 +121,6 @@ export interface Baseline {
   stock: StockRow[];
   volumePlan: VolumeRow[];
   builtAircraft: BuiltUnit[];
+  /** Supplier limits the supply check looks for conflicts between open changes in. Optional: only a company that keeps them in its ERP has them here. */
+  supplierConstraints?: SupplierConstraint[];
 }
