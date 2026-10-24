@@ -9,7 +9,8 @@
   },
   "scripts": {
     "typecheck": "tsc -p .",
-    "check": "node check.ts"
+    "test": "node --test --test-reporter=spec test/*.test.ts",
+    "check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON check.ts"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

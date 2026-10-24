@@ -38,4 +38,16 @@ export const erpnextCheck = {
   reference: 'bowman/data/bowman.json',
   /** Roll-up standard cost (USD) of each program's top item: Vesper V4 and Meridian M6. */
   rollups: { 'BW-0001-000': 2_800_019, 'BW-M000-000': 5_007_356.8 } as Record<string, number>,
+  /**
+   * The ECR-0417 bracket (docs/ARCHITECTURE.md worked example; values from bowman/erp/NOTES.md): repriced by ECO-0271
+   * on 2025-11-20, seven received orders, two open lines from PO-26-0144, and a parent BOM that has two versions.
+   */
+  spot: {
+    item: 'BW-5120-210',
+    standardCost: [[175.2, '2025-01-15', '2025-11-19'], [186.4, '2025-11-20']] as [number, string, string?][],
+    leadTimeDays: [49, 49, 56, 57, 74, 80, 63],
+    openOrders: [[60, '2026-11-02'], [60, '2026-12-07']] as [number, string][],
+    bomItem: 'BW-5120-000',
+    bomVersions: [[false, 353.2], [true, 364.4]] as [boolean, number][],
+  },
 };

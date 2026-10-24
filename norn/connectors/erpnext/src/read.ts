@@ -55,16 +55,21 @@ export const hashOf = (b: Baseline) => createHash('sha256').update(canonicalJson
 export function explodeQty(bom: BomLine[], top: ItemCode): Map<ItemCode, number> {
   const kids = new Map<ItemCode, BomLine[]>();
   for (const l of bom) kids.set(l.parent, [...(kids.get(l.parent) ?? []), l]);
-  const out = new Map<ItemCode, number>();
-  const walk = (code: ItemCode, mult: number, path: Set<ItemCode>) => {
+  // Per-unit descendants of each item, computed once: a sub-assembly used in many places is not re-walked.
+  const memo = new Map<ItemCode, Map<ItemCode, number>>();
+  const below = (code: ItemCode, path: ItemCode[]): Map<ItemCode, number> => {
+    const known = memo.get(code);
+    if (known) return known;
+    const out = new Map<ItemCode, number>();
     for (const l of kids.get(code) ?? []) {
-      if (path.has(l.child)) throw new Error(`BOM cycle: ${[...path, l.child].join(' > ')}`);
-      out.set(l.child, (out.get(l.child) ?? 0) + mult * l.qty);
-      walk(l.child, mult * l.qty, new Set([...path, l.child]));
+      if (path.includes(l.child)) throw new Error(`BOM cycle: ${[...path, l.child].join(' > ')}`);
+      out.set(l.child, (out.get(l.child) ?? 0) + l.qty);
+      for (const [d, q] of below(l.child, [...path, l.child])) out.set(d, (out.get(d) ?? 0) + l.qty * q);
     }
+    memo.set(code, out);
+    return out;
   };
-  walk(top, 1, new Set([top]));
-  return out;
+  return below(top, [top]);
 }
 
 export async function readBaseline(opts: ErpnextOptions): Promise<ReadResult> {

@@ -1,5 +1,5 @@
 // Everything that differs from one company's ERPNext to the next. The connector code names no
-// company; a company supplies these values (Bowman's live in bowman/norn-config/erpnext.ts).
+// company; a company supplies these values in its own Norn config (see the ERPNext settings file there).
 
 import type { BuiltUnit, ItemCode, VolumeRow } from './baseline.ts';
 
