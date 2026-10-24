@@ -1,0 +1,19 @@
+{
+  "name": "@norn/connector-plm",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Norn's PLM connector: reads change requests, polls and receives their changes, and writes the impact assessment back, over a Frappe-style REST API. No runtime dependencies.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "node --test --test-reporter=spec test/*.test.ts",
+    "check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON check.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  }
+}
