@@ -4,6 +4,7 @@
 #   bowman/plm/up.sh            copy compose.yml to the Mac and start the stack (idempotent)
 #   bowman/plm/up.sh stop       stop the containers; volumes (all PLM data) are kept
 #   bowman/plm/up.sh status     show container state and ping the site
+#   bowman/plm/up.sh brand      copy brand/plm.css and plm.js into the site and register them (also done by `up`)
 #   bowman/plm/up.sh tunnel     open the SSH tunnel laptop:8082 -> Mac:8082 (foreground)
 #
 # Reads the repo-root .env (override with ENV_FILE=...). Needed there:
@@ -46,6 +47,19 @@ SSH_TARGET="$(envget BOWMAN_PLM_SSH)"; [ -n "$SSH_TARGET" ] || SSH_TARGET="$(env
 [ -n "$SSH_TARGET" ] || { echo "BOWMAN_PLM_SSH (or BOWMAN_ERP_SSH) is not set in $ENV_FILE (user@host of the Mac)" >&2; exit 1; }
 rssh() { ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "$@"; }
 
+# The desk theme is a CSS and a JS file in the site's public files, listed in common_site_config as
+# app_include_css / app_include_js (Frappe reads those two keys, so no custom app is needed). The
+# files carry a content hash in their name because browsers cache static files.
+brand() {
+  local ext h
+  for ext in css js; do
+    h="$(sha1sum "$HERE/brand/plm.$ext" | cut -c1-8)"
+    rssh "$REMOTE_PATH; docker exec -i bowman-plm-backend-1 bash -c 'mkdir -p sites/frontend/public/files/bowman-plm && cat > sites/frontend/public/files/bowman-plm/plm.$h.$ext'" < "$HERE/brand/plm.$ext"
+    rssh "$REMOTE_PATH; docker exec bowman-plm-backend-1 bench set-config -gp app_include_$ext \"['/files/bowman-plm/plm.$h.$ext']\"" >/dev/null
+  done
+  echo "Brand files installed."
+}
+
 cmd="${1:-up}"
 case "$cmd" in
   up)
@@ -69,6 +83,7 @@ case "$cmd" in
       # and the web tier answers a ping.
       state="$(rssh "$REMOTE_PATH; cd $REMOTE_DIR && docker inspect -f '{{.State.Status}}:{{.State.ExitCode}}' \$(docker compose -p $PROJECT ps -aq create-site)" 2>/dev/null || true)"
       if [ "$state" = "exited:0" ] && [ "$(rssh "curl -s -m 5 http://127.0.0.1:$PORT/api/method/ping" 2>/dev/null)" = '{"message":"pong"}' ]; then
+        brand
         echo "Up. Open the tunnel with: $0 tunnel   then browse http://127.0.0.1:$PORT"
         exit 0
       fi
@@ -87,12 +102,15 @@ case "$cmd" in
   status)
     rssh "$REMOTE_PATH; cd $REMOTE_DIR && docker compose -p $PROJECT ps; curl -s -m 5 http://127.0.0.1:$PORT/api/method/ping; echo"
     ;;
+  brand)
+    brand
+    ;;
   tunnel)
     echo "Tunnel 127.0.0.1:$PORT -> Mac:$PORT. Ctrl-C to close."
     exec ssh "${SSH_OPTS[@]}" -N -L "$PORT:127.0.0.1:$PORT" "$SSH_TARGET"
     ;;
   *)
-    echo "usage: $0 [up|stop|status|tunnel]" >&2
+    echo "usage: $0 [up|stop|status|brand|tunnel]" >&2
     exit 2
     ;;
 esac

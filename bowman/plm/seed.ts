@@ -6,6 +6,7 @@
 //
 // By default the webhooks are switched off while seeding, so Norn is not sent a hundred historical
 // events, and restored afterwards. --live leaves them on (use it to file the demo ECR for real).
+// --reset first deletes every ECO, ECR and NCR (development only; parts and BOMs are updated in place).
 // --skip / --only pick which open ECRs are filed, so ECR-0417 can be filed on stage.
 // Needs: setup.ts has run, and PLM_ADMIN_PASSWORD and PLM_USER_PASSWORD are in .env. Prints no secret.
 import { readFileSync } from 'node:fs';
@@ -21,6 +22,7 @@ const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(n);
 const listArg = (n: string) => (args.includes(n) ? (args[args.indexOf(n) + 1] ?? '').split(',').filter(Boolean) : []);
 const live = flag('--live');
+const reset = flag('--reset');
 const skip = new Set(listArg('--skip'));
 const only = new Set(listArg('--only'));
 
@@ -71,16 +73,11 @@ async function setSeries(prefix: string, next: number) {
   });
 }
 
-async function createWithId(doctype: string, prefix: string, id: string, doc: Record<string, unknown>, by: Plm = admin) {
+async function createWithId(doctype: string, prefix: string, id: string, by: Plm, doc: Record<string, unknown>) {
   const n = Number(id.slice(prefix.length));
   await setSeries(prefix, n);
   const r = await by.post(`/api/resource/${enc(doctype)}`, { doctype, ...doc });
   if (r.body.data.name !== id) throw new Error(`${doctype} came out as ${r.body.data.name}, expected ${id}`);
-}
-
-/** Backdate and re-own a seeded record so the timeline reads like it was filed by its author. */
-async function stamp(doctype: string, name: string, owner: string, creation: string) {
-  await admin.put(`/api/resource/${enc(doctype)}/${enc(name)}`, { owner, creation: `${creation} 09:00:00` }, { allow: true });
 }
 
 async function applyAction(who: Plm, doctype: string, name: string, action: string) {
@@ -194,12 +191,11 @@ async function ncrs() {
   let made = 0;
   for (const n of data.ncrs) {
     if (await admin.exists('NCR', n.id)) continue;
-    await createWithId('NCR', 'NCR-', n.id, {
+    await createWithId('NCR', 'NCR-', n.id, admin, {
       part: n.item, part_revision: n.rev, location_found: n.where, quantity_affected: n.quantityAffected,
       status: NCR_STATUS[n.status], opened_on: n.openedOn, opened_by: emailOf(n.openedBy),
       description: n.description, mrb_disposition: n.mrbDisposition ?? '',
     });
-    await stamp('NCR', n.id, emailOf(n.openedBy), n.openedOn);
     made++;
   }
   log(`  NCRs: ${data.ncrs.length} (${made} created)`);
@@ -229,19 +225,18 @@ async function history() {
     const who = emailOf(h.originator);
     const prog = programOf(h.program);
     if (!(await admin.exists('ECR', h.ecr))) {
-      await createWithId('ECR', 'ECR-', h.ecr, {
+      await createWithId('ECR', 'ECR-', h.ecr, await as(who), {
         title: h.title, program: prog === 'Both programs' ? 'Vesper V4' : prog, originator: who, filed_on: h.fileDate,
         priority: 'Routine', justification_code: h.justificationCode, company_class: CLASS[h.companyClass], faa_class: cap(h.faaClass),
         description: h.summary, need: `Released as ${h.id}. The original request is archived.`,
         affected_items: affected(h.itemChanges), field_changes: redlines(h.itemChanges),
       });
-      await stamp('ECR', h.ecr, who, h.fileDate);
     }
     await toState(h.ecr, who, 'Approved', h.decidedBy === 'fast_track');
     await admin.put(`/api/resource/ECR/${enc(h.ecr)}`, { decided_on: h.approvedOn });
     if (await admin.exists('ECO', h.id)) continue;
     const serial = h.actual.cutInSerial;
-    await createWithId('ECO', 'ECO-', h.id, {
+    await createWithId('ECO', 'ECO-', h.id, admin, {
       ecr: h.ecr, title: h.title, program: prog, status: 'Released', released_on: h.releasedOn,
       released_by: emailOf(h.decidedBy === 'fast_track' ? 'EMP-02' : 'EMP-01'),
       decided_by: h.decidedBy === 'fast_track' ? 'Fast track' : 'CCB',
@@ -254,7 +249,6 @@ async function history() {
       actual_unit_cost_delta: h.actual.unitCostDeltaUsd, actual_one_time_cost: h.actual.oneTimeCostUsd,
       actual_cut_in_date: h.actual.cutInDate, actual_cut_in_serial: serial ?? null, variance: h.actual.variance,
     });
-    await stamp('ECO', h.id, emailOf(h.decidedBy === 'fast_track' ? 'EMP-02' : 'EMP-01'), h.releasedOn);
     made++;
   }
   log(`  released ECOs: ${data.history.length} (${made} created), each with its Approved ECR`);
@@ -274,7 +268,7 @@ async function openEcrs() {
       description: l.description, unit_price: l.unitPrice ?? 0, qty: l.qty ?? 0, one_time: l.oneTime ?? 0,
     })));
     const eff = e.effectivity;
-    await createWithId('ECR', 'ECR-', e.id, {
+    await createWithId('ECR', 'ECR-', e.id, await as(who), {
       title: e.title, program: PROGRAM[e.program], originator: who, filed_on: e.filedOn, needed_by: e.neededBy ?? null,
       originating_ncr: e.originatingNcr ?? null, ecr_revision: e.rev,
       priority: cap(e.priority), justification_code: e.justificationCode, company_class: CLASS[e.companyClass], faa_class: cap(e.faaClass),
@@ -293,7 +287,6 @@ async function openEcrs() {
       routed_to: e.routedTo.map((s: string) => ({ review_function: SEAT_FUNCTION[s] })),
     });
     await toState(e.id, who, STATE[e.status]);
-    await stamp('ECR', e.id, who, e.filedOn);
     filed.push(e.id);
   }
   // Close the loop on the NCRs: the NCR names the ECR that answers it.
@@ -313,9 +306,18 @@ async function withWebhooksPaused<T>(fn: () => Promise<T>): Promise<T> {
   finally { for (const n of on) await admin.put(`/api/resource/Webhook/${enc(n)}`, { enabled: 1 }); log(`  webhooks: ${on.length} restored`); }
 }
 
+async function wipeChanges() {
+  for (const dt of ['ECO', 'ECR', 'NCR']) {
+    if (dt === 'ECR') for (const n of await admin.list('NCR', { fields: ['name'] })) await admin.put(`/api/resource/NCR/${enc(n.name)}`, { linked_ecr: null });
+    for (const r of await admin.list(dt, { fields: ['name'] })) await admin.del(`/api/resource/${enc(dt)}/${enc(r.name)}`);
+  }
+  log('  reset: all ECOs, ECRs and NCRs deleted');
+}
+
 async function main() {
   await admin.login('Administrator', env.PLM_ADMIN_PASSWORD);
   await withWebhooksPaused(async () => {
+    if (reset) await wipeChanges();
     log('1. People'); await people();
     log('2. Parts'); await parts();
     log('3. Engineering BOMs'); await boms();

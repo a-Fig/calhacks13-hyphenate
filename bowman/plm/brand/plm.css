@@ -1,0 +1,26 @@
+/* Bowman PLM desk theme. Loaded through the bench's app_include_css (up.sh brand).
+   The ERP next door keeps Frappe's black and white; this one is petrol with an amber accent so the
+   two read as different products. */
+:root, [data-theme="light"] {
+  --primary: #0e7490;
+  --primary-color: #0e7490;
+  --btn-primary: #0e7490;
+  --brand-color: #0e7490;
+  --border-primary: #0e7490;
+  --desk-sidebar-bg: #0b3c49;
+  --surface-sidebar: #0b3c49;
+  --surface-alpha-sidebar: #0b3c49;
+  --navbar-bg: #0b3c49;
+  --sidebar-select-color: rgba(255, 255, 255, 0.14);
+}
+.body-sidebar, .body-sidebar-container { background: #0b3c49 !important; }
+.body-sidebar, .body-sidebar * { color: #dbeef3; }
+.body-sidebar .sidebar-item-container.active-sidebar .item-anchor,
+.body-sidebar .sidebar-item-container:hover .item-anchor { background: rgba(255, 255, 255, 0.14) !important; }
+.body-sidebar svg, .body-sidebar .icon { stroke: #dbeef3; }
+.body-sidebar .sidebar-header .header-logo, .body-sidebar .app-logo { background: #0e7490; }
+.page-head { border-top: 3px solid #fbbf24; }
+.btn-primary, .btn-primary:hover, .btn-primary:focus { background: #0e7490 !important; border-color: #0e7490 !important; color: #fff !important; }
+.indicator-pill.gray { background: #eef2f3; }
+/* Long ECR titles: give the first list column room. */
+.list-row-head .list-subject, .list-row .list-subject { flex: 0 0 38%; max-width: 38%; }
