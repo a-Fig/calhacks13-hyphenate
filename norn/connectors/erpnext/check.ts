@@ -11,7 +11,7 @@
 //              engineering BOM), it returns the reference as the ERP should hold it.
 // --reference  overrides erpnextCheck.reference.
 // The reference is JSON holding the baseline's own arrays (programs, workCenters, items, bom, sourcing, stock,
-// volumePlan, builtAircraft). It may carry more fields (the checks only compare the ones the baseline has) and
+// volumePlan, builtAircraft, and supplierConstraints when the settings name where the ERP keeps them). It may carry more fields (the checks only compare the ones the baseline has) and
 // `suppliers` as {id, name}: ERPNext identifies a supplier by its name (the PLM connector maps its own supplier names to
 // those), so the reference's supplier ids are mapped to names. Work centers are compared by id, so the settings
 // must give the ERP's work center id field (customFields.workCenter).
@@ -21,7 +21,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Baseline, BomLine, ItemCode } from './src/baseline.ts';
-import { connect, connectionFromEnv, loadEnvFile, readBaseline } from './src/index.ts';
+import { connect, connectionFromEnv, diffSupplierConstraints, expectedSupplierConstraints, loadEnvFile, readBaseline } from './src/index.ts';
+import type { ReferenceConstraint } from './src/index.ts';
 import type { ErpnextSettings } from './src/index.ts';
 
 /** One item's history, as the company knows it, for the history reads. */
@@ -49,7 +50,7 @@ const spec: { reference?: string; rollups?: Record<ItemCode, number>; spot?: Spo
 const refFile = arg('reference') ?? (spec.reference ? resolve(root, spec.reference) : undefined);
 if (!settings || !refFile) { console.error('the config module must export `erpnext`, and a reference dataset must be given'); process.exit(2); }
 const dataset = JSON.parse(readFileSync(refFile, 'utf8'));
-const ref: Omit<Partial<Baseline>, 'workCenters'> & { suppliers?: { id: string; name: string }[]; workCenters?: { id: string; name?: string; laborRatePerHour: number }[] } = spec.view ? spec.view(dataset) : dataset;
+const ref: Omit<Partial<Baseline>, 'workCenters' | 'supplierConstraints'> & { suppliers?: { id: string; name: string }[]; supplierConstraints?: ReferenceConstraint[]; workCenters?: { id: string; name?: string; laborRatePerHour: number }[] } = spec.view ? spec.view(dataset) : dataset;
 
 loadEnvFile();
 const opts = { ...settings, ...connectionFromEnv() };
@@ -152,6 +153,16 @@ const items = new Map(b.items.map((i) => [i.code, i]));
   const diffs = (ref.builtAircraft ?? []).filter((u) => have.get(`${u.program}|${u.serial}`) !== u.completed).map((u) => `${u.program} #${u.serial}`);
   same('built aircraft serial and completion date', ref.builtAircraft?.length ?? 0, diffs);
   check((ref.programs ?? []).every((p) => programId.has(p.id) && b.programs.find((q) => q.id === p.id)?.topItem === p.topItem), 'program ids and top items', b.programs.map((p) => p.name).join(', '));
+}
+
+// ---- supplier constraints: only when the settings say where the ERP keeps them --------------------------------
+if (settings.supplierConstraints) {
+  const want = expectedSupplierConstraints(ref.supplierConstraints ?? [], sup as (id: string) => string);
+  const have = b.supplierConstraints ?? [];
+  same(`supplier constraints (supplier name, kind, items, capacity, window, description)`, want.length, diffSupplierConstraints(have, want));
+  check(have.length === want.length, `supplier constraints: ${have.length}`, have.map((c) => `${c.id}=${c.supplier}`).join(', '));
+  const sourcing = new Set(b.sourcing.map((s) => s.supplier));
+  check(have.every((c) => sourcing.has(c.supplier)), 'every constraint names a supplier that sourcing rows name');
 }
 
 // ---- roll-up by a simple BOM explode: leaves at standard cost, make items add labor hours x rate --------------

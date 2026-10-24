@@ -48,6 +48,16 @@ export const erpnext: ErpnextSettings = {
       accruedLiability: '21210 - Accrued Expenses - BWA',
     },
   },
+  // Bowman's purchasing team keeps its suppliers' limits in the custom doctype that bowman/erp/seed-constraints.ts creates.
+  supplierConstraints: {
+    doctype: 'Supplier Constraint',
+    items: { doctype: 'Supplier Constraint Item', itemField: 'item_code' },
+    fields: {
+      id: 'constraint_id', supplier: 'supplier', kind: 'kind', capacityPerYear: 'capacity_per_year', windowFrom: 'window_from',
+      windowTo: 'window_to', description: 'description', slotCadenceMonths: 'slot_cadence_months', bundleWithinWeeks: 'bundle_within_weeks',
+      bundleSecondQualificationDiscount: 'bundle_second_qualification_discount', bundlePriceBreak: 'bundle_price_break',
+    },
+  },
   // No `fallback`: the volume plan is a Master Production Schedule and the built aircraft are Serial Nos in
   // Bowman's ERPNext (bowman/erp/seed-planning.ts).
 };
