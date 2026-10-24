@@ -1,10 +1,13 @@
-# Architecture: ECR/ECO → production-impact forecasting
+# Architecture: ECRs as branches, ECOs as merged PRs
 
-Drafted 2026-10-24 for CalHacks 13. The repo was empty at the time of writing, so nothing here describes existing code.
+Drafted 2026-10-24 for CalHacks 13; rewritten the same day around a Git-style branch/PR model. The repo had no code when this was written, so nothing here describes existing code.
 
-**Scope.** Loop 1 (forecast) is the goal. Loop 2 (benchmark against actuals and self-improve) is deferred and only has a few cheap hooks reserved (§9).
+**Scope.** Loop 1 (forecast production impact) is the goal. Loop 2 (benchmark forecasts against actuals, self-improve) is deferred; only a few cheap hooks are reserved (§11).
 
-**Epistemic status.** The product description comes from conversations with Archer senior staff. We have not seen a real ECR/ECO, BOM, or supplier dataset, so every data shape below is an assumption. Claims about SpacetimeDB are from the author's training knowledge and are unverified against the current release. §7 lists the ones to check first.
+**Epistemic status.**
+- The product description comes from conversations with Archer senior staff. We have not seen a real ECR/ECO, BOM, supplier file, or their PLM system, so every data shape and workflow state below is an assumption.
+- SpacetimeDB facts in §9 were read from its docs on 2026-10-24 (version 2.8 at the time). The docs are marketing-heavy in places and several limits are unstated, so they are marked as unverified.
+- The PLM/ECO process facts in §2 come from vendor blogs and ERP/PLM documentation, not independent studies.
 
 ---
 
@@ -15,162 +18,242 @@ Engineering teams change the aircraft design constantly. Each change is filed as
 Finance does not care what a change costs R&D. They care what it does to **production**:
 
 1. final per-unit cost at production volume,
-2. when the change can reach the line (timeline),
-3. what the supply chain looks like after the change, how it can be interrupted, and the resulting risk.
+2. when the change takes effect on the line,
+3. what the supply chain looks like afterwards, how it can be interrupted, and the resulting risk.
 
-Output for each ECR is a "production impact card". Output for the backlog is a roll-up across ECRs. Both show ranges, not point estimates, and every number traces back to the assumptions that produced it.
+For each ECR they get a **production impact card**; for the backlog they get a **roll-up**. Both show ranges, not point estimates, and every number traces back to the assumptions that produced it.
 
-## 2. Principles
+## 2. The model: version control for the production definition
 
-- **LLMs interpret; code computes.** Agents read prose (ECR text, supplier notes), extract structure, choose priors, and write explanations. Arithmetic, BOM diffs, and simulation are deterministic code. An LLM never produces a final cost number directly.
-- **Assumptions are data.** Every input that isn't a given fact (a lead-time distribution, a scrap rate, a learning-curve slope) is a row with a value, a distribution, a source (`given` / `default` / `agent_estimated`), and a rationale. A forecast is only meaningful alongside the assumptions it used.
-- **Forecasts are decomposed and carry ranges.** Cost is a sum of line items, each with p10/p50/p90. Timeline is a critical path of named steps. This is what lets a human ask "why", and what makes Loop 2 possible later.
-- **Forecast runs are immutable.** A change to inputs produces a new run; it never edits an old one.
-- **Compute stays out of the database.** Monte Carlo and LLM calls run in workers. The database holds state, coordinates work, and pushes updates.
+The production definition (BOM, sourcing options, assumptions) is a repository. Proposed changes are branches. Review is a pull request. Approval is a merge.
 
-## 3. Pipeline (Loop 1)
+| Git / GitHub | Here |
+|---|---|
+| `main` | The production baseline: BOM, sourcing options, volume plan, assumptions |
+| Branch | An ECR: an overlay of changes (parts, quantities, specs, suppliers) on a base version of `main` |
+| Commit | A revision of that overlay: agent extraction from the ECR text, an engineer's correction, a reviewer's edit to an assumption |
+| Pull request | The ECR under review |
+| Merge | The ECO: the change becomes part of the baseline |
+| CI checks | The forecast stages (§5), run on (base, head) |
+| Bot comment | The production impact card |
+| Diff | A BOM diff plus a **forecast diff**: forecast(base + ECR) − forecast(base) |
+| Merge conflict | Two ECRs changing the same entity/field, or interacting through a shared supplier or part (§6) |
+| Stacked PRs | An ECR that only makes sense after another one lands |
+| Merge queue / integration branch | The backlog roll-up: a chosen, ordered set of ECRs merged into one branch and forecast as a unit |
+| CI re-run when `main` moves | A new supplier quote or a merged ECO changes the base, so open forecasts recompute |
+| Post-merge review / revert | Loop 2: compare the forecast to actuals |
 
-Each stage reads and writes rows (§5). Stages are tasks in a DAG per ECR (§6).
+What this buys us:
+- The backlog roll-up is "forecast the integration branch", not a special feature. It also fixes the double-counting you get from summing per-ECR deltas when ECRs touch the same part.
+- Conflict detection has a defined meaning (a three-way comparison against the common base).
+- Human-in-the-loop is natural. A reviewer correcting an agent-estimated assumption is a new commit that re-triggers the checks.
+- The UI is a pattern reviewers already understand.
 
-| Stage | Input | Output | Agent or code |
-|---|---|---|---|
-| S0 Ingest | ECR/ECO document | `ChangeSet`: structured list of `ChangeItem`s (part added/removed/replaced, spec/material change, supplier change, quantity change), each with a confidence and a pointer to the source text | Agent (extraction), human-confirmable in the UI |
-| S1 BOM delta | Baseline production BOM + `ChangeSet` | New BOM revision (a diff, not a copy), plus the list of affected parts and suppliers | Code |
-| S2 Cost | BOM delta + sourcing options + assumptions | Per-unit cost delta by line item at each point on the production volume schedule: material, labor/assembly time, tooling (amortized), scrap/yield, learning curve | Code, with agents proposing missing assumptions |
-| S3 Timeline | BOM delta + sourcing + assumptions | Effectivity date: critical path over requalification/testing, tooling lead time, supplier lead time, inventory burn-down of the old part | Code, with agents proposing missing assumptions |
-| S4 Supply chain | New sourcing graph | Monte Carlo over lead time, price, capacity and disruption events. Risk metrics: probability of missing the effectivity date, single-source exposure, p90 lead time, cost-at-risk, top disruption scenarios | Code (simulation), agent proposes disruption scenarios |
-| S5 Synthesis | S2–S4 results | Production impact card: headline numbers with ranges, the top drivers (sensitivity), plain-language explanation, flagged low-confidence assumptions | Agent (narration only; numbers are passed in) |
+### Where the analogy breaks
 
-Notes on stages:
-- **S0 is the fragile stage.** ECR prose is free-form and may reference part numbers that don't map cleanly. Low-confidence items surface in the UI for a human to confirm instead of silently flowing downstream.
-- **S2/S3 gap-filling.** Real ECRs will rarely state a requalification duration or a tooling cost. An agent proposes a distribution from category defaults and comparable parts, records it as an `agent_estimated` assumption with a rationale, and the card flags it. A finance reader can see which numbers rest on guesses.
-- **S4 is where the "different route" story lives.** A change that swaps a supplier or a material creates a new sourcing graph; the simulation compares old versus new route on the same random draws so the difference is not noise.
+- **Effectivity.** A merged ECO does not change every unit. Arena's ECO template carries a material effectivity date and an inventory disposition per affected item, and PLM guidance stresses handling in-flight stock and work in progress. So `main` is closer to a timeline than a single state, and "when does the merged change take effect" is an output of our timeline stage (§5), not metadata. See §7.
+- **Hidden coupling.** Two ECRs can merge cleanly and still interact physically (a weight change alters range, which alters battery sizing). We can detect shared-entity conflicts; we cannot detect physics. Interaction flags are best-effort.
+- **Vocabulary.** Organizations use ECR, ECN and ECO inconsistently (sources disagree whether ECN and ECO are the same thing). The mapping "ECR = branch, ECO = merged PR" needs confirming against how Archer actually names states.
+- **We mirror, not replace.** We don't know Archer's PLM. The system reads ECRs and baseline data; it does not become the system of record.
+- **Prior art.** The idea already exists in PLM: Onshape markets branch-and-merge as ECO-style change isolation, and PLM systems keep "redlined" pending BOMs. We are not inventing the concept, we are attaching a production-cost-and-risk forecast to it.
 
-## 4. Backlog roll-up
+### What we don't build
 
-Summing per-ECR deltas is wrong when ECRs touch the same part, the same supplier, or depend on one another (ECR B only makes sense if ECR A lands). The roll-up therefore works on a **scenario**: an ordered set of ECRs applied to the baseline BOM, producing one merged BOM revision, which is forecast as a unit.
+A general version-control engine. A branch is a base pointer plus an overlay keyed by (entity, field); the state at a branch head is a deterministic function of `main` at the base plus the overlay's commits. At the scale we expect (hundreds of parts, tens of ECRs) this is a few tables.
 
-- Per-ECR cards (each ECR applied alone to the baseline) answer "what does this one change do".
-- Scenario cards answer "what does the backlog do", and let finance toggle ECRs in or out to see the effect.
-- First cut: detect and flag conflicts (shared parts or suppliers) without trying to resolve them. Automatic resolution is out of scope.
+## 3. Principles
 
-## 5. Data model (sketch)
+- **LLMs interpret; code computes.** Agents read prose (ECR text, supplier notes), extract structure, propose assumptions, and write explanations. Arithmetic, BOM diffs, and simulation are deterministic code. An LLM never produces a final cost number directly.
+- **Assumptions are data.** Every input that isn't a given fact (a lead-time distribution, a scrap rate, a learning-curve slope) is a versioned row with a value or distribution, a source (`given` / `default` / `agent_estimated`), and a rationale. Assumptions live on `main` and can be overridden in a branch.
+- **Forecasts are decomposed and carry ranges.** Cost is a sum of line items, each with p10/p50/p90. Timeline is a critical path of named steps. This is what lets a human ask "why", and what makes Loop 2 possible.
+- **A check run is a pure function of its inputs.** Each run is keyed by a hash of (base state, overlay, assumptions, code version, seed). Same hash, same numbers. "Is this forecast current?" is a hash comparison.
+- **Compute stays out of the database.** Monte Carlo and LLM calls run in workers. The state layer holds data, coordinates work, and shows results.
 
-Names and fields are provisional. Grouped by role.
+## 4. Data model (sketch)
 
-**Reference data (baseline, changes rarely)**
-- `Part(id, name, category, spec_json)`
-- `BomRevision(id, parent_revision, source: baseline | ecr | scenario)` and `BomLine(revision, part, qty, ...)` stored as diffs against the parent.
-- `Supplier(id, region, ...)`
-- `SourcingOption(part, supplier, unit_price_dist, lead_time_dist, moq, capacity, qualified: bool)`
+Names and fields are provisional.
+
+**Baseline (`main`)**
+- `Part(id, name, category, spec_json)`, `Supplier(id, region, ...)`
+- `BomLine(main_version, assembly, part, qty)`
+- `SourcingOption(part, supplier, unit_price_dist, lead_time_dist, moq, capacity, qualified)`
 - `VolumePlan(period, units)`
-
-**Inputs**
-- `Ecr(id, text, status, filed_at)`, `ChangeSet(ecr, ...)`, `ChangeItem(changeset, kind, part, payload_json, confidence, source_span)`
 - `Assumption(id, scope, key, dist_json, source, rationale, created_by)`
+- `MainVersion(n, parent, merged_pr, merged_at, effectivity)`: appended on every merge or reference-data update.
 
-**Outputs (immutable per run)**
-- `ForecastRun(id, scenario_or_ecr, bom_revision, assumptions_hash, code_version, seed, created_at, status)`
-- `CostLine(run, line_item, volume_period, p10, p50, p90)`
-- `TimelineStep(run, step, depends_on, duration_dist, on_critical_path)` and `TimelineResult(run, effectivity_p10/p50/p90)`
-- `RiskMetric(run, metric, value, detail_json)`
-- `ImpactCard(run, summary_md, drivers_json, flags_json)`
+**Branches and PRs**
+- `Branch(id, kind: ecr | integration, base_version, head_commit)`
+- `Commit(id, branch, parent, author_kind: agent | human, author, message, created_at)`
+- `Change(commit, entity_type, entity_id, field, op: set | add | remove, value_json, source_span)`: the overlay. `source_span` points into the ECR text for agent-extracted changes, with a confidence.
+- `PullRequest(id, branch, status: draft | review | approved | merged | closed, title)`, `Review(pr, reviewer, verdict)`, `Comment(pr, author, anchor, body)`
+- `IntegrationMember(integration_branch, ecr_branch, position)`
 
-**Coordination**
-- `Task(id, run, kind, status, claimed_by, lease_expires_at, attempts, depends_on)`
-- `Scenario(id, owner, ecr_ids_ordered)`
+**Check runs (immutable)**
+- `CheckRun(id, pr_or_branch, stage, input_hash, status, claimed_by, lease_expires_at, started, finished)`
+- `CostLine(check_run, line_item, volume_period, p10, p50, p90)`
+- `TimelineStep(check_run, step, depends_on, duration_dist, on_critical_path)`, `TimelineResult(check_run, effectivity_p10/p50/p90)`
+- `RiskMetric(check_run, metric, value, detail_json)`
+- `ImpactCard(check_run, summary_md, drivers_json, flags_json)`
 
-Raw Monte Carlo samples are not stored as rows. Rows hold summary statistics and histogram bins; the seed plus `code_version` regenerates the samples on demand.
+Raw Monte Carlo samples are not stored as rows. Rows hold summary statistics and histogram bins; the seed plus code version regenerates samples on demand.
 
-## 6. Execution model
+## 5. Checks (the forecast pipeline)
 
-- **Task DAG per run.** `S0 → S1 → {S2, S3, S4} → S5`. S2, S3, S4 can run in parallel once S1 is done (S3 reads S4's lead-time results when available; if that coupling proves necessary the DAG gets an edge).
-- **Workers** claim a task whose dependencies are done, run it, and write results. Claiming is atomic (one worker wins), and each claim has a lease so a crashed worker's task is retried.
-- **Idempotency.** A task's output is keyed by `(run, kind)`. Re-running overwrites nothing; it fails if results exist.
-- **Invalidation cascade.** When a reference fact changes (a new supplier quote, a revised lead time, a BOM baseline update), every non-terminal run that read it is marked `stale` and a fresh run is enqueued. This must be atomic with the change that caused it, otherwise the UI shows forecasts that quietly no longer match the data.
-- **Determinism.** A run records its seed and code version. Re-executing S2–S4 with the same inputs gives the same numbers; only S0, gap-filling, and S5 involve an LLM, and their outputs are stored, not re-derived.
+Each check runs on (base, head) for a branch and produces a result plus a delta against the same check on the base. `forecast(main)` is itself a cached check, computed once per `MainVersion`.
 
-## 7. Where SpacetimeDB fits (and where it doesn't)
+| Check | Input | Output | Agent or code |
+|---|---|---|---|
+| S0 Extract | ECR document | A commit of `Change`s: structured list of part/quantity/spec/supplier changes, each with a confidence and a pointer to the source text | Agent, human-confirmable on the PR page |
+| S1 BOM delta | `main@base` + overlay | The BOM at head, the diff, affected parts and suppliers | Code |
+| S2 Cost | BOM delta, sourcing options, assumptions | Per-unit cost delta by line item at each point on the volume plan: material, labor/assembly time, tooling (amortized), scrap/yield, learning curve | Code, with agents proposing missing assumptions |
+| S3 Timeline | BOM delta, sourcing, assumptions | Effectivity date: critical path over requalification/testing, tooling lead time, supplier lead time, burn-down of old-part inventory | Code, with agents proposing missing assumptions |
+| S4 Supply chain | Sourcing graph at head | Monte Carlo over lead time, price, capacity and disruption events. Risk metrics: probability of missing the effectivity date, single-source exposure, p90 lead time, cost-at-risk, top disruption scenarios | Code (simulation), agent proposes disruption scenarios |
+| S5 Card | S2–S4 results | Impact card: headline numbers with ranges, top drivers (sensitivity), plain-language explanation, flagged low-confidence assumptions | Agent (narration only; numbers are passed in) |
 
-SpacetimeDB is a database that runs application logic inside it (modules whose functions, called *reducers*, run as transactions) and pushes changes to clients that subscribe with SQL queries, keeping a local replicated cache. The question is whether this architecture needs those properties, as opposed to merely tolerating them.
+Notes:
+- **S0 is the fragile check.** ECR prose is free-form and may reference part numbers that don't map cleanly. Low-confidence changes are surfaced on the PR page for a human to confirm instead of flowing downstream silently.
+- **Gap-filling.** Real ECRs will rarely state a requalification duration or a tooling cost. An agent proposes a distribution from category defaults and comparable parts and records it as an `agent_estimated` assumption with a rationale. The card flags it. A finance reader can see which numbers rest on guesses and edit them.
+- **S4 compares routes on shared random draws.** Old route versus new route use the same random numbers, so the difference isn't simulation noise.
+- **DAG.** `S0 → S1 → {S2, S3, S4} → S5`. If S3 turns out to need S4's lead-time results the DAG gets an edge.
 
-### The case for
+## 6. Integration branch and conflicts
 
-The architecture has three jobs that a conventional stack handles with separate glue, and SpacetimeDB covers all three in one place.
+The backlog roll-up is an integration branch: an ordered list of ECR branches merged into one overlay and checked as a unit. Order matters (later ECRs see earlier ones), so the roll-up is scenario-specific and finance can reorder, add, or drop members.
 
-1. **Live reactive forecast graph.** The central product behavior is "an input changed, so every dependent forecast must update, and finance sees it happen". With Postgres that means building change notification, a websocket layer, and client cache invalidation. Here, the UI subscribes to `ImpactCard`/`RiskMetric` rows for the ECRs or scenario on screen, and updates arrive as rows land. During a demo, a supplier lead time changes and the backlog roll-up visibly re-prices.
-2. **Atomic invalidation cascade (§6).** "Update the quote, mark dependent runs stale, enqueue new tasks" is one reducer, one transaction. That is the transactional-outbox pattern without the outbox. This is the strongest technical reason: the correctness requirement is real, and the usual solution is real extra machinery.
-3. **The database as agent coordination bus.** Many workers (extraction agents, cost agents, simulators, narrators) need to claim tasks without double work, be woken when work appears, and publish results others react to. A `Task` table, a `claim_task` reducer, and worker subscriptions to pending tasks replace a separate queue plus pub/sub. Lease expiry runs as a scheduled reducer in the same system.
-4. **Scenario-toggling is multi-client state.** Finance users toggling ECRs into a scenario and watching totals change is shared, live state with identity. The platform provides per-client identity and subscriptions directly.
-5. **Later, for Loop 2:** "come back in N weeks and compare to actuals" maps onto scheduled reducers, and "every forecast is immutable with its inputs" maps onto append-only tables inside the same transaction model. This is a bonus, not a reason to choose it for Loop 1.
+Conflict kinds, from most to least certain:
 
-### The case against, stated plainly
+1. **Textual**: two branches change the same (entity, field) differently, or one removes what the other modifies. Detected by comparing overlays against the common base. Blocks the merge until someone chooses.
+2. **Shared-resource**: different entities, same supplier or same capacity-limited part. Not a merge failure, but the combined forecast differs from the sum, so it is flagged and the integration forecast is what to read.
+3. **Dependency**: an ECR is only meaningful after another (stacked). Declared by a human or suggested by an agent reading the ECR text.
+4. **Physical interaction**: not detectable here (§2). Out of scope.
 
-- **It does no heavy compute.** Reducers are transactional, sandboxed, and not meant for long-running work, so the Monte Carlo, the LLM calls, and any dataframe-style analysis live in external workers either way. SpacetimeDB makes zero difference to the hardest part of the product.
-- **It is a poor analytics store.** Subscription SQL is a restricted subset (as I understand it: limited joins, no aggregates). Roll-ups must be computed by a worker or reducer and stored as rows, not computed on the fly by the client. Finance will also want export (CSV/Excel); that is a worker or UI concern.
-- **The glue it removes is moderate, not enormous.** Postgres with `SELECT ... FOR UPDATE SKIP LOCKED` for the queue, `LISTEN/NOTIFY` for wake-ups, and a small websocket gateway for the UI achieves the same behavior. That is perhaps a day of plumbing, not infeasible.
-- **Risk.** It is a younger system than Postgres, with a smaller ecosystem and, for us, a learning curve inside a hackathon window.
+First cut: detect 1 and 2, flag 3 when declared, ignore 4.
 
-### Verdict
+## 7. Effectivity and `main` as a timeline
 
-SpacetimeDB is justified **if** we commit to the design in §6 (live invalidation cascade, DB-as-bus, live scenario toggling) as the product's core experience. It would not be justified for a batch "upload ECRs, get a PDF" tool, where Postgres is simply better. The honest summary: its value is deleting plumbing that this particular design needs a lot of, and the design is only worth it if the live, always-current feel is the demo.
+Merging an ECO sets an effectivity (a date or unit boundary) taken from the S3 result, possibly overridden by a human. Cost and volume math then splits production into before and after the cut-in: units before use the old part, units after use the new one, and there is a transition period burning down old inventory. S2 consumes this split.
 
-### Spike before committing (time-boxed)
+Minimum viable version: one effectivity date per ECO and a simple inventory burn-down. Anything finer (per-serial effectivity, lot boundaries) is deferred.
 
-Verify these, and adopt SpacetimeDB only if all pass. Each is a place where my assumptions could be wrong:
+## 8. Execution model
 
-1. A worker in our chosen language can connect, subscribe to `Task WHERE status = 'pending'`, claim one via reducer, and write results back. (Check which client SDKs are mature; a Python worker may need to use the HTTP API instead of a native SDK.)
-2. Module language options and maturity for our team (Rust, C#, TypeScript status).
-3. A reducer can enqueue tasks and mark many rows stale in one transaction at the row counts we expect (hundreds of parts, tens of ECRs).
-4. Whether reducers can call out over HTTP (some version of "procedures"). Not required (workers do outbound calls) but would simplify the LLM path.
-5. UI subscription latency and re-render behavior when a roll-up row updates.
+- **Workers** claim a pending check run whose dependencies are done, run it, and write results. Claiming is atomic (one worker wins), and each claim has a lease so a crashed worker's run is retried.
+- **Invalidation is a reconcile loop.** When `main` advances, or a branch gets a new commit, the expected `input_hash` for each check changes. Any check without a matching completed run is enqueued. Because the hash is a pure function of inputs, this stays correct even if enqueueing is not atomic with the change.
+- **Idempotency.** A check's output is keyed by `(branch, stage, input_hash)`. Re-running a completed key is a no-op.
+- **Determinism.** Seeds and code version are in the hash. Only S0, gap-filling, and S5 involve an LLM; their outputs are stored, not re-derived.
 
-**Fallback:** Postgres + a thin realtime layer. To keep this swap cheap, all writes go through a narrow API (`enqueue_run`, `claim_task`, `complete_task`, `record_assumption`, `mark_stale`) rather than workers touching tables ad hoc.
+## 9. State layer: SpacetimeDB or not (decision open)
 
-## 8. Components
+The team has a strong preference for SpacetimeDB and wants a reason it fits, not just a reason it doesn't hurt. An independent review was requested on 2026-10-24; its result should be folded into this section. Until then, this is the author's analysis.
 
-Stack is deferred. The architecture implies four deployable pieces:
+### What the layer must provide
 
-1. **State + coordination core** (SpacetimeDB module, or the Postgres fallback): tables from §5, reducers/API from §7.
-2. **Workers**, split by kind:
-   - *Agent workers*: S0 extraction, assumption proposals, S5 narration. Call an LLM.
-   - *Compute workers*: S1 diff, S2 cost, S3 timeline, S4 Monte Carlo. Numeric libraries matter here (this is the main input to the language choice).
-3. **UI**: ECR backlog view, per-ECR impact card, scenario builder with live roll-up, S0 confirmation screen, assumption inspector ("why is this number what it is").
-4. **Data generator** (§10): produces fake baseline data and ECRs.
+1. Live updates to a multi-user PR page: check results stream in, assumption edits and comments appear for other viewers.
+2. Safe concurrent edits (two reviewers editing assumptions or toggling integration members).
+3. Atomic task claiming by workers, with leases.
+4. A place for the overlay and baseline tables (§4), at small scale.
+5. Narrow enough write surface that swapping the layer later is cheap.
 
-Language constraint worth deciding early: compute workers want good numerics (Python/NumPy is the path of least resistance); the UI side wants whatever the SpacetimeDB client SDK supports best. These two may end up in different languages, which is fine as long as the interface is the narrow API above.
+It does **not** need analytics, large data, or heavy compute.
 
-## 9. Loop 2 hooks (everything else deferred)
+### What the SpacetimeDB docs say (read 2026-10-24, version 2.8)
 
-Done now because it's nearly free and impossible to retrofit cleanly:
-- Runs are immutable and store seed, code version, assumptions, and the BOM revision.
-- Outputs are decomposed with ranges (§2), so a later variance can be attributed to a line item or assumption.
+- Reducers are transactional and cannot do I/O. Procedures can make HTTP calls (30 s default timeout, capped at 180 s), must open transactions manually, and cannot send HTTP while holding one. Procedures are marked unstable in C#, C++ and Rust.
+- Views are subscribable. Query-builder views update incrementally; procedural views re-run when their read set changes. Documented operators are semijoin and `count()`; no sum or group-by was found.
+- Subscription SQL: no aggregates, joins limited to two tables with indexed join columns. One-off queries document only `COUNT`.
+- Modules: Rust, C#, TypeScript (new in 2.0), C++. Official client SDKs: TypeScript, Rust, C#, C++. No official Python SDK was found, so a Python worker would use the HTTP API (unverified).
+- All data is held in RAM on a single node. The FAQ says it is "designed for any real-time application" and "purpose-built for real-time applications, not batch processing or analytics".
+- Scheduled tables can trigger reducers or procedures at set times.
+- No native branching or forking was found. The overlay model in §4 is ordinary tables either way.
+
+Sources: [FAQ](https://spacetimedb.com/docs/intro/faq), [Functions](https://spacetimedb.com/docs/functions), [Views](https://spacetimedb.com/docs/functions/views), [Procedures](https://spacetimedb.com/docs/functions/procedures), [SQL reference](https://spacetimedb.com/docs/reference/sql).
+
+### Assessment
+
+Requirement 1 and 2 are where SpacetimeDB is built to be strong: a PR page is a collaboration dashboard, and clients subscribing to rows filtered by an indexed column (e.g. `pr_id`) get push updates with a local cache and no hand-written websocket layer. Requirement 3 works but is a pattern we build (a claim reducer plus a lease), not a feature. Requirements 4–5 are neutral.
+
+The aggregation and analytics limits do not bite: roll-ups are forecasts of a merged branch, computed in workers and stored as rows, and percentiles don't aggregate by SQL anyway. The RAM limit does not bite at this scale.
+
+Two earlier arguments are weaker than the first draft of this spec claimed:
+- *Atomic invalidation cascade.* With hash-keyed runs (§8), a reconcile loop is correct without it.
+- *DB as agent queue.* Doable, but Postgres with `SELECT ... FOR UPDATE SKIP LOCKED` is equally mature.
+
+### Alternatives
+
+| Option | Strong at | Costs |
+|---|---|---|
+| SpacetimeDB | Live multi-user subscriptions, one system for state + reactivity | Younger ecosystem; no Python SDK; procedures/long-task behavior unverified; team learning curve |
+| Postgres + realtime layer (e.g. LISTEN/NOTIFY, Supabase Realtime, Electric) | Mature; Python-friendly; branch overlay queries in full SQL | We assemble the live layer and client cache ourselves |
+| Dolt | Native branch/diff/merge over SQL (`dolt_diff`, `DOLT_MERGE`) | No live push; not designed for many small concurrent edits; still need a reactive layer |
+| SQLite/Postgres + a small websocket server | Simplest to reason about | Hand-rolled everything live |
+
+### Spike (time-boxed) before committing
+
+The spike exercises the real scenario, not a toy:
+1. Two worker processes claim and complete check runs through a reducer/lease; a crashed worker's run is retried.
+2. Two browsers subscribe to one PR (filtered by `pr_id`) and see check results arrive live.
+3. A reviewer edits an assumption in one browser; the other browser sees it; checks re-enqueue by the reconcile loop.
+4. A worker in our chosen compute language can do (1) and write results back (native SDK, or HTTP API for Python).
+5. A long-running worker task (tens of seconds) behaves as expected; check whether a procedure or an external worker is the right place for the LLM calls.
+
+Adopt it if 1–3 are smooth and 4 has an acceptable path. If 4 forces a language we don't want, or any of 1–3 takes unreasonable time, fall back.
+
+### Fallback and portability
+
+All writes go through a narrow API (`enqueue_check`, `claim_check`, `complete_check`, `add_commit`, `record_assumption`, `add_comment`, `set_pr_status`) instead of workers or the UI touching tables ad hoc. Swapping the layer then means reimplementing that API.
+
+## 10. Components
+
+Stack is deferred. The architecture implies four pieces:
+
+1. **State + coordination layer** (§9): the tables in §4 and the narrow API.
+2. **Workers**:
+   - *Agent workers*: S0 extraction, assumption proposals, S5 narration (LLM calls).
+   - *Compute workers*: S1 diff, S2 cost, S3 timeline, S4 Monte Carlo. Numerics matter here (the main input to the language choice).
+3. **UI**: backlog list, PR page (diff, impact card, streaming check status, assumption inspector with inline editing, comments, reviews), integration-branch builder with reorder/toggle and conflict flags, S0 confirmation screen.
+4. **Data generator** (§12).
+
+The language question is smaller than it looked: SpacetimeDB supports TypeScript for modules and clients, and a Monte Carlo over a few hundred nodes is fast in TypeScript, so an end-to-end TypeScript stack is plausible. If compute wants Python, the narrow API is the seam.
+
+## 11. Loop 2 hooks (everything else deferred)
+
+Done now because it's nearly free and hard to retrofit:
+- Check runs are immutable and store seed, code version, assumptions hash, and base/overlay.
+- A merged PR keeps the forecast it was approved on, so "what did we think when we merged it" stays answerable.
+- Outputs are decomposed with ranges (§3), so a later variance can be attributed to a line item or assumption.
 - `Assumption.source` and `rationale` are recorded.
 
-Deferred until Loop 1 is working: `Actual`, `Variance`, `Attribution` tables; scheduled revisits; prior updates; backtest harness; any "why were we wrong" agent.
+Deferred: `Actual`, `Variance`, `Attribution` tables; scheduled revisits (post-merge review); prior updates; a backtest harness; a "why were we wrong" agent.
 
-## 10. Fake data (not yet, but constrain the design)
+## 12. Fake data (not yet, but constrain the design)
 
-The data will be generated and synthetic. When it's built it needs: a baseline production BOM of a plausible electric aircraft (tens of parts is enough for a demo), suppliers with regions and lead-time distributions, a volume ramp, and a set of ECRs written as realistic prose with varied clarity (some precise, some vague, one that conflicts with another). If Loop 2 gets built, the generator should also emit a hidden ground truth so "actuals" can be produced for a backtest; designing the generator with that in mind costs little now.
+Data will be generated and synthetic. When built it needs: a baseline BOM of a plausible electric aircraft (tens of parts is enough for a demo), suppliers with regions and lead-time distributions, a volume ramp, and a set of ECRs written as realistic prose with varied clarity, including one pair that conflicts textually and one pair that interacts through a shared supplier. If Loop 2 gets built, the generator should also emit a hidden ground truth so "actuals" can be produced for a backtest.
 
-## 11. Suggested build order
+## 13. Suggested build order
 
-Ordered by dependency, not by time estimate. The line after step 6 is the minimum credible demo.
+Ordered by dependency, not time. The line after step 7 is the minimum credible demo.
 
-1. SpacetimeDB spike (§7) and decision.
-2. Schema + narrow API + task queue running end to end with a dummy task.
+1. State-layer spike (§9) and decision.
+2. Schema + narrow API + check-run queue running end to end with a dummy check.
 3. Minimal fake data: small BOM, a few suppliers, 3–5 ECRs.
-4. S0 → S1 (extraction and BOM diff), with the confirmation UI.
-5. S2 (cost) and S3 (timeline) with simple distributions.
-6. S4 (supply chain simulation) and S5 (impact card) — **minimum credible demo: one ECR in, card out, live.**
-7. Backlog scenario roll-up with toggling and conflict flags.
-8. Live invalidation demo (change a supplier input, watch dependents re-forecast).
-9. Loop 2, if time remains.
+4. Branch/overlay model: apply an overlay to `main`, produce the BOM at head and the diff (S1), PR page shell.
+5. S0 extraction with confirmation UI.
+6. S2 (cost) and S3 (timeline) with simple distributions, forecast diff on the PR page.
+7. S4 (supply chain simulation) and S5 (card): **one ECR in, PR page with live checks and impact card out.**
+8. Integration branch with ordering, toggling, and textual/shared-resource conflict flags.
+9. Live demo moves: change a supplier input on `main` and watch open PRs recompute; reviewer edits an assumption and the card updates.
+10. Loop 2, if time remains.
 
-## 12. Open questions
+## 14. Open questions
 
 - What does a real ECR/ECO look like at Archer: structured form, PDF, PLM export? S0 is only as good as our assumptions here.
-- Is "production" cost the full aircraft rolled up, or per subsystem? This sets BOM depth.
-- Who confirms S0 output in practice: the engineer who filed it, or finance?
-- How does finance prefer ranges shown (p10/p50/p90, a probability of exceeding a threshold, a scenario table)?
-- Is cross-ECR dependency something Archer already tracks, or will we have to infer it?
+- What are their actual state names, and how do ECR, ECN and ECO map to PR states?
+- Is "production" cost the full aircraft or per subsystem? This sets BOM depth.
+- Who confirms S0 output in practice: the filing engineer, or finance?
+- How does finance want ranges shown (p10/p50/p90, probability of exceeding a threshold, scenario table)?
+- Does Archer already track cross-ECR dependencies, or will we have to infer them?
+- Effectivity: per date, per unit, or per serial range?
+
+## Sources for §2
+
+[Onshape: cloud-native CAD/PDM/PLM workflow](https://www.onshape.com/en/blog/cloud-native-cad-pdm-plm-workflow-onshape-arena), [Autodesk: engineering change management process](https://www.autodesk.com/blogs/design-and-manufacturing/engineering-change-management-process/), [Arena ECO template](https://www.arenasolutions.com/wp-content/uploads/arena-eco-template.pdf), [Oracle PeopleSoft: Creating and Maintaining ECRs](https://docs.oracle.com/cd/G47724_01/fscm92pbr55/eng/fscm/segg/CreatingandMaintainingECRs-9f1453.html), [Dolt cheat sheet](https://www.dolthub.com/docs/guides/cheat-sheet.md).
