@@ -1,8 +1,8 @@
 # Norn's impact checks
 
-The first two checks of the impact screen, as a pure TypeScript library: **S1, the BOM delta**,
-and **S2, cost** (`../ARCHITECTURE.md` §5). No database, no I/O, no dependencies at run time.
-The worker calls them and stores the result; wiring them into `workers/` is a later step.
+The code checks of the impact screen, as a pure TypeScript library: **S1, the BOM delta**,
+**S2, cost**, **S3, timeline** and **S4, supply** (`../ARCHITECTURE.md` §5). No database, no I/O,
+no dependencies at run time. The worker (`../workers`) calls them and stores the rows.
 Written 2026-10-24.
 
 ```
@@ -31,8 +31,101 @@ node demo.ts ECR-0417 [seed]   # print an ECR's cost page from Bowman's dataset
   year-one and whole-plan totals), each program's unit cost at base and head, the piece-price
   ranges, recurring cost by year, the biggest swings, and a convergence check.
 
-Both results are plain JSON. `bomDeltaRows` and `costCheckRows` turn them into rows of
-`{ key, label, unit, p10, p50, p90, detailJson }`, the skeleton worker's `Result` shape.
+- **`timelineCheck(baseline, ecr, { seed })`** (S3): when the change can reach the line. See
+  "Timeline and supply" below.
+- **`supplyCheck(baseline, ecr, { seed, peers? })`** (S4): single-source parts, lead times, spend
+  and capacity, and what changes when other open ECRs buy from the same supplier.
+
+All results are plain JSON. `bomDeltaRows`, `costCheckRows`, `timelineRows` and `supplyCheckRows`
+turn them into rows of `{ key, label, unit, p10, p50, p90, detailJson }`, the worker's `Result`
+shape. The last row of each is `detail`, which carries the whole result with every input the
+traces name.
+
+## Timeline and supply (S3 and S4)
+
+Both read the ECR's own program, from the same model (`src/plan.ts`), and follow S2's conventions:
+per-input draws keyed by the seed and the input's id, correlation 0.3 inside a group, a second-seed
+convergence check on every continuous result they compute (cut-in weeks, weeks late, spend, capacity
+use, the shift with peers, the bundle savings; a part's lead time is one input's own draws and is not
+checked), traces whose ids are all in `inputs`, and assumptions by id (`replacesGiven` for stated numbers).
+Dates hang on the ECR's filing date, never on the clock, so a result is a function of its inputs and
+the seed.
+
+**The model.** The board decides some weeks after filing (a PERT range from the filing history:
+3, 4, 7 weeks for a routine change, 1.5, 3, 5 for an urgent one; the median of the history is 4.1
+weeks). Each changed buy part then takes its supplier's lead time. The quote's `leadTimeWeeks` is
+the median, spread by the sourcing record's p10/p50/p90; with no sourcing record the spread is a
+default (sigma 0.15 for a firm quote, 0.25 for a budgetary one). A part with no quote uses the
+sourcing record alone; a part with neither takes the median of the sourced parts and is flagged
+`needs_estimate`. A part from a supplier with a qualification slot
+(`supplierConstraints`, kind `qualification_slot`) is ordered at the first slot that opens after the
+decision. The change reaches the line on the latest of: every changed part in the building, and the
+old stock the proposal uses up having been built into aircraft. The first serial that can take it is
+the first one the volume plan completes on or after that day.
+
+**Which parts, and their prices.** The changed buy parts are the ones the ECR changes or adds, plus
+any part the change needs more of than the baseline does, wherever in the BOM the quantity rises
+(a `set_qty` on a part, or a changed assembly above it): the spend is at the full head quantity, not
+only the increase. A part's price is the quote line that names that part (a quote can price several
+parts, so the order of its lines does not matter), or a line that names none and is on the quote for
+that part, else the item master's. S4 draws the price from the same variables the cost check uses:
+the sourcing record's p10/p50/p90 as a multiplier (`price:<item>`; a part with no record takes the
+cost check's default range), and a budgetary quote's own spread (`quote:<item>`).
+
+**What S3 returns.** The decision date, the cut-in date (P10, P50, P90), the weeks from filing, the
+first serial, how late that is against the effectivity the ECR states (positive is late) with the
+share of draws in which it is late, and each step on the path with how often it sets the cut-in.
+The old-stock step is the day the aircraft before the stock's serial are planned to complete, from
+the volume plan alone, so it differs from the cut-in whenever a part arrives later. Row values for
+days are days since 1970-01-01 (unit `day`); the ISO dates are in the `detail` row.
+
+**What S4 returns.** Each changed part's sources (single-source is flagged) and lead time, the
+probability the parts miss the stated effectivity, year-one spend and the single-source share of
+it, and capacity use against a `capacity` constraint. When `peers` (the other open ECRs'
+change requests) share a supplier with this one, it adds the interaction:
+- **Slots.** Per draw, ECRs take slots in the order they were filed (`filedOn`, then id). The ECR
+  filed second waits for the next slot. This is a rule Norn assumes, not one the supplier states.
+  The headline numbers treat the ECR alone; the interaction is shown beside them (cut-in alone and
+  with the peers, the shift in weeks, the probability it is later).
+- **Bundles.** Two part numbers from one supplier within the constraint's window get a cheaper
+  qualification for the later one and a raw-material price break on both. The saving is shown for
+  this ECR and for the pair, from the same draws, so it is the same number from either ECR.
+- **Capacity** counts the open changes it is given, not the supplier's other customers. It ignores
+  the constraint's window and any yield penalty.
+
+**Where the constraint terms come from.** The dataset states a slot's cadence and its bundle terms
+in the constraint's description. The library takes structured fields when present
+(`slotCadenceMonths`, `bundle`), and otherwise reads the description for the cadence, "within N
+weeks", "N% less" and "N% ... price break", flagging `terms_from_text`. The raw-material share of
+the part price (40%, 60%, 80%) that the price break applies to is a default nobody stated, flagged
+`needs_estimate`. The ERP baseline carries no constraints: without them there is no slot to wait
+for, and S4 reports the shared supplier without a shift.
+
+**Limits.**
+- S2 still reads the effectivity the ECR states, so S2's money does not move when S3 reports a
+  later cut-in. S3 is the earliest the change can reach the line, on the facts it has.
+- Only the ECR's own program is timed.
+- Using up the old stock can need a serial past the end of the volume plan. Then no day can be
+  placed: the serial floor is kept (`cut_in_serial`), the cut-in date and weeks, the lateness and
+  the interaction shift are left out (null in the result, absent from the rows), the chance of
+  missing a stated effectivity is 1 with no weeks, the year-one spend and capacity use are 0 (no
+  planned aircraft takes the change), and a `stock_beyond_plan` flag says the plan needs to run
+  further.
+- `peers` are the caller's to pass. The worker names them in the run's inputs (each open ECR's
+  change request revision and digest), so a run is a function of them and filing, editing, closing
+  or reopening a peer re-runs S4. The peer list, with a content hash of each peer's change request,
+  is in the `detail` row. A peer that cannot be read (no id, or a change request with missing
+  parts) is left out and named in an `unreadable_peer` flag; it never fails the ECR's own check.
+- One function decides which quote and which line apply to a part, and price, lead time, source and
+  qualification lot all use it: a quote whose `item` is the part comes first, then a quote with a
+  line naming the part. A quote that prices several parts therefore gives every part its lead time.
+- A bundle needs two different part numbers. Two ECRs that change the same part number earn no
+  bundle discount from each other. An ECR's own qualification lots take separate slots of an
+  exclusive-slot constraint, with or without peers.
+- Convergence is checked on the continuous results only. Serial numbers and probabilities are
+  steps and are not.
+- The cumulative units a plan completes are interpolated through each month, so the serial that
+  takes the change is the one planned to complete on or after the cut-in day, not a rounded month.
 
 ## Ranges
 
@@ -45,9 +138,11 @@ Both results are plain JSON. `bomDeltaRows` and `costCheckRows` turn them into r
   group are independent.
 - Convergence: P80 and P90 of the headline numbers are recomputed on a second seed and must agree
   within 1%. A run that misses doubles its draws, up to 40,000 (`maxDraws`), and `draws` in the
-  result says how many it used. ECR-0409, whose budgetary quote makes its change wide, needed
-  20,000 or 40,000 on 12 of 60 seeds tried; every other dataset ECR converged at 10,000 on all 12
-  seeds tried. A run that still misses at the cap is flagged `not_converged`.
+  result says how many it used. On 12 seeds tried (`seed-0` to `seed-11`), S3 and S4 converged at
+  10,000 draws on every seed for six of the ten dataset ECRs; ECR-0417, ECR-0409, ECR-0412 and
+  ECR-0419 needed 20,000 or 40,000 on some, and ECR-0417 missed the tolerance on `seed-0` even at
+  40,000 (its weeks-late number) and was flagged `not_converged`. A run that still misses at the cap
+  is flagged `not_converged`.
 
 ## Paired draws and the seed rule
 
