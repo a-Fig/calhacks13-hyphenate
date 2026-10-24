@@ -1,0 +1,4 @@
+node_modules/
+# Event logs written by the CLI and the smoke test. They hold tool inputs and outputs and local
+# paths, so they stay out of the repo.
+logs/
