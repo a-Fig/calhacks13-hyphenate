@@ -8,11 +8,17 @@ Processes that do Norn's work outside the database, through its reducers. Writte
   - Every other stage, and every ECR with no change request, is mock compute. Its results say
     `mock: true`.
 - **The ingest loop** (`src/ingest.ts`) reports the ECRs a change-request source has to Norn.
+- **The company config** (`src/config.ts`): at start-up the worker loads and validates the file in
+  `NORN_COMPANY_CONFIG`, refuses to start on a malformed one, and stores the config through
+  `set_config` when it differs from what is stored. How it works and what the module checks are in
+  `../config/README.md`.
 
 ```
 npm run worker                                       # from norn/: the worker, on the database NORN_DB (default norn)
 npm run ingest                                       # the ingest loop (needs NORN_INGEST_SOURCE)
 NORN_DB=norn-pipe npm run check:pipeline             # end to end on a scratch database: ingest, real checks, revisions, assumptions, baseline change
+npm run test:workers                                 # offline tests of the start-up config and of the module's company_config checks
+NORN_DB=norn-cfg npm run check:config                # end to end on a scratch database you named: start-up config stored once, a re-run stores nothing, a malformed file stops the worker
 ```
 
 ## How an ECR gets its numbers
@@ -69,6 +75,7 @@ stated:
 
 | Variable | For | Meaning |
 |---|---|---|
+| `NORN_COMPANY_CONFIG` | worker | The company's configuration file: a module that default-exports it, or a `.json` file (for Bowman, `../../bowman/norn-config/bowman.config.ts` from `norn/workers`). Unset: the worker warns and keeps the stored config. Malformed: it exits with code 1 and prints the problems. A relative path is relative to where the worker starts (`norn/workers` for `npm run worker`). |
 | `NORN_ERP_SETTINGS` | worker | A module exporting the company's `erpnext` settings, for example `../bowman/norn-config/erpnext.ts`. The connection comes from `ERPNEXT_URL`, `ERPNEXT_API_KEY` and `ERPNEXT_API_SECRET` (the .env, or `ENV_FILE`). |
 | `NORN_BASELINE_FILE` | worker | A baseline JSON file instead of the ERP, for tests. Recorded with source `file`. |
 | `NORN_BASELINE_POLL_MS` | worker | How often to re-read the baseline. |

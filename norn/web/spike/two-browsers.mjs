@@ -20,7 +20,7 @@ report.timings.seed = resetAndSeed();
 startWorker('w1', { NORN_MC_TICKS: '4', NORN_MC_TICK_MS: '100' });
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 
-async function open(name, path = '/') {
+async function open(name, path = '/spike') {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 1400 } });
   await ctx.addInitScript(RECORDER);
   const page = await ctx.newPage();

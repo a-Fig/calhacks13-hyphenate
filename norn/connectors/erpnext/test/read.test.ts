@@ -85,6 +85,18 @@ test('maps ERPNext rows to the baseline', async () => {
   assert.deepEqual(meta.warnings, ['X has no Cost price valid on 2026-06-01']);
 });
 
+test('names work centers by the company\'s own ids when the ERP holds them', async () => {
+  stub({ Workstation: [{ name: 'Bench', hour_rate: 100, wid: 'WC-BENCH' }] });
+  const cfg = { ...opts, customFields: { ...opts.customFields, workCenter: { externalId: 'wid' } } };
+  const { baseline: b } = await readBaseline(cfg);
+  assert.deepEqual(b.workCenters, [{ id: 'WC-BENCH', laborRatePerHour: 100 }]);
+  assert.equal(b.items.find((i) => i.code === 'A')!.workCenter, 'WC-BENCH');
+  assert.equal(b.items.find((i) => i.code === 'P')!.defaultSupplier, 'Supplier S');
+  assert.deepEqual(b.sourcing.map((s) => s.supplier), ['Supplier S']);
+  const plain = await readBaseline(opts);
+  assert.equal(plain.baseline.workCenters[0].id, 'Bench', 'without the setting the ERPNext name is kept');
+});
+
 test('uses the fallback only when ERPNext has no rows', async () => {
   stub({ 'Serial No': [], 'Master Production Schedule': [] });
   const fallback = { volumePlan: [{ month: '2027-01', program: 'alpha', units: 4 }], builtAircraft: [{ program: 'alpha', serial: 7, completed: '2026-01-01' }] };

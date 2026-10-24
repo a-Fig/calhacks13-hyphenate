@@ -87,18 +87,23 @@ export async function readBaseline(opts: ErpnextOptions): Promise<ReadResult> {
   const quoteFields = ['name', 'item_code', 'price_list', 'supplier', 'price_list_rate', 'lead_time_days', 'valid_from', 'valid_upto',
     quoteF.priceP10, quoteF.priceP90, quoteF.leadWeeksP10, quoteF.leadWeeksP90, quoteF.qualified, quoteF.primary, quoteF.allocation].filter((f): f is string => !!f);
 
+  const wcF = cf.workCenter?.externalId;
   const [items, itemDefaults, boms, bomItems, bomOps, stations, prices, bins, serials, schedule] = await Promise.all([
     c.list('Item', { fields: itemFields }),
     c.list('Item Default', { parent: 'Item', fields: ['parent', 'company', 'default_supplier'] }),
     c.list('BOM', { filters: [co, ['docstatus', '=', 1], ['is_active', '=', 1], ['is_default', '=', 1]], fields: ['name', 'item', 'quantity'] }),
     c.list('BOM Item', { parent: 'BOM', filters: [['docstatus', '=', 1]], fields: ['parent', 'item_code', 'stock_qty', 'qty', 'idx'] }),
     c.list('BOM Operation', { parent: 'BOM', filters: [['docstatus', '=', 1]], fields: ['parent', 'workstation', 'time_in_mins', 'idx'] }),
-    c.list('Workstation', { fields: ['name', 'hour_rate'] }),
+    c.list('Workstation', { fields: wcF ? ['name', 'hour_rate', wcF] : ['name', 'hour_rate'] }),
     c.list('Item Price', { filters: [['price_list', 'in', [opts.standardCostPriceList, opts.supplierPriceList]]], fields: quoteFields }),
     c.list('Bin', { fields: ['item_code', 'warehouse', 'actual_qty', 'ordered_qty'] }),
     readSerials(c, opts),
     readSchedule(c, opts),
   ]);
+
+  // Work center ids the company's other systems use, when the ERP holds them; otherwise the ERPNext name.
+  const centerId = new Map<string, string>(stations.filter((w) => wcF && w[wcF]).map((w) => [w.name, String(w[wcF!])]));
+  const wid = (name: string) => centerId.get(name) ?? name;
 
   // ---- items, programs, BOM -----------------------------------------------------------------
   const itemRow = new Map<ItemCode, (typeof items)[number]>(items.map((i) => [i.name, i]));
@@ -125,11 +130,11 @@ export async function readBaseline(opts: ErpnextOptions): Promise<ReadResult> {
     if (!parent) continue;
     const cur = labor.get(parent.item) ?? { hours: 0 };
     cur.hours += num(o.time_in_mins) / 60 / parent.quantity;
-    cur.workCenter ??= o.workstation || undefined;
+    cur.workCenter ??= o.workstation ? wid(o.workstation) : undefined;
     labor.set(parent.item, cur);
   }
 
-  const workCenters: WorkCenter[] = stations.map((w) => ({ id: w.name, laborRatePerHour: r6(num(w.hour_rate)) }));
+  const workCenters: WorkCenter[] = stations.map((w) => ({ id: wid(w.name), laborRatePerHour: r6(num(w.hour_rate)) }));
 
   // ---- prices: standard cost and supplier quotes ----------------------------------------------
   const costRow = new Map<ItemCode, (typeof prices)[number]>();
