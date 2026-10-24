@@ -27,6 +27,7 @@ node bowman/erp/seed.ts         # load bowman/data/bowman.json as Administrator 
 node bowman/erp/verify-seed.ts  # read the seed back as Norn and compare with the dataset
 node bowman/erp/seed-mbom.ts     # the manufacturing BOM: build stations under each aircraft (after seed.ts; re-runnable)
 node bowman/erp/seed-planning.ts # volume plan (Master Production Schedule), built aircraft (Serial Nos), and Norn's read grants for them
+node bowman/erp/seed-constraints.ts # the Supplier Constraint doctype and the dataset's 4 supplier constraints (re-runnable)
 ```
 
 With the tunnel open, browse `http://127.0.0.1:8081` and log in as `Administrator` with `ERPNEXT_ADMIN_PASSWORD` from `.env`. 8081 is used on both ends because the laptop cannot bind 8080.
@@ -101,8 +102,17 @@ Mapping decisions:
 - **Purchase orders and receipts.** Each PO keeps its order date, required dates and unit prices, and its dataset id in `bw_po_id` (ERPNext numbers them itself). Each received line becomes a Purchase Receipt on its received date, one per PO and date, created in date order so ERPNext needs no backdated stock repost. Receipt date minus PO date is the realised lead time.
 - **Stock.** Stores, Work In Progress and Finished Goods quantities map to the three stock warehouses; `supplierFinished` goes to a new `At Supplier - BWA` warehouse; `onOrder` is not stock (open POs fill the Bin `ordered_qty`, which equals `onOrder + supplierFinished`); `inField` (installed on aircraft) is not loaded. Items never received on a PO got an Opening Stock entry dated 2025-01-14 against `Temporary Opening`. The rest were set to the dataset quantity by a Stock Reconciliation dated 2026-10-24, with the difference posted to Cost of Goods Sold. Valuation rate is the standard cost, so FIFO or moving-average valuation will drift from it once ERPNext starts moving stock.
 - **Volume plan and built aircraft** are loaded by `seed-planning.ts`, not `seed.ts`: the volume plan as one Master Production Schedule (`MPS26-000001`, planned units per month and program), and the ten built Vespers as Serial Nos `VESPER-001` to `-010` with the completion date as `posting_date` (no stock entry, so the reconciled stock is unchanged). Details in `norn/connectors/erpnext/NOTES.md`.
-- **Not loaded** (no natural ERPNext home, or Norn takes them from the PLM side): people, change-control policy, NCRs, ECRs, ECOs as documents, supplier constraints, rate factors, scenarios.
+- **Not loaded** (no natural ERPNext home, or Norn takes them from the PLM side): people, change-control policy, NCRs, ECRs, ECOs as documents, rate factors, scenarios. Supplier constraints are loaded by `seed-constraints.ts` (next section).
 - **GL side effects.** The receipts credit `Inventory Received But Not Billed` and nothing clears it, because no purchase invoices were created. Reconciliation differences sit in Cost of Goods Sold and Temporary Opening.
+
+## Supplier constraints (2026-10-24, #89)
+
+A supplier's limits on what Bowman can buy: Orrin qualifies one UH-grade part number per quarter, Vantage commits 180,000 cells for 2027, Aurelio has 2 turbogenerator build slots in 2028. A real maker's purchasing team keeps these where it keeps its suppliers, because they come out of supplier agreements and change when a buyer renegotiates. ERPNext has no doctype for them, so `seed-constraints.ts` (Administrator, REST, re-runnable) adds one, the way a customer would with the Customize UI:
+
+- **Supplier Constraint** (custom doctype, module Buying, named by its constraint id, e.g. `CON-ORRIN-UH-SLOT`): `supplier` (Link to Supplier), `kind` (`qualification_slot` or `capacity`), `items` (child table **Supplier Constraint Item**, one Link to Item per row), `description`, `window_from` and `window_to`, `capacity_per_year`, `slot_cadence_months`, and the bundle terms `bundle_within_weeks`, `bundle_second_qualification_discount`, `bundle_price_break` (fractions: 0.4 is 40%). Purchase Manager can edit, Purchase User and Norn Agent can read. Norn has read and nothing else, as on every other doctype.
+- **Seeded:** the dataset's 4 constraints (`CON-ORRIN-UH-SLOT`, `CON-ORRIN-UH-CAPACITY`, `CON-VANTAGE-ALLOC`, `CON-AURELIO-SLOT`), the supplier set to the ERPNext name ("Orrin Magnetics") by the id-to-name map `seed.ts` uses. A second run created nothing. The dataset has no cadence or bundle numbers, only the description text, so those fields are empty and the supply check reads the description. The provenance (`prov`, "invented") is not loaded.
+- The connector reads the doctype when `supplierConstraints` is set in the ERPNext settings (`bowman/norn-config/erpnext.ts`); `norn/connectors/erpnext/NOTES.md` has the read side. Adding the doctype changes the baseline hash: the baseline now carries `supplierConstraints`.
+- Not tested: whether the doctype survives a `bench migrate` or an app update (it is a custom doctype, stored in the database like a Custom Field, so it should); how it renders in the desk UI.
 
 ## Manufacturing BOM (2026-10-24)
 

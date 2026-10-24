@@ -36,6 +36,7 @@ import {
 // Import all reducer arg schemas
 import AddCommentReducer from "./add_comment_reducer";
 import ClaimCheckReducer from "./claim_check_reducer";
+import ClaimPublicationReducer from "./claim_publication_reducer";
 import CompleteCheckReducer from "./complete_check_reducer";
 import CreatePrReducer from "./create_pr_reducer";
 import EditPrTextReducer from "./edit_pr_text_reducer";
@@ -49,6 +50,7 @@ import RecordAgentEventsReducer from "./record_agent_events_reducer";
 import RecordAssumptionReducer from "./record_assumption_reducer";
 import RecordBaselineReducer from "./record_baseline_reducer";
 import RegisterActorReducer from "./register_actor_reducer";
+import ReleasePublicationReducer from "./release_publication_reducer";
 import ReportProgressReducer from "./report_progress_reducer";
 import SetConfigReducer from "./set_config_reducer";
 import SetPrStatusReducer from "./set_pr_status_reducer";
@@ -72,6 +74,7 @@ import MainVersionRow from "./main_version_table";
 import NornConfigRow from "./norn_config_table";
 import PartRow from "./part_table";
 import PrincipalRow from "./principal_table";
+import PublicationClaimRow from "./publication_claim_table";
 import PullRequestRow from "./pull_request_table";
 
 /** Type-only namespace exports for generated type groups. */
@@ -293,6 +296,17 @@ const tablesSchema = __schema({
       { name: 'principal_identity_key', constraint: 'unique', columns: ['identity'] },
     ],
   }, PrincipalRow),
+  publicationClaim: __table({
+    name: 'publication_claim',
+    indexes: [
+      { accessor: 'prId', name: 'publication_claim_pr_id_idx_btree', algorithm: 'btree', columns: [
+        'prId',
+      ] },
+    ],
+    constraints: [
+      { name: 'publication_claim_pr_id_key', constraint: 'unique', columns: ['prId'] },
+    ],
+  }, PublicationClaimRow),
   pullRequest: __table({
     name: 'pull_request',
     indexes: [
@@ -317,6 +331,7 @@ const tablesSchema = __schema({
 const reducersSchema = __reducers(
   __reducerSchema("add_comment", AddCommentReducer),
   __reducerSchema("claim_check", ClaimCheckReducer),
+  __reducerSchema("claim_publication", ClaimPublicationReducer),
   __reducerSchema("complete_check", CompleteCheckReducer),
   __reducerSchema("create_pr", CreatePrReducer),
   __reducerSchema("edit_pr_text", EditPrTextReducer),
@@ -330,6 +345,7 @@ const reducersSchema = __reducers(
   __reducerSchema("record_assumption", RecordAssumptionReducer),
   __reducerSchema("record_baseline", RecordBaselineReducer),
   __reducerSchema("register_actor", RegisterActorReducer),
+  __reducerSchema("release_publication", ReleasePublicationReducer),
   __reducerSchema("report_progress", ReportProgressReducer),
   __reducerSchema("set_config", SetConfigReducer),
   __reducerSchema("set_pr_status", SetPrStatusReducer),
