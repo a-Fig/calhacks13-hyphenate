@@ -15,7 +15,8 @@
     "token:person": "tsx scripts/mint-person-token.ts",
     "db:publish": "npm run typecheck -w @norn/module --silent && spacetime publish norn-mcp --no-config --module-path ../module --server local --delete-data=always --yes",
     "check:gate": "tsx test/gate.ts",
-    "e2e": "tsx test/e2e.ts"
+    "e2e": "tsx test/e2e.ts",
+    "probe:argv": "tsx test/argv-probe.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

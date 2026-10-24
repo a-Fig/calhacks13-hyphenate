@@ -8,7 +8,9 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Timestamp } from 'spacetimedb';
-import { Norn, loadSigningKey, nornMcpFor, signToken, startServer, verifyToken } from '../src/index.ts';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { Norn, jobTokenFile, loadSigningKey, nornMcpFor, signToken, startServer, verifyToken } from '../src/index.ts';
 import { DB, URI, meta, nornDir, rawClient, recorder, resetDatabase, sleep, waitForChecks } from './kit.ts';
 
 const { check, finish } = recorder();
@@ -25,7 +27,7 @@ console.log(`serving ${server.url}`);
 // ---- helpers -------------------------------------------------------------------------------------
 const ident = (actor: string, onBehalfOf: string | null = null, spawnedBy = 'norn') => ({ actor, onBehalfOf, spawnedBy });
 const entryFor = (actor: string, ecrs: string[], extra: { jobId?: string; kind?: 'job' | 'person_agent'; onBehalfOf?: string | null; spawnedBy?: string; role?: string; ttlSeconds?: number } = {}) =>
-  nornMcpFor(ident(actor, extra.onBehalfOf ?? null, extra.spawnedBy), { jobId: extra.jobId ?? `job-${stamp}-${actor.length}`, role: extra.role ?? 'level1-writeup', ecrs, url: server.url, signingKey: key, kind: extra.kind, ttlSeconds: extra.ttlSeconds });
+  nornMcpFor(ident(actor, extra.onBehalfOf ?? null, extra.spawnedBy), { jobId: extra.jobId ?? `job-${stamp}-${actor.length}`, role: extra.role ?? 'level1-writeup', ecrs, url: server.url, signingKey: key, kind: extra.kind, ttlSeconds: extra.ttlSeconds, delivery: 'header' as const });
 async function connect(entry: { url: string; headers: Record<string, string> }) {
   const c = new Client({ name: 'gate-check', version: '0.0.0' });
   await c.connect(new StreamableHTTPClientTransport(new URL(entry.url), { requestInit: { headers: entry.headers } }));
@@ -67,6 +69,12 @@ check('a person_agent token needs a person; "*" is for person agents only', (() 
   try { signToken({ kind: 'job', jobId: 'p', role: 'r', actor: 'a', onBehalfOf: null, spawnedBy: 's', ecrs: ['*'], ttlSeconds: 60 }, key); return false; } catch { return true; }
 })());
 check('claims survive a round trip', verifyToken(good, key).ecrs[0] === 'BWM-ECR-0417');
+// the default delivery keeps the token off the command line: Claude Code runs the helper, which prints the header
+const helperEntry = nornMcpFor(ident(`agent:norn/helper/${stamp}`), { jobId: `helper-${stamp}`, role: 'level1-writeup', ecrs: ['BWM-ECR-0417'], url: server.url, signingKey: key });
+const helperText = JSON.stringify(helperEntry);
+const helperToken = readFileSync(jobTokenFile(`helper-${stamp}`), 'utf8').trim();
+const helperOut = JSON.parse(execFileSync('node', [helperEntry.headersHelper.match(/^node "(.+?)" "/)![1]!, jobTokenFile(`helper-${stamp}`)], { encoding: 'utf8' }));
+check('#10 the default entry has no token in it (a headers helper reads a private file), and the helper prints a header the server accepts', !('headers' in helperEntry) && !helperText.includes(helperToken) && helperOut.Authorization === `Bearer ${helperToken}` && (await post({ authorization: helperOut.Authorization })).status === 200, helperEntry.headersHelper.slice(0, 60));
 
 // ---- job A: Norn's own agent, for Jeff, scoped to ECR-0417 ---------------------------------------
 const actorA = `agent:norn/gate/${stamp}`;

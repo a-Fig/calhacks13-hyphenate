@@ -157,7 +157,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     'get_ecr_history',
     {
       description:
-        'The ECR\'s comments and the actions taken on it, oldest first: who did it, for whom, what started it and the outcome. Refusals show as outcome denied with the reason. Evidence class: fact. Default last 40 entries.',
+        'The ECR\'s comments and the actions taken on it, oldest first: who did it, for whom, what started it and the outcome. A refusal shows as outcome denied (the policy gate) or rejected (the write was invalid), with the reason. Evidence class: fact. Default last 40 entries.',
       inputSchema: { ecr: ECR, limit: z.number().int().min(1).max(200).optional() },
       annotations: { readOnlyHint: true },
     },

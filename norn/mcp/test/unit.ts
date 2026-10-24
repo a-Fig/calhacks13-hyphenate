@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { nornMcpFor, nornTools, READ_TOOLS, WRITE_TOOLS } from '../src/client.ts';
+import { jobTokenFile, nornMcpFor, nornTools, READ_TOOLS, WRITE_TOOLS } from '../src/client.ts';
 import { readEnvValue } from '../src/env.ts';
 import { securePrivateDir, windowsAcl } from '../src/fsutil.ts';
 import { connectErrorText, maxLevelFor } from '../src/norn.ts';
@@ -70,7 +70,7 @@ test('claim rules: lifetimes, person agents and the any-ECR wildcard', () => {
 
 test('nornMcpFor returns an http entry whose bearer token carries the job identity and scope', () => {
   const identity = { actor: 'agent:norn/level1/BWM-ECR-0417', onBehalfOf: null, spawnedBy: 'norn' };
-  const entry = nornMcpFor(identity, { jobId: 'job-9', role: 'level1-writeup', ecrs: ['BWM-ECR-0417'], url: 'http://127.0.0.1:1234/mcp', signingKey: KEY, ttlSeconds: 120 });
+  const entry = nornMcpFor(identity, { jobId: 'job-9', role: 'level1-writeup', ecrs: ['BWM-ECR-0417'], url: 'http://127.0.0.1:1234/mcp', signingKey: KEY, ttlSeconds: 120, delivery: 'header' });
   assert.equal(entry.type, 'http');
   assert.equal(entry.url, 'http://127.0.0.1:1234/mcp');
   assert.match(entry.headers.Authorization, /^Bearer nmt1\.[\w-]+\.[\w-]+$/);
@@ -192,5 +192,27 @@ test('on Windows the private directory is closed to other users', { skip: proces
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the default nornMcpFor entry keeps the token out of the config: a headers helper reads a private file', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'norn-state-'));
+  const saved = process.env.NORN_MCP_STATE_DIR;
+  process.env.NORN_MCP_STATE_DIR = dir;
+  try {
+    const identity = { actor: 'agent:norn/level1/BWM-ECR-0417/job-h', onBehalfOf: null, spawnedBy: 'norn' };
+    const entry = nornMcpFor(identity, { jobId: 'job-h', role: 'level1-writeup', ecrs: ['BWM-ECR-0417'], url: 'http://127.0.0.1:1/mcp', signingKey: KEY });
+    const file = jobTokenFile('job-h');
+    const token = readFileSync(file, 'utf8');
+    assert.equal(entry.type, 'http');
+    assert.ok(!('headers' in entry));
+    assert.ok(!JSON.stringify(entry).includes(token), 'the token is in the entry');
+    assert.ok(entry.headersHelper.includes(file));
+    assert.equal(verifyToken(token, KEY).actor, identity.actor);
+    const out = execFileSync(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'headers-helper.mjs'), file], { encoding: 'utf8' });
+    assert.deepEqual(JSON.parse(out), { Authorization: `Bearer ${token}` });
+  } finally {
+    if (saved === undefined) delete process.env.NORN_MCP_STATE_DIR;
+    else process.env.NORN_MCP_STATE_DIR = saved;
   }
 });

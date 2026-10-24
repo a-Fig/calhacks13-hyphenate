@@ -2,13 +2,30 @@
 // token minted for exactly that job. The token is the job's credential; the identity it carries is
 // the one the server will act as, so build it from the same identity the job spec carries.
 //
+//   const id = `level1-${Date.now().toString(36)}`;
+//   const identity = { actor: `agent:norn/level1/BWM-ECR-0417/${id}`, onBehalfOf: null, spawnedBy: 'norn' };
 //   const spec: JobSpec = {
 //     ...,
 //     identity,
-//     mcpServers: { [NORN_MCP_SERVER_NAME]: nornMcpFor(identity, { jobId: id, role, ecrs: ['BWM-ECR-0417'] }) },
-//     allowedTools: nornTools('read', 'comment'),
+//     mcpServers: { [NORN_MCP_SERVER_NAME]: nornMcpFor(identity, { jobId: id, role: 'level1-writeup', ecrs: ['BWM-ECR-0417'] }) },
+//     allowedTools: nornTools('read', 'add_comment'),
 //   };
+//
+// Put the job id in the actor name. An actor can be held by one live job at a time, so a rerun of a
+// job under the same actor name inside the token's life would be refused (HTTP 409).
+//
+// The token is kept off the command line. The Agent SDK hands MCP server configs to the `claude`
+// process as `--mcp-config <json>`, so a token in `headers` is on argv (on Linux, readable by every
+// local user through /proc). By default the entry carries a `headersHelper` instead: Claude Code runs
+// `node headers-helper.mjs <token file>`, which prints the headers. The token file is in a private
+// directory (mode 0600 / a current-user-only ACL). `delivery: 'header'` gives a plain Authorization
+// header, for other MCP clients and tests. `npm run probe:argv` shows both on a live session.
+import { createHash } from 'node:crypto';
+import { readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadSigningKey } from './env.ts';
+import { securePrivateDir } from './fsutil.ts';
 import { signToken, type TokenKind } from './token.ts';
 
 /** The key under `mcpServers`, so tools appear to the model as `mcp__norn__<tool>`. */
@@ -37,20 +54,60 @@ export interface NornMcpOptions {
   signingKey?: string;
   /** 'job' (default) or 'person_agent'. A person's agent is minted by scripts/mint-person-token.ts. */
   kind?: TokenKind;
+  /**
+   * How the token reaches the server: `'headersHelper'` (default; the token is in a private file and
+   * not on any command line) or `'header'` (a plain Authorization header).
+   */
+  delivery?: 'headersHelper' | 'header';
 }
 
-/** An entry for a runner job spec's `mcpServers` (the Agent SDK's `http` config). */
+/** An entry for a runner job spec's `mcpServers` with a plain Authorization header (`delivery: 'header'`). */
 export interface NornMcpServerEntry {
   type: 'http';
   url: string;
   headers: { Authorization: string };
 }
 
+/** The default entry: Claude Code runs `headersHelper` to get the headers, so no token is on a command line. */
+export interface NornMcpHelperEntry {
+  type: 'http';
+  url: string;
+  headersHelper: string;
+}
+
+const here = dirname(fileURLToPath(import.meta.url));
+const HELPER = join(here, '..', 'scripts', 'headers-helper.mjs');
+
+/** Where job token files live: `<state dir>/job-tokens` (NORN_MCP_STATE_DIR, else norn/mcp/.state). */
+export function jobTokenDir(): string {
+  return join(process.env.NORN_MCP_STATE_DIR ?? join(here, '..', '.state'), 'job-tokens');
+}
+
+/** The file that holds a job's token when it is delivered through the headers helper. */
+export function jobTokenFile(jobId: string): string {
+  const safe = jobId.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 48);
+  return join(jobTokenDir(), `${safe}-${createHash('sha256').update(jobId).digest('hex').slice(0, 8)}.token`);
+}
+
+// Token files older than a day are long expired (a job token lives at most six hours): remove them.
+function pruneOldTokenFiles(dir: string, keep: string): void {
+  try {
+    for (const f of readdirSync(dir)) {
+      const p = join(dir, f);
+      if (basename(p) !== basename(keep) && Date.now() - statSync(p).mtimeMs > 24 * 3600_000) unlinkSync(p);
+    }
+  } catch {
+    // best effort
+  }
+}
+
 export function nornMcpUrl(): string {
   return process.env.NORN_MCP_URL ?? `http://127.0.0.1:${process.env.NORN_MCP_PORT ?? DEFAULT_PORT}/mcp`;
 }
 
-export function nornMcpFor(identity: JobIdentity, opts: NornMcpOptions): NornMcpServerEntry {
+export function nornMcpFor(identity: JobIdentity, opts: NornMcpOptions & { delivery: 'header' }): NornMcpServerEntry;
+export function nornMcpFor(identity: JobIdentity, opts: NornMcpOptions): NornMcpHelperEntry;
+export function nornMcpFor(identity: JobIdentity, opts: NornMcpOptions): NornMcpServerEntry | NornMcpHelperEntry {
   const key = opts.signingKey ?? loadSigningKey();
   if (!key) throw new Error('NORN_MCP_SIGNING_KEY is not set; run `npm run key:ensure -w @norn/mcp`');
   const token = signToken(
@@ -66,7 +123,13 @@ export function nornMcpFor(identity: JobIdentity, opts: NornMcpOptions): NornMcp
     },
     key
   );
-  return { type: 'http', url: opts.url ?? nornMcpUrl(), headers: { Authorization: `Bearer ${token}` } };
+  const url = opts.url ?? nornMcpUrl();
+  if (opts.delivery === 'header') return { type: 'http', url, headers: { Authorization: `Bearer ${token}` } };
+  const file = jobTokenFile(opts.jobId);
+  securePrivateDir(jobTokenDir());
+  writeFileSync(file, token, { mode: 0o600 });
+  pruneOldTokenFiles(jobTokenDir(), file);
+  return { type: 'http', url, headersHelper: `node "${HELPER}" "${file}"` };
 }
 
 // ---------------------------------------------------------------------------------------------
