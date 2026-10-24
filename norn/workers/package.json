@@ -9,7 +9,8 @@
     "typecheck": "tsc -p .",
     "check:module": "tsx src/checks.ts",
     "spike:errors": "tsx src/spike/s1-errors.ts",
-    "spike:crash": "tsx src/spike/s4-crash.ts"
+    "spike:crash": "tsx src/spike/s4-crash.ts",
+    "check:policy": "tsx src/checks-policy.ts"
   },
   "dependencies": {
     "@norn/bindings": "*",

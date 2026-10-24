@@ -1,5 +1,5 @@
 // A reducer that writes a log row and then fails in each way a reducer can, to see what a caller
-// gets and whether the write is undone (spike 1, `npm run spike:error-kinds`).
+// gets and whether the write is undone (spike 1, `npm run spike:errors`).
 import { SenderError, t } from 'spacetimedb/server';
 import { write } from '../../module/src/core';
 

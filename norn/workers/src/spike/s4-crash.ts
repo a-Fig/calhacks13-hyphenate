@@ -131,8 +131,17 @@ try {
   check('with max_attempts=1 a killed worker\'s run ends as failed (not requeued forever)', failed.attempts === 1 && failed.note.includes('giving up'), `${failedEv.t - tKill2} ms after the kill; ${failed.note}`);
   await O.R.setConfig({ key: 'max_attempts', value: '3' });
 
-  // ---- C. the action log names the reaper, not a person
-  await sleep(300);
+  // ---- C. an agent-style stage that outlives its lease keeps it with heartbeats
+  start('crash-h', { NORN_STAGES: 's0_extract', NORN_LEASE_MS: '2000', NORN_AGENT_STAGE_MS: '7000' });
+  await sleep(3000);
+  const pr3 = await newPr('spike heartbeat');
+  await O.R.enqueueCheck({ prId: pr3.id, stage: 's0_extract', trigger: 'requested' });
+  const s0 = () => [...O.conn.db.checkRun.iter()].find(r => r.prId === pr3.id && r.stage === 's0_extract' && r.status !== 'stale');
+  const claimedAt = await until('crash-h to claim the extraction', () => { const r = s0(); return r?.status === 'running' && r; });
+  const finished = await until('the extraction to finish', () => { const r = s0(); return r?.status === 'done' && r; }, 60000);
+  const requeues = events.filter(e => e.run === claimedAt.id && e.status === 'queued' && e.attempts > 0);
+  out.heartbeat = { leaseMs: 2000, stageMs: 7000, attempts: finished.attempts, requeues: requeues.length };
+  check('a stage that takes 7 s on a 2 s lease finishes on its first attempt: heartbeats kept the lease alive', finished.attempts === 1 && requeues.length === 0, `attempts ${finished.attempts}, requeued ${requeues.length} time(s)`);
 } catch (e) {
   check('script ran to the end', false, (e as Error).stack ?? String(e));
 } finally {
