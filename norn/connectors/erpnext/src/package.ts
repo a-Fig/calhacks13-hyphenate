@@ -348,7 +348,10 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
       affected = boms.filter((b) => (b.is_active && b.is_default) || b[t.bom.eco] === eco).map((b) => b.item);
     }
   }
-  affected = uniq([...affected, ...lineChanges.map((b) => b.parent)]);
+  // A BOM already entered for this ECO counts even if it no longer holds the repriced item: a line left out of it is a conflict
+  // to show, not a reason for the package to forget the BOM.
+  const entered: Row[] = await c.list('BOM', { filters: [[t.bom.eco, '=', eco], ['company', '=', opts.company], ['docstatus', '<', 2]], fields: ['item'] });
+  affected = uniq([...affected, ...entered.map((b) => b.item as ItemCode), ...lineChanges.map((b) => b.parent)]);
 
   const bomFields = ['name', 'item', 'is_active', 'is_default', 'docstatus', 'quantity', 'raw_material_cost', 'operating_cost', 'total_cost', 'creation', t.bom.eco];
   const versions: Row[] = affected.length
@@ -364,6 +367,11 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
   }
   const baseLines: Row[] = bases.size
     ? await c.list('BOM Item', { parent: 'BOM', filters: [['parent', 'in', [...bases.values()].map((b) => b.base.name)], ['docstatus', '=', 1]], fields: ['parent', 'item_code', 'qty', 'uom', 'rate', 'bom_no', 'idx'] })
+    : [];
+  // The lines of the BOM versions already entered for this ECO, to compare with the package's.
+  const taggedNames = [...bases.values()].flatMap((b) => (b.tagged ? [b.tagged.name] : []));
+  const taggedLines: Row[] = taggedNames.length
+    ? await c.list('BOM Item', { parent: 'BOM', filters: [['parent', 'in', taggedNames]], fields: ['parent', 'item_code', 'qty'] })
     : [];
   // The parents that use the old BOM (still to be switched) or the new one (already switched).
   const bomNames = [...bases.values()].flatMap((b) => [b.base.name, ...(b.tagged ? [b.tagged.name] : [])]);
@@ -417,6 +425,18 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
       if (ch.op !== 'add' && !baseRows.some((l) => l.item_code === ch.child)) problems.push(`${item}'s BOM ${base.name} has no line for ${ch.child} to ${ch.op === 'remove' ? 'remove' : 'change'}`);
       if (ch.op === 'add' && baseRows.some((l) => l.item_code === ch.child)) problems.push(`${item}'s BOM ${base.name} already has a line for ${ch.child}`);
     }
+    // Entered lines against the package's: a missing item, a different quantity or an extra line is a conflict.
+    const quantities = (xs: [string, number][]) => { const m = new Map<string, number>(); for (const [k, v] of xs) m.set(k, (m.get(k) ?? 0) + v); return m; };
+    const wanted = quantities(rows.map((row) => [row.find((f) => f.field === 'item_code')!.value as string, num(row.find((f) => f.field === 'qty')!.value)]));
+    const lineDiffs: string[] = [];
+    if (tagged) {
+      const have = quantities(taggedLines.filter((l) => l.parent === tagged.name).map((l) => [l.item_code as string, num(l.qty)]));
+      for (const [code, qty] of wanted) {
+        if (!have.has(code)) lineDiffs.push(`has no line for ${code}`);
+        else if (Math.abs(have.get(code)! - qty) > 1e-6) lineDiffs.push(`has ${code} x${have.get(code)} where the release says x${qty}`);
+      }
+      for (const code of have.keys()) if (!wanted.has(code)) lineDiffs.push(`has a line for ${code} that the release does not`);
+    }
     const operating = num(base.operating_cost);
     const afterTotal = tagged ? num(tagged.total_cost) : known ? r2(raw + operating) : undefined;
     if (afterTotal !== undefined) estimate.set(item, afterTotal / q);
@@ -439,9 +459,9 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
       ],
       tables: [{ table: 'items', label: 'Items', rows }],
       amounts,
-      status: tagged?.docstatus === 1 ? 'entered' : 'to-enter',
+      status: lineDiffs.length ? 'conflict' : tagged?.docstatus === 1 ? 'entered' : 'to-enter',
       ...(tagged ? { found: ref('BOM', tagged.name) } : {}),
-      ...(tagged && tagged.docstatus !== 1 ? { note: `${tagged.name} is saved but not submitted; submit it` } : {}),
+      ...(tagged && lineDiffs.length ? { note: `${tagged.name} ${lineDiffs.join(' and ')}` } : tagged && tagged.docstatus !== 1 ? { note: `${tagged.name} is saved but not submitted; submit it` } : {}),
     });
 
     const parentsOf = (name: string | undefined) => uniq(refs.filter((r) => r.bom_no === name && activeParent.has(r.parent)).map((r) => r.parent)).sort();
@@ -574,7 +594,7 @@ export function formatErpChangePackage(pkg: ErpChangePackage): string {
   ];
   if (pkg.problems.length) out.push('', '## Problems', '', 'The package cannot be followed as it stands until these are fixed.', '', ...pkg.problems.map((p) => `- ${p}`));
   if (!pkg.lines.length) out.push('', 'Nothing to enter.');
-  else out.push('', `Enter the lines in this order. Each carries the ECO number, which is how Norn finds it again on its next read of ERPNext.`);
+  else out.push('', `Enter the lines in this order. Type the ECO number into the ECO field of each document you create: Norn finds it by that on its next read of ERPNext.`);
 
   pkg.lines.forEach((l, i) => {
     const where = l.mode === 'new' ? `a new ${l.doctype}` : l.mode === 'tool' ? `the ${l.doctype}` : `${l.doctype} ${l.document!.name}`;

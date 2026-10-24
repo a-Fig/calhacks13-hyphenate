@@ -273,6 +273,26 @@ test('what is entered but differs, or is not finished, is a conflict or still to
   assert.deepEqual(pkg.problems, [], 'a conflict sits on its line; problems are for what stops the package being followed');
 });
 
+test('a BOM entered with other lines than the package is a conflict, whether saved or submitted', async () => {
+  enterCostChange();
+  enterBom();
+  const lines = () => db['BOM Item'].filter((l) => l.parent === 'BOM-A2');
+  assert.equal(line(await build(), 'bom:A').status, 'entered');
+  lines().find((l) => l.item_code === 'Q')!.qty = 2;
+  let pkg = await build();
+  assert.deepEqual([line(pkg, 'bom:A').status, line(pkg, 'bom:A').note], ['conflict', 'BOM-A2 has Q x2 where the release says x1']);
+  db['BOM Item'].splice(db['BOM Item'].indexOf(lines().find((l) => l.item_code === 'P')!), 1);
+  db['BOM Item'].push({ parent: 'BOM-A2', item_code: 'Z', qty: 1, idx: 3, docstatus: 1 });
+  pkg = await build();
+  assert.equal(line(pkg, 'bom:A').note, 'BOM-A2 has no line for P and has Q x2 where the release says x1 and has a line for Z that the release does not');
+  // Two lines for one item add up: 1 + 2 of P is not the 3 the package asks for in one line, but it is the same 3.
+  db['BOM Item'].splice(db['BOM Item'].indexOf(lines().find((l) => l.item_code === 'Z')!), 1);
+  lines().find((l) => l.item_code === 'Q')!.qty = 1;
+  db['BOM Item'].push({ parent: 'BOM-A2', item_code: 'P', qty: 1, idx: 3, docstatus: 1 }, { parent: 'BOM-A2', item_code: 'P', qty: 2, idx: 4, docstatus: 1 });
+  assert.equal(line(await build(), 'bom:A').status, 'entered');
+  assert.equal(pkg.problems.length, 0);
+});
+
 test('the connector only reads: every request is an explicit GET without a body', async () => {
   enterAll();
   await build();

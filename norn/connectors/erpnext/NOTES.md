@@ -93,7 +93,7 @@ formatErpChangePackage(pkg): string                                         // t
 **Status comes from a read of ERPNext** that finds each entry by the ECO number the person types into the ECO fields (`bw_eco`, and `bw_eco_entry` on a journal entry). Run the build again after entering lines and each moves from `to-enter` to `entered`:
 - *Close line*: entered when the old row's `valid_upto` is the day before the effective date; to enter while open or running longer; conflict if closed earlier.
 - *Standard cost line*: the Item Price row tagged with the ECO. Entered when its rate and `valid_from` match; conflict when either differs (the note says which).
-- *BOM line*: the BOM tagged with the ECO. Entered when submitted; a saved draft stays to enter, with a note.
+- *BOM line*: the BOM tagged with the ECO (found even if it left out the repriced item). Entered when submitted and its lines match the package's (quantities of one item are added up); a saved draft stays to enter, with a note; a missing item, another quantity or an extra line is a conflict.
 - *Replace line*: entered when no active parent BOM uses the old BOM any more; to enter while one does.
 - *Retire line*: entered when the old BOM is inactive.
 - *Journal entry line*: the entry with the ECO and the key. Entered when submitted and its total and posting date match; a draft stays to enter; a different total or date is a conflict.
