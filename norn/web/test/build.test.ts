@@ -15,7 +15,7 @@ const id = (h: string) => ({ toHexString: () => h });
 const pr: PrRow = { id: 1n, plmEcrNumber: 'ECR-0417', title: 't', description: 'd', status: 'review', revision: 2, createdBy: id('aa'), createdAt: ts(1), updatedAt: ts(1) };
 const run = (rid: bigint, status: string, created: number, finished?: number): RunRow =>
   ({ id: rid, prId: 1n, stage: 's2_cost', status, note: '', createdAt: ts(created), finishedAt: finished === undefined ? undefined : ts(finished) });
-const results = (runId: bigint, rows: Row[]): ResultRow[] => rows.map((r, i) => ({ ...r, id: runId * 1000n + BigInt(i), checkRunId: runId, prId: 1n, mock: false }));
+const results = (runId: bigint, rows: Row[], at?: number): ResultRow[] => rows.map((r, i) => ({ ...r, id: runId * 1000n + BigInt(i), checkRunId: runId, prId: 1n, mock: false, createdAt: at === undefined ? undefined : ts(at) }));
 const statement = (at: number): StatementRow => ({
   id: 1n, prId: 1n, level: 1, prRevision: 1, changeClass: 'Class I, FAA minor', route: 'As filed', headline: 'h',
   numbers: [{ key: 'net_total_year_one', label: 'Net', unit: 'USD', p10: 0, p50: 0, p90: 0, evidence: 'computation', resultKey: 'net_total_year_one' }],
@@ -55,6 +55,19 @@ test('a statement opens the run it was written on, not the newest', () => {
   assert.ok(out.statement!.numbersNote);
   // the cost page itself shows the newest run
   assert.equal(out.cost.net.p50, net(b).p50);
+});
+
+test('a statement finds its run by when the results were written, not by finishedAt', () => {
+  // A: results at 20, marked stale at 30. B: results at 40, statement at 45, B marked stale at 50. C: results at 60.
+  // Marking a run stale overwrites finishedAt, so finishedAt alone would pick A.
+  const a = rows0417l1 as Row[], b = rows0417l3 as Row[];
+  const s = snap([run(1n, 'stale', 10, 30), run(2n, 'stale', 35, 50), run(3n, 'done', 55, 60)],
+    [...results(1n, a, 20), ...results(2n, b, 40), ...results(3n, a, 60)],
+    [{ ...statement(45), numbers: [{ ...statement(45).numbers[0], p10: net(b).p10, p50: net(b).p50, p90: net(b).p90 }] }]);
+  const out = buildAssessment(s, pr)!;
+  const t = out.traces[out.statement!.numbers[0].traceId!];
+  assert.ok(t, 'the statement drills into run B');
+  assert.match(t.value!.text, new RegExp(Math.round(net(b).p50).toLocaleString('en-US')));
 });
 
 test('a statement whose run is gone has numbers but no drill-through', () => {

@@ -22,7 +22,7 @@ interface Id { toHexString(): string }
 export interface PrRow { id: bigint; plmEcrNumber: string; title: string; description: string; status: string; revision: number; createdBy: Id; createdAt: Ts; updatedAt: Ts }
 export interface RevisionRow { id: bigint; prId: bigint; seq: number; changeRequestJson: string; source: string; current: boolean; createdBy: Id; createdAt: Ts }
 export interface RunRow { id: bigint; prId: bigint; stage: string; status: string; note: string; createdAt: Ts; finishedAt: Ts | undefined }
-export interface ResultRow { id: bigint; checkRunId: bigint; prId: bigint; key: string; label: string; unit: string; p10: number; p50: number; p90: number; detailJson: string; mock: boolean }
+export interface ResultRow { id: bigint; checkRunId: bigint; prId: bigint; key: string; label: string; unit: string; p10: number; p50: number; p90: number; detailJson: string; mock: boolean; createdAt?: Ts }
 export interface StatementRow {
   id: bigint; prId: bigint; level: number; prRevision: number; changeClass: string; route: string; headline: string;
   numbers: { key: string; label: string; unit: string; p10: number; p50: number; p90: number; evidence: string; resultKey: string }[];
@@ -201,8 +201,16 @@ type StatementRun = { kind: 'same' } | { kind: 'earlier'; view: ChecksView; fini
 /** The cost run a statement was written on: the newest one that had finished when it was posted. */
 function runForStatement(s: Snapshot, runs: RunRow[], st: StatementRow, shown: RunRow): StatementRun {
   const posted = st.createdAt.microsSinceUnixEpoch;
-  const run = newest(runs, r => r.stage === 's2_cost' && (r.status === 'done' || r.status === 'stale') && (r.finishedAt ?? r.createdAt).microsSinceUnixEpoch <= posted
-    && s.results.some(x => x.checkRunId === r.id));
+  // When a run's results were written. Not finishedAt: the module overwrites that when it marks the run stale.
+  const doneAt = (r: RunRow): bigint | undefined => {
+    const own = s.results.filter(x => x.checkRunId === r.id);
+    if (!own.length) return undefined;
+    const at = own.map(x => x.createdAt?.microsSinceUnixEpoch).filter((x): x is bigint => x !== undefined);
+    return at.length ? at.reduce((m, x) => (x > m ? x : m)) : (r.finishedAt ?? r.createdAt).microsSinceUnixEpoch;
+  };
+  const candidates = runs.filter(r => r.stage === 's2_cost' && (r.status === 'done' || r.status === 'stale'))
+    .map(r => ({ r, at: doneAt(r) })).filter((x): x is { r: RunRow; at: bigint } => x.at !== undefined && x.at <= posted);
+  const run = candidates.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))[0]?.r;
   if (!run) return { kind: 'gone' };
   if (run.id === shown.id) return { kind: 'same' };
   const c = costViewOf(s.results.filter(r => r.checkRunId === run.id).map(toRow));
@@ -222,13 +230,13 @@ function statementView(s: Snapshot, st: StatementRow, pr: PrRow, src: StatementR
   };
   const e = (x: string): Evidence => (['fact', 'assumption', 'computation', 'judgment'].includes(x) ? (x as Evidence) : 'judgment');
   // A number from the check results opens the trace of the run the statement was written on, not the newest run's.
-  const resultTrace = (key: string): string | undefined => {
+  const resultTrace = (key: string, value: { text: string; range?: string }): string | undefined => {
     if (src.kind === 'same') return traces[key] ? key : undefined;
     if (src.kind === 'gone') return undefined;
     const t = src.view.traces[key];
     if (!t) return undefined;
     const id = `stmt:${st.id}:run:${key}`;
-    traces[id] = { ...t, id, summary: `From the cost run before the ECR changed (finished ${dateTime(src.finishedAt)}), not the one on the Impact tab. ${t.summary}`, inputs: t.inputs.map(i => ({ ...i, traceId: undefined })) };
+    traces[id] = { ...t, id, value, summary: `From the cost run before the ECR changed (finished ${dateTime(src.finishedAt)}), not the one on the Impact tab. ${t.summary}`, inputs: t.inputs.map(i => ({ ...i, traceId: undefined })) };
     return id;
   };
   const fmt = (n: StatementRow['numbers'][number], x: number) =>
@@ -238,7 +246,7 @@ function statementView(s: Snapshot, st: StatementRow, pr: PrRow, src: StatementR
     numbers: st.numbers.map((n, i) => ({
       key: n.key, label: n.label, unit: n.unit, p10: n.p10, p50: n.p50, p90: n.p90, evidence: e(n.evidence),
       traceId: n.resultKey && src.kind !== 'same'
-        ? resultTrace(n.resultKey)
+        ? resultTrace(n.resultKey, { text: fmt(n, n.p50), range: n.p10 !== n.p90 ? `${fmt(n, n.p10)} – ${fmt(n, n.p90)}` : undefined })
         : n.resultKey && traces[n.resultKey]
           ? n.resultKey
           : synth(`n${i}`, n.label, e(n.evidence), `Stated in Norn's Level ${st.level} impact statement. It is not a check result.`, { text: fmt(n, n.p50), range: n.p10 !== n.p90 ? `${fmt(n, n.p10)} – ${fmt(n, n.p90)}` : undefined }),
