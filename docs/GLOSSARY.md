@@ -2,6 +2,9 @@
 
 The terms this project uses, and what they mean. Started 2026-10-24.
 
+These are Bowman's terms (#3). Bowman has one vocabulary and one set of systems, so this doc states
+what Bowman does, not how other companies differ (Tyler, 2026-10-24).
+
 ## Two vocabularies
 
 We design the product with a Git metaphor (`ARCHITECTURE.md` §2), but the people we sell to speak
@@ -27,7 +30,7 @@ Where this repo's own GitHub workflow needs a git word too, say "repo PR" versus
 | Commit | **ECR revision** | One edit to the ECR: the agent's extraction, an engineer's correction, a reviewer's change to an assumption |
 | Review / approve | **CCB review and disposition** | The Change Control Board's decision: approve, reject, or send back |
 | Merge | **ECR approved, ECO released** | The change becomes an engineering change order and enters the baseline |
-| Merge notification | **Engineering change notice (ECN)** | Tells downstream teams the change is official |
+| Merge notification | **ECO release** | Releasing the ECO is what tells planning, purchasing and accounting that the change is official |
 | CI checks | **Impact assessment** | Cost, schedule, supply-chain and certification analysis of the change |
 | Bot comment / impact card | **Change impact statement** | The summary the board reads: headline numbers with ranges, drivers, flagged assumptions |
 | Cheap checks / deep review (#10) | **Impact screen / full impact assessment** *(proposed)* | The always-on automated pass versus the on-demand deep analysis |
@@ -53,14 +56,16 @@ Detail on how these fit together, and who does what, is in `CHANGE-CONTROL.md`.
   it.
 - **MRB (Material Review Board).** Decides what to do with a nonconforming part: use as is, rework,
   or scrap. A design flaw it finds becomes an ECR.
-- **NCR, ECR, ECO, ECN.** A problem is found (NCR). A change is requested (ECR). The change is
-  approved and ordered (ECO). The change is announced (ECN). Companies use ECN and ECO
-  inconsistently (`ARCHITECTURE.md` §2).
+- **NCR, ECR, ECO.** Bowman's three change documents:
+  - **NCR**: a problem is found.
+  - **ECR**: a change is requested.
+  - **ECO**: the change is approved and released. Releasing the ECO notifies downstream teams;
+    Bowman issues no separate change notice (ECN).
 - **PLM / ERP / MRP.**
   - Product lifecycle management holds the design and the BOM.
   - Enterprise resource planning holds finance, purchasing and inventory.
   - Material requirements planning schedules parts against production.
-  - Which systems Bowman runs is #4.
+  - Bowman runs exactly one of each. Which ones is #4.
 - **Major / minor change.** The FAA's split for changes to a type-certificated design (14 CFR
   21.93). A major change can mean new testing and approval, which is often the largest schedule
   risk for aircraft.

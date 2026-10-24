@@ -26,7 +26,8 @@ handoff is what the product replaces.
 4. **Each function writes an impact assessment.** These are the seats in the table below.
 5. **The CCB decides.** It can approve, reject, or send the ECR back for more work. An approval
    releases an engineering change order (ECO) with its effectivity.
-6. **Everyone is told.** An engineering change notice (ECN) goes to downstream teams. Planning
+6. **Everyone is told.** The released ECO goes to downstream teams. Some companies issue a separate
+   engineering change notice (ECN); Bowman doesn't (`GLOSSARY.md`). Planning
    updates schedules, purchasing updates orders, and accounting updates the standard cost.
 
 ## Who writes the impact assessment
