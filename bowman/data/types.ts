@@ -224,6 +224,19 @@ export interface BomLine {
   seq: number;
 }
 
+/**
+ * The manufacturing BOM (the aircraft as built, kept in the ERP). `bom` stays the engineering BOM (the aircraft as
+ * designed, kept in the PLM). The two differ only at each program's top level: the ERP's BOM is every `bom` line
+ * whose parent is not a program's top item, plus the lines here (top item to its build stations, each station to the
+ * top-level children it builds). A top item has no labor of its own in the MBOM: its hours are split across its
+ * stations, so exploded leaf quantities and the roll-up cost equal the engineering BOM's.
+ */
+export interface Mbom {
+  /** ERP-only build stations (make items in the item group `Build stations`). */
+  items: Item[];
+  bom: BomLine[];
+}
+
 /** A buy item's quote from one supplier. */
 export interface Sourcing {
   item: ItemCode;
@@ -525,6 +538,7 @@ export interface Dataset {
   supplierConstraints: SupplierConstraint[];
   items: Item[];
   bom: BomLine[];
+  mbom: Mbom;
   sourcing: Sourcing[];
   rateFactors: RateFactor[];
   stock: StockRow[];

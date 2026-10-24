@@ -6,10 +6,15 @@
 // --config     a module exporting `erpnext` (ErpnextSettings) and, optionally, `erpnextCheck`:
 //              { reference: path of the dataset relative to the repo root, rollups: { topItem: expected roll-up cost } }
 //              optional `spot`: one item whose history reads are checked against fixed values (see Spot below).
+//              optional `view`: (dataset) => dataset, applied to the reference before comparing. For a company whose ERP holds a
+//              different structure from the reference (Bowman's ERP holds the manufacturing BOM, the dataset's `bom` is the
+//              engineering BOM), it returns the reference as the ERP should hold it.
 // --reference  overrides erpnextCheck.reference.
 // The reference is JSON holding the baseline's own arrays (programs, workCenters, items, bom, sourcing, stock,
 // volumePlan, builtAircraft). It may carry more fields (the checks only compare the ones the baseline has) and
-// `suppliers` / `workCenters` as {id, name}: ERPNext identifies both by name, so the reference ids are mapped.
+// `suppliers` as {id, name}: ERPNext identifies a supplier by its name (the PLM connector maps its own supplier names to
+// those), so the reference's supplier ids are mapped to names. Work centers are compared by id, so the settings
+// must give the ERP's work center id field (customFields.workCenter).
 // Needs ERPNEXT_URL, ERPNEXT_API_KEY and ERPNEXT_API_SECRET in the environment or in ENV_FILE (default: the .env at the repo root).
 
 import { readFileSync } from 'node:fs';
@@ -40,10 +45,11 @@ if (!configFile) { console.error('usage: node check.ts --config <settings module
 const root = resolve(import.meta.dirname, '../../..');
 const mod = await import(pathToFileURL(resolve(configFile)).href);
 const settings: ErpnextSettings = mod.erpnext;
-const spec: { reference?: string; rollups?: Record<ItemCode, number>; spot?: Spot } = mod.erpnextCheck ?? {};
+const spec: { reference?: string; rollups?: Record<ItemCode, number>; spot?: Spot; view?: (dataset: any) => any } = mod.erpnextCheck ?? {};
 const refFile = arg('reference') ?? (spec.reference ? resolve(root, spec.reference) : undefined);
 if (!settings || !refFile) { console.error('the config module must export `erpnext`, and a reference dataset must be given'); process.exit(2); }
-const ref: Omit<Partial<Baseline>, 'workCenters'> & { suppliers?: { id: string; name: string }[]; workCenters?: { id: string; name?: string; laborRatePerHour: number }[] } = JSON.parse(readFileSync(refFile, 'utf8'));
+const dataset = JSON.parse(readFileSync(refFile, 'utf8'));
+const ref: Omit<Partial<Baseline>, 'workCenters'> & { suppliers?: { id: string; name: string }[]; workCenters?: { id: string; name?: string; laborRatePerHour: number }[] } = spec.view ? spec.view(dataset) : dataset;
 
 loadEnvFile();
 const opts = { ...settings, ...connectionFromEnv() };
@@ -62,12 +68,11 @@ function check(ok: boolean, what: string, detail = '') {
 }
 /** A check that passes when `diffs` is empty; shows the first few differences. */
 const same = (what: string, n: number, diffs: string[]) => check(diffs.length === 0, `${what}: ${n - diffs.length} of ${n} match`, diffs.slice(0, 3).join('; '));
-const near = (a: number | undefined, c: number | undefined, tol = 1e-6) => Math.abs((a ?? 0) - (c ?? 0)) <= tol;
+const near = (a: number | undefined, c: number | undefined, tol = 1e-9) => Math.abs((a ?? 0) - (c ?? 0)) <= tol;
 
 const supplierName = new Map((ref.suppliers ?? []).map((s) => [s.id, s.name]));
-const centerName = new Map((ref.workCenters ?? []).map((w) => [w.id, w.name ?? w.id]));
 const sup = (id?: string) => (id === undefined ? undefined : supplierName.get(id) ?? id);
-const wc = (id?: string) => (id === undefined ? undefined : centerName.get(id) ?? id);
+const wc = (id?: string) => id;
 
 // ---- counts ---------------------------------------------------------------------------------------
 const monthKey = (r: { month: string; program: string }) => `${r.month}|${r.program}`;
@@ -92,7 +97,7 @@ const items = new Map(b.items.map((i) => [i.code, i]));
     if (!i) { diffs.push(`${r.code} missing`); continue; }
     const bad = [
       i.name !== r.name && 'name', i.rev !== r.rev && 'rev', i.makeBuy !== r.makeBuy && 'makeBuy', i.status !== r.status && 'status',
-      !near(i.standardCost, r.standardCost, 0.005) && `standardCost ${i.standardCost} vs ${r.standardCost}`,
+      !near(i.standardCost, r.standardCost) && `standardCost ${i.standardCost} vs ${r.standardCost}`,
       i.defaultSupplier !== sup(r.defaultSupplier) && 'defaultSupplier', !near(i.laborHours, r.laborHours) && 'laborHours', i.workCenter !== wc(r.workCenter) && 'workCenter',
     ].filter(Boolean);
     if (bad.length) diffs.push(`${r.code} ${bad.join(', ')}`);
@@ -119,7 +124,7 @@ const items = new Map(b.items.map((i) => [i.code, i]));
     if (!s) { diffs.push(`${r.item}/${r.supplier} missing`); continue; }
     const bad = [
       s.primary !== r.primary && 'primary', s.qualified !== r.qualified && 'qualified', !near(s.allocation, r.allocation) && 'allocation',
-      ...(['p10', 'p50', 'p90'] as const).flatMap((q) => [!near(s.unitPrice[q], r.unitPrice[q], 0.005) && `price ${q}`, !near(s.leadTimeWeeks[q], r.leadTimeWeeks[q]) && `weeks ${q}`]),
+      ...(['p10', 'p50', 'p90'] as const).flatMap((q) => [!near(s.unitPrice[q], r.unitPrice[q]) && `price ${q}`, !near(s.leadTimeWeeks[q], r.leadTimeWeeks[q]) && `weeks ${q}`]),
     ].filter(Boolean);
     if (bad.length) diffs.push(`${r.item}/${r.supplier} ${bad.join(', ')}`);
   }
