@@ -126,7 +126,7 @@ test('the event header must agree with the signed body; without the header the b
   const sig = { 'X-Frappe-Webhook-Signature': sign(body) };
   assert.equal((await send(body, { ...sig, 'X-Acme-Event': 'ecr.updated' })).status, 400);
   assert.equal((await send(body, { ...sig, 'X-Acme-Event': 'eco.released' })).status, 200);
-  const later = eventAt('2026-10-03 10:30:15.250000', 'Submitted', 'eco.released'); // a repeat of the same event would be ignored
+  const later = eventAt('2026-10-03 10:30:15.250000', 'Submitted', 'eco.released'); // a second ECO release on the same document
   assert.equal((await send(later, { 'X-Frappe-Webhook-Signature': sign(later) })).status, 200);
   assert.deepEqual(got, ['eco.released', 'eco.released']);
 });

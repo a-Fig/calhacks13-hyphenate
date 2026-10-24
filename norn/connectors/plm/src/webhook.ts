@@ -6,8 +6,8 @@
 //
 // The PLM signs the body but sends no timestamp or nonce, so anyone who has seen a request can send the same
 // bytes again later and the signature still verifies. The payload is therefore a prompt, not a source of
-// truth: the handler reads the request's current state from the PLM and hands that to `onEvent`, and it
-// drops an event that is not newer than the last one it handled for the same document.
+// truth: the handler reads the request's current state from the PLM and hands that to `onEvent`. A replay
+// costs a repeat read, never an obsolete assessment; consumers stay idempotent on the request's content.
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
