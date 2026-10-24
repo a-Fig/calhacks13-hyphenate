@@ -1,74 +1,54 @@
-import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Label } from '@primer/react';
-import { useState } from 'react';
-import type { ChangedItem, DiffLine, ImpactAssessment } from '../assessment/types.ts';
+import type { DiffLine, ImpactAssessment } from '../assessment/types.ts';
+import { MockTag } from '../ui/Bits.tsx';
+import { CaliperIcon } from '../ui/icons.tsx';
 
-function stat(item: ChangedItem) {
-  return {
-    add: item.lines.filter(l => l.kind === 'add').length,
-    del: item.lines.filter(l => l.kind === 'del').length,
-  };
-}
-
-/** GitHub's "Files changed": one block per affected item, with red and green lines. */
 export function Changes({ a }: { a: ImpactAssessment }) {
-  const total = a.changes.reduce((s, c) => ({ add: s.add + stat(c).add, del: s.del + stat(c).del }), { add: 0, del: 0 });
   return (
-    <div className="nx-changes">
-      <div className="nx-changes-summary">
-        Showing <b>{a.changes.length} changed items</b> with <b className="nx-add">{total.add} additions</b> and <b className="nx-del">{total.del} deletions</b>.
+    <div className="nx-sections">
+      <div className="nx-changes-bar">
+        <CaliperIcon size={16} className="nx-fg-muted" />
+        <span>Showing <b>{a.changes.length} changed records</b></span>
+        <MockTag on={a.mock.includes('narrative')} />
       </div>
-      {a.changes.map(c => <Block key={c.id} item={c} />)}
+      {a.changes.map(c => (
+        <section key={c.id} className="nx-diff">
+          <header className="nx-diff-head">
+            <CaliperIcon size={14} className="nx-fg-muted" />
+            <code className="nx-diff-title">{c.title}</code>
+            {c.subtitle && <span className="nx-fg-muted">{c.subtitle}</span>}
+            <span className="nx-sp" />
+            {c.impact && <Label variant="secondary">{c.impact}</Label>}
+          </header>
+          <DiffTable lines={c.lines} />
+        </section>
+      ))}
     </div>
   );
 }
 
-function Block({ item }: { item: ChangedItem }) {
-  const [open, setOpen] = useState(true);
-  const s = stat(item);
-  return (
-    <section className="nx-diff">
-      <header className="nx-diff-head">
-        <button type="button" className="nx-diff-toggle" onClick={() => setOpen(o => !o)} aria-expanded={open} aria-label={`${open ? 'Collapse' : 'Expand'} ${item.title}`}>
-          {open ? <ChevronDownIcon size={16} /> : <ChevronRightIcon size={16} />}
-        </button>
-        <span className="nx-diff-stat" title={`${s.add} additions and ${s.del} deletions`}>
-          <b className="nx-add">+{s.add}</b> <b className="nx-del">&minus;{s.del}</b>
-        </span>
-        <span className="mono nx-diff-title">{item.title}</span>
-        {item.subtitle && <span className="nx-fg-muted">{item.subtitle}</span>}
-        <span className="nx-sp" />
-        {item.impact && <Label variant="secondary">{item.impact}</Label>}
-      </header>
-      {open && (
-        <DiffTable lines={item.lines} />
-      )}
-    </section>
-  );
-}
-
-/** A block of diff lines, with GitHub's two line-number columns and red and green rows. */
 export function DiffTable({ lines }: { lines: DiffLine[] }) {
-  let n1 = 0, n2 = 0;
+  let oldN = 0, newN = 0;
   return (
-        <table className="nx-diff-table">
-          <tbody>
-            {lines.map((l, i) => {
-              if (l.kind !== 'add') n1++;
-              if (l.kind !== 'del') n2++;
-              return (
-                <tr key={i} className={`nx-line ${l.kind}`}>
-                  <td className="ln">{l.kind !== 'add' ? n1 : ''}</td>
-                  <td className="ln">{l.kind !== 'del' ? n2 : ''}</td>
-                  <td className="mk">{l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ''}</td>
-                  <td className="tx">
-                    <code>{l.text}</code>
-                    {l.remark && <span className="nx-remark">  # {l.remark}</span>}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+    <table className="nx-diff-table">
+      <tbody>
+        {lines.map((l, i) => {
+          const o = l.kind === 'add' ? '' : ++oldN;
+          const n = l.kind === 'del' ? '' : ++newN;
+          const sign = l.kind === 'add' ? '+' : l.kind === 'del' ? '\u2212' : ' ';
+          return (
+            <tr key={i} className={`nx-dl nx-dl-${l.kind}`}>
+              <td className="ln">{o}</td>
+              <td className="ln">{n}</td>
+              <td className="sg">{sign}</td>
+              <td className="tx">
+                <code>{l.text}</code>
+                {l.remark && <span className="rm"># {l.remark}</span>}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }

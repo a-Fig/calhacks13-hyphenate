@@ -1,23 +1,23 @@
 import {
-  AlertFillIcon, CheckCircleFillIcon, CircleIcon, DotFillIcon, GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon,
-  GitPullRequestIcon, SkipIcon, XCircleFillIcon,
+  AlertFillIcon, CheckCircleFillIcon, CircleIcon, DotFillIcon, SkipIcon, XCircleFillIcon,
 } from '@primer/octicons-react';
 import { Avatar, Label, Spinner, StateLabel } from '@primer/react';
 import type { Check, EcrSummary, ReportLevel } from '../assessment/types.ts';
 import { avatarSrc, type AvatarKind } from './avatars.ts';
+import { EcoStampIcon, EcrDraftIcon, EcrIcon, EcrRejectedIcon } from './icons.tsx';
 
 type Status = EcrSummary['status'];
 
 export const isOpen = (s: Status) => s === 'Draft' || s === 'Submitted' || s === 'In review';
 
-/** GitHub's state colours: open is green, approved and released (merged) purple, rejected (closed) red. */
+/** State colours: open is green, approved and ECO released are purple, rejected is red. */
 export function StateBadge({ status, size = 'medium' }: { status: Status; size?: 'small' | 'medium' }) {
   const map: Record<Status, { status: 'pullOpened' | 'pullMerged' | 'pullClosed' | 'draft'; text: string }> = {
     Draft: { status: 'draft', text: 'Draft' },
     Submitted: { status: 'pullOpened', text: 'Submitted' },
     'In review': { status: 'pullOpened', text: 'In review' },
     Approved: { status: 'pullMerged', text: 'Approved' },
-    'ECO released': { status: 'pullMerged', text: 'Released' },
+    'ECO released': { status: 'pullMerged', text: 'ECO released' },
     Rejected: { status: 'pullClosed', text: 'Rejected' },
   };
   const m = map[status];
@@ -25,16 +25,16 @@ export function StateBadge({ status, size = 'medium' }: { status: Status; size?:
 }
 
 export function StateIcon({ status, size = 16 }: { status: Status; size?: number }) {
-  if (status === 'Draft') return <GitPullRequestDraftIcon size={size} className="nx-fg-muted" />;
-  if (status === 'Approved' || status === 'ECO released') return <GitMergeIcon size={size} className="nx-fg-done" />;
-  if (status === 'Rejected') return <GitPullRequestClosedIcon size={size} className="nx-fg-danger" />;
-  return <GitPullRequestIcon size={size} className="nx-fg-open" />;
+  if (status === 'Draft') return <EcrDraftIcon size={size} className="nx-fg-muted" />;
+  if (status === 'Approved' || status === 'ECO released') return <EcoStampIcon size={size} className="nx-fg-done" />;
+  if (status === 'Rejected') return <EcrRejectedIcon size={size} className="nx-fg-danger" />;
+  return <EcrIcon size={size} className="nx-fg-open" />;
 }
 
 export function LevelLabel({ level, long = false }: { level: ReportLevel; long?: boolean }) {
-  if (level === 3) return <Label variant="success">{long ? 'Level 3 · Norn’s final verdict' : 'Level 3'}</Label>;
-  if (level === 2) return <Label variant="accent">{long ? 'Level 2 · Reviewed once' : 'Level 2'}</Label>;
-  return <Label variant="attention">{long ? 'Level 1 · Provisional' : 'Level 1'}</Label>;
+  if (level === 3) return <Label variant="success">{long ? 'Level 3 \u00b7 Norn\u2019s final verdict' : 'Level 3'}</Label>;
+  if (level === 2) return <Label variant="accent">{long ? 'Level 2 \u00b7 Reviewed once' : 'Level 2'}</Label>;
+  return <Label variant="attention">{long ? 'Level 1 \u00b7 Provisional' : 'Level 1'}</Label>;
 }
 
 export function CheckStateIcon({ state, size = 16 }: { state: Check['state']; size?: number }) {
@@ -48,7 +48,7 @@ export function CheckStateIcon({ state, size = 16 }: { state: Check['state']; si
 }
 
 export function Person({ name, kind = 'person', size = 20 }: { name: string; kind?: AvatarKind; size?: number }) {
-  return <Avatar src={avatarSrc(name, kind)} alt={name} size={size} square={kind === 'norn'} />;
+  return <Avatar src={avatarSrc(name, kind)} alt={name} size={size} square={kind === 'norn' || kind === 'team'} />;
 }
 
 /** Marks one section of a page as a mock fixture, so a live section can drop it later. */
@@ -79,4 +79,22 @@ export function SavedRun({ source = 'saved' }: { source?: 'saved' | 'live' }) {
 
 export function XFail() {
   return <XCircleFillIcon className="nx-fg-danger" />;
+}
+
+/**
+ * Engineering drawing title block stamp for an ECR number.
+ * Replaces GitHub's `#123` muted pull-request number with a technical drawing block.
+ */
+export function DrawingStamp({ id, program, part, compact = false }: { id: string; program?: string; part?: string; compact?: boolean }) {
+  if (compact) {
+    return <span className="nx-dwg-chip" title={`Engineering Change Request ${id}`}>{id}</span>;
+  }
+  return (
+    <span className="nx-dwg-block" aria-label={`Drawing title block ${id}`}>
+      <span className="nx-dwg-cell nx-dwg-tag">DWG CHG</span>
+      <span className="nx-dwg-cell nx-dwg-id">{id}</span>
+      {part && <span className="nx-dwg-cell nx-dwg-meta">{part}</span>}
+      {program && <span className="nx-dwg-cell nx-dwg-prog">{program.toUpperCase()}</span>}
+    </span>
+  );
 }

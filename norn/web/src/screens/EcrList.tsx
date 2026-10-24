@@ -1,24 +1,24 @@
 import { useMemo, useState } from 'react';
 import {
-  AlertFillIcon, CheckCircleFillIcon, CheckIcon, CommentIcon, DotFillIcon, GitPullRequestIcon, SearchIcon,
+  AlertFillIcon, CheckCircleFillIcon, CommentIcon, DotFillIcon, SearchIcon,
 } from '@primer/octicons-react';
 import { ActionList, ActionMenu, AvatarStack, CounterLabel, Label, TextInput } from '@primer/react';
-import { source, useEcrList } from '../assessment/source.ts';
+import { useEcrList } from '../assessment/source.ts';
 import type { EcrSummary } from '../assessment/types.ts';
-import { isOpen, LevelLabel, Person, StateIcon } from '../ui/Bits.tsx';
+import { DrawingStamp, isOpen, LevelLabel, Person, StateIcon } from '../ui/Bits.tsx';
+import { AircraftIcon, EcoStampIcon, EcrIcon } from '../ui/icons.tsx';
 import { ago, usdK } from '../ui/fmt.ts';
 import { Link, navigate } from '../router.tsx';
-import { RepoHeader } from './Shell.tsx';
 
 type Pick1 = string | null;
 
 function reviewText(e: EcrSummary): string {
-  if (e.status === 'ECO released') return 'Released';
+  if (e.status === 'ECO released') return 'ECO released';
   if (e.status === 'Approved') return 'Approved';
   const r = e.reviewers ?? [];
   if (!r.length) return 'Review required';
   const done = r.filter(x => x.state === 'approved').length;
-  return done ? `Review required · ${done} of ${r.length} approved` : 'Review required';
+  return done ? `Review required \u00b7 ${done} of ${r.length} approved` : 'Review required';
 }
 
 function Filter({ label, options, value, onChange }: { label: string; options: string[]; value: Pick1; onChange: (v: Pick1) => void }) {
@@ -92,99 +92,118 @@ export function EcrList() {
   const people = [...new Set(all.map(e => e.originator))].sort();
 
   return (
-    <>
-      <RepoHeader mock={source.isMock} />
-      <main className="nx-container nx-list">
-        <h2 className="nx-list-title">All ECRs</h2>
-        <div className="nx-searchbar">
-          <TextInput
-            block
-            leadingVisual={SearchIcon}
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            aria-label="Search ECRs"
-            placeholder="Search all ECRs"
-          />
+    <main className="nx-container nx-list">
+      <div className="nx-list-head">
+        <div>
+          <h2 className="nx-list-title">Engineering Change Requests</h2>
+          <p className="nx-fg-muted nx-small">Production baseline impact assessments across Vesper and Meridian programs</p>
         </div>
+        <div className="nx-program-pills" role="group" aria-label="Filter by aircraft program">
+          {PROGRAMS.map(p => (
+            <button
+              key={p}
+              type="button"
+              className={`nx-prog-pill ${program === p ? 'on' : ''}`}
+              onClick={() => setProgram(program === p ? null : p)}
+            >
+              <AircraftIcon size={13} />
+              <span>{p}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
-        <div className="nx-box" data-testid="ecr-table">
-          <div className="nx-box-head">
-            <div className="nx-states">
-              <button type="button" className={`nx-state ${state === 'open' ? 'on' : ''}`} onClick={() => setState('open')}>
-                <GitPullRequestIcon size={16} /> Open <CounterLabel>{nOpen}</CounterLabel>
-              </button>
-              <button type="button" className={`nx-state ${state === 'closed' ? 'on' : ''}`} onClick={() => setState('closed')}>
-                <CheckIcon size={16} /> Closed <CounterLabel>{nClosed}</CounterLabel>
-              </button>
-            </div>
-            <span className="nx-sp" />
-            <div className="nx-filters">
-              <Filter label="Originator" options={people} value={who} onChange={setWho} />
-              <Filter label="Label" options={LEVELS} value={level} onChange={setLevel} />
-              <Filter label="Program" options={PROGRAMS} value={program} onChange={setProgram} />
-              <Filter label="Class" options={CLASSES} value={cls} onChange={setCls} />
-              <Filter label="Approvals" options={APPROVALS} value={approvals} onChange={setApprovals} />
-              <ActionMenu>
-                <ActionMenu.Button variant="invisible" size="small" className="nx-filter">Sort</ActionMenu.Button>
-                <ActionMenu.Overlay width="small">
-                  <ActionList selectionVariant="single">
-                    {SORTS.map(s => (
-                      <ActionList.Item key={s} selected={sort === s} onSelect={() => setSort(s)}>{s}</ActionList.Item>
-                    ))}
-                  </ActionList>
-                </ActionMenu.Overlay>
-              </ActionMenu>
-            </div>
+      <div className="nx-searchbar">
+        <TextInput
+          block
+          leadingVisual={SearchIcon}
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          aria-label="Search ECRs"
+          placeholder="Search all ECRs"
+        />
+      </div>
+
+      <div className="nx-box" data-testid="ecr-table">
+        <div className="nx-box-head">
+          <div className="nx-states">
+            <button type="button" className={`nx-state ${state === 'open' ? 'on' : ''}`} onClick={() => setState('open')}>
+              <EcrIcon size={16} className="nx-fg-open" /> Open <CounterLabel>{nOpen}</CounterLabel>
+            </button>
+            <button type="button" className={`nx-state ${state === 'closed' ? 'on' : ''}`} onClick={() => setState('closed')}>
+              <EcoStampIcon size={16} className="nx-fg-done" /> Closed <CounterLabel>{nClosed}</CounterLabel>
+            </button>
           </div>
-
-          <ul className="nx-rows">
-            {rows.map(e => (
-              <li key={e.id} className="nx-row" data-testid={`row-${e.id}`} onClick={() => navigate(`/ecr/${e.id}`)}>
-                <span className="nx-row-state"><StateIcon status={e.status} /></span>
-                <div className="nx-row-main">
-                  <div className="nx-row-title">
-                    <Link to={`/ecr/${e.id}`} className="nx-row-link" onClick={ev => ev.stopPropagation()}>{e.title}</Link>
-                    <span className="nx-row-labels">
-                      <Label variant="secondary">Class {e.companyClass}</Label>
-                      {e.priority !== 'Routine' && <Label variant="severe">{e.priority}</Label>}
-                      {e.level && <LevelLabel level={e.level} />}
-                    </span>
-                  </div>
-                  <div className="nx-row-sub">
-                    {e.id} filed {ago(e.filedOn + 'T12:00:00-07:00')} by {e.originator} &middot; {reviewText(e)}
-                    {e.flag && isOpen(e.status) && (
-                      <span className="nx-flag"> &middot; <AlertFillIcon size={12} className="nx-fg-attention" /> {e.flag}</span>
-                    )}
-                  </div>
-                </div>
-                <div className="nx-row-right">
-                  <span className="nx-row-check">
-                    {e.checks === 'passed' && <CheckCircleFillIcon size={16} className="nx-fg-success" aria-label="Checks passed" />}
-                    {e.checks === 'attention' && <DotFillIcon size={16} className="nx-fg-attention" aria-label="A check needs attention" />}
-                    {e.checks === 'running' && <DotFillIcon size={16} className="nx-fg-attention" aria-label="Checks running" />}
-                  </span>
-                  <span className="nx-row-av">
-                    {e.reviewers && e.reviewers.length > 0 && (
-                      <AvatarStack alignRight>
-                        {e.reviewers.slice(0, 3).map(r => (
-                          <Person key={r.name} name={r.name} kind={r.name === 'Norn' ? 'norn' : 'person'} size={20} />
-                        ))}
-                      </AvatarStack>
-                    )}
-                  </span>
-                  <span className="nx-row-comments">
-                    {(e.comments ?? 0) > 0 && (<><CommentIcon size={16} /> {e.comments}</>)}
-                  </span>
-                  <span className="nx-row-cost num" title="Net cost of the first 12 months, point estimate">
-                    {e.cost ? usdK(e.cost.point ?? e.cost.p50, { plus: true }) : ''}
-                  </span>
-                </div>
-              </li>
-            ))}
-            {rows.length === 0 && <li className="nx-empty">{error ?? (loaded ? 'No ECRs match this search.' : 'Loading')}</li>}
-          </ul>
+          <span className="nx-sp" />
+          <div className="nx-filters">
+            <Filter label="Originator" options={people} value={who} onChange={setWho} />
+            <Filter label="Label" options={LEVELS} value={level} onChange={setLevel} />
+            <Filter label="Program" options={PROGRAMS} value={program} onChange={setProgram} />
+            <Filter label="Class" options={CLASSES} value={cls} onChange={setCls} />
+            <Filter label="Approvals" options={APPROVALS} value={approvals} onChange={setApprovals} />
+            <ActionMenu>
+              <ActionMenu.Button variant="invisible" size="small" className="nx-filter">Sort</ActionMenu.Button>
+              <ActionMenu.Overlay width="small">
+                <ActionList selectionVariant="single">
+                  {SORTS.map(s => (
+                    <ActionList.Item key={s} selected={sort === s} onSelect={() => setSort(s)}>{s}</ActionList.Item>
+                  ))}
+                </ActionList>
+              </ActionMenu.Overlay>
+            </ActionMenu>
+          </div>
         </div>
-      </main>
-    </>
+
+        <ul className="nx-rows">
+          {rows.map(e => (
+            <li key={e.id} className="nx-row" data-testid={`row-${e.id}`} onClick={() => navigate(`/ecr/${e.id}`)}>
+              <span className="nx-row-state"><StateIcon status={e.status} /></span>
+              <div className="nx-row-main">
+                <div className="nx-row-title">
+                  <DrawingStamp id={e.id} compact />
+                  <Link to={`/ecr/${e.id}`} className="nx-row-link" onClick={ev => ev.stopPropagation()}>{e.title}</Link>
+                  <span className="nx-row-labels">
+                    <span className="nx-prog-tag"><AircraftIcon size={12} /> {e.program}</span>
+                    <Label variant="secondary">Class {e.companyClass}</Label>
+                    {e.priority !== 'Routine' && <Label variant="severe">{e.priority}</Label>}
+                    {e.level && <LevelLabel level={e.level} />}
+                  </span>
+                </div>
+                <div className="nx-row-sub">
+                  {e.partNumber && <><code className="nx-part-inline">{e.partNumber}</code> &middot; </>}
+                  filed {ago(e.filedOn + 'T12:00:00-07:00')} by {e.originator} &middot; {reviewText(e)}
+                  {e.flag && isOpen(e.status) && (
+                    <span className="nx-flag"> &middot; <AlertFillIcon size={12} className="nx-fg-attention" /> {e.flag}</span>
+                  )}
+                </div>
+              </div>
+              <div className="nx-row-right">
+                <span className="nx-row-check">
+                  {e.checks === 'passed' && <CheckCircleFillIcon size={16} className="nx-fg-success" aria-label="Checks passed" />}
+                  {e.checks === 'attention' && <DotFillIcon size={16} className="nx-fg-attention" aria-label="A check needs attention" />}
+                  {e.checks === 'running' && <DotFillIcon size={16} className="nx-fg-attention" aria-label="Checks running" />}
+                </span>
+                <span className="nx-row-av">
+                  {e.reviewers && e.reviewers.length > 0 && (
+                    <AvatarStack alignRight>
+                      {e.reviewers.slice(0, 3).map(r => (
+                        <Person key={r.name} name={r.name} kind={r.name === 'Norn' ? 'norn' : 'person'} size={20} />
+                      ))}
+                    </AvatarStack>
+                  )}
+                </span>
+                <span className="nx-row-comments">
+                  {(e.comments ?? 0) > 0 && (<><CommentIcon size={16} /> {e.comments}</>)}
+                </span>
+                <span className="nx-row-cost num" title="Net cost of the first 12 months, point estimate">
+                  {e.cost ? usdK(e.cost.point ?? e.cost.p50, { plus: true }) : ''}
+                </span>
+              </div>
+            </li>
+          ))}
+          {rows.length === 0 && <li className="nx-empty">{error ?? (loaded ? 'No ECRs match this search.' : 'Loading')}</li>}
+        </ul>
+      </div>
+    </main>
   );
 }

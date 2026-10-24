@@ -1,15 +1,18 @@
 import { useState, type ReactNode } from 'react';
 import {
-  AlertFillIcon, CheckCircleFillIcon, CheckIcon, ChecklistIcon, CircleIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, CommentIcon,
-  DotFillIcon, EyeIcon, FileDiffIcon, GitMergeIcon, GraphIcon, NoteIcon, PackageIcon, SearchIcon, ShieldCheckIcon, TagIcon,
+  AlertFillIcon, CheckCircleFillIcon, CheckIcon, CircleIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, CommentIcon,
+  DotFillIcon, EyeIcon, GraphIcon, NoteIcon, PackageIcon, SearchIcon, ShieldCheckIcon, TagIcon,
 } from '@primer/octicons-react';
 import { AvatarStack, Button, Checkbox, Label, PageLayout, ProgressBar, Spinner, Timeline } from '@primer/react';
-import type { ActivityEvent, ErpPackage, EventKind, ImpactAssessment, RiskLevel, StepState } from '../assessment/types.ts';
+import type { ActivityEvent, ErpPackage, EventKind, ImpactAssessment, LinkedRecord, RiskLevel, StepState } from '../assessment/types.ts';
 import { monthLabel } from '../assessment/adapter.ts';
 import { DiffTable } from './Changes.tsx';
 import { CheckStateIcon, LevelLabel, MockTag, Person, SavedRun } from '../ui/Bits.tsx';
+import {
+  AircraftIcon, CaliperIcon, CcbTableIcon, CrateIcon, EcoStampIcon, EcrIcon, GaugeIcon, NcrCrackIcon, SerialPlateIcon,
+} from '../ui/icons.tsx';
 import { Glyph, Mark, Num } from '../ui/Evidence.tsx';
-import { ago, dateTime, dayLabel, dateShort, range as rangeText, usdK } from '../ui/fmt.ts';
+import { ago, dateTime, dayLabel, range as rangeText, usdK } from '../ui/fmt.ts';
 import { Link } from '../router.tsx';
 import type { AgentRun, StatementView } from '../assessment/types.ts';
 
@@ -50,8 +53,8 @@ function CommentBox({ name, kind, label, time, edited, children, right }: {
     <div className="nx-comment">
       <div className="nx-comment-head">
         <b>{name}</b>
-        {kind === 'norn' && <Label variant="secondary" size="small">Bot</Label>}
-        <span className="nx-fg-muted" title={dateTime(time)}>commented {ago(time)}{edited ? ' · edited' : ''}</span>
+        {kind === 'norn' && <Label variant="secondary" size="small">Automated Analyst</Label>}
+        <span className="nx-fg-muted" title={dateTime(time)}>commented {ago(time)}{edited ? ' \u00b7 edited' : ''}</span>
         <span className="nx-sp" />
         {right}
         {label}
@@ -81,7 +84,7 @@ function OpeningComment({ a, filed }: { a: ImpactAssessment; filed: ActivityEven
 
 const RISK: Record<RiskLevel, 'success' | 'attention' | 'severe'> = { low: 'success', moderate: 'attention', high: 'severe' };
 
-/** Norn's impact statement, as a bot comment in the manner of Vercel and Codecov. */
+/** Norn's impact statement, as an automated comment on the change request. */
 function BotComment({ a }: { a: ImpactAssessment }) {
   if (a.statement) return <StatementComment a={a} />;
   const h = a.headline;
@@ -90,7 +93,7 @@ function BotComment({ a }: { a: ImpactAssessment }) {
     <Timeline.Item className="nx-t-comment">
       <div className="nx-av-col"><Person name="Norn" kind="norn" size={40} /></div>
       <Timeline.Body className="nx-t-body">
-        <CommentBox name="norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? a.activity[a.activity.length - 1]?.at ?? ''} edited={a.source !== 'live'} right={a.level ? <LevelLabel level={a.level} long /> : undefined}>
+        <CommentBox name="Norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? a.activity[a.activity.length - 1]?.at ?? ''} edited={a.source !== 'live'} right={a.level ? <LevelLabel level={a.level} long /> : undefined}>
           <h3 className="nx-h3">Impact assessment <SavedRun source={a.source} /></h3>
           {a.checks.some(c => c.state === 'queued' || c.state === 'running') && <p className="nx-fg-muted nx-small">These are the numbers of the previous run. Norn is checking the changed ECR again.</p>}
           <table className="nx-bot-table">
@@ -100,14 +103,17 @@ function BotComment({ a }: { a: ImpactAssessment }) {
             <tbody>
               {h.unitCost.map(u => (
                 <tr key={u.figure.id}>
-                  <td>Unit cost, per {u.program} unit built</td>
+                  <td><span className="nx-row-icon"><AircraftIcon size={14} className="nx-fg-muted" /> Unit cost, per {u.program} unit built</span></td>
                   <td className="num"><Num f={u.figure} plus /></td>
                   <td className="num nx-fg-muted">{rangeText(u.figure, 'full')}</td>
                   <td className="nx-fg-muted">&ndash;</td>
                 </tr>
               ))}
               <tr>
-                <td>Net cost, first 12 months<div className="nx-fg-muted nx-small">{a.cost.window.label}</div></td>
+                <td>
+                  <span className="nx-row-icon"><GaugeIcon size={14} className="nx-fg-muted" /> Net cost, first 12 months</span>
+                  <div className="nx-fg-muted nx-small" style={{ paddingLeft: 20 }}>{a.cost.window.label}</div>
+                </td>
                 <td className="num"><Num f={h.year1} kind="short" plus /></td>
                 <td className="num nx-fg-muted">{rangeText(h.year1, 'short')}</td>
                 <td>
@@ -119,14 +125,14 @@ function BotComment({ a }: { a: ImpactAssessment }) {
                 </td>
               </tr>
               <tr>
-                <td>Cut-in, {a.cutIn.program}{a.cutIn.estimate ? ', as filed' : ''}</td>
+                <td><span className="nx-row-icon"><SerialPlateIcon size={14} className="nx-fg-muted" /> Cut-in, {a.cutIn.program}{a.cutIn.estimate ? ', as filed' : ''}</span></td>
                 <td className="num"><Mark ev={a.cutIn.source === 'given' ? 'fact' : 'assumption'} id="cutin">{monthLabel(a.cutIn.month)}</Mark></td>
                 <td className="nx-fg-muted">S/N {a.cutIn.serial}{a.cutIn.source === 'default' ? ', a default' : ''}</td>
                 <td>{a.cutIn.estimate ? <span className="nx-fg-muted">Range: see below</span> : <Pending />}</td>
               </tr>
               {a.cutIn.estimate && (
                 <tr>
-                  <td>Rev C reaches the line <MockTag on={a.mock.includes('cutInEstimate')} /></td>
+                  <td><span className="nx-row-icon"><SerialPlateIcon size={14} className="nx-fg-muted" /> Rev C reaches the line <MockTag on={a.mock.includes('cutInEstimate')} /></span></td>
                   <td className="num"><Num f={a.cutIn.estimate.figure} use="p50" /></td>
                   <td className="num nx-fg-muted">{rangeText(a.cutIn.estimate.figure, 'short')}</td>
                   <td>
@@ -137,7 +143,7 @@ function BotComment({ a }: { a: ImpactAssessment }) {
                 </tr>
               )}
               <tr>
-                <td>Supply risk {a.supply && <MockTag on={a.mock.includes('supply')} />}</td>
+                <td><span className="nx-row-icon"><CrateIcon size={14} className="nx-fg-muted" /> Supply risk {a.supply && <MockTag on={a.mock.includes('supply')} />}</span></td>
                 {a.supply ? (
                   <>
                     <td><Mark ev={a.supply.evidence} id={a.supply.id}><Label variant={RISK[a.supply.level]}>{cap(a.supply.level)}</Label></Mark></td>
@@ -172,7 +178,7 @@ function BotComment({ a }: { a: ImpactAssessment }) {
                 {a.drivers.slice(0, 4).map(d => (
                   <li key={d.id}>
                     <Glyph ev={d.evidence} /> <Mark ev={d.evidence} id={d.id} claim>{d.label}</Mark>
-                    <span className="nx-fg-muted"> {d.lowLabel && d.highLabel ? `· ${d.lowLabel} to ${d.highLabel} ` : '· '}moves the net cost by </span>
+                    <span className="nx-fg-muted"> {d.lowLabel && d.highLabel ? `\u00b7 ${d.lowLabel} to ${d.highLabel} ` : '\u00b7 '}moves the net cost by </span>
                     <b className="num">{swing(d.low, d.high)}</b>
                   </li>
                 ))}
@@ -202,12 +208,12 @@ function swing(lo: number, hi: number) {
 
 type BadgeSpec = { icon: ReactNode; variant?: 'success' | 'danger' | 'done' | 'attention' | 'accent' };
 const BADGE: Partial<Record<EventKind, BadgeSpec>> = {
-  ran_checks: { icon: <ChecklistIcon /> },
+  ran_checks: { icon: <GaugeIcon size={16} /> },
   label: { icon: <TagIcon /> },
   review_requested: { icon: <EyeIcon /> },
   report: { icon: <GraphIcon /> },
   approved: { icon: <CheckIcon />, variant: 'success' },
-  changes_requested: { icon: <FileDiffIcon />, variant: 'danger' },
+  changes_requested: { icon: <CaliperIcon size={16} />, variant: 'danger' },
   comment: { icon: <CommentIcon /> },
   research: { icon: <SearchIcon /> },
   policy: { icon: <ShieldCheckIcon />, variant: 'done' },
@@ -301,15 +307,15 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
 
       {decided ? (
         <MergeRow
-          icon={<GitMergeIcon size={24} className="nx-fg-done" />}
+          icon={<EcoStampIcon size={24} className="nx-fg-done" />}
           title={a.ecr.status === 'ECO released' ? 'ECO released' : 'Approved'}
-          sub={ccb && ccb.state === 'not_required' ? 'Within Norn’s limits, no CCB needed' : 'The CCB approved this ECR'}
+          sub={ccb && ccb.state === 'not_required' ? 'Within Norn\u2019s limits, no CCB needed' : 'The Change Control Board approved this ECR'}
         />
       ) : (
         <MergeRow
-          icon={<DotFillIcon size={24} className="nx-fg-attention" />}
+          icon={<CcbTableIcon size={24} className="nx-fg-attention" />}
           title="Review required"
-          sub={`${ccb ? 'CCB approval needed' : 'Approval needed'} · ${done} of ${reviewers.length} approved`}
+          sub={`${ccb ? 'CCB approval needed' : 'Approval needed'} \u00b7 ${done} of ${reviewers.length} approved`}
         >
           <div className="nx-merge-bar"><ProgressBar barSize="small" progress={reviewers.length ? (done / reviewers.length) * 100 : 0} aria-label="Approvals" /></div>
         </MergeRow>
@@ -323,7 +329,7 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
 
       {!decided && (
         <div className="nx-merge-foot">
-          <Button variant="primary" disabled leadingVisual={PackageIcon}>Release ECO</Button>
+          <Button variant="primary" disabled leadingVisual={EcoStampIcon}>Release ECO</Button>
           <span className="nx-fg-muted">
             {ccb?.when ? `Waiting for the CCB on ${ccb.when}` : 'Waiting for approvals'}
           </span>
@@ -339,6 +345,13 @@ function StepIcon({ state }: { state: StepState }) {
   if (state === 'approved') return <CheckIcon size={16} className="nx-fg-success" aria-label="Approved" />;
   if (state === 'not_required') return <span className="nx-fg-muted nx-small">Not needed</span>;
   return <DotFillIcon size={16} className="nx-fg-attention" aria-label="Review pending" />;
+}
+
+function LinkedIcon({ l }: { l: LinkedRecord }) {
+  if (l.kind === 'NCR') return <NcrCrackIcon size={16} className="nx-fg-danger" />;
+  if (l.kind === 'ECO') return <EcoStampIcon size={16} className="nx-fg-done" />;
+  if (l.kind === 'ECR') return <EcrIcon size={16} className="nx-fg-open" />;
+  return <CrateIcon size={16} className="nx-fg-muted" />;
 }
 
 function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }) {
@@ -359,7 +372,10 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
               {s.role === 'CCB'
                 ? <Person name="CCB" kind="team" size={20} />
                 : <Person name={s.person ?? s.role} kind={s.person === 'Norn' ? 'norn' : 'person'} size={20} />}
-              <span className="nx-side-name">{s.role === 'CCB' ? 'bowman-aviation/ccb' : s.person}</span>
+              <span className="nx-side-name">
+                {s.role === 'CCB' ? 'Change Control Board' : s.person}
+                {s.role !== 'CCB' && s.role && <span className="nx-side-role">{s.role}</span>}
+              </span>
               <span className="nx-side-trail"><StepIcon state={s.state} /></span>
             </li>
           ))}
@@ -374,17 +390,17 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
       <section>
         <h3>Labels</h3>
         <div className="nx-side-labels">
+          <span className="nx-prog-tag"><AircraftIcon size={12} /> {e.program}</span>
           <Label variant="secondary">Class {e.companyClass}</Label>
           <Label variant="secondary">FAA {e.faa}</Label>
           {e.priority !== 'Routine' && <Label variant="severe">{e.priority}</Label>}
-          <Label variant="accent">{e.program}</Label>
           {a.level && <LevelLabel level={a.level} />}
         </div>
       </section>
 
       <section>
-        <h3>Milestone</h3>
-        <div className="nx-side-one"><b>{a.meeting.label}</b></div>
+        <h3>CCB Milestone</h3>
+        <div className="nx-side-one"><CcbTableIcon size={15} className="nx-fg-muted" /> <b>{a.meeting.label}</b></div>
         <div className="nx-side-ms">
           <ProgressBar barSize="small" progress={pct} aria-label="Approvals so far" />
           <span className="nx-fg-muted nx-small">{Math.round(pct)}% approved &middot; {dayLabel(a.meeting.date + 'T12:00:00-07:00')}</span>
@@ -397,7 +413,7 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
           <ul className="nx-side-list nx-linked">
             {a.linked.map(l => (
               <li key={l.ref}>
-                {l.state === 'released' ? <GitMergeIcon size={16} className="nx-fg-done" /> : l.state === 'open' ? <DotFillIcon size={16} className="nx-fg-open" /> : <CheckCircleFillIcon size={16} className="nx-fg-done" />}
+                <LinkedIcon l={l} />
                 <span><b>{l.ref}</b> <span className="nx-fg-muted">{l.title}</span></span>
               </li>
             ))}

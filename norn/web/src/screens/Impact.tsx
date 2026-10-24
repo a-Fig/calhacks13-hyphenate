@@ -1,277 +1,328 @@
-import { useMemo } from 'react';
-import { ArrowRightIcon, CheckIcon, CircleIcon, ClockIcon, DotFillIcon } from '@primer/octicons-react';
-import { ActionList, Flash, Label } from '@primer/react';
+import { Fragment, useMemo, type ReactNode } from 'react';
+import { ActionList, Label, PageLayout, Spinner } from '@primer/react';
+import type { Check, CostBlock, CostRow, Evidence, ImpactAssessment } from '../assessment/types.ts';
 import { monthLabel } from '../assessment/adapter.ts';
-import type { CostBlock, CostRow, Figure, ImpactAssessment, RiskLevel } from '../assessment/types.ts';
 import { CheckStateIcon, MockTag, SavedRun } from '../ui/Bits.tsx';
+import { CaliperIcon, CcbTableIcon, CrateIcon, GaugeIcon, SerialPlateIcon } from '../ui/icons.tsx';
 import { SCurveChart, TornadoChart } from '../ui/Charts.tsx';
-import { Legend, Mark, Num } from '../ui/Evidence.tsx';
-import { range as rangeText } from '../ui/fmt.ts';
-import { evidenceCounts } from '../ui/trace.ts';
-import { Link, navigate } from '../router.tsx';
+import { EV_ORDER, Glyph, Legend, Mark, Num } from '../ui/Evidence.tsx';
+import { fig as figText, range as rangeText, usd, usdK } from '../ui/fmt.ts';
+import { navigate } from '../router.tsx';
+import { figureIndex } from '../ui/trace.ts';
 
-const BLOCKS: { id: CostBlock; label: string }[] = [
-  { id: 'production', label: 'Production' },
-  { id: 'retrofit', label: 'Retrofit' },
-  { id: 'logisticsSupport', label: 'Logistics support' },
-  { id: 'other', label: 'Other' },
-];
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
-const RISK: Record<RiskLevel, 'success' | 'attention' | 'severe'> = { low: 'success', moderate: 'attention', high: 'severe' };
 
-/** GitHub's Checks tab: the list on the left, the selected check's summary page on the right. */
+const CHECK_ICON: Record<Check['id'], ReactNode> = {
+  cost: <GaugeIcon size={15} className="nx-fg-muted" />,
+  timeline: <SerialPlateIcon size={15} className="nx-fg-muted" />,
+  supply: <CrateIcon size={15} className="nx-fg-muted" />,
+  bom: <CaliperIcon size={15} className="nx-fg-muted" />,
+  class: <CcbTableIcon size={15} className="nx-fg-muted" />,
+};
+
 export function Impact({ a, check }: { a: ImpactAssessment; check?: string }) {
-  const current = a.checks.find(c => c.id === check) ?? a.checks.find(c => c.id === 'cost') ?? a.checks[0];
-  const counts = useMemo(() => evidenceCounts(a), [a]);
-  const base = `/ecr/${a.ecr.id}/impact`;
-  const bad = a.checks.filter(c => c.state === 'attention').length;
-  const pending = a.checks.filter(c => c.state === 'pending').length;
-  const working = a.checks.filter(c => c.state === 'queued' || c.state === 'running').length;
-  const passed = a.checks.filter(c => c.state === 'passed').length;
-  const stateWord = { passed: 'Passed', attention: 'Needs attention', running: 'Running', queued: 'Queued', pending: 'Not assessed yet', skipped: 'Skipped' }[current.state];
+  const id = (a.checks.find(c => c.id === check)?.id ?? 'cost') as Check['id'];
+  const picked = a.checks.find(c => c.id === id) ?? a.checks[0];
+
+  const counts = useMemo(() => {
+    const out: Record<Evidence, number> = { fact: 0, assumption: 0, computation: 0, judgment: 0 };
+    for (const f of figureIndex(a).values()) out[f.evidence]++;
+    for (const d of a.drivers) out[d.evidence]++;
+    for (const r of a.recommendation.reasons) out[r.evidence]++;
+    out[a.changeClass.evidence]++;
+    return out;
+  }, [a]);
 
   return (
-    <div className="nx-checks">
-      <nav className="nx-checks-list" aria-label="Impact checks">
-        <div className="nx-checks-title">
-          Impact checks
-          <span className="nx-fg-muted nx-small">
-            {[`${passed} passed`, bad ? `${bad} need attention` : '', working ? `${working} queued or running` : '', pending ? `${pending} not assessed yet` : ''].filter(Boolean).join(', ')}
-          </span>
+    <PageLayout containerWidth="full" padding="none" columnGap="normal">
+      <PageLayout.Pane position="start" width="small" padding="none" divider="line">
+        <div className="nx-checks nx-checks-pane">
+          <div className="nx-checks-head">Impact checks</div>
+          <ActionList variant="full">
+            {a.checks.map(c => (
+              <ActionList.Item key={c.id} active={c.id === id} onSelect={() => navigate(`/ecr/${a.ecr.id}/impact/${c.id}`)}>
+                <ActionList.LeadingVisual><CheckStateIcon state={c.state} /></ActionList.LeadingVisual>
+                <span className="nx-check-item-title">{CHECK_ICON[c.id]} {c.name}</span>
+                {c.mock && <MockTag title="Mock compute: this stage is a placeholder" />}
+                <ActionList.Description variant="block">{c.summary}</ActionList.Description>
+              </ActionList.Item>
+            ))}
+          </ActionList>
         </div>
-        <ActionList>
-          {a.checks.map(c => (
-            <ActionList.Item key={c.id} active={c.id === current.id} onSelect={() => navigate(`${base}/${c.id}`)}>
-              <ActionList.LeadingVisual><CheckStateIcon state={c.state} /></ActionList.LeadingVisual>
-              {c.name} <MockTag on={!!c.mock} />
-              <ActionList.Description>{c.state === 'pending' ? 'Not assessed yet' : c.state === 'queued' ? 'Queued' : c.state === 'running' ? 'Running' : c.took ?? ''}</ActionList.Description>
-            </ActionList.Item>
-          ))}
-        </ActionList>
-      </nav>
+      </PageLayout.Pane>
 
-      <section className="nx-check-pane">
-        <header className="nx-check-head">
-          <CheckStateIcon state={current.state} size={20} />
-          <div>
-            <h2>{current.name} <MockTag on={!!current.mock} /></h2>
-            <div className="nx-fg-muted">
-              {stateWord}{current.by ? ` · ${current.by}` : ''}
-            </div>
-          </div>
-        </header>
-        <Legend counts={counts} />
-        <p className="nx-check-sum">{current.summary}{/[.!?]$/.test(current.summary) ? '' : '.'}</p>
-        {current.id === 'cost' && <CostCheck a={a} />}
-        {current.id === 'timeline' && <TimelineCheck a={a} />}
-        {current.id === 'supply' && <SupplyCheck a={a} />}
-        {current.id === 'bom' && <BomCheck a={a} />}
-        {current.id === 'class' && <ClassCheck a={a} />}
-      </section>
-    </div>
+      <PageLayout.Content>
+        <div className="nx-check-body">
+          <header className="nx-check-title">
+            <CheckStateIcon state={picked.state} size={20} />
+            {CHECK_ICON[picked.id]}
+            <h2>{picked.name}</h2>
+            {picked.id === 'cost' || picked.id === 'bom' ? <SavedRun source={a.source} /> : null}
+            {picked.mock && <MockTag title="Mock compute: this stage is a placeholder, and its numbers are made up" />}
+            {picked.by && <span className="nx-fg-muted">{picked.by}{picked.took ? ` \u00b7 ${picked.took}` : ''}</span>}
+            <span className="nx-sp" />
+            <Legend counts={EV_ORDER.some(k => counts[k] > 0) ? counts : undefined} />
+          </header>
+
+          {id === 'cost' && <CostCheck a={a} />}
+          {id === 'timeline' && <TimelineCheck a={a} />}
+          {id === 'supply' && <SupplyCheck a={a} />}
+          {id === 'bom' && <BomCheck a={a} />}
+          {id === 'class' && <ClassCheck a={a} />}
+        </div>
+      </PageLayout.Content>
+    </PageLayout>
   );
 }
 
-// ---------------------------------------------------------------- Cost
+// ---------------------------------------------------------------- Cost check
+
+const BLOCK_NAME: Record<CostBlock, string> = {
+  production: 'I. Production',
+  retrofit: 'II. Retrofit',
+  logisticsSupport: 'III. Operations & support',
+  other: 'IV. Other costs & savings',
+};
+const BLOCKS: CostBlock[] = ['production', 'retrofit', 'logisticsSupport', 'other'];
 
 function CostCheck({ a }: { a: ImpactAssessment }) {
-  const need = a.cost.needsEstimate;
+  const h = a.headline;
   return (
-    <>
-      {need.length > 0 && (
-        <Flash variant="warning" className="nx-flash">
-          <b>{need.length} lines need an estimate.</b> The originator left them blank, so they count as $0 until someone estimates them:{' '}
-          {need.map(n => n.label).join('; ')}.
-        </Flash>
-      )}
-      <div className="nx-box">
-        <div className="nx-box-title">
-          Cost page <SavedRun source={a.source} /> <span className="nx-fg-muted">&middot; {a.cost.window.label}, point estimates, savings in parentheses</span>
+    <div className="nx-sections">
+      <div className="nx-stats">
+        <div className="nx-stat">
+          <div className="nx-stat-label">Net cost, first 12 months ({a.cost.window.label})</div>
+          <div className="nx-stat-value num"><Num f={h.year1} kind="short" plus /></div>
+          <div className="nx-stat-sub num">
+            {h.year1.point !== undefined && h.year1.point !== h.year1.p50 && <>Median <Num f={h.year1} kind="short" plus use="p50" /> &middot; </>}
+            P10 to P90: {rangeText(h.year1, 'short') || 'exact'}
+          </div>
+          {h.year1Likelihood && (
+            <div className="nx-stat-sub">
+              <Mark ev="computation" id={h.year1.id}><b>{cap(h.year1Likelihood.word)}</b> ({Math.round(h.year1Likelihood.probability * 100)}%) {h.year1Likelihood.event}</Mark>
+            </div>
+          )}
         </div>
-        <CostTable a={a} />
-        <div className="nx-foot">
-          {a.cost.run.draws.toLocaleString('en-US')} paired draws, seed {a.cost.run.seed}, {a.cost.run.codeVersion}. Ranges are P10 to P90; the values are the point estimate, which adds up.
-        </div>
+        {h.unitCost.map(u => (
+          <div className="nx-stat" key={u.figure.id}>
+            <div className="nx-stat-label">Unit cost, per {u.program} unit built</div>
+            <div className="nx-stat-value num"><Num f={u.figure} plus /></div>
+            <div className="nx-stat-sub">{u.note ?? (rangeText(u.figure, 'full') ? `P10 to P90: ${rangeText(u.figure, 'full')}` : 'Exact from quote')}</div>
+          </div>
+        ))}
       </div>
+
       {a.sCurve && (
         <div className="nx-box">
           <div className="nx-box-title">
-            Cost range <span className="nx-fg-muted">&middot; chance the net cost of {a.cost.window.label} stays under a given cost</span>
+            Cumulative probability of the first-12-months cost
+            <span className="nx-fg-muted nx-small">Read across from a probability to see the cost at that confidence</span>
           </div>
-          <SCurveChart data={a.sCurve} />
+          <div className="nx-box-pad"><SCurveChart data={a.sCurve} /></div>
         </div>
       )}
+
       {a.drivers.length > 0 && (
         <div className="nx-box">
           <div className="nx-box-title">
-            What moves it most <span className="nx-fg-muted">&middot; each input alone at its P10 and P90, a decision at each alternative</span>
+            What moves the first-12-months cost most
+            <span className="nx-fg-muted nx-small">Each input alone at its P10 and P90; click a bar to see why</span>
           </div>
-          <TornadoChart drivers={a.drivers.slice(0, 4)} base={a.sCurve?.point ?? a.cost.net.point ?? a.cost.net.p50} />
+          <div className="nx-box-pad"><TornadoChart drivers={a.drivers} base={h.year1.point ?? h.year1.p50} /></div>
+          {a.scenarios.length > 0 && (
+            <div className="nx-scenarios">
+              {a.scenarios.map((s, i) => (
+                <div key={i}><b>{s.label}:</b> <span className="nx-fg-muted">{s.effect}</span></div>
+              ))}
+            </div>
+          )}
         </div>
       )}
-    </>
+
+      <CostTable a={a} />
+    </div>
   );
 }
 
 function CostTable({ a }: { a: ImpactAssessment }) {
-  return (
-    <table className="nx-table nx-cost">
-      <thead>
-        <tr>
-          <th>Item</th>
-          <th className="r">One-time</th>
-          <th className="r">Recurring</th>
-          <th className="r">Total</th>
-          <th className="r">P10 &ndash; P90</th>
-        </tr>
-      </thead>
-      <tbody>
-        {BLOCKS.map(b => {
-          const rows = a.cost.rows.filter(r => r.block === b.id);
-          const sub = a.cost.subtotals.find(s => s.block === b.id);
-          if (!rows.length || !sub) return null;
-          return <BlockRows key={b.id} label={b.label} rows={rows} sub={sub.total} />;
-        })}
-        <tr className="net">
-          <td>Net cost, {a.cost.window.label}</td>
-          <td className="r num"><Num f={a.cost.oneTime} /></td>
-          <td className="r num"><Num f={a.cost.recurring} /></td>
-          <td className="r num"><Num f={a.cost.net} /></td>
-          <td className="r num nx-fg-muted">{rangeText(a.cost.net, 'short')}</td>
-        </tr>
-      </tbody>
-    </table>
-  );
-}
+  const c = a.cost;
+  const sub = new Map(c.subtotals.map(s => [s.block, s.total]));
 
-function BlockRows({ label, rows, sub }: { label: string; rows: CostRow[]; sub: Figure }) {
-  return (
-    <>
-      <tr className="blk">
-        <td>{label}</td>
-        <td />
-        <td />
-        <td className="r num"><Num f={sub} /></td>
-        <td className="r num nx-fg-muted">{rangeText(sub, 'short')}</td>
-      </tr>
-      {rows.map(r => (
-        <tr key={r.id}>
-          <td>
-            <div>
-              {r.label}
-              {r.needsEstimate && <> <Label variant="attention" size="small">Needs an estimate</Label></>}
-            </div>
-            <div className="nx-fg-muted nx-small">
-              {r.unitCost && r.quantity !== undefined && (<><Num f={r.unitCost} /> &times; {r.quantity.toLocaleString('en-US')} &middot; </>)}
-              {r.basis}
-            </div>
-          </td>
-          <td className="r num">{!r.recurring ? <Num f={r.total} /> : <span className="nx-fg-muted">&ndash;</span>}</td>
-          <td className="r num">{r.recurring ? <Num f={r.total} /> : <span className="nx-fg-muted">&ndash;</span>}</td>
-          <td />
-          <td className="r num nx-fg-muted">{r.needsEstimate ? '–' : rangeText(r.total, 'full') || 'exact'}</td>
-        </tr>
-      ))}
-    </>
-  );
-}
+  const cell = (r: CostRow, side: 'one' | 'rec') => {
+    if ((side === 'rec') !== r.recurring) return <td className="num nx-fg-muted">&ndash;</td>;
+    if (r.needsEstimate) return <td className="num"><Mark ev={r.total.evidence} id={r.total.id}><Label variant="attention" size="small">Needs estimate</Label> $0</Mark></td>;
+    const rg = rangeText(r.total, 'full');
+    return (
+      <td className="num">
+        <Num f={r.total} />
+        {rg && <div className="nx-range">{rg}</div>}
+      </td>
+    );
+  };
 
-// ---------------------------------------------------------------- the other checks
-
-function Stat({ label, children, sub }: { label: React.ReactNode; children: React.ReactNode; sub?: React.ReactNode }) {
-  return (
-    <div className="nx-stat">
-      <div className="nx-stat-label">{label}</div>
-      <div className="nx-stat-value">{children}</div>
-      {sub && <div className="nx-stat-sub">{sub}</div>}
-    </div>
-  );
-}
-
-function PendingCard({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="nx-pending-card">
-      <CircleIcon size={16} className="nx-fg-muted" />
-      <div>
-        <b>Not assessed yet</b>
-        <div className="nx-fg-muted">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function Scenarios({ a }: { a: ImpactAssessment }) {
-  if (!a.scenarios.length) return null;
   return (
     <div className="nx-box">
-      <div className="nx-box-title">What if <MockTag on={a.mock.includes('supply')} /></div>
-      <ul className="nx-plain">
-        {a.scenarios.map(s => (
-          <li key={s.label}><span>{s.label}</span><b className="num">{s.effect}</b></li>
-        ))}
-      </ul>
+      <div className="nx-box-title">
+        Cost breakdown (MIL-HDBK-61A App. B)
+        <span className="nx-fg-muted nx-small">Point estimates add up down the column; P10 &ndash; P90 come from {c.run.draws.toLocaleString('en-US')} draws &middot; {c.window.label}</span>
+      </div>
+      <table className="nx-cost-table">
+        <thead>
+          <tr>
+            <th>Element</th>
+            <th className="r">Unit / rate</th>
+            <th className="r">Units</th>
+            <th className="r">One-time</th>
+            <th className="r">Recurring (12 mo)</th>
+            <th>Basis</th>
+          </tr>
+        </thead>
+        <tbody>
+          {BLOCKS.map(b => {
+            const rows = c.rows.filter(r => r.block === b);
+            const tot = sub.get(b);
+            if (!rows.length || !tot) return null;
+            return (
+              <Fragment key={b}>
+                <tr className="nx-block-row">
+                  <td colSpan={3}>{BLOCK_NAME[b]}</td>
+                  <td colSpan={2} className="num">
+                    Subtotal <Num f={tot} />
+                    {rangeText(tot, 'full') && <span className="nx-fg-muted"> ({rangeText(tot, 'full')})</span>}
+                  </td>
+                  <td />
+                </tr>
+                {rows.map(r => (
+                  <tr key={r.id}>
+                    <td>
+                      <div className="nx-row-label">{r.label}</div>
+                      {r.note && <div className="nx-fg-muted nx-small">{r.note}</div>}
+                    </td>
+                    <td className="num">{r.unitCost ? <Num f={r.unitCost} plus={r.id.startsWith('unit_cost')} /> : <span className="nx-fg-muted">&ndash;</span>}</td>
+                    <td className="num nx-fg-muted">{r.quantity ?? '\u2013'}</td>
+                    {cell(r, 'one')}
+                    {cell(r, 'rec')}
+                    <td className="nx-fg-muted nx-small">{r.basis ?? '\u2013'}</td>
+                  </tr>
+                ))}
+              </Fragment>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colSpan={3}>One-time total / 12-month recurring total</td>
+            <td className="num"><Num f={c.oneTime} /></td>
+            <td className="num"><Num f={c.recurring} /></td>
+            <td />
+          </tr>
+          <tr className="nx-net-row">
+            <td colSpan={3}>Net total, first 12 months ({c.window.label})</td>
+            <td colSpan={2} className="num">
+              <Num f={c.net} plus />
+              {c.net.point !== undefined && c.net.point !== c.net.p50 && (
+                <span className="nx-fg-muted nx-small"> &middot; median {usd(c.net.p50)}</span>
+              )}
+              {rangeText(c.net, 'full') && (
+                <span className="nx-fg-muted nx-small"> &middot; P10 to P90 {rangeText(c.net, 'full')}</span>
+              )}
+            </td>
+            <td className="nx-fg-muted nx-small">
+              {c.run.draws > 0 ? `${c.run.draws.toLocaleString('en-US')} draws, \u03c1=${c.run.correlation}, ${c.run.codeVersion}` : c.run.codeVersion}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }
+
+// ---------------------------------------------------------------- the other four checks
 
 function TimelineCheck({ a }: { a: ImpactAssessment }) {
   const c = a.cutIn;
-  const est = c.estimate;
+  const check = a.checks.find(x => x.id === 'timeline');
+  const waiting = check?.state === 'queued' || check?.state === 'running';
   return (
-    <>
+    <div className="nx-sections">
       <div className="nx-stats">
-        <Stat label={`Cut-in on ${c.program}, as ${c.source === 'given' ? 'filed' : 'assumed'}`} sub={`S/N ${c.serial}. ${c.rationale}`}>
-          <Mark ev={c.source === 'given' ? 'fact' : 'assumption'} id="cutin">{monthLabel(c.month)}</Mark>
-        </Stat>
-        {est ? (
-          <Stat label={<>Rev C reaches the line <MockTag on={a.mock.includes('cutInEstimate')} /></>} sub={`${rangeText(est.figure, 'short')} · ${est.note}`}>
-            <Num f={est.figure} use="p50" />
-          </Stat>
-        ) : null}
-        {est?.likelihood && (
-          <Stat label="Likelihood">
-            <Mark ev="assumption" id={est.figure.id}><b>{cap(est.likelihood.word)}</b> {est.likelihood.event}</Mark>
-          </Stat>
-        )}
+        <div className="nx-stat">
+          <div className="nx-stat-label">Cut-in on {c.program}{c.estimate ? ', as filed' : ''}</div>
+          <div className="nx-stat-value num"><Mark ev={c.source === 'given' ? 'fact' : 'assumption'} id="cutin">{monthLabel(c.month)} &middot; S/N {c.serial}</Mark></div>
+          <div className="nx-stat-sub">{c.rationale}</div>
+        </div>
+        <div className="nx-stat">
+          <div className="nx-stat-label">When the change reaches the line {c.estimate && <MockTag on={a.mock.includes('cutInEstimate')} />}</div>
+          {c.estimate ? (
+            <>
+              <div className="nx-stat-value num"><Num f={c.estimate.figure} use="p50" /></div>
+              <div className="nx-stat-sub num">P10 to P90: {rangeText(c.estimate.figure, 'short')} &middot; {c.estimate.note}</div>
+              {c.estimate.likelihood && (
+                <div className="nx-stat-sub"><Mark ev="assumption" id={c.estimate.figure.id}><b>{cap(c.estimate.likelihood.word)}</b> ({Math.round(c.estimate.likelihood.probability * 100)}%) {c.estimate.likelihood.event}</Mark></div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="nx-stat-value nx-fg-muted">{waiting ? <><Spinner size="small" /> Running</> : 'Not assessed yet'}</div>
+              <div className="nx-stat-sub">The cost check uses one fixed cut-in month. A date range needs the timeline check (S3), which is not built yet.</div>
+            </>
+          )}
+        </div>
       </div>
-      {!est && <PendingCard>The cut-in has no range yet. The cost check takes the month above, which is {c.source === 'given' ? 'what the ECR states' : 'a default until the timeline check sets it'}.</PendingCard>}
-    </>
+    </div>
   );
 }
 
 function SupplyCheck({ a }: { a: ImpactAssessment }) {
   const s = a.supply;
-  if (!s) return <PendingCard>Supply risk comes from the supply check, which is not built yet.</PendingCard>;
+  const check = a.checks.find(x => x.id === 'supply');
+  const waiting = check?.state === 'queued' || check?.state === 'running';
   return (
-    <>
+    <div className="nx-sections">
       <div className="nx-stats">
-        <Stat label={<>Supply risk <MockTag on={a.mock.includes('supply')} /></>} sub={s.note}>
-          <Mark ev={s.evidence} id={s.id}><Label variant={RISK[s.level]} size="large">{cap(s.level)}</Label></Mark>
-        </Stat>
-        {s.likelihood && (
-          <Stat label="Likelihood" sub="Outages are shown as scenarios, not blended into the range">
-            <Mark ev="computation" id={s.id}><b>{cap(s.likelihood.word)}</b> {s.likelihood.event}</Mark>
-          </Stat>
-        )}
+        <div className="nx-stat">
+          <div className="nx-stat-label">Supply risk {s && <MockTag on={a.mock.includes('supply')} />}</div>
+          {s ? (
+            <>
+              <div className="nx-stat-value"><Mark ev={s.evidence} id={s.id}>{cap(s.level)}</Mark></div>
+              <div className="nx-stat-sub">{s.note}</div>
+              {s.likelihood && (
+                <div className="nx-stat-sub"><Mark ev="computation" id={s.id}><b>{cap(s.likelihood.word)}</b> ({Math.round(s.likelihood.probability * 100)}%) {s.likelihood.event}</Mark></div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="nx-stat-value nx-fg-muted">{waiting ? <><Spinner size="small" /> Running</> : 'Not assessed yet'}</div>
+              <div className="nx-stat-sub">Needs the supply check (S4), which is not built yet.</div>
+            </>
+          )}
+        </div>
       </div>
-      <Scenarios a={a} />
-    </>
+    </div>
   );
 }
 
 function BomCheck({ a }: { a: ImpactAssessment }) {
+  const c = a.checks.find(x => x.id === 'bom');
   return (
-    <div className="nx-box">
-      <div className="nx-box-title">Changed items</div>
-      <ul className="nx-plain">
-        {a.changes.map(c => (
-          <li key={c.id}>
-            <span><b className="mono">{c.title}</b> <span className="nx-fg-muted">{c.subtitle}</span></span>
-            <span className="nx-fg-muted">{c.impact}</span>
-          </li>
-        ))}
-      </ul>
-      <div className="nx-foot"><Link to={`/ecr/${a.ecr.id}/changes`}>See the diff <ArrowRightIcon size={12} /></Link></div>
+    <div className="nx-sections">
+      <div className="nx-box">
+        <div className="nx-box-title"><CaliperIcon size={15} /> {c?.summary ?? 'BOM delta'}</div>
+        <table className="nx-cost-table">
+          <thead>
+            <tr><th>Item / record</th><th>Change</th><th className="r">Cost effect</th></tr>
+          </thead>
+          <tbody>
+            {a.changes.map(ch => (
+              <tr key={ch.id}>
+                <td><b>{ch.title}</b></td>
+                <td className="nx-fg-muted">{ch.subtitle}</td>
+                <td className="num">{ch.impact ?? '\u2013'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -279,37 +330,41 @@ function BomCheck({ a }: { a: ImpactAssessment }) {
 function ClassCheck({ a }: { a: ImpactAssessment }) {
   const c = a.changeClass;
   return (
-    <>
+    <div className="nx-sections">
       <div className="nx-stats">
-        <Stat label={<>Company class <MockTag on={a.mock.includes('class')} /></>} sub={c.companyWhy}><Mark ev={c.evidence} id={c.traceId}>Class {c.company}</Mark></Stat>
-        <Stat label={<>FAA class <MockTag on={a.mock.includes('class')} /></>} sub={c.faaWhy}><Mark ev={c.evidence} id={c.traceId}>FAA {c.faa}</Mark></Stat>
+        <div className="nx-stat">
+          <div className="nx-stat-label">Company class <MockTag on={a.mock.includes('class')} /></div>
+          <div className="nx-stat-value"><Mark ev={c.evidence} id={c.traceId}>Class {c.company}</Mark></div>
+          <div className="nx-stat-sub">{c.companyWhy}</div>
+        </div>
+        <div className="nx-stat">
+          <div className="nx-stat-label">FAA 14 CFR 21.93 <MockTag on={a.mock.includes('class')} /></div>
+          <div className="nx-stat-value"><Mark ev={c.evidence} id={c.traceId}>FAA {c.faa}</Mark></div>
+          <div className="nx-stat-sub">{c.faaWhy}</div>
+        </div>
       </div>
       <div className="nx-box">
-        <div className="nx-box-title">Approval route <MockTag on={a.mock.includes('route')} /> <span className="nx-fg-muted">&middot; {a.route.tier}</span></div>
-        <ul className="nx-plain">
-          {a.route.steps.map((s, i) => (
-            <li key={i}>
-              <span>
-                {s.state === 'approved' ? <CheckIcon size={16} className="nx-fg-success" /> : s.state === 'waiting' ? <ClockIcon size={16} className="nx-fg-muted" /> : <DotFillIcon size={16} className="nx-fg-attention" />}{' '}
-                <b>{s.person ?? s.role}</b> <span className="nx-fg-muted">{s.person ? s.role : ''}</span>
-              </span>
-              <span className="nx-fg-muted">
-                {s.state === 'approved' ? `Approved ${s.when ?? ''}` : s.state === 'waiting' ? `Meets ${s.when ?? ''}` : s.state === 'not_required' ? 'Not needed' : 'Needed'}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-      {a.needed.length > 0 && (
-        <div className="nx-box">
-          <div className="nx-box-title">Still needed</div>
-          <ul className="nx-plain">
-            {a.needed.map((n, i) => (
-              <li key={i}><span>{n.text}</span><span className="nx-fg-muted">{n.owner}</span></li>
+        <div className="nx-box-title"><CcbTableIcon size={15} /> Approval route &middot; {a.route.tier} <MockTag on={a.mock.includes('route')} /></div>
+        <table className="nx-cost-table">
+          <thead><tr><th>Seat</th><th>Person</th><th>Status</th></tr></thead>
+          <tbody>
+            {a.route.steps.map((s, i) => (
+              <tr key={i}>
+                <td><b>{s.role}</b></td>
+                <td>{s.person ?? '\u2013'}</td>
+                <td>
+                  <Label variant={s.state === 'approved' ? 'success' : s.state === 'not_required' ? 'secondary' : 'attention'}>
+                    {s.state === 'not_required' ? 'Not required' : cap(s.state)}
+                  </Label>
+                  {s.when && <span className="nx-fg-muted nx-small"> &middot; {s.when}</span>}
+                </td>
+              </tr>
             ))}
-          </ul>
-        </div>
-      )}
-    </>
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
+
+export { usdK };
