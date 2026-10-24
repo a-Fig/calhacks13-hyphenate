@@ -268,6 +268,18 @@ test('a bad sourcing range on an unrelated part falls back to the default and is
   const r = costCheck(base, ecr('ECR-0423'), { seed: SEED, draws: 2000 });
   assert.equal(r.headline.unitCostDelta[0].perUnit.point, -11.4);
   assert.ok(r.flags.some((f) => f.kind === 'bad_sourcing' && f.ref === 'BW-1110-100'));
+  assert.equal(r.inputs.find((i) => i.id === 'price:BW-1110-100')?.source, 'default', 'listed on its own, not folded into the given price ranges');
+  assert.ok(r.unitCost[0].base.trace.uses.some((u) => u.id === 'price:BW-1110-100' && u.source === 'default'));
+});
+
+test('an assumption on an untouched part\'s price is listed on its own and shows in the trace', () => {
+  const r = costCheck(bowman, ecr('ECR-0423'), {
+    seed: SEED, draws: 2000,
+    assumptions: [{ id: 'price:BW-1110-100', source: 'agent_estimated', dist: lognormal(1.2, 0.1), rationale: 'a price rise the buyer expects', replacesGiven: true }],
+  });
+  assert.equal(r.inputs.find((i) => i.id === 'price:BW-1110-100')?.source, 'agent_estimated');
+  assert.ok(r.unitCost[0].base.trace.uses.some((u) => u.id === 'price:BW-1110-100' && u.source === 'agent_estimated'));
+  assert.ok(!r.flags.some((f) => f.kind === 'unused_assumption'));
 });
 
 test('a first-lot premium the engineer already listed is not added again', () => {
@@ -323,6 +335,11 @@ test('an assumption replaces the cut-in the ECR states only with replacesGiven; 
   });
   assert.equal(d.effectivity[0].basis, 'use_up');
   assert.match(d.flags.find((f) => f.kind === 'unused_assumption' && f.ref === 'effectivity:ECR-0423:vesper')!.message, /takes a value/);
+  const rec = costCheck(bowman, ecr('ECR-0417'), {
+    seed: SEED, draws: 2000,
+    assumptions: [{ id: 'stock:BW-5120-210:stores', source: 'agent_estimated', value: 0, rationale: 'a recorded fact, not an input' }],
+  });
+  assert.match(rec.flags.find((f) => f.kind === 'unused_assumption' && f.ref === 'stock:BW-5120-210:stores')!.message, /names a record/);
 });
 
 test('a blank scrap row with no disposition proposed is an ordinary blank row, on its own id', () => {
@@ -335,6 +352,13 @@ test('a blank scrap row with no disposition proposed is an ordinary blank row, o
   const est = costCheck(bowman, e, { seed: SEED, draws: 2000, assumptions: [{ id: scrap, source: 'agent_estimated', dist: point(5_000), rationale: 'the buyer\'s estimate' }] });
   assert.equal(row(est, scrap).total.point, 5_000);
   assert.ok(!est.flags.some((f) => f.kind === 'unused_assumption'));
+  // A proposal for an item with no stock row computes no line, so the scrap row is blank after all.
+  const none = ecr('ECR-0417');
+  none.inventoryProposal = [{ item: 'BW-NOPE', location: 'stores', disposition: 'scrap' }];
+  const rn = costCheck(bowman, none, { seed: SEED, draws: 2000, assumptions: [{ id: scrap, source: 'agent_estimated', dist: point(5_000), rationale: 'the buyer\'s estimate' }] });
+  assert.ok(rn.flags.some((f) => f.kind === 'no_stock' && f.ref === 'BW-NOPE'));
+  assert.equal(row(rn, scrap).total.point, 5_000);
+  assert.ok(!rn.flags.some((f) => f.kind === 'unused_assumption'));
 });
 
 test('the computed premium is skipped only for a supplier-quote production row of the same amount', () => {
@@ -343,17 +367,21 @@ test('the computed premium is skipped only for a supplier-quote production row o
   e.costPage.production.push({ label: 'Programme allowance', oneTime: 462.5, basis: 'engineer_estimate' });
   const r = costCheck(bowman, e, { seed: SEED, draws: 2000 });
   assert.ok(rows(r).some((x) => x.id === PREMIUM), 'an unrelated row of the same amount doesn\'t hide the premium');
+  const named = ecr('ECR-0417');
+  named.costPage.production.push({ label: 'First-lot premium on the Rev C bracket', oneTime: 462.5, basis: 'engineer_estimate' });
+  const rn = costCheck(bowman, named, { seed: SEED, draws: 2000 });
+  assert.ok(!rows(rn).some((x) => x.id === PREMIUM), 'a row that names the premium, whatever its basis, isn\'t doubled');
 });
 
 test('a run that misses the convergence tolerance doubles its draws until it converges', () => {
-  // Seeds w28 and w29 need 20,000 and 40,000 draws for ECR-0409, whose budgetary quote makes its change wide.
-  for (const [seed, draws] of [['w28', 20_000], ['w29', 40_000], [SEED, 10_000]] as const) {
+  // Seeds w28 and w18 need 20,000 and 40,000 draws for ECR-0409, whose budgetary quote makes its change wide.
+  for (const [seed, draws] of [['w28', 20_000], ['w18', 40_000], [SEED, 10_000]] as const) {
     const r = costCheck(bowman, ecr('ECR-0409'), { seed });
     assert.equal(r.draws, draws, seed);
     assert.ok(r.convergence.converged, seed);
     assert.ok(!r.flags.some((f) => f.kind === 'not_converged'), seed);
   }
-  const capped = costCheck(bowman, ecr('ECR-0409'), { seed: 'w29', maxDraws: 10_000 });
+  const capped = costCheck(bowman, ecr('ECR-0409'), { seed: 'w18', maxDraws: 10_000 });
   assert.equal(capped.draws, 10_000);
   assert.equal(capped.convergence.converged, false);
   assert.match(capped.flags.find((f) => f.kind === 'not_converged')!.message, /maxDraws/);

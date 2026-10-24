@@ -43,12 +43,12 @@ export interface Draws {
 }
 
 /** Draw every variable n times under one seed. */
-export function drawAll(vars: Variable[], seed: string, n: number, rho = 0.3): Draws {
+export function drawAll(vars: Variable[], seed: string, n: number, rho = 0.3, block = n): Draws {
   const factors = new Map<string, Float64Array>();
   const factor = (g: string) => {
     let f = factors.get(g);
     if (!f) {
-      f = normals(seed, `group:${g}`, n);
+      f = normals(seed, `group:${g}`, n, block);
       factors.set(g, f);
     }
     return f;
@@ -65,7 +65,7 @@ export function drawAll(vars: Variable[], seed: string, n: number, rho = 0.3): D
     const groups = [...new Set(v.groups)];
     const own = 1 - groups.length * rho;
     if (own < 0) throw new Error(`variable ${v.id} is in ${groups.length} groups; at rho ${rho} the most is ${Math.floor(1 / rho)}`);
-    const e = normals(seed, `var:${v.id}`, n);
+    const e = normals(seed, `var:${v.id}`, n, block);
     const fs = groups.map(factor);
     const a = Math.sqrt(rho);
     const b = Math.sqrt(own);

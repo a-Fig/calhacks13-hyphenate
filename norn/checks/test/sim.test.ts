@@ -100,3 +100,17 @@ test('each input\'s draws are Latin hypercube sampled: one in each of n equal-pr
   }
   assert.notDeepEqual([...normals('s', 'price:X', 50)], [...normals('s', 'price:X', 50)].sort((a, b) => a - b), 'in a shuffled order, not sorted');
 });
+
+test('a run with more draws starts with the same draws: runs of different lengths are paired on the draws they share', () => {
+  const vars = [
+    { id: 'a', dist: lognormal(100, 0.2), groups: ['supplier:S'] },
+    { id: 'b', dist: pert(0, 0.1, 0.5), groups: ['supplier:S', 'labor:internal'] },
+  ];
+  const short = drawAll(vars, 's', 1000, 0.3, 1000);
+  const long = drawAll(vars, 's', 4000, 0.3, 1000);
+  for (const id of ['a', 'b']) {
+    assert.deepEqual([...long.values.get(id)!.subarray(0, 1000)], [...short.values.get(id)!], id);
+  }
+  const z = [...normals('s', 'price:X', 3000, 1000).subarray(1000, 2000)].sort((x, y) => x - y);
+  for (let k = 1; k < 999; k++) assert.ok(z[k] >= invNorm(k / 1000) - 1e-9 && z[k] <= invNorm((k + 1) / 1000) + 1e-9, `block 2, draw ${k}`);
+});

@@ -191,6 +191,8 @@ export interface CostCheckOptions {
 // ---------------------------------------------------------------- helpers
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
+/** A cost-page row that already names a first-lot premium. */
+const PREMIUM_ROW = /premium|first[- ]lot|early[- ]lot|\bPPV\b/i;
 const near = (a: number, b: number) => Math.abs(a - b) < 0.005;
 const FIELD: Record<StockLocation, keyof StockRow> = {
   stores: 'stores', wip: 'wip', finished_goods: 'finishedGoods', supplier_finished: 'supplierFinished', on_order: 'onOrder', in_field: 'inField',
@@ -310,7 +312,6 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const priceVar = (code: ItemCode): string => {
     const id = `price:${code}`;
     if (vars.has(id)) return id;
-    if (!affectedCodes.has(code)) bulk.add(id);
     const src = sourcingOf(code);
     const supplier = src?.supplier ?? s.head.get(code)?.supplier ?? s.base.get(code)?.supplier;
     const groups = supplier ? [`supplier:${supplier}`] : [];
@@ -320,6 +321,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     }
     if (src && okRange(src.unitPrice)) {
       const p = src.unitPrice;
+      if (!affectedCodes.has(code) && !overrides.has(id)) bulk.add(id);
       return variable({
         id, label: `${code} price index (next 12 months)`, groups, source: 'given',
         dist: lognormalFromQuantiles(p.p10 / p.p50, 1, p.p90 / p.p50),
@@ -662,7 +664,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
       if (steady === undefined || l.unitPrice === undefined || !l.qty || l.oneTime !== undefined) return;
       if (l.unitPrice <= steady + 0.005) return;
       const premium = (l.unitPrice - steady) * l.qty;
-      const listed = ecr.costPage.production.find((x) => x.basis === 'supplier_quote' && x.oneTime !== undefined && near(x.oneTime, premium));
+      const listed = ecr.costPage.production.find((x) => x.oneTime !== undefined && near(x.oneTime, premium) && (x.basis === 'supplier_quote' || PREMIUM_ROW.test(x.label)));
       if (listed) {
         flags.push({ kind: 'read_from_quote', severity: 'info', ref: `supplier quote ${q.id} line ${li + 1}`, message: `The first-lot premium on quote ${q.id} (${r2(premium)}) is already on the cost page as "${listed.label}", so it is not added again.` });
         return;
@@ -841,11 +843,11 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     });
   }
   const varList = [...vars.values()];
-  const runOnce = (seed: string, n: number) => {
-    const d = drawAll(varList, seed, n, rho);
+  const runOnce = (seed: string, n: number, only?: string[]) => {
+    const d = drawAll(varList, seed, n, rho, n0);
     const out = new Map<string, Summary>();
     const arrays = new Map<string, Float64Array>();
-    for (const [key, p] of pending) {
+    for (const [key, p] of only ? only.map((k) => [k, pending.get(k)!] as const) : pending) {
       const a = evaluate(p.expr, d);
       arrays.set(key, a);
       out.set(key, summarize(a));
@@ -865,11 +867,11 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   });
   let n = n0;
   let run1 = runOnce(options.seed, n);
-  let metrics = compare(run1.out, runOnce(seed2, n).out);
+  let metrics = compare(run1.out, runOnce(seed2, n, convKeys).out);
   while (!metrics.every((m) => m.relDiff <= tol) && n * 2 <= maxDraws) {
     n *= 2;
     run1 = runOnce(options.seed, n);
-    metrics = compare(run1.out, runOnce(seed2, n).out);
+    metrics = compare(run1.out, runOnce(seed2, n, convKeys).out);
   }
   const converged = metrics.every((m) => m.relDiff <= tol);
   if (!converged) flags.push({ kind: 'not_converged', severity: 'warn', message: `P80/P90 moved by more than ${tol * 100}% between seeds at ${n.toLocaleString('en-US')} draws, the most allowed; raise maxDraws.` });
@@ -939,8 +941,9 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     if (usedOverrides.has(a.id)) continue;
     const why = noVariable.get(a.id)
       ?? (vars.has(a.id) ? 'it has no distribution, and this input needs one'
-        : reg.has(a.id) ? 'this input takes a value (a serial number or a month), not a distribution'
-          : 'no input of this check has that id');
+        : reg.has(a.id) && a.id.startsWith('effectivity:') ? 'a cut-in takes a value (a serial number or a month), not a distribution'
+          : reg.has(a.id) ? 'it names a record the check reads (stock, sourcing, a quote or a default), not an input it draws; change the record, or the default through options.defaults'
+            : 'no input of this check has that id');
     flags.push({ kind: 'unused_assumption', severity: 'warn', ref: a.id, message: `Assumption ${a.id} was not applied: ${why}.` });
   }
 

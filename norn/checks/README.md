@@ -45,9 +45,9 @@ Both results are plain JSON. `bomDeltaRows` and `costCheckRows` turn them into r
   group are independent.
 - Convergence: P80 and P90 of the headline numbers are recomputed on a second seed and must agree
   within 1%. A run that misses doubles its draws, up to 40,000 (`maxDraws`), and `draws` in the
-  result says how many it used. ECR-0409, whose budgetary quote makes its change wide, needs 20,000
-  or 40,000 on about one seed in six; every other dataset ECR converges at 10,000 on every seed
-  tried. A run that still misses at the cap is flagged `not_converged`.
+  result says how many it used. ECR-0409, whose budgetary quote makes its change wide, needed
+  20,000 or 40,000 on 12 of 60 seeds tried; every other dataset ECR converged at 10,000 on all 12
+  seeds tried. A run that still misses at the cap is flagged `not_converged`.
 
 ## Paired draws and the seed rule
 
@@ -63,6 +63,12 @@ matters across runs:
 - a backlog roll-up of several ECRs agrees with each ECR on its own, because an item's price draws
   are the same in all of them;
 - a cached forecast of the baseline stays comparable with every ECR built on it.
+
+Draws come in blocks of the starting count (10,000), each Latin hypercube sampled from its own
+stream, so a run that doubled to 20,000 starts with the same 10,000 draws as a run that didn't.
+Two runs are paired on the draws they share. Their percentiles still differ by sampling noise when
+their lengths differ, so a comparison across runs is made per draw on the shared draws, or with
+`maxDraws` pinned so every run has the same count.
 
 A seed derived from the run's input hash changes whenever the inputs change, so none of those
 comparisons would be paired. The skeleton worker seeds from the input hash today
@@ -84,7 +90,8 @@ proposes a disposition; otherwise it is an ordinary blank row.
 
 The price ranges of parts the change doesn't touch are drawn one by one, since they set the unit
 cost at base and head, but they are listed as one input, `baseline:price-ranges`, because they
-cancel in every change. That keeps ECR-0417's stored detail near 23 KB rather than 116 KB.
+cancel in every change. Only stated (`given`) ranges with no assumption on them fold in; a
+default range or an agent's estimate is listed on its own. That keeps ECR-0417's stored detail near 23 KB rather than 116 KB.
 
 An assumption recorded on the ECR replaces a default by id
 (`options.assumptions: [{ id, source: 'agent_estimated', dist, rationale }]`). That is how an
@@ -106,7 +113,8 @@ shows it.
   is read as a first-lot premium: (lot price − steady price) × lot quantity.
   - It is its own one-time row, "First-lot price premium (booked as PPV)". It is cash the change
     causes, and the books show it as a purchase price variance against the new standard.
-  - It is skipped if the cost page already lists it.
+  - It is skipped if a production row of the same amount already lists it: a supplier-quote row,
+    or one whose label says premium, first lot or PPV.
   - It is flagged for a person to confirm, because extra hardware such as engineering samples looks
     the same.
 - **Budgetary quotes.** A quote marked `firmness: 'budgetary'`, or whose note says budgetary,

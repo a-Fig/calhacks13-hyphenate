@@ -83,22 +83,30 @@ export function normCdf(z: number): number {
 }
 
 /**
- * n standard normal draws from one named stream, Latin hypercube sampled: one draw in each of n
- * equal-probability strata, in a random order from the same stream (GAO-20-195G recommends it,
- * docs/IN-PRACTICE.md §5). Each input's percentiles then settle with far fewer draws than plain
- * Monte Carlo, and draws stay a function of the seed and the input's id only.
+ * n standard normal draws for one named quantity, Latin hypercube sampled in blocks of `block`
+ * draws: each block has one draw in each of its `block` equal-probability strata, in a random order
+ * (GAO-20-195G recommends LHS, docs/IN-PRACTICE.md §5). Percentiles then settle with far fewer
+ * draws than plain Monte Carlo.
+ *
+ * Block k draws from its own stream, so the first k blocks depend only on the seed, the name and
+ * the block size. A run that doubles its draws starts with the same draws as the run it doubled,
+ * and two runs of different lengths are paired on the draws they share.
  */
-export function normals(seed: string, name: string, n: number): Float64Array {
-  const u = stream(seed, name);
-  const order = new Uint32Array(n);
-  for (let i = 0; i < n; i++) order[i] = i;
-  for (let i = n - 1; i > 0; i--) {
-    const j = Math.floor(u() * (i + 1));
-    const t = order[i];
-    order[i] = order[j];
-    order[j] = t;
-  }
+export function normals(seed: string, name: string, n: number, block = n): Float64Array {
+  if (!(block > 0)) throw new Error(`block must be positive, got ${block}`);
   const out = new Float64Array(n);
-  for (let i = 0; i < n; i++) out[i] = invNorm((order[i] + u()) / n);
+  for (let start = 0, k = 0; start < n; start += block, k++) {
+    const m = Math.min(block, n - start);
+    const u = stream(seed, k === 0 ? name : `${name}#${k}`);
+    const order = new Uint32Array(m);
+    for (let i = 0; i < m; i++) order[i] = i;
+    for (let i = m - 1; i > 0; i--) {
+      const j = Math.floor(u() * (i + 1));
+      const t = order[i];
+      order[i] = order[j];
+      order[j] = t;
+    }
+    for (let i = 0; i < m; i++) out[start + i] = invNorm((order[i] + u()) / m);
+  }
   return out;
 }
