@@ -3,14 +3,18 @@
 //
 // The PLM keeps some things differently from the checks, so the mapping reverses them:
 //   - a blank number is stored as 0, so a 0 on a cost, quote or lead-time field is read as "not given";
-//   - redline values are stored as text, so "1.25" is read back as the number 1.25 and "" as null;
+//   - redline values are stored as text, so "1.25" is read back as the number 1.25 and "" as null, and the
+//     characteristics the checks compute with (the unit price, labour hours) are always read as numbers:
+//     "34.60" is 34.6, and text that is not a number is refused rather than left for the checks to ignore;
 //   - a supplier quote is one row per line with the quote's header repeated, so rows are grouped by quote;
 //   - enums are spelled for people ("Urgent"), so they go back through the company's settings.
 
 import type {
-  BomChange, ChangeRequest, CostBlock, CostPage, CostPageRow, EffectivityPoint, FieldValue, InventoryProposal, ItemChange, QuoteLine, SupplierQuote,
+  BomChange, ChangeRequest, CostBlock, FieldChange, CostPage, CostPageRow, EffectivityPoint, FieldValue, InventoryProposal, ItemChange, QuoteLine, SupplierQuote,
 } from '../../../checks/src/types.ts';
+import { createHash } from 'node:crypto';
 import { COST_BLOCKS } from '../../../checks/src/types.ts';
+import { HOURS_FIELD, PRICE_FIELD } from '../../../checks/src/bom.ts';
 import type { CompanyClass, FaaClass, PlmSettings, Priority } from './options.ts';
 import { COST_TABLE, IMPACT_FIELDS } from './schema.ts';
 import type { ImpactField, PlmDoc } from './schema.ts';
@@ -86,20 +90,35 @@ export class PlmMappingError extends Error {
   }
 }
 
+/**
+ * A fingerprint of what an assessment is made from: the mapped request and everything Norn shows beside it,
+ * except what Norn itself writes (the impact fields), the PLM's `modified` stamp, who made the last change
+ * and the mapping warnings. Two reads with the same fingerprint need the same assessment, so Norn's own
+ * write does not change it and a person's edit to a cost, quote, redline, state or the prose does.
+ */
+export function inputsHash(r: ReadResult): string {
+  const { impact: _impact, modifiedBy: _by, warnings: _warnings, dates: { modified: _modified, ...dates }, ...record } = r.record;
+  const canon = (v: unknown): unknown => (Array.isArray(v) ? v.map(canon)
+    : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().filter((k) => (v as any)[k] !== undefined).map((k) => [k, canon((v as any)[k])]))
+    : v);
+  return createHash('sha256').update(JSON.stringify(canon({ change: r.change, record: { ...record, dates } }))).digest('hex');
+}
+
 // ---------------------------------------------------------------- small helpers
 
 const blank = (v: unknown) => v === undefined || v === null || v === '';
 const text = (v: unknown): string | undefined => (blank(v) ? undefined : String(v));
 /** A number the PLM stores as 0 when nobody filled it in: 0 and blank both read as not given. */
-const given = (v: unknown): number | undefined => {
-  if (blank(v)) return undefined;
-  const x = Number(v);
-  return Number.isFinite(x) && x !== 0 ? x : undefined;
+const given = (v: unknown, what: string): number | undefined => {
+  const x = num(v, what);
+  return x !== undefined && x !== 0 ? x : undefined;
 };
-const num = (v: unknown): number | undefined => {
+/** A number column. Blank is not given; a value that is not a finite number is refused, not dropped. */
+const num = (v: unknown, what: string): number | undefined => {
   if (blank(v)) return undefined;
-  const x = Number(v);
-  return Number.isFinite(x) ? x : undefined;
+  const x = typeof v === 'boolean' ? NaN : Number(v);
+  if (!Number.isFinite(x)) throw new PlmMappingError(`${what} ${JSON.stringify(v)} is not a number`);
+  return x;
 };
 const rows = (v: unknown): PlmDoc[] => (Array.isArray(v) ? v : []);
 /** Drop the keys whose value is undefined, so an absent field is absent rather than undefined. */
@@ -127,6 +146,24 @@ export function parseFieldValue(v: unknown): FieldValue {
   return Number.isFinite(x) && String(x) === t ? x : t;
 }
 
+const NUMBER = /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
+
+/**
+ * A redline value on a characteristic the checks compute with. Blank is null; "34.60" is 34.6. Anything
+ * else (a currency sign, "TBD", "1,200") throws: the checks apply a price or hours change only when it is
+ * a number, so passing text through would leave the assessed cost at the old value with no conflict.
+ */
+export function parseNumericValue(v: unknown, what: string): number | null {
+  if (blank(v)) return null;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (t === '') return null;
+    if (NUMBER.test(t) && Number.isFinite(Number(t))) return Number(t);
+  }
+  throw new PlmMappingError(`${what} ${JSON.stringify(v)} is not a number`);
+}
+
 function supplierId(s: PlmSettings, name: string): string {
   if (typeof s.supplier === 'function') return s.supplier(name);
   if (s.supplier && Object.hasOwn(s.supplier, name)) return s.supplier[name];
@@ -137,6 +174,7 @@ function supplierId(s: PlmSettings, name: string): string {
 
 function itemChanges(s: PlmSettings, doc: PlmDoc, warnings: string[]): ItemChange[] {
   const id = String(doc.name);
+  const numeric = new Set([PRICE_FIELD, HOURS_FIELD, ...(s.numericFields ?? [])]);
   const redlines = new Map<string, PlmDoc[]>();
   for (const r of rows(doc.field_changes)) redlines.set(String(r.part), [...(redlines.get(String(r.part)) ?? []), r]);
   const out = rows(doc.affected_items).map((a): ItemChange => {
@@ -147,7 +185,16 @@ function itemChanges(s: PlmSettings, doc: PlmDoc, warnings: string[]): ItemChang
       op: lookup(s.itemOps, a.change_type, 'change type', id),
       fromRev: text(a.from_revision),
       toRev: text(a.to_revision),
-      changes: mine.map((r) => ({ field: String(r.field), from: parseFieldValue(r.from_value), to: parseFieldValue(r.to_value) })),
+      changes: mine.map((r): FieldChange => {
+        const field = String(r.field);
+        if (!numeric.has(field)) {
+          // Not a name the checks compute with exactly as written, so a near miss ("Unit_Price_USD") would be carried as text.
+          if ([...numeric].some((n) => n === field.trim().toLowerCase())) warnings.push(`${a.part}: "${field}" looks like a numeric characteristic but is not spelled exactly so; it is read as text`);
+          return { field, from: parseFieldValue(r.from_value), to: parseFieldValue(r.to_value) };
+        }
+        const where = `${a.part}.${field}`;
+        return { field, from: parseNumericValue(r.from_value, `${where} from value`), to: parseNumericValue(r.to_value, `${where} to value`) };
+      }),
     });
   });
   for (const [part, rs] of redlines) warnings.push(`${rs.length} characteristic change(s) on ${part}, which is not an affected item`);
@@ -162,8 +209,8 @@ function bomChanges(s: PlmSettings, doc: PlmDoc): BomChange[] {
       op,
       parent: String(b.parent_part),
       child: String(b.child_part),
-      qtyFrom: op === 'add' ? undefined : num(b.qty_from),
-      qtyTo: op === 'remove' ? undefined : num(b.qty_to),
+      qtyFrom: op === 'add' ? undefined : num(b.qty_from, `${b.parent_part}/${b.child_part} quantity from`),
+      qtyTo: op === 'remove' ? undefined : num(b.qty_to, `${b.parent_part}/${b.child_part} quantity to`),
     });
   });
 }
@@ -188,8 +235,8 @@ function supplierQuotes(s: PlmSettings, doc: PlmDoc): { quotes: SupplierQuote[];
       id,
       supplier: supplierId(s, String(head.supplier)),
       item: String(head.part),
-      lines: rs.map((r): QuoteLine => clean({ description: String(r.description ?? ''), unitPrice: given(r.unit_price), qty: given(r.qty), oneTime: given(r.one_time) })),
-      leadTimeWeeks: given(head.lead_time_weeks),
+      lines: rs.map((r): QuoteLine => clean({ description: String(r.description ?? ''), unitPrice: given(r.unit_price, `quote ${id} unit price`), qty: given(r.qty, `quote ${id} quantity`), oneTime: given(r.one_time, `quote ${id} one-time cost`) })),
+      leadTimeWeeks: given(head.lead_time_weeks, `quote ${id} lead time`),
       // Firm or budgetary where the PLM carries it; unset otherwise, and the checks then read the note. One budgetary row makes the quote budgetary.
       firmness: firmness(s, rs, doc.name),
       note: rs.map((r) => text(r.note)).find((n) => n !== undefined),
@@ -237,9 +284,9 @@ function costPage(s: PlmSettings, doc: PlmDoc): CostPage {
       // The child row's own name: it stays with the row when the table is reordered.
       id: text(r.name),
       label: String(r.label ?? ''),
-      oneTime: given(r.one_time),
-      unitCost: given(r.unit_cost),
-      quantity: given(r.quantity),
+      oneTime: given(r.one_time, `${block} cost "${r.label}" one-time cost`),
+      unitCost: given(r.unit_cost, `${block} cost "${r.label}" unit cost`),
+      quantity: given(r.quantity, `${block} cost "${r.label}" quantity`),
       basis: lookup(s.costBasis, r.basis, `${block} cost basis`, id),
       note: text(r.note),
     }));
@@ -253,8 +300,20 @@ function impactState(doc: PlmDoc): ImpactState {
   return out;
 }
 
-/** Map one ECR document (REST or webhook) and, if it has been released, its ECO. */
+/**
+ * Map one ECR document (REST or webhook) and, if it has been released, its ECO. Throws a PlmMappingError,
+ * naming the ECR, for a value the settings do not map or a number column that holds something else.
+ */
 export function mapEcr(s: PlmSettings, doc: PlmDoc, eco?: { name: string; released_on?: string }): ReadResult {
+  try {
+    return mapEcrDoc(s, doc, eco);
+  } catch (e) {
+    if (e instanceof PlmMappingError && !e.message.startsWith(`${doc.name}: `)) throw new PlmMappingError(`${doc.name}: ${e.message}`);
+    throw e;
+  }
+}
+
+function mapEcrDoc(s: PlmSettings, doc: PlmDoc, eco?: { name: string; released_on?: string }): ReadResult {
   const id = String(doc.name);
   const warnings: string[] = [];
   const quotes = supplierQuotes(s, doc);

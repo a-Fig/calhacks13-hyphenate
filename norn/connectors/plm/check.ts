@@ -24,9 +24,9 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ChangeRequest } from '../../checks/src/types.ts';
 import { PlmClient, enc } from './src/client.ts';
-import type { EcrListing, EcrRecord, PlmDoc, PlmOptions, PlmSettings, WebhookEvent } from './src/index.ts';
+import type { EcrListing, EcrRecord, PlmDoc, PlmOptions, PlmSettings, ReadResult, WebhookEvent } from './src/index.ts';
 import {
-  IMPACT_FIELDS, connectionFromEnv, createWebhookHandler, loadEnvFile, mapEcr, postComment, readChangeRequest, watchEcrs, webhookSecretFromEnv, writeImpact,
+  IMPACT_FIELDS, connectionFromEnv, createWebhookHandler, inputsHash, loadEnvFile, mapEcr, postComment, readChangeRequest, watchEcrs, webhookSecretFromEnv, writeImpact,
 } from './src/index.ts';
 
 const arg = (name: string) => { const i = process.argv.indexOf(`--${name}`); return i >= 0 ? process.argv[i + 1] : undefined; };
@@ -208,8 +208,8 @@ console.log('2. A signed webhook, against a local receiver');
   const client = new PlmClient(opts);
   const doc = (await client.get<{ data: PlmDoc }>(`/api/resource/ECR/${enc(spec.demoEcr)}`)).data;
   const body = JSON.stringify({ event: 'ecr.updated', doctype: 'ECR', name: doc.name, modified: doc.modified, modified_by: doc.modified_by, workflow_state: doc.workflow_state, doc });
-  const got: WebhookEvent[] = [];
-  const server = createServer(createWebhookHandler(secret, (e) => { got.push(e); }, { eventHeader: settings.webhook?.eventHeader, onError: () => {} }));
+  const got: { event: WebhookEvent; current?: ReadResult }[] = [];
+  const server = createServer(createWebhookHandler(secret, (event, current) => { got.push({ event, current }); }, { plm: opts, onError: () => {} }));
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
   const sign = (b: string, s = secret) => createHmac('sha256', s).update(b).digest('base64');
@@ -217,7 +217,7 @@ console.log('2. A signed webhook, against a local receiver');
   try {
     const ev = settings.webhook?.eventHeader ?? 'X-Event';
     const good = await post(body, { 'X-Frappe-Webhook-Signature': sign(body), [ev]: 'ecr.updated' });
-    check(good === 200 && got.length === 1 && got[0].name === spec.demoEcr, 'a correctly signed ecr.updated is accepted', `${good}`);
+    check(good === 200 && got.length === 1 && got[0].event.name === spec.demoEcr, 'a correctly signed ecr.updated is accepted', `${good}`);
     check((await post(body, { [ev]: 'ecr.updated' })) === 401, 'no signature: 401');
     check((await post(body, { 'X-Frappe-Webhook-Signature': sign(body, 'not the secret'), [ev]: 'ecr.updated' })) === 401, 'signed with another secret: 401');
     const tampered = body.replace('"ecr.updated"', '"ecr.inserted"');
@@ -225,9 +225,22 @@ console.log('2. A signed webhook, against a local receiver');
     check((await post(body, { 'X-Frappe-Webhook-Signature': sign(body), [ev]: 'eco.released' })) === 400, 'event header that disagrees with the signed body: 400');
     check(got.length === 1, 'only the good request reached the handler');
     if (got[0]) {
-      const viaHook = mapEcr(opts, got[0].doc).change;
+      const viaHook = mapEcr(opts, got[0].event.doc).change;
       const viaRest = (await readChangeRequest(opts, spec.demoEcr)).change;
       check(JSON.stringify(viaHook) === JSON.stringify(viaRest), 'the webhook body maps to the same ChangeRequest as the REST read');
+      check(JSON.stringify(got[0].current?.change) === JSON.stringify(viaRest), 'the handler passes the request it read from the PLM by name');
+    }
+    // Replay: a body that was true once (an old stamp, a stale title and cost) signed with the real secret.
+    const stale = JSON.stringify({ ...JSON.parse(body), modified: '2020-01-01 00:00:00.000000', doc: { ...doc, modified: '2020-01-01 00:00:00.000000', title: 'STALE TITLE FROM A REPLAYED REQUEST' } });
+    const server2 = createServer(createWebhookHandler(secret, (event, current) => { got.push({ event, current }); }, { plm: opts, onError: () => {} }));
+    await new Promise<void>((r) => server2.listen(0, '127.0.0.1', r));
+    try {
+      const n = got.length;
+      const replayed = (await fetch(`http://127.0.0.1:${(server2.address() as AddressInfo).port}/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Frappe-Webhook-Signature': sign(stale), [ev]: 'ecr.updated' }, body: stale })).status;
+      const seen = got[n];
+      check(replayed === 200 && !!seen && seen.event.doc.title === 'STALE TITLE FROM A REPLAYED REQUEST' && seen.current?.record.title === doc.title, 'a replayed old body is delivered with the live request alongside, which has the live title');
+    } finally {
+      await new Promise((r) => server2.close(r));
     }
   } finally {
     await new Promise((r) => server.close(r));
@@ -351,6 +364,7 @@ const latencies: { what: string; ms: number }[] = [];
       impact_statement: '<p><b>Connector check: not a Norn assessment.</b></p><table class="table"><tr><td>x</td></tr></table>',
     };
     let cleared = false;
+    let afterWrite = demoBefore;
     try {
       const rej = await (async () => {
         let calls = 0;
@@ -367,6 +381,9 @@ const latencies: { what: string; ms: number }[] = [];
       check(res.impact.impact_report_level === '1' && JSON.stringify(res.impact) === JSON.stringify(back.record.impact), 'writeImpact returns what was stored');
       check(JSON.stringify(back.change) === JSON.stringify(baseline.change), `nothing else on ${spec.demoEcr} changed (the whole ChangeRequest is identical)`);
       check(JSON.stringify({ ...back.record, impact: 0, dates: 0, modifiedBy: 0 }) === JSON.stringify({ ...baseline.record, impact: 0, dates: 0, modifiedBy: 0 }), `the record is identical apart from the impact fields and the modified stamp`);
+      check(inputsHash(back) === inputsHash(baseline), `the assessment inputs fingerprint is the same with and without Norn's impact fields`);
+      await sleep(INTERVAL * 2 + 500);
+      afterWrite = events.filter((e) => e.name === spec.demoEcr).length;
     } finally {
       const nullAll = Object.fromEntries(IMPACT_FIELDS.map((f) => [f, null]));
       await writeImpact(opts, spec.demoEcr, nullAll);
@@ -375,7 +392,10 @@ const latencies: { what: string; ms: number }[] = [];
       check(cleared, `${spec.demoEcr} is clean again: no impact field set, ChangeRequest unchanged`, JSON.stringify(after.record.impact).slice(0, 120));
     }
     await sleep(INTERVAL * 2 + 500);
-    check(events.filter((e) => e.name === spec.demoEcr).length === demoBefore, `the poller reported none of Norn's writes on ${spec.demoEcr}`);
+    // The poller had not seen this ECR in this run, so it has no fingerprint to compare Norn's first write with and reports that once;
+    // clearing the fields changes nothing an assessment is made from, and must not be reported.
+    const demoNow = events.filter((e) => e.name === spec.demoEcr).length;
+    check(afterWrite - demoBefore <= 1 && demoNow === afterWrite, `Norn's writes on ${spec.demoEcr}: the first sighting is reported at most once (${afterWrite - demoBefore}), clearing the fields is not`);
   } finally {
     await watcher.stop();
     // clean up the throwaway

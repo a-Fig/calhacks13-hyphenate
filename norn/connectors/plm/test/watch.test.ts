@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
 import { EcrWatcher, listEcrs, shiftStamp, watchEcrs } from '../src/index.ts';
 import type { EcrListing } from '../src/index.ts';
-import { opts } from './fixture.ts';
+import { ecrDoc, opts } from './fixture.ts';
 
-interface Row { name: string; title: string; workflow_state: string; modified: string; modified_by: string }
+interface Row { name: string; title: string; workflow_state: string; modified: string; modified_by: string; extra?: Record<string, unknown> }
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
@@ -16,16 +16,30 @@ const NORN = opts.nornUser;
 const PERSON = 'ann@acme.test';
 const t = (s: string) => `2026-10-24 12:00:${s}`; // t('05.100000')
 
-/** A PLM whose ECR list answers `filters`, `order_by`, `limit_page_length` and `fields` like Frappe's. */
+/**
+ * A PLM whose ECR list answers `filters`, `order_by`, `limit_page_length` and `fields` like Frappe's, and
+ * whose ECR documents (for the read the poller makes of each change) are the fixture's with the row's
+ * title, state, stamp, modifier and `extra` fields (an edit to a cost, Norn's impact fields) laid over it.
+ */
 function plm(initial: Row[] = []) {
   const rows = [...initial];
   const requests: URLSearchParams[] = [];
+  const reads: string[] = [];
   let failNext = 0;
   globalThis.fetch = (async (input: URL | string) => {
     const url = new URL(String(input));
+    const path = decodeURIComponent(url.pathname);
+    if (path === '/api/resource/ECO') return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    const doc = /^\/api\/resource\/ECR\/(.+)$/.exec(path);
+    if (doc) {
+      reads.push(doc[1]);
+      const r = rows.find((x) => x.name === doc[1]);
+      if (!r) return new Response(JSON.stringify({ exc_type: 'DoesNotExistError' }), { status: 404 });
+      return new Response(JSON.stringify({ data: { ...ecrDoc(), name: r.name, title: r.title, workflow_state: r.workflow_state, modified: r.modified, modified_by: r.modified_by, ...r.extra } }), { status: 200 });
+    }
     requests.push(url.searchParams);
     if (failNext > 0) { failNext--; return new Response(JSON.stringify({ exc_type: 'OperationalError' }), { status: 500 }); }
-    assert.equal(decodeURIComponent(url.pathname), '/api/resource/ECR');
+    assert.equal(path, '/api/resource/ECR');
     let out = [...rows];
     for (const [f, op, v] of JSON.parse(url.searchParams.get('filters') ?? '[]')) {
       assert.equal(f, 'modified');
@@ -41,9 +55,11 @@ function plm(initial: Row[] = []) {
   }) as typeof fetch;
   return {
     requests,
-    set(name: string, modified: string, by = PERSON, state = 'Submitted') {
+    reads,
+    /** Save a change request. `extra` fields stay on it for later saves, so an edit is kept when Norn writes next. */
+    set(name: string, modified: string, by = PERSON, state = 'Submitted', extra: Record<string, unknown> = {}) {
       const i = rows.findIndex((r) => r.name === name);
-      const row = { name, title: `Title of ${name}`, workflow_state: state, modified, modified_by: by };
+      const row = { name, title: `Title of ${name}`, workflow_state: state, modified, modified_by: by, extra: { ...rows[i]?.extra, ...extra } };
       if (i >= 0) rows[i] = row; else rows.push(row);
     },
     failNext(n = 1) { failNext = n; },
@@ -128,19 +144,79 @@ test('the mark survives a restart in a state file', async () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('Norn\'s own writes are skipped, but the mark moves past them; a person\'s edit after one is delivered', async () => {
+/** What Norn writes on an ECR: only the impact fields. */
+const impact = (n: number) => ({ impact_report_level: '1', impact_recommendation: 'Approve', impact_statement: `<p>assessment ${n}</p>` });
+/** A person's edit to the ECR's costs. */
+const edit = (unitCost: number) => ({ cost_production: [{ name: 'cp1', label: 'Bracket unit cost', basis: 'Quote', unit_cost: unitCost, quantity: 12 }] });
+
+test('Norn\'s own writes are not delivered, but the mark moves past them; a person\'s edit after one is', async () => {
+  const p = plm(seed());
+  const got: string[] = [];
+  const w = new EcrWatcher(opts, (c) => { got.push(`${c.name}@${c.modified}`); });
+  await w.tick();
+  p.set('ECR-0002', t('12.000000'), PERSON, 'Submitted', edit(34.6));
+  await w.tick();
+  p.set('ECR-0002', t('13.000000'), NORN, 'Submitted', impact(1)); // Norn's assessment of that edit
+  assert.deepEqual(await w.tick(), []);
+  assert.equal(w.highWater(), t('13.000000'), 'moved past Norn\'s write');
+  p.set('ECR-0002', t('14.000000'), PERSON, 'Submitted', edit(40));
+  await w.tick();
+  p.set('ECR-0002', t('16.000000'), NORN, 'Submitted', impact(2));
+  await w.tick();
+  p.set('ECR-0002', t('17.000000'), NORN, 'Submitted', { impact_statement: '<p>assessment 3</p>' }); // Norn rewrites its own text
+  await w.tick();
+  assert.deepEqual(got, [`ECR-0002@${t('12.000000')}`, `ECR-0002@${t('14.000000')}`]);
+});
+
+test('a person\'s edit that Norn\'s write lands on before the next pass is still delivered', async () => {
   const p = plm(seed());
   const got: string[] = [];
   const w = new EcrWatcher(opts, (c) => { got.push(`${c.name}:${c.modifiedBy === NORN ? 'norn' : 'person'}`); });
   await w.tick();
-  p.set('ECR-0002', t('12.000000'), NORN);
+  p.set('ECR-0002', t('12.000000'), PERSON, 'Submitted', edit(25));
+  await w.tick(); // delivered: Norn starts assessing a cost of 25
+  // A person raises the cost, and Norn's publisher then writes the assessment of the old cost, before the next pass.
+  p.set('ECR-0002', t('14.000000'), PERSON, 'Submitted', edit(34.6));
+  p.set('ECR-0002', t('14.800000'), NORN, 'Submitted', impact(1));
+  const delivered = await w.tick();
+  assert.deepEqual(delivered.map((c) => [c.name, c.modifiedBy]), [['ECR-0002', NORN]], 'the row\'s last modifier is Norn, but its inputs changed');
+  assert.equal(w.highWater(), t('14.800000'));
+  // Norn assesses 34.6 and writes it: that is an echo of a delivered state
+  p.set('ECR-0002', t('16.000000'), NORN, 'Submitted', impact(2));
   assert.deepEqual(await w.tick(), []);
-  assert.equal(w.highWater(), t('12.000000'), 'moved past Norn\'s write');
-  p.set('ECR-0002', t('14.000000'), PERSON);
+  assert.deepEqual(got, ['ECR-0002:person', 'ECR-0002:norn']);
+});
+
+test('a save that changes nothing an assessment is made from is not delivered; a change of state or text is', async () => {
+  const p = plm(seed());
+  const got: string[] = [];
+  const w = new EcrWatcher(opts, (c) => { got.push(`${c.workflowState}@${c.modified}`); });
   await w.tick();
-  p.set('ECR-0002', t('16.000000'), NORN);
+  p.set('ECR-0002', t('12.000000'), PERSON, 'Submitted');
+  p.set('ECR-0003', t('12.500000'), PERSON, 'Draft');
   await w.tick();
-  assert.deepEqual(got, ['ECR-0002:person']);
+  p.set('ECR-0002', t('14.000000'), PERSON, 'Submitted'); // saved again, same content
+  await w.tick();
+  p.set('ECR-0002', t('16.000000'), PERSON, 'In CM Review');
+  p.set('ECR-0003', t('17.000000'), PERSON, 'Draft', { description: 'Thicker plate, now with a shot-peen.' });
+  await w.tick();
+  assert.deepEqual(got, [`Submitted@${t('12.000000')}`, `Draft@${t('12.500000')}`, `In CM Review@${t('16.000000')}`, `Draft@${t('17.000000')}`]);
+});
+
+test('a request that cannot be read is offered again and then given up on like a failed delivery', async () => {
+  const p = plm(seed());
+  const errors: string[] = [];
+  const got: string[] = [];
+  const w = new EcrWatcher(opts, (c) => { got.push(c.name); }, { maxAttempts: 2, onError: (e) => errors.push((e as Error).message) });
+  await w.tick();
+  p.set('ECR-0003', t('12.000000'), PERSON, 'Submitted', { priority: 'Not a priority' }); // the settings do not map it
+  await w.tick();
+  assert.equal(w.highWater(), t('09.500000'), 'held behind the unreadable one for now');
+  p.set('ECR-0004', t('13.000000'));
+  await w.tick();
+  assert.deepEqual(got, ['ECR-0004']);
+  assert.ok(errors.some((e) => e.includes('giving up on ECR-0003')));
+  assert.equal(w.highWater(), t('13.000000'));
 });
 
 test('a change that commits late, with an older stamp than one already delivered, is still delivered, once', async () => {

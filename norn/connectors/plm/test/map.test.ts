@@ -1,7 +1,9 @@
 // Offline tests: the PLM document to the checks' ChangeRequest, through the company's settings.
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import { PlmMappingError, mapEcr, parseFieldValue, readChangeRequest } from '../src/index.ts';
+import { bowman } from '../../../../bowman/data/index.ts';
+import { bomDelta } from '../../../checks/src/bom.ts';
+import { PlmMappingError, mapEcr, parseFieldValue, parseNumericValue, readChangeRequest } from '../src/index.ts';
 import { ecrDoc, opts, settings } from './fixture.ts';
 
 test('maps the whole document', () => {
@@ -129,6 +131,76 @@ test('a redline on a part that is not an affected item is not lost silently', ()
 test('redline values come back from text', () => {
   assert.deepEqual(['1.25', '12', '0', '-3.5', '', null, undefined, 'true', 'false', 'B', '1.0', '007', '1e3', ' 5', 'anodised'].map(parseFieldValue),
     [1.25, 12, 0, -3.5, null, null, null, true, false, 'B', '1.0', '007', '1e3', ' 5', 'anodised']);
+});
+
+// ---- numeric characteristics: the checks apply a price or hours change only when it is a number
+
+const redline = (part: string, field: string, from: unknown, to: unknown) => ({ name: `fc-${field}`, parent: 'ECR-0001', parentfield: 'field_changes', doctype: 'x', part, field, from_value: from, to_value: to });
+const withRedlines = (...r: ReturnType<typeof redline>[]) => { const doc = ecrDoc(); doc.field_changes = r; return doc; };
+
+test('the unit price and labour hours are numbers however the PLM spells them', () => {
+  const doc = withRedlines(
+    redline('P-100', 'unit_price_usd', '186.40', '34.60'),
+    redline('P-100', 'labor_hours', ' 2.50 ', '3'),
+    redline('P-100', 'finish', '1.0', '2.50'), // not one the checks compute with: carried as written
+  );
+  assert.deepEqual(mapEcr(settings, doc).change.itemChanges[0].changes, [
+    { field: 'unit_price_usd', from: 186.4, to: 34.6 },
+    { field: 'labor_hours', from: 2.5, to: 3 },
+    { field: 'finish', from: '1.0', to: '2.50' },
+  ]);
+  // blank is "no value", as for any redline; JSON numbers pass
+  assert.deepEqual(mapEcr(settings, withRedlines(redline('P-100', 'unit_price_usd', '', 221), redline('P-100', 'labor_hours', null, '0'))).change.itemChanges[0].changes,
+    [{ field: 'unit_price_usd', from: null, to: 221 }, { field: 'labor_hours', from: null, to: 0 }]);
+});
+
+test('a price the checks cannot read as a number is refused, naming the ECR, item and field', () => {
+  for (const bad of ['$34.60', 'TBD', '1,200', '34.60 USD', '1e', '--2', 'NaN', 'Infinity', true, {}]) {
+    assert.throws(() => mapEcr(settings, withRedlines(redline('P-100', 'unit_price_usd', '25', bad))),
+      (e: any) => e instanceof PlmMappingError && e.message.startsWith('ECR-0001: P-100.unit_price_usd to value') && e.message.includes('is not a number'), String(bad));
+  }
+  assert.throws(() => mapEcr(settings, withRedlines(redline('P-100', 'labor_hours', 'about 2', '3'))), /ECR-0001: P-100\.labor_hours from value "about 2" is not a number/);
+  assert.equal(parseNumericValue('+.5', 'x'), 0.5);
+  assert.equal(parseNumericValue('1e3', 'x'), 1000);
+});
+
+test('extra numeric characteristics come from the settings; a near-miss spelling is warned about', () => {
+  const doc = withRedlines(redline('P-100', 'mass_kg', '1.50', '1.20'), redline('P-100', 'Unit_Price_USD', '25', '34.60'));
+  const plain = mapEcr(settings, doc);
+  assert.deepEqual(plain.change.itemChanges[0].changes.map((c) => c.to), ['1.20', '34.60'], 'text unless named');
+  assert.equal(plain.record.warnings.length, 1);
+  assert.match(plain.record.warnings[0], /P-100: "Unit_Price_USD" looks like a numeric characteristic/);
+  const named = mapEcr({ ...settings, numericFields: ['mass_kg'] }, doc);
+  assert.deepEqual(named.change.itemChanges[0].changes.map((c) => c.to), [1.2, '34.60']);
+  assert.throws(() => mapEcr({ ...settings, numericFields: ['mass_kg'] }, withRedlines(redline('P-100', 'mass_kg', '1', 'light'))), PlmMappingError);
+});
+
+test('a price change written as "34.60" reaches the assessed head item (it was left at the old price as text)', () => {
+  // ECR-0417 on the dataset: the bracket BW-5120-210 goes from 186.40 to 221.00. The PLM stores both as text.
+  const doc = ecrDoc();
+  Object.assign(doc, { name: 'ECR-0417', program: 'Falcon 1' });
+  doc.affected_items = [{ name: 'ai1', part: 'BW-5120-210', change_type: 'Revise', from_revision: 'B', to_revision: 'C' }];
+  doc.bom_changes = [];
+  doc.inventory = [];
+  doc.field_changes = [redline('BW-5120-210', 'unit_price_usd', '186.40', '221.00')];
+  const { change } = mapEcr(settings, doc);
+  const r = bomDelta(bowman, { ...change, program: 'vesper' });
+  const head = r.head.items.find((i) => i.code === 'BW-5120-210')!;
+  assert.equal(head.unitPrice, 221);
+  assert.equal(r.items[0].fields[0].status, 'ok', 'the "from" is a number too, so it matches the baseline price');
+  assert.deepEqual(r.conflicts, []);
+});
+
+test('a number column that holds text is refused, not dropped as "not given"', () => {
+  const doc = ecrDoc();
+  doc.cost_production[0].unit_cost = 'a lot';
+  assert.throws(() => mapEcr(settings, doc), /ECR-0001: production cost "Bracket unit cost" unit cost "a lot" is not a number/);
+  const quote = ecrDoc();
+  quote.supplier_quotes[0].lead_time_weeks = '14 weeks';
+  assert.throws(() => mapEcr(settings, quote), /quote Q-1 lead time "14 weeks" is not a number/);
+  const bom = ecrDoc();
+  bom.bom_changes[0].qty_to = 'two';
+  assert.throws(() => mapEcr(settings, bom), /A-1\/P-200 quantity to "two" is not a number/);
 });
 
 test('the ECO that released the request is carried on the change and the record', () => {
