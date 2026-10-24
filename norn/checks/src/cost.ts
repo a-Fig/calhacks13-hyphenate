@@ -175,6 +175,12 @@ export interface CostCheckResult {
 export interface CostCheckOptions {
   /** The run's seed. Use the deployment's configured seed, never a hash of the head's inputs (README). */
   seed: string;
+  /**
+   * Where the baseline and the change request came from, as the trace should name them, e.g.
+   * 'ERPNext baseline 2c02958e, as of 2026-10-24' or 'a test baseline file, not the ERP'.
+   * Defaults: 'the baseline' and 'the change request'.
+   */
+  provenance?: { baseline?: string; changeRequest?: string };
   /** Draws to start with (10,000). A run that misses the convergence tolerance doubles them, up to maxDraws. */
   draws?: number;
   /** The most draws a run may double up to: 4 × draws unless set. Set it to draws to turn doubling off. */
@@ -297,9 +303,11 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   };
 
   // ---------------------------------------------------------------- the baseline facts used
-  input({ id: 'baseline:items', label: 'Items, revisions and standard costs', source: 'given', ref: 'ERP and PLM item master' });
-  input({ id: 'baseline:bom', label: 'Bills of materials', source: 'given', ref: 'PLM engineering BOM' });
-  input({ id: `ecr:${ecr.id}:overlay`, label: `${ecr.id} item and BOM changes`, source: 'given', ref: `${ecr.id} itemChanges, bomChanges` });
+  const fromBaseline = options.provenance?.baseline ?? 'the baseline';
+  const fromEcr = options.provenance?.changeRequest ?? 'the change request';
+  input({ id: 'baseline:items', label: 'Items, revisions and standard costs', source: 'given', ref: `${fromBaseline}: item master` });
+  input({ id: 'baseline:bom', label: 'Bills of materials', source: 'given', ref: `${fromBaseline}: bills of materials` });
+  input({ id: `ecr:${ecr.id}:overlay`, label: `${ecr.id} item and BOM changes`, source: 'given', ref: `${fromEcr}: itemChanges, bomChanges` });
   const rate = new Map(baseline.workCenters.map((w) => [w.id, w.laborRatePerHour]));
   const sourcingOf = (code: ItemCode) => baseline.sourcing.find((x) => x.item === code && x.primary) ?? baseline.sourcing.find((x) => x.item === code);
   const itemCodes = new Set([...s.base.keys(), ...s.head.keys()]);
@@ -709,10 +717,10 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     const st = stockOf.get(code);
     const value = s.base.get(code)?.unitPrice ?? baseline.items.find((i) => i.code === code)?.standardCost ?? 0;
     if (!st) {
-      flags.push({ kind: 'no_stock', severity: 'warn', message: `${code}: a disposition is proposed but the ERP has no stock row for it.`, ref: code });
+      flags.push({ kind: 'no_stock', severity: 'warn', message: `${code}: a disposition is proposed but the baseline has no stock row for it.`, ref: code });
       continue;
     }
-    for (const l of LOCATIONS) input({ id: `stock:${code}:${l}`, label: `${code} ${l.replace('_', ' ')}`, source: 'given', value: st[FIELD[l]] as number, ref: 'ERP stock' });
+    for (const l of LOCATIONS) input({ id: `stock:${code}:${l}`, label: `${code} ${l.replace('_', ' ')}`, source: 'given', value: st[FIELD[l]] as number, ref: `${fromBaseline}: stock` });
     const parts: (typeof inventory)[number]['parts'] = [];
     for (const pr of ecr.inventoryProposal.filter((x) => x.item === code)) {
       const qty = st[FIELD[pr.location]] as number;
@@ -838,7 +846,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   // ---------------------------------------------------------------- simulate
   if (bulk.size) {
     input({
-      id: BULK_ID, label: `Price ranges of the ${bulk.size} parts the change does not touch`, source: 'given', ref: 'sourcing, next 12 months',
+      id: BULK_ID, label: `Price ranges of the ${bulk.size} parts the change does not touch`, source: 'given', ref: `${fromBaseline}: sourcing, next 12 months`,
       rationale: 'Each part\'s price index is lognormal through its sourcing p10, p50 and p90, drawn as price:<item> and correlated 0.3 within its supplier. They move the unit cost at base and head equally, so they cancel in every change.',
     });
   }

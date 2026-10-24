@@ -396,3 +396,12 @@ test('price ranges of parts the change does not touch are one input, and the sto
   const detail = costCheckRows(r417).find((x) => x.unit === 'json')!;
   assert.ok(detail.detailJson.length < 40_000, `detail row ${detail.detailJson.length} bytes`);
 });
+
+test('the trace names where the baseline and the change request came from', () => {
+  const r = costCheck(bowman, ecr('ECR-0423'), { seed: SEED, draws: 2000, provenance: { baseline: 'a test baseline file, not the ERP', changeRequest: 'change request rev 1 from stub' } });
+  const ref = (id: string) => r.inputs.find((i) => i.id === id)!.ref ?? '';
+  assert.match(ref('baseline:items'), /^a test baseline file, not the ERP: /);
+  assert.match(ref('ecr:ECR-0423:overlay'), /^change request rev 1 from stub: /);
+  assert.ok(!JSON.stringify(r.inputs).includes('ERP and PLM item master'));
+  assert.match(r417.inputs.find((i) => i.id === 'baseline:items')!.ref ?? '', /^the baseline: /, 'without provenance the trace names no system');
+});
