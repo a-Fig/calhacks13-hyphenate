@@ -90,7 +90,7 @@ test('a runner event becomes an agent_event row: named fields out, the rest as J
     ts: '2026-10-24T20:00:00.000Z',
     jobId: 'l1-ECR-0417-r1-a1',
     role: 'level1',
-    identity: { actor: 'agent:norn/level1/l1-ECR-0417-r1-a1', onBehalfOf: null, spawnedBy: 'norn: check_run 7' },
+    identity: { actor: 'agent:norn/level1/l1-ECR-0417-r1-a1', onBehalfOf: null, spawnedBy: 'norn:check_run:7' },
     sessionId: null,
     type: 'tool_call',
     toolUseId: 't1',
@@ -103,7 +103,7 @@ test('a runner event becomes an agent_event row: named fields out, the rest as J
   assert.equal(row.eventType, 'tool_call');
   assert.equal(row.onBehalfOf, undefined);
   assert.equal(row.sessionId, undefined);
-  assert.equal(row.spawnedBy, 'norn: check_run 7');
+  assert.equal(row.spawnedBy, 'norn:check_run:7');
   assert.deepEqual(JSON.parse(row.payloadJson), { toolUseId: 't1', tool: 'mcp__norn__get_ecr', input: { ecr: 'ECR-0417' }, parentToolUseId: null });
   const big = toInput({ seq: 0, ts: '2026-10-24T20:00:00.000Z', jobId: 'j', role: 'level1', identity: { actor: 'a', onBehalfOf: null, spawnedBy: 's' }, sessionId: 'x', type: 'tool_result', content: 'x'.repeat(300_000) } as any);
   assert.ok(big.payloadJson.length < 200_000);

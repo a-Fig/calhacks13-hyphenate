@@ -27,7 +27,7 @@ import { Runner, jsonlFileSink, teeSink, type JobSpec } from '../../../runner/sr
 import { connect, subscribe } from '../connect.ts';
 import { provenanceOf, type Inputs } from '../impact.ts';
 import { agentEventWriter } from './agent-events.ts';
-import { decide, jobIdFor, jobsFromEvents, actorFor, type EcrFacts, type EventRow } from './plan.ts';
+import { actorFor, decide, jobIdFor, jobsFromEvents, spawnedByFor, type EcrFacts, type EventRow } from './plan.ts';
 import { SYSTEM_PROMPT, jobPrompt, screenDetail, type Detail, type HeadlineKey } from './prompt.ts';
 import { routeFor } from './routing.ts';
 import { settingsFromEnv, type Level1Settings } from './settings.ts';
@@ -92,7 +92,7 @@ export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
 }
 
 export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; prompt: string; settings: Level1Settings; signingKey?: string; mcpUrl?: string }): JobSpec {
-  const identity = { actor: actorFor(opts.jobId), onBehalfOf: null, spawnedBy: `norn: check_run ${opts.s2RunId}` };
+  const identity = { actor: actorFor(opts.jobId), onBehalfOf: null, spawnedBy: spawnedByFor(opts.s2RunId) };
   return {
     id: opts.jobId,
     role: opts.settings.role,
@@ -136,6 +136,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
 
   const running = new Set<string>();
   const lingering = new Map<string, NodeJS.Timeout>();
+  // A session that cannot even start (no signing key, a bad spec) is not retried forever.
+  const startFailures = new Map<string, number>();
   let sweeping = false;
   let again = false;
 
@@ -152,6 +154,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
       const posted = [...conn.db.impactStatement.prId.filter(pr.id)].length;
       log(`${jobId} ${r.status} in ${(r.durationMs / 1000).toFixed(1)} s, ${r.numTurns} turn(s)${r.error ? `, ${r.error.kind}: ${r.error.message}` : ''}; events ${stored ? 'stored' : 'NOT all stored'}; ${posted} statement(s) on the ECR`);
     } catch (e) {
+      startFailures.set(`${pr.plmEcrNumber}:${revision}`, (startFailures.get(`${pr.plmEcrNumber}:${revision}`) ?? 0) + 1);
       log(`${jobId} could not start: ${(e as Error).message}`);
     } finally {
       // Keep counting it as running a little longer, so the finished event and the statement reach this cache before the next look.
@@ -171,7 +174,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
         again = false;
         for (const pr of conn.db.pullRequest.iter()) {
           const d = decide(factsOf(conn.db, pr), { nowMs: Date.now(), maxAttempts: settings.maxAttempts, retryDelayMs: settings.retryDelayMs, orphanMs: settings.orphanMs, running });
-          if (d.action === 'dispatch') void startJob(pr, d.revision, d.attempt, d.s2RunId);
+          if (d.action !== 'dispatch') continue;
+          if ((startFailures.get(`${pr.plmEcrNumber}:${d.revision}`) ?? 0) >= 3) continue; // gave up until a restart
+          void startJob(pr, d.revision, d.attempt, d.s2RunId);
         }
       } while (again);
     } catch (e) {

@@ -66,6 +66,9 @@ export function parseJobId(jobId: string): { revision: number; attempt: number }
 /** The actor name a session writes under (the runner identity and the MCP token carry the same). */
 export const actorFor = (jobId: string) => `agent:norn/level1/${jobId}`;
 
+/** What started the session: Norn, automatically, because a cost check finished. The MCP token takes no spaces in this field. */
+export const spawnedByFor = (checkRunId: number) => `norn:check_run:${checkRunId}`;
+
 export interface EventRow {
   jobId: string;
   eventType: string;
