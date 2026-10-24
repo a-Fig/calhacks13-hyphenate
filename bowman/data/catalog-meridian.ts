@@ -67,7 +67,7 @@ export const meridian: Row[] = [
   make('BW-M512-000', 'Rotor assembly (cruise)', PT, 'Assemblies', 'WC-MOTOR', 10, [['BW-M512-340', 1], ['BW-M513-100', 1], ['BW-M514-100', 1]], { safety: true }),
   buy('BW-M512-340', 'Rotor magnet segment set, SH grade (cruise)', PT, 'Motor components', 'SUP-ORRIN', 21_400, 'magnets', 2, { safety: true, vol: 'volatile' }),
   buy('BW-M513-100', 'Rotor core and hub, machined (cruise)', PT, 'Machined parts', 'SUP-HALDEN', 4_000, 'machined', 2, { safety: true }),
-  buy('BW-M514-100', 'Magnet retention sleeve, carbon (cruise)', PT, 'Motor components', 'SUP-TARN', 1_650, 'tier1', 2, { safety: true }),
+  buy('BW-M514-100', 'Magnet retention sleeve, carbon (cruise)', PT, 'Motor components', 'SUP-TARN', 1_650, 'windings', 2, { safety: true }),
   buy('BW-M515-100', 'Motor housing with cooling jacket (cruise)', PT, 'Machined parts', 'SUP-HALDEN', 5_200, 'machined', 2),
   buy('BW-M516-100', 'Bearing set, hybrid ceramic (cruise)', PT, 'Hardware and consumables', 'SUP-COBALT', 3_100, 'bearings', 2, { safety: true }),
   buy('BW-M517-100', 'Motor shaft (cruise)', PT, 'Machined parts', 'SUP-HALDEN', 2_600, 'machined', 2, { safety: true }),
@@ -86,7 +86,7 @@ export const meridian: Row[] = [
   ], { safety: true, prov: SHARE }),
   buy('BW-M620-100', 'Pack enclosure with fire shield (4-module)', BT, 'Cells and battery', 'SUP-TARN', 4_900, 'tier1', 1, { safety: true }),
   buy('BW-M630-100', 'Battery management system, pack master (Meridian)', BT, 'Cells and battery', 'SUP-NORTHGATE', 3_900, 'electronics', 2, { safety: true }),
-  buy('BW-M640-100', 'HV junction box with contactors (Meridian)', BT, 'Cells and battery', 'SUP-DUNMORE', 5_100, 'harness', 2, { safety: true }),
+  buy('BW-M640-100', 'HV junction box with contactors (Meridian)', BT, 'Cells and battery', 'SUP-FERROW', 5_100, 'harness', 2, { safety: true }),
 
   // ------------------------------------------------------------ avionics and mission systems
   make('BW-M700-000', 'Avionics and mission systems', AV, 'Assemblies', 'WC-AVI', 320, [
@@ -109,8 +109,8 @@ export const meridian: Row[] = [
   make('BW-M900-000', 'Electrical power distribution system', OT, 'Assemblies', 'WC-SYS', 80, [
     ['BW-M910-100', 1], ['BW-M920-100', 1], ['BW-9120-100', 2], ['BW-9130-100', 2], ['BW-9140-100', 1], ['BW-9150-100', 2], ['BW-9160-100', 1],
   ], { safety: true }),
-  buy('BW-M910-100', 'HV feeder harness set (Meridian)', OT, 'Electrical', 'SUP-DUNMORE', 96_000, 'harness', 1, { safety: true }),
-  buy('BW-M920-100', 'Airframe signal harness set (Meridian)', OT, 'Electrical', 'SUP-DUNMORE', 112_000, 'harness', 1, { safety: true }),
+  buy('BW-M910-100', 'HV feeder harness set (Meridian)', OT, 'Electrical', 'SUP-FERROW', 96_000, 'harness', 1, { safety: true }),
+  buy('BW-M920-100', 'Airframe signal harness set (Meridian)', OT, 'Electrical', 'SUP-FERROW', 112_000, 'harness', 1, { safety: true }),
   make('BW-M950-000', 'Cabin: cargo, litter and flight station', OT, 'Assemblies', 'WC-INT', 120, [
     ['BW-9410-100', 1], ['BW-M960-100', 1], ['BW-M970-100', 1], ['BW-9450-100', 1], ['BW-9490-100', 1],
   ], {}),

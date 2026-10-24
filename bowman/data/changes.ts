@@ -163,12 +163,12 @@ export const ecrs: Ecr[] = [
     description:
       'Replace the machined 7075 mounting bracket BW-5120-210 Rev B with Rev C on all twelve motor controllers (six forward, six aft). Rev C changes: plate stock 1.0 in to 1.25 in, web 5 mm to 8 mm, lower fillet radius 3 mm to 6 mm. ' +
       'Outer envelope, the four mounting holes and the isolator pattern do not change, so Rev C is interchangeable with Rev B at the controller and the harness. Mass goes from 0.41 kg to 0.53 kg per bracket (+1.4 kg per aircraft). ' +
-      'Halden has quoted Rev C at $221.00 steady state, $239.50 for the first lot of 25, plus fixture and programming costs. Rev B has been the production revision since S/N 005 and is installed on S/N 001-010.',
+      'Halden has quoted Rev C at $221.00 steady state, $239.50 for the first lot of 25, plus fixture and programming costs. Rev B has been the production revision since S/N 005 and is installed on S/N 001-010. The same bracket is in the Meridian aft lift controllers (eight per aircraft); no Meridian hardware is built, so Rev C simply becomes its baseline at +$276.80 per aircraft.',
     need:
       'NCR-0119: crack at the lower fillet at 8.2 h of the 20 h endurance profile; three of twelve rig brackets have initiated by 20 h. The Rev B stress check used a 212 Hz forcing line that Rev B did move, but the sixth electrical order of the aft motor at hover speed sits at 241 Hz, right on the new mode. ' +
-      'Rev C moves the mode to 318 Hz, clear of every forcing line up to the 9th order, and the stress report supplement shows a fatigue margin of +14% at the fillet against -31% for Rev B.',
+      'Rev C moves the mode to 262 Hz, between the 6th and 7th orders (241 and 281 Hz), the only orders with energy in the hover profile, and the stress report supplement shows a fatigue margin of +14% at the fillet against -31% for Rev B.',
     consequencesIfDisapproved:
-      'No aircraft can fly beyond the 5 h inspection interval with Rev B. S/N 001-004 carry the certification test program, so the test campaign stops. S/N 005-010 cannot be delivered, and controller installation stays held on every aircraft still in build.',
+      'No aircraft can fly beyond the 5 h inspection interval with Rev B. S/N 001-004 carry the certification test program, so the test campaign stops. S/N 005-010 cannot be delivered, and controller installation stays held on every aircraft still in build. The first aircraft to reach that station is S/N 011 in about three weeks, which is why this is filed urgent.',
     alternativesConsidered:
       '(1) Shot-peen the Rev B fillets: analysis gives +9% fatigue margin, not enough. (2) Add a doubler plate: adds a part and a bond, interferes with the cold-plate hose, and needs its own qualification. ' +
       '(3) Change the isolator durometer to move the mode: it moves the mode below the forcing line at hover but onto the 4th order at transition. (4) Do nothing and inspect every 5 h: not viable for a production aircraft.',
@@ -224,7 +224,7 @@ export const ecrs: Ecr[] = [
     ],
     costPage: {
       production: [
-        line('Bracket unit cost, Rev C steady state vs Rev B', 'supplier_quote', { unitCost: 34.6, note: '$221.00 vs $186.40 per bracket, 12 per aircraft. First lot of 25 at $239.50.' }),
+        line('Bracket unit cost, Rev C steady state vs Rev B', 'supplier_quote', { unitCost: 34.6, quantity: 12, note: '$221.00 vs $186.40 per bracket, 12 brackets per aircraft. First lot of 25 at $239.50.' }),
         line('Special tooling and fixtures (Halden fixture and CMM programs)', 'supplier_quote', { oneTime: 6800 }),
         line('NC programming (Halden)', 'supplier_quote', { oneTime: 4200 }),
         line('Delta first-article inspection (Halden)', 'supplier_quote', { oneTime: 2600 }),
@@ -256,7 +256,7 @@ export const ecrs: Ecr[] = [
     description:
       'Replace the six 2-blade aft propellers (BW-4200-000) with 4-blade fixed-pitch propellers and remove the two blade dampers on each. New parts: 4-blade hub BW-4210-200, blade BW-4220-200 (four per propeller), spinner cap BW-4240-200. Removed from the assembly: 2-blade hub BW-4210-100, blade BW-4220-100, damper BW-4230-100, spinner BW-4240-100. ' +
       'The lock actuator BW-4250-100 stays. Tip speed drops 6% at the same hover thrust, so the aft motor runs at lower speed and higher torque; no hardware change to the aft motor, but the controller current limit and the hover software table need a new calibration. ' +
-      'Net mass change -1.7 kg per aircraft (dampers out 2.5 kg, hubs and extra blades in 0.8 kg).',
+      'Net mass change -1.7 kg per aircraft, -0.28 kg per propeller (dampers out 2.5 kg, hubs and extra blades in 0.8 kg).',
     need:
       'NCR-0113: damper elastomer fretting after 38 h, trend says it will not reach 100 h, and the 2.1 dB hover noise exceedance at the 500 ft point. Four blades at lower tip speed gives an estimated 3.4 dB reduction and 3.1% better hover efficiency from lower disk loading per blade, and removes the dampers entirely. ' +
       'Launch customers have community noise commitments that depend on closing the 2.1 dB gap.',
@@ -269,7 +269,7 @@ export const ecrs: Ecr[] = [
     testAndQualification:
       'New blade mould set, whirl-tower and flutter test of the 4-blade rotor, noise measurement campaign, hover performance flight test (about 12 sorties), reopen compliance for the listed means-of-compliance items. Engineering estimate 6 to 12 months from approval to FAA acceptance.',
     itemChanges: [
-      { item: 'BW-4200-000', op: 'revise', fromRev: 'A', toRev: 'B', changes: [{ field: 'blade_count', from: 2, to: 4 }, { field: 'dampers', from: 2, to: 0 }, { field: 'mass_kg', from: 9.8, to: 8.1 }] },
+      { item: 'BW-4200-000', op: 'revise', fromRev: 'A', toRev: 'B', changes: [{ field: 'blade_count', from: 2, to: 4 }, { field: 'dampers', from: 2, to: 0 }, { field: 'mass_kg', from: 9.8, to: 9.52 }] },
       { item: 'BW-4210-200', op: 'add', toRev: 'A', changes: [{ field: 'name', from: null, to: 'Propeller hub, 4-blade fixed pitch' }, { field: 'unit_price_usd', from: null, to: 3950 }] },
       { item: 'BW-4220-200', op: 'add', toRev: 'A', changes: [{ field: 'name', from: null, to: 'Propeller blade, aft 4-blade, carbon' }, { field: 'unit_price_usd', from: null, to: 930 }] },
       { item: 'BW-4240-200', op: 'add', toRev: 'A', changes: [{ field: 'name', from: null, to: 'Spinner and fairing cap (aft, 4-blade)' }, { field: 'unit_price_usd', from: null, to: 330 }] },
@@ -299,7 +299,7 @@ export const ecrs: Ecr[] = [
     ],
     effectivity: {
       production: { basis: 'tbd', from: 'tbd', note: 'After FAA acceptance of the major change. Engineering suggests S/N 034 (about December 2027) if certification testing goes to plan; blade tooling alone is 34 weeks to first articles.' },
-      retrofit: { basis: 'tbd', from: 'tbd', note: 'Engineering recommends a retrofit kit for built aircraft S/N 005-030 before entry into service. Test aircraft S/N 001-004 excluded. Not assessed.' },
+      retrofit: { basis: 'tbd', from: 'tbd', note: 'Engineering recommends a retrofit kit for built aircraft S/N 005-033 (everything before the proposed cut-in) before entry into service. Test aircraft S/N 001-004 excluded. Not assessed.' },
       interchangeable: false,
     },
     inventoryProposal: [
@@ -316,7 +316,7 @@ export const ecrs: Ecr[] = [
         blank('Hover performance flight test'),
         blank('Scrap and write-off of 2-blade inventory'),
       ],
-      retrofit: [blank('Retrofit kits and installation', 'Retrofit recommended for S/N 005-030; not scoped.')],
+      retrofit: [blank('Retrofit kits and installation', 'Retrofit recommended for S/N 005-033; not scoped.')],
       logisticsSupport: [blank('Spares, manuals, training, support equipment')],
       other: [blank('Aft motor controller recalibration and hover table')],
     },
@@ -371,7 +371,7 @@ export const ecrs: Ecr[] = [
       'Hollis quotes Rev C at $3,820 against $3,400 for Rev B. Meridian uses the same pump, two per aircraft; Linnea has been told.',
     need:
       'NCR-0112: hot-and-high climb at 45 C gave 11.4 L/min against 12.5 L/min needed, with the hottest module at 58 C against a 60 C limit. Rev C gives 14.2 L/min, which holds the module spread under 6 K and the hottest module near 54 C on the same profile.',
-    consequencesIfDisapproved: 'Hot-day climb stays restricted to 40 C ambient. Certification hot-day tests (planned January) cannot be run at the required 45 C.',
+    consequencesIfDisapproved: 'Hot-day climb stays restricted to 40 C ambient. Certification hot-day tests (planned January) cannot be run at the required 45 C without engineering samples of the Rev C pump.',
     alternativesConsidered: 'Two pumps in parallel per loop (more plumbing, +1.9 kg, needs a manifold change); larger lines (structure interference). Larger impeller chosen.',
     testAndQualification: 'Pump bench test, glycol soak, and a repeat of the hot-and-high climb on S/N 004. Hollis estimates 8 weeks.',
     itemChanges: [
@@ -389,11 +389,11 @@ export const ecrs: Ecr[] = [
     supplierQuotes: [
       {
         id: 'Q-HOL-26-0966', supplier: 'SUP-HOLLIS', item: 'BW-8210-110', receivedOn: '2026-10-07', validUntil: '2027-01-07',
-        lines: [{ description: 'Pump Rev C, 240 W, 14.2 L/min', unitPrice: 3820 }, { description: 'Qualification and soak testing', oneTime: 36000 }],
+        lines: [{ description: 'Pump Rev C, 240 W, 14.2 L/min', unitPrice: 3820 }, { description: 'Qualification and soak testing', oneTime: 36000 }, { description: 'Engineering samples, four pumps, 8 weeks', unitPrice: 4800, qty: 4 }],
         leadTimeWeeks: 18,
       },
     ],
-    effectivity: { production: { basis: 'serial', from: '15', note: 'S/N 015 and subsequent (March 2027), the earliest delivery on the Hollis 18-week quote. Test time not included.' }, retrofit: { basis: 'tbd', from: 'tbd', note: 'S/N 005-012 retrofit only if hot-day certification needs it.' }, interchangeable: true },
+    effectivity: { production: { basis: 'serial', from: '15', note: 'S/N 015 and subsequent (March 2027), the earliest delivery on the Hollis 18-week quote. Test time not included.' }, retrofit: { basis: 'tbd', from: 'tbd', note: 'Hollis engineering samples (four pumps, 8 weeks) go on S/N 004 for the hot-day tests. S/N 005-014 retrofit only if hot-day certification needs it.' }, interchangeable: true },
     inventoryProposal: [{ item: 'BW-8210-110', location: 'stores', disposition: 'tbd', note: 'Rev B still usable for aircraft not flown hot.' }],
     costPage: {
       production: [
@@ -401,7 +401,7 @@ export const ecrs: Ecr[] = [
         line('Qualification and soak testing (Hollis)', 'supplier_quote', { oneTime: 36000 }),
         blank('Engineering and data revision'),
       ],
-      retrofit: [blank('Retrofit S/N 005-012')], logisticsSupport: [], other: [],
+      retrofit: [blank('Retrofit S/N 005-014 and S/N 004 engineering samples')], logisticsSupport: [], other: [],
     },
     routedTo: FULL_ROUTE, clarity: 'detailed',
     prov: inv('Half of the conflicting pair: same item and fields as ECR-0415.'),
@@ -415,7 +415,7 @@ export const ecrs: Ecr[] = [
     description:
       'Cost reduction on the battery loop pump. Rev C: injection-moulded PPS GF40 housing instead of machined stainless, motor 180 W to 150 W, rated flow 12.0 to 11.0 L/min. Mounting and connector unchanged. Hollis quotes Rev C at $3,015 against $3,400: -$385 per pump, two per aircraft, plus a one-time $48,000 for the mould. ' +
       'The pack loop requirement in TS-8210 rev 3 is 10.5 L/min, so 11.0 still has margin. Mass -0.31 kg per pump.',
-    need: 'Pump is the largest single thermal component by price after the heat exchangers, and the stainless housing is overspecified for the pressure. A 12% cost reduction at 650 aircraft per year is worth about $500k a year.',
+    need: 'The stainless housing is overspecified for the 0.9 bar loop pressure, and the part is bought twice per aircraft. An 11% cost reduction on this pump at 650 aircraft per year is worth about $500k a year.',
     consequencesIfDisapproved: 'No saving. The machined housing stays at about $1,100 of the pump price.',
     alternativesConsidered: 'Cast aluminium housing (-$210, needs a mould too and a coating step); keep machined, cut the motor only (-$120).',
     testAndQualification: 'Housing burst and glycol soak at 85 C, vibration profile. Hollis says 10 weeks.',
@@ -460,12 +460,12 @@ export const ecrs: Ecr[] = [
     title: 'Forward rotor magnet set BW-3120-340: SH grade to UH grade',
     status: 'submitted', program: 'vesper', originator: 'EMP-04', filedOn: '2026-10-20', neededBy: '2026-11-12', originatingNcr: 'NCR-0115',
     priority: 'urgent', justificationCode: 'D', companyClass: 'I', faaClass: 'major',
-    faaRationale: 'New magnet material grade in a flight-critical rotating part; changes rotor design data, torque constant (-3%) and the spin and thermal margins. Treated as major pending Gideon.',
+    faaRationale: 'New magnet material grade in a flight-critical rotating part; changes rotor design data, torque constant (-6%) and the spin and thermal margins. Treated as major pending Gideon.',
     description:
-      'Move the forward motor rotor magnets from SH to UH grade, same segment geometry and coating. UH has higher coercivity (Hcj 2,630 kA/m against 1,990) at slightly lower remanence (1.34 T against 1.40 T), so the torque constant drops about 3% and the controller current limit rises by the same amount. ' +
+      'Move the forward motor rotor magnets from SH to UH grade, same segment geometry and coating. UH has higher coercivity (Hcj 1,990 kA/m against 1,590) at lower remanence (1.31 T against 1.40 T), so the torque constant drops about 6% and the controller current limit rises by the same amount. ' +
       'The set price goes from $8,000 to $9,350. Orrin runs UH only on its pilot furnace line; they said the next qualification slot is 2027-Q2 and they will not commit to a date until we place the qualification order.',
     need:
-      'NCR-0115: 0.8% irreversible flux loss after three hot-day transition cycles at 163 C magnet temperature. The knee margin on SH is about 2 C at our worst case. UH gives about 35 C of margin. Interim software limit TL-212 caps transition thrust above 38 C ambient and costs us hot-day range.',
+      'NCR-0115: 0.8% irreversible flux loss after three hot-day transition cycles at 163 C magnet temperature. The knee margin on SH is about 2 C at our worst case. UH is rated to 180 C and gives about 30 C of margin. Interim software limit TL-212 caps transition thrust above 38 C ambient and costs us hot-day range.',
     consequencesIfDisapproved: 'The transition-thrust limit stays, and hot-day certification flight tests cannot show the required transition performance.',
     alternativesConsidered: 'Improve nacelle airflow at transition (structures change, 4 to 6 months, less margin gained); derate the motor (costs range); active cooling jackets on the rotor (new part). UH chosen as the least invasive.',
     testAndQualification: 'Orrin qualification lot, rotor spin and thermal cycling test, one repeat hot-day transition test on S/N 004, update of the motor performance data for certification.',
@@ -474,8 +474,8 @@ export const ecrs: Ecr[] = [
         item: 'BW-3120-340', op: 'revise', fromRev: 'A', toRev: 'B',
         changes: [
           { field: 'magnet_grade', from: 'SH', to: 'UH' },
-          { field: 'coercivity_hcj_ka_m', from: 1990, to: 2630 },
-          { field: 'remanence_br_t', from: 1.4, to: 1.34 },
+          { field: 'coercivity_hcj_ka_m', from: 1590, to: 1990 },
+          { field: 'remanence_br_t', from: 1.4, to: 1.31 },
           { field: 'unit_price_usd', from: 8000, to: 9350 },
         ],
       },
@@ -493,7 +493,7 @@ export const ecrs: Ecr[] = [
       },
     ],
     effectivity: {
-      production: { basis: 'serial', from: '30', note: 'S/N 030 and subsequent (about October 2027). Assumes the 2027-Q2 slot holds and the 12-set qualification lot can be flown. Orrin has not confirmed either.' },
+      production: { basis: 'serial', from: '30', note: 'S/N 030 and subsequent (about October 2027). Assumes the 2027-Q2 slot holds and the 12-set qualification lot is flown on S/N 030 and 031. Production UH sets follow about 24 weeks after qualification, and S/N 032 onward is not planned. Orrin has not confirmed any date.' },
       retrofit: { basis: 'tbd', from: 'tbd', note: 'Motors on built aircraft keep SH under the transition-thrust limit. Retrofit not requested.' },
       interchangeable: true,
     },
@@ -532,7 +532,7 @@ export const ecrs: Ecr[] = [
         item: 'BW-M512-340', op: 'revise', fromRev: 'A', toRev: 'B',
         changes: [
           { field: 'magnet_grade', from: 'SH', to: 'UH' },
-          { field: 'coercivity_hcj_ka_m', from: 1990, to: 2630 },
+          { field: 'coercivity_hcj_ka_m', from: 1590, to: 1990 },
           { field: 'unit_price_usd', from: 21400, to: 24900 },
         ],
       },

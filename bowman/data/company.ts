@@ -30,12 +30,12 @@ export const company: Company = {
   name: 'Bowman Aviation',
   short: 'Bowman',
   description:
-    'Fictional Archer-like electric-aircraft maker. HQ and pilot production line in California, ' +
+    'Fictional electric-aircraft maker. HQ and pilot production line in California, ' +
     'high-rate plant in Georgia. Builds the Vesper V4 piloted eVTOL air taxi and is developing the ' +
     'Meridian M6 hybrid-electric cargo and medevac VTOL.',
   vocabulary: 'NCR -> ECR -> CCB -> ECO. There is no separate ECN: releasing the ECO notifies downstream teams.',
-  plm: 'Stand-in PLM (plays the role Teamcenter plays at Archer)',
-  erp: 'ERPNext v16 (plays the role SAP S/4HANA plays at Archer)',
+  plm: 'Stand-in PLM',
+  erp: 'ERPNext v16',
   currency: 'USD',
   asOf: '2026-10-24',
   prov: src(`${ARCHER} §6 and "Suggested basis for Bowman"`, 'Teamcenter and SAP are the confirmed Archer tools; Bowman mirrors the roles.'),
@@ -64,7 +64,7 @@ export const programs: Program[] = [
     name: 'Vesper V4',
     stage: 'production',
     description:
-      'Midnight-like 12-tilt-6 piloted eVTOL air taxi: six forward motors tilt and drive 5-blade variable-pitch propellers; ' +
+      '12-tilt-6 piloted eVTOL air taxi: six forward motors tilt and drive 5-blade variable-pitch propellers; ' +
       'six aft motors are fixed, provide lift only, and are faired in cruise. Composite structure, fixed tricycle gear. ' +
       'Powertrain and flight-control software in-house.',
     topItem: 'BW-0001-000',
@@ -78,7 +78,7 @@ export const programs: Program[] = [
     standardCostUsd: 2_800_000,
     targetStandardCostAtRateUsd: 1_800_000,
     certification:
-      'Type certificate and production certificate held (fictional). Mirrors Archer: 797 means-of-compliance items accepted, 17 issue papers (13 standard, 4 unique).',
+      'Type certificate and production certificate held (fictional). 797 means-of-compliance items accepted, 17 issue papers (13 standard, 4 unique).',
     note: 'Rate: about 1 aircraft per month now (Oct 2026), 2 per month in 2027, 6 per month in 2028, 650 per year at the Georgia plant around 2030.',
     prov: src(`${ARCHER} §1, §5 and "Suggested basis for Bowman"`, 'Configuration, MTOW, payload, range and speed follow Midnight; certificates held, price, costs and ramp are invented.'),
   },

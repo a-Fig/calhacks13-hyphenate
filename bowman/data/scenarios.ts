@@ -27,6 +27,7 @@ export const demoScenarios: Scenario[] = [
       'Inventory: Rev B failed fatigue, so no use-up. Scrap stores, WIP, supplier-finished and every installed bracket; cancel the 60 not started at 10%. Use-up versus scrap is the biggest swing.',
       'Retrofit covers S/N 001-010 (120 brackets), not only the four test aircraft. Production cut-in S/N 011; S/N 011-014 wait at the controller-install station for about 14 weeks.',
       'Aircraft are held, so the delay cost of S/N 011-014 is a real line that the originator left blank.',
+      'The bracket is also in eight Meridian aft lift controllers; Meridian has no hardware yet, so the change only moves its baseline cost by $34.60 x 8 per aircraft. A shared item, a second program, no retrofit.',
     ],
     reference: {
       steadyStateDeltaPerAircraftUsd: r2(PERF * (NEW - OLD)),
@@ -45,7 +46,7 @@ export const demoScenarios: Scenario[] = [
     expect: [
       'Company Class I, FAA major (set separately), routine, justification O. Reopens 23 of 797 means-of-compliance items and issue paper IP-07.',
       'Per-propeller material change is +$1,440 (+$8,640 per aircraft, +0.3% of standard cost), tiny against $500k of tooling and about $650k of engineering: one-time cost dominates.',
-      'The cut-in date is driven by certification, 6 to 12 months, not by the 34-week blade tooling alone. Earliest realistic cut-in S/N 034 (December 2027).',
+      'The cut-in date is driven by certification, 6 to 12 months, not by the 34-week blade tooling alone. Earliest realistic cut-in S/N 034 (December 2027). Meridian is unaffected: it has its own lift rotors.',
       'Retrofit of built aircraft is unscoped and is the largest unknown. Inventory of 2-blade parts has no disposition.',
       'Hidden coupling (not detectable from shared entities): four blades change the aft-boom vibration spectrum that ECR-0417\'s bracket sits in. Interaction flags are best effort.',
     ],
@@ -77,7 +78,7 @@ export const demoScenarios: Scenario[] = [
     id: 'S5', title: 'Different parts, one supplier (ECR-0419 and ECR-0421)', ecrs: ['ECR-0419', 'ECR-0421'], kind: 'shared_supplier',
     expect: [
       'No shared entity: BW-3120-340 (Vesper forward magnets) and BW-M512-340 (Meridian cruise magnets) are different items in different programs. Both are bought from Orrin Magnetics, the single source for both.',
-      'Both need the same new grade (UH) qualified in the same 2027-Q2 slot. Orrin runs one qualification lot per quarter, so one part number slips about 13 weeks to 2027-Q4 unless sequenced.',
+      'Both need the same new grade (UH) qualified in the same 2027-Q2 slot. Orrin runs one qualification lot per quarter, so one part number slips about 13 weeks to the 2027-Q3 slot unless sequenced.',
       'UH capacity is 1,200 sets per year on one furnace until 2028-Q3. Combined demand and the 24% extra furnace time per UH set matter.',
       'Combined effects differ from the sum: ordering both within 26 weeks earns a 6% UH raw-material price break and a 40% cheaper second qualification; a missed slot moves Vesper cut-in from S/N 030 (October 2027) to about S/N 037 (January 2028), or the Meridian rotor build and first flight (September 2027) back by a quarter.',
       'ECO-0297 (March 2026) already showed the same pattern: a seven-week wait for an Orrin qualification slot moved a cut-in by two aircraft.',

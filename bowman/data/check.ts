@@ -7,6 +7,7 @@ import { bowman as d } from './index.ts';
 import type { CostGroup, Ecr, Item, ItemCode, Provenance } from './types.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { JSON_PATH, render } from './export.ts';
+import { serialRanges } from './volume.ts';
 
 const failures: string[] = [];
 const warnings: string[] = [];
@@ -307,6 +308,56 @@ for (const it of d.items) {
     ok(near(delta, e.actual.unitCostDeltaUsd, Math.max(2, 0.01 * Math.abs(delta))), `${e.id}: price changes imply ${delta.toFixed(0)} per aircraft, actual says ${e.actual.unitCostDeltaUsd}`);
   }
 }
+// ECO program tags are the union of the programs of the items they change
+for (const e of d.history) {
+  const want = [...new Set(e.itemChanges.flatMap((c) => itemBy.get(c.item)?.programs ?? []))].sort().join(',');
+  ok([...e.program].sort().join(',') === want, `${e.id}: program tags ${e.program} != programs of changed items ${want}`);
+}
+// The first purchase order received at the new price arrives after release and before the actual cut-in
+for (const e of d.history) {
+  for (const ch of e.itemChanges) {
+    const p = ch.changes.find((c) => c.field === 'unit_price_usd');
+    if (!p || typeof p.from !== 'number' || typeof p.to !== 'number' || Math.abs(p.to - p.from) / p.from < 0.01) continue;
+    const mid = (p.from + p.to) / 2;
+    const up = p.to > p.from;
+    const recv = d.purchaseOrders
+      .flatMap((po) => po.lines.filter((l) => l.item === ch.item && l.receivedDate && (up ? l.unitPrice > mid : l.unitPrice < mid)))
+      .map((l) => l.receivedDate as string)
+      .sort();
+    ok(recv.length > 0, `${e.id}: no purchase order received at the new price of ${ch.item}`);
+    if (recv.length) {
+      ok(recv[0] > e.releasedOn, `${e.id}: ${ch.item} received at the new price (${recv[0]}) before release ${e.releasedOn}`);
+      ok(recv[0] <= e.actual.cutInDate, `${e.id}: first ${ch.item} at the new price arrives ${recv[0]}, after the actual cut-in ${e.actual.cutInDate}`);
+    }
+  }
+}
+// Serial numbers sit in the right month of the build history or the volume plan
+{
+  const sr = serialRanges();
+  const monthOfSerial = (s: number) => {
+    const built = d.builtAircraft.find((a) => a.serial === s);
+    if (built) return built.completed.slice(0, 7);
+    return sr.find((r) => s >= r.first && s <= r.last)?.month;
+  };
+  ok(monthOfSerial(11) === '2026-11' && monthOfSerial(15) === '2027-03' && monthOfSerial(34) === '2027-12', 'serial-to-month mapping drifted from the volume plan');
+  for (const e of d.history) {
+    if (e.actual.cutInSerial === undefined) continue;
+    const m = monthOfSerial(e.actual.cutInSerial);
+    ok(m !== undefined && m >= e.actual.cutInDate.slice(0, 7), `${e.id}: cut-in serial ${e.actual.cutInSerial} completes ${m}, before the cut-in date ${e.actual.cutInDate}`);
+  }
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  let compared = 0;
+  for (const e of d.ecrs) {
+    const p = e.effectivity.production;
+    if (p.basis !== 'serial') continue;
+    const m = /[(](?:about )?([A-Za-z]+) ([0-9]{4})[)]/.exec(p.note);
+    if (!m) continue;
+    compared++;
+    const want = `${m[2]}-${String(MONTHS.indexOf(m[1]) + 1).padStart(2, '0')}`;
+    ok(monthOfSerial(Number(p.from)) === want, `${e.id}: effectivity S/N ${p.from} is in ${monthOfSerial(Number(p.from))} per the volume plan, the note says ${want}`);
+  }
+  ok(compared >= 3, `expected to compare at least 3 effectivity months, compared ${compared}`);
+}
 // Mean forecast error, for the summary
 const costErr = d.history.map((e) => (e.actual.unitCostDeltaUsd - e.forecast.unitCostDeltaUsd) / Math.abs(e.forecast.unitCostDeltaUsd));
 const slipWeeks = d.history.map((e) => (new Date(e.actual.cutInDate).getTime() - new Date(e.forecast.cutInDate).getTime()) / (7 * 864e5));
@@ -436,6 +487,22 @@ function itemFieldSet(e: Ecr) {
 ok(d.demoScenarios.filter((s) => s.kind !== 'background').length === 5, 'expected five planted demo scenarios');
 ok(d.demoScenarios.filter((s) => s.kind === 'background').length === 3, 'expected three background scenarios');
 for (const sc of d.demoScenarios) for (const id of sc.ecrs) ok(ecrBy.has(id), `scenario ${sc.id} unknown ECR ${id}`);
+
+// ------------------------------------------------------------------ no real company or product names outside provenance and analog fields
+
+{
+  const REAL = new RegExp('\\b(Archer|Garmin|Safran|Honeywell|FACC|Hexcel|Molicel|Teamcenter|SAP|Midnight|Joby|Beta Technologies|GE Aerospace|Stellantis|Boeing|Lilium|Anduril|Palantir|Overair|Dunmore)\\b');
+  const walk = (v: unknown, path: string) => {
+    if (typeof v === 'string') {
+      if (REAL.test(v)) failures.push(`real name in ${path}: ${v.slice(0, 60)}`);
+    } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${path}[${i}]`));
+    else if (v && typeof v === 'object') {
+      for (const [k, x] of Object.entries(v)) if (k !== 'prov' && k !== 'analog' && k !== 'sectionProvenance') walk(x, `${path}.${k}`);
+    }
+  };
+  checks++;
+  walk(d, 'dataset');
+}
 
 // ------------------------------------------------------------------ provenance
 

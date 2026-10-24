@@ -223,6 +223,31 @@ for (const code of KEY_ITEMS) {
   }
 }
 
+// First order at each ECO's new price: placed three days after release, and received before the actual
+// cut-in date (the supplier lead time is clipped to fit), so the price history never contradicts history.ts.
+for (const eco of history) {
+  for (const ch of eco.itemChanges) {
+    const p = ch.changes.find((c) => c.field === 'unit_price_usd');
+    if (!p || typeof p.to !== 'number' || ch.item === 'BW-5120-210') continue;
+    const r = byCode.get(ch.item) as BuyRow;
+    const rnd = mulberry(hash('eco' + eco.id + ch.item));
+    const od = addDays(eco.releasedOn, 3);
+    const perAircraft = vesperQty.get(ch.item) ?? 1;
+    const gap = GAP[r.lead] ?? 3;
+    let qty = Math.max(r.moq, Math.ceil(perAircraft * useRate(od) * gap * 1.6));
+    if (r.moq >= 25) qty = Math.ceil(qty / r.moq) * r.moq;
+    const maxDays = Math.round((new Date(eco.actual.cutInDate).getTime() - new Date(od).getTime()) / 864e5) - 5;
+    const leadDays = Math.min(Math.round(sampleLead(r, rnd) * 7), maxDays);
+    rawLines.push({
+      r, orderDate: od,
+      line: {
+        item: ch.item, qty, unitPrice: cents(pathPrice(r, od)), requiredDate: addDays(od, Math.round(LEAD[r.lead].p50 * 7 * 1.15)),
+        receivedDate: addDays(od, leadDays), receivedQty: qty,
+      },
+    });
+  }
+}
+
 // The bracket, hand-written to match the ECO-0271 story and the ECR-0417 inventory table.
 const BRACKET = 'BW-5120-210';
 const bracketOrders: [string, number, number, string, string | null][] = [

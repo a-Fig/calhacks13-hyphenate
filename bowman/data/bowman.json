@@ -95,10 +95,10 @@
     },
     "name": "Bowman Aviation",
     "short": "Bowman",
-    "description": "Fictional Archer-like electric-aircraft maker. HQ and pilot production line in California, high-rate plant in Georgia. Builds the Vesper V4 piloted eVTOL air taxi and is developing the Meridian M6 hybrid-electric cargo and medevac VTOL.",
+    "description": "Fictional electric-aircraft maker. HQ and pilot production line in California, high-rate plant in Georgia. Builds the Vesper V4 piloted eVTOL air taxi and is developing the Meridian M6 hybrid-electric cargo and medevac VTOL.",
     "vocabulary": "NCR -> ECR -> CCB -> ECO. There is no separate ECN: releasing the ECO notifies downstream teams.",
-    "plm": "Stand-in PLM (plays the role Teamcenter plays at Archer)",
-    "erp": "ERPNext v16 (plays the role SAP S/4HANA plays at Archer)",
+    "plm": "Stand-in PLM",
+    "erp": "ERPNext v16",
     "currency": "USD",
     "asOf": "2026-10-24",
     "prov": {
@@ -136,7 +136,7 @@
       "id": "vesper",
       "name": "Vesper V4",
       "stage": "production",
-      "description": "Midnight-like 12-tilt-6 piloted eVTOL air taxi: six forward motors tilt and drive 5-blade variable-pitch propellers; six aft motors are fixed, provide lift only, and are faired in cruise. Composite structure, fixed tricycle gear. Powertrain and flight-control software in-house.",
+      "description": "12-tilt-6 piloted eVTOL air taxi: six forward motors tilt and drive 5-blade variable-pitch propellers; six aft motors are fixed, provide lift only, and are faired in cruise. Composite structure, fixed tricycle gear. Powertrain and flight-control software in-house.",
       "topItem": "BW-0001-000",
       "seats": "Pilot + 4",
       "mtowLb": 6500,
@@ -147,7 +147,7 @@
       "targetPriceUsd": 5000000,
       "standardCostUsd": 2800000,
       "targetStandardCostAtRateUsd": 1800000,
-      "certification": "Type certificate and production certificate held (fictional). Mirrors Archer: 797 means-of-compliance items accepted, 17 issue papers (13 standard, 4 unique).",
+      "certification": "Type certificate and production certificate held (fictional). 797 means-of-compliance items accepted, 17 issue papers (13 standard, 4 unique).",
       "note": "Rate: about 1 aircraft per month now (Oct 2026), 2 per month in 2027, 6 per month in 2028, 650 per year at the Georgia plant around 2030.",
       "prov": {
         "basis": "sourced",
@@ -564,7 +564,7 @@
       ],
       "paymentTerms": "Net 45",
       "analog": "FACC (key fuselage and wing elements for Archer)",
-      "onTimeDeliveryPct": 81,
+      "onTimeDeliveryPct": 78,
       "qualityPpm": 1800,
       "prov": {
         "basis": "sourced",
@@ -606,7 +606,7 @@
       ],
       "paymentTerms": "Net 30, 20% deposit on blanket orders",
       "analog": "Molicel / E-One Moli (battery cells; MOU only, November 2022)",
-      "onTimeDeliveryPct": 88,
+      "onTimeDeliveryPct": 89,
       "qualityPpm": 120,
       "prov": {
         "basis": "sourced",
@@ -668,7 +668,7 @@
       ],
       "paymentTerms": "Net 45",
       "analog": "Generic power-semiconductor and motor-component maker",
-      "onTimeDeliveryPct": 76,
+      "onTimeDeliveryPct": 77,
       "qualityPpm": 700,
       "prov": {
         "basis": "invented",
@@ -709,7 +709,7 @@
       ],
       "paymentTerms": "Net 45",
       "analog": "Garmin (G3000 integrated flight deck for Archer, Nov 2022)",
-      "onTimeDeliveryPct": 92,
+      "onTimeDeliveryPct": 100,
       "qualityPpm": 300,
       "prov": {
         "basis": "sourced",
@@ -751,7 +751,7 @@
       ],
       "paymentTerms": "Net 45",
       "analog": "Honeywell (actuators, climate and thermal management for Archer)",
-      "onTimeDeliveryPct": 90,
+      "onTimeDeliveryPct": 91,
       "qualityPpm": 800,
       "prov": {
         "basis": "sourced",
@@ -760,8 +760,8 @@
       }
     },
     {
-      "id": "SUP-DUNMORE",
-      "name": "Dunmore Interconnect",
+      "id": "SUP-FERROW",
+      "name": "Ferrow Interconnect",
       "region": "Latin America",
       "country": "Mexico",
       "supplies": "HV and signal wire harnesses, connectors, junction boxes, charge inlet",
@@ -772,7 +772,7 @@
       ],
       "paymentTerms": "Net 45",
       "analog": "Generic aerospace harness house",
-      "onTimeDeliveryPct": 85,
+      "onTimeDeliveryPct": 86,
       "qualityPpm": 1500,
       "prov": {
         "basis": "invented",
@@ -812,7 +812,7 @@
       ],
       "paymentTerms": "Net 30",
       "analog": "Generic aerospace hardware distributor",
-      "onTimeDeliveryPct": 78,
+      "onTimeDeliveryPct": 81,
       "qualityPpm": 500,
       "prov": {
         "basis": "invented",
@@ -845,7 +845,7 @@
       "id": "CON-ORRIN-UH-SLOT",
       "supplier": "SUP-ORRIN",
       "kind": "qualification_slot",
-      "description": "Orrin runs one qualification lot per quarter on its UH-grade (high-coercivity) furnace line, and each part number needs its own lot. Open slots: 2027-Q2, then 2027-Q4. A second part number requested for the same quarter waits for the next slot (about 13 weeks). Grade-level data (material certificate, demagnetisation curves) is shared between part numbers, so a second part number qualified within 26 weeks of the first costs 40% less. Ordering two part numbers inside one 26-week window also earns a 6% UH raw-material price break. UH yield is 71% against 88% for SH, so each UH set consumes about 24% more furnace time.",
+      "description": "Orrin runs one qualification lot per quarter on its UH-grade (high-coercivity) furnace line, and each part number needs its own lot. Open slots: 2027-Q2, then 2027-Q3. A second part number requested for the same quarter waits for the next slot (about 13 weeks). Grade-level data (material certificate, demagnetisation curves) is shared between part numbers, so a second part number qualified within 26 weeks of the first costs 40% less. Ordering two part numbers inside one 26-week window also earns a 6% UH raw-material price break. UH yield is 71% against 88% for SH, so each UH set consumes about 24% more furnace time.",
       "items": [
         "BW-3120-340",
         "BW-M512-340"
@@ -2349,7 +2349,7 @@
       "makeBuy": "buy",
       "rev": "B",
       "status": "released",
-      "defaultSupplier": "SUP-DUNMORE",
+      "defaultSupplier": "SUP-FERROW",
       "safetyCritical": true,
       "programs": [
         "vesper",
@@ -2366,8 +2366,8 @@
         },
         {
           "rev": "B",
-          "date": "2026-06-25",
-          "eco": "ECO-0318",
+          "date": "2026-05-14",
+          "eco": "ECO-0309",
           "note": "Keyed HV terminal connector on both motors"
         }
       ],
@@ -3541,7 +3541,7 @@
       "makeBuy": "buy",
       "rev": "A",
       "status": "released",
-      "defaultSupplier": "SUP-DUNMORE",
+      "defaultSupplier": "SUP-FERROW",
       "safetyCritical": false,
       "programs": [
         "vesper",
@@ -3801,8 +3801,8 @@
         },
         {
           "rev": "B",
-          "date": "2026-05-07",
-          "eco": "ECO-0309",
+          "date": "2026-03-26",
+          "eco": "ECO-0302",
           "note": "Tighter capacity-match screening on cells"
         }
       ],
@@ -3916,7 +3916,7 @@
       "makeBuy": "buy",
       "rev": "A",
       "status": "released",
-      "defaultSupplier": "SUP-DUNMORE",
+      "defaultSupplier": "SUP-FERROW",
       "safetyCritical": false,
       "programs": [
         "vesper",
@@ -4004,7 +4004,7 @@
       "makeBuy": "buy",
       "rev": "A",
       "status": "released",
-      "defaultSupplier": "SUP-DUNMORE",
+      "defaultSupplier": "SUP-FERROW",
       "safetyCritical": true,
       "programs": [
         "vesper"
@@ -4091,7 +4091,7 @@
       "makeBuy": "buy",
       "rev": "A",
       "status": "released",
-      "defaultSupplier": "SUP-DUNMORE",
+      "defaultSupplier": "SUP-FERROW",
       "safetyCritical": false,
       "programs": [
         "vesper"
@@ -4196,8 +4196,8 @@
         },
         {
           "rev": "B",
-          "date": "2026-01-22",
-          "eco": "ECO-0285",
+          "date": "2025-07-17",
+          "eco": "ECO-0238",
           "note": "Flight deck display Rev B for the new vehicle-management software load"
         }
       ],
@@ -4840,8 +4840,8 @@
         },
         {
           "rev": "B",
-          "date": "2026-08-20",
-          "eco": "ECO-0326",
+          "date": "2026-06-25",
+          "eco": "ECO-0318",
           "note": "Battery loop coolant pump, Rev B impeller and seal"
         }
       ],
@@ -5123,7 +5123,7 @@
       "makeBuy": "buy",
       "rev": "A",
       "status": "released",
-      "defaultSupplier": "SUP-DUNMORE",
+      "defaultSupplier": "SUP-FERROW",
       "safetyCritical": true,
       "programs": [
         "vesper"
@@ -5212,7 +5212,7 @@
       "makeBuy": "buy",
       "rev": "A",
       "status": "released",
-      "defaultSupplier": "SUP-DUNMORE",
+      "defaultSupplier": "SUP-FERROW",
       "safetyCritical": false,
       "programs": [
         "vesper",
@@ -5302,7 +5302,7 @@
       "makeBuy": "buy",
       "rev": "A",
       "status": "released",
-      "defaultSupplier": "SUP-DUNMORE",
+      "defaultSupplier": "SUP-FERROW",
       "safetyCritical": true,
       "programs": [
         "vesper"
@@ -5612,7 +5612,7 @@
         },
         {
           "rev": "B",
-          "date": "2026-06-02",
+          "date": "2026-05-19",
           "eco": "ECO-0314",
           "note": "Superseded fastener standards in the aircraft fastener kit"
         }
@@ -6869,7 +6869,7 @@
       "makeBuy": "buy",
       "rev": "A",
       "status": "released",
-      "defaultSupplier": "SUP-DUNMORE",
+      "defaultSupplier": "SUP-FERROW",
       "safetyCritical": true,
       "programs": [
         "meridian"
@@ -7133,7 +7133,7 @@
       "makeBuy": "buy",
       "rev": "A",
       "status": "released",
-      "defaultSupplier": "SUP-DUNMORE",
+      "defaultSupplier": "SUP-FERROW",
       "safetyCritical": true,
       "programs": [
         "meridian"
@@ -7162,7 +7162,7 @@
       "makeBuy": "buy",
       "rev": "A",
       "status": "released",
-      "defaultSupplier": "SUP-DUNMORE",
+      "defaultSupplier": "SUP-FERROW",
       "safetyCritical": true,
       "programs": [
         "meridian"
@@ -9584,14 +9584,14 @@
         "p90": 759.7
       },
       "leadTimeWeeks": {
-        "p10": 18,
-        "p50": 24,
-        "p90": 32
+        "p10": 12,
+        "p50": 16,
+        "p90": 22
       },
       "moq": 12,
       "qualified": true,
       "soleSource": true,
-      "requalMonths": 9,
+      "requalMonths": 6,
       "priceValidUntil": "2027-06-30",
       "prov": {
         "basis": "invented"
@@ -9767,7 +9767,7 @@
     },
     {
       "item": "BW-3190-100",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "primary": true,
       "allocation": 1,
       "unitPrice": {
@@ -10542,7 +10542,7 @@
     },
     {
       "item": "BW-5195-100",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "primary": true,
       "allocation": 1,
       "unitPrice": {
@@ -10761,7 +10761,7 @@
     },
     {
       "item": "BW-6124-100",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "primary": true,
       "allocation": 1,
       "unitPrice": {
@@ -10833,7 +10833,7 @@
     },
     {
       "item": "BW-6150-100",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "primary": true,
       "allocation": 1,
       "unitPrice": {
@@ -10905,7 +10905,7 @@
     },
     {
       "item": "BW-6180-100",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "primary": true,
       "allocation": 1,
       "unitPrice": {
@@ -11657,7 +11657,7 @@
     },
     {
       "item": "BW-9110-100",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "primary": true,
       "allocation": 1,
       "unitPrice": {
@@ -11729,7 +11729,7 @@
     },
     {
       "item": "BW-9140-100",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "primary": true,
       "allocation": 1,
       "unitPrice": {
@@ -11801,7 +11801,7 @@
     },
     {
       "item": "BW-9300-100",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "primary": true,
       "allocation": 1,
       "unitPrice": {
@@ -12536,14 +12536,14 @@
         "p90": 1766
       },
       "leadTimeWeeks": {
-        "p10": 18,
-        "p50": 24,
-        "p90": 32
+        "p10": 12,
+        "p50": 16,
+        "p90": 22
       },
       "moq": 2,
       "qualified": true,
       "soleSource": true,
-      "requalMonths": 9,
+      "requalMonths": 6,
       "priceValidUntil": "2027-06-30",
       "prov": {
         "basis": "invented"
@@ -12767,7 +12767,7 @@
     },
     {
       "item": "BW-M640-100",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "primary": true,
       "allocation": 1,
       "unitPrice": {
@@ -12915,7 +12915,7 @@
     },
     {
       "item": "BW-M910-100",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "primary": true,
       "allocation": 1,
       "unitPrice": {
@@ -12939,7 +12939,7 @@
     },
     {
       "item": "BW-M920-100",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "primary": true,
       "allocation": 1,
       "unitPrice": {
@@ -13693,11 +13693,11 @@
     },
     {
       "item": "BW-3126-100",
-      "stores": 15,
+      "stores": 18,
       "wip": 24,
       "finishedGoods": 0,
       "supplierFinished": 0,
-      "onOrder": 53,
+      "onOrder": 29,
       "inField": 60,
       "uom": "Nos",
       "monthlyUse": 6,
@@ -16230,7 +16230,7 @@
   "purchaseOrders": [
     {
       "id": "PO-25-0101",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "orderDate": "2025-02-10",
       "status": "received",
       "buyer": "EMP-09",
@@ -16583,8 +16583,8 @@
           "item": "BW-3126-100",
           "qty": 12,
           "unitPrice": 587.05,
-          "requiredDate": "2025-09-02",
-          "receivedDate": "2025-08-14",
+          "requiredDate": "2025-06-30",
+          "receivedDate": "2025-06-18",
           "receivedQty": 12
         },
         {
@@ -16770,7 +16770,7 @@
     },
     {
       "id": "PO-25-0120",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "orderDate": "2025-05-06",
       "status": "received",
       "buyer": "EMP-09",
@@ -16991,8 +16991,8 @@
           "item": "BW-3126-100",
           "qty": 12,
           "unitPrice": 591.86,
-          "requiredDate": "2025-11-24",
-          "receivedDate": "2025-12-13",
+          "requiredDate": "2025-09-21",
+          "receivedDate": "2025-10-05",
           "receivedQty": 12
         },
         {
@@ -17174,6 +17174,42 @@
     },
     {
       "id": "PO-25-0133",
+      "supplier": "SUP-COBALT",
+      "orderDate": "2025-06-19",
+      "status": "received",
+      "buyer": "EMP-09",
+      "lines": [
+        {
+          "item": "BW-9610-100",
+          "qty": 2,
+          "unitPrice": 11738.79,
+          "requiredDate": "2025-07-28",
+          "receivedDate": "2025-08-15",
+          "receivedQty": 2
+        },
+        {
+          "item": "BW-3140-100",
+          "qty": 12,
+          "unitPrice": 1120,
+          "requiredDate": "2025-10-10",
+          "receivedDate": "2025-09-20",
+          "receivedQty": 12
+        },
+        {
+          "item": "BW-3240-100",
+          "qty": 12,
+          "unitPrice": 860,
+          "requiredDate": "2025-10-10",
+          "receivedDate": "2025-10-01",
+          "receivedQty": 12
+        }
+      ],
+      "prov": {
+        "basis": "invented"
+      }
+    },
+    {
+      "id": "PO-25-0134",
       "supplier": "SUP-VEYRON",
       "orderDate": "2025-06-19",
       "status": "received",
@@ -17193,7 +17229,7 @@
       }
     },
     {
-      "id": "PO-25-0134",
+      "id": "PO-25-0135",
       "supplier": "SUP-VANTAGE",
       "orderDate": "2025-06-24",
       "status": "received",
@@ -17206,26 +17242,6 @@
           "requiredDate": "2025-12-02",
           "receivedDate": "2025-11-27",
           "receivedQty": 15000
-        }
-      ],
-      "prov": {
-        "basis": "invented"
-      }
-    },
-    {
-      "id": "PO-25-0135",
-      "supplier": "SUP-COBALT",
-      "orderDate": "2025-06-26",
-      "status": "received",
-      "buyer": "EMP-09",
-      "lines": [
-        {
-          "item": "BW-9610-100",
-          "qty": 2,
-          "unitPrice": 11738.79,
-          "requiredDate": "2025-07-28",
-          "receivedDate": "2025-08-15",
-          "receivedQty": 2
         }
       ],
       "prov": {
@@ -17254,6 +17270,26 @@
     },
     {
       "id": "PO-25-0137",
+      "supplier": "SUP-ALTUS",
+      "orderDate": "2025-07-20",
+      "status": "received",
+      "buyer": "EMP-09",
+      "lines": [
+        {
+          "item": "BW-7110-100",
+          "qty": 8,
+          "unitPrice": 33000,
+          "requiredDate": "2026-04-12",
+          "receivedDate": "2026-03-04",
+          "receivedQty": 8
+        }
+      ],
+      "prov": {
+        "basis": "invented"
+      }
+    },
+    {
+      "id": "PO-25-0138",
       "supplier": "SUP-CARDINAL",
       "orderDate": "2025-07-31",
       "status": "received",
@@ -17273,7 +17309,7 @@
       }
     },
     {
-      "id": "PO-25-0138",
+      "id": "PO-25-0139",
       "supplier": "SUP-STRATUS",
       "orderDate": "2025-07-31",
       "status": "received",
@@ -17293,7 +17329,7 @@
       }
     },
     {
-      "id": "PO-25-0139",
+      "id": "PO-25-0140",
       "supplier": "SUP-NORTHGATE",
       "orderDate": "2025-08-08",
       "status": "received",
@@ -17318,7 +17354,7 @@
         {
           "item": "BW-6122-100",
           "qty": 70,
-          "unitPrice": 1711.41,
+          "unitPrice": 1504.48,
           "requiredDate": "2026-01-18",
           "receivedDate": "2026-01-10",
           "receivedQty": 70
@@ -17346,6 +17382,14 @@
           "requiredDate": "2026-01-04",
           "receivedDate": "2026-03-08",
           "receivedQty": 12
+        },
+        {
+          "item": "BW-6122-100",
+          "qty": 70,
+          "unitPrice": 1505,
+          "requiredDate": "2026-01-03",
+          "receivedDate": "2026-01-07",
+          "receivedQty": 70
         }
       ],
       "prov": {
@@ -17353,8 +17397,8 @@
       }
     },
     {
-      "id": "PO-25-0140",
-      "supplier": "SUP-DUNMORE",
+      "id": "PO-25-0141",
+      "supplier": "SUP-FERROW",
       "orderDate": "2025-08-10",
       "status": "received",
       "buyer": "EMP-09",
@@ -17381,7 +17425,7 @@
       }
     },
     {
-      "id": "PO-25-0141",
+      "id": "PO-25-0142",
       "supplier": "SUP-HALDEN",
       "orderDate": "2025-08-11",
       "status": "received",
@@ -17409,7 +17453,7 @@
       }
     },
     {
-      "id": "PO-25-0142",
+      "id": "PO-25-0143",
       "supplier": "SUP-HALVORSEN",
       "orderDate": "2025-08-11",
       "status": "received",
@@ -17453,7 +17497,7 @@
       }
     },
     {
-      "id": "PO-25-0143",
+      "id": "PO-25-0144",
       "supplier": "SUP-HOLLIS",
       "orderDate": "2025-08-12",
       "status": "received",
@@ -17505,7 +17549,7 @@
       }
     },
     {
-      "id": "PO-25-0144",
+      "id": "PO-25-0145",
       "supplier": "SUP-COBALT",
       "orderDate": "2025-08-13",
       "status": "received",
@@ -17514,7 +17558,7 @@
         {
           "item": "BW-3140-100",
           "qty": 12,
-          "unitPrice": 927.68,
+          "unitPrice": 1111.23,
           "requiredDate": "2025-12-04",
           "receivedDate": "2025-11-01",
           "receivedQty": 12
@@ -17525,7 +17569,7 @@
       }
     },
     {
-      "id": "PO-25-0145",
+      "id": "PO-25-0146",
       "supplier": "SUP-TARN",
       "orderDate": "2025-08-15",
       "status": "received",
@@ -17535,8 +17579,8 @@
           "item": "BW-3126-100",
           "qty": 12,
           "unitPrice": 586.77,
-          "requiredDate": "2026-02-24",
-          "receivedDate": "2026-01-30",
+          "requiredDate": "2025-12-22",
+          "receivedDate": "2025-12-05",
           "receivedQty": 12
         },
         {
@@ -17561,7 +17605,7 @@
       }
     },
     {
-      "id": "PO-25-0146",
+      "id": "PO-25-0147",
       "supplier": "SUP-ORRIN",
       "orderDate": "2025-08-21",
       "status": "received",
@@ -17581,7 +17625,7 @@
       }
     },
     {
-      "id": "PO-25-0147",
+      "id": "PO-25-0148",
       "supplier": "SUP-STRATUS",
       "orderDate": "2025-08-25",
       "status": "received",
@@ -17601,7 +17645,7 @@
       }
     },
     {
-      "id": "PO-25-0148",
+      "id": "PO-25-0149",
       "supplier": "SUP-VANTAGE",
       "orderDate": "2025-08-29",
       "status": "received",
@@ -17621,7 +17665,7 @@
       }
     },
     {
-      "id": "PO-25-0149",
+      "id": "PO-25-0150",
       "supplier": "SUP-COBALT",
       "orderDate": "2025-09-01",
       "status": "received",
@@ -17630,7 +17674,7 @@
         {
           "item": "BW-3240-100",
           "qty": 15,
-          "unitPrice": 683.9,
+          "unitPrice": 858.62,
           "requiredDate": "2025-12-23",
           "receivedDate": "2025-11-08",
           "receivedQty": 15
@@ -17649,7 +17693,7 @@
       }
     },
     {
-      "id": "PO-25-0150",
+      "id": "PO-25-0151",
       "supplier": "SUP-STRATUS",
       "orderDate": "2025-09-03",
       "status": "received",
@@ -17669,7 +17713,7 @@
       }
     },
     {
-      "id": "PO-25-0151",
+      "id": "PO-25-0152",
       "supplier": "SUP-ORRIN",
       "orderDate": "2025-09-04",
       "status": "received",
@@ -17689,7 +17733,7 @@
       }
     },
     {
-      "id": "PO-25-0152",
+      "id": "PO-25-0153",
       "supplier": "SUP-CARDINAL",
       "orderDate": "2025-10-06",
       "status": "received",
@@ -17709,7 +17753,27 @@
       }
     },
     {
-      "id": "PO-25-0153",
+      "id": "PO-25-0154",
+      "supplier": "SUP-HOLLIS",
+      "orderDate": "2025-10-06",
+      "status": "received",
+      "buyer": "EMP-09",
+      "lines": [
+        {
+          "item": "BW-8110-100",
+          "qty": 15,
+          "unitPrice": 19400,
+          "requiredDate": "2026-05-03",
+          "receivedDate": "2026-04-20",
+          "receivedQty": 15
+        }
+      ],
+      "prov": {
+        "basis": "invented"
+      }
+    },
+    {
+      "id": "PO-25-0155",
       "supplier": "SUP-ALTUS",
       "orderDate": "2025-10-09",
       "status": "received",
@@ -17718,7 +17782,7 @@
         {
           "item": "BW-7110-100",
           "qty": 10,
-          "unitPrice": 32540.01,
+          "unitPrice": 33142.61,
           "requiredDate": "2026-07-02",
           "receivedDate": "2026-07-03",
           "receivedQty": 10
@@ -17729,7 +17793,7 @@
       }
     },
     {
-      "id": "PO-25-0154",
+      "id": "PO-25-0156",
       "supplier": "SUP-HALDEN",
       "orderDate": "2025-10-11",
       "status": "received",
@@ -17749,7 +17813,7 @@
       }
     },
     {
-      "id": "PO-25-0155",
+      "id": "PO-25-0157",
       "supplier": "SUP-VEYRON",
       "orderDate": "2025-10-24",
       "status": "received",
@@ -17777,7 +17841,7 @@
       }
     },
     {
-      "id": "PO-25-0156",
+      "id": "PO-25-0158",
       "supplier": "SUP-VANTAGE",
       "orderDate": "2025-10-29",
       "status": "received",
@@ -17797,7 +17861,7 @@
       }
     },
     {
-      "id": "PO-25-0157",
+      "id": "PO-25-0159",
       "supplier": "SUP-STRATUS",
       "orderDate": "2025-10-30",
       "status": "received",
@@ -17817,7 +17881,7 @@
       }
     },
     {
-      "id": "PO-25-0158",
+      "id": "PO-25-0160",
       "supplier": "SUP-COBALT",
       "orderDate": "2025-11-04",
       "status": "received",
@@ -17845,8 +17909,8 @@
       }
     },
     {
-      "id": "PO-25-0159",
-      "supplier": "SUP-DUNMORE",
+      "id": "PO-25-0161",
+      "supplier": "SUP-FERROW",
       "orderDate": "2025-11-05",
       "status": "received",
       "buyer": "EMP-09",
@@ -17873,7 +17937,7 @@
       }
     },
     {
-      "id": "PO-25-0160",
+      "id": "PO-25-0162",
       "supplier": "SUP-NORTHGATE",
       "orderDate": "2025-11-07",
       "status": "received",
@@ -17925,7 +17989,7 @@
       }
     },
     {
-      "id": "PO-25-0161",
+      "id": "PO-25-0163",
       "supplier": "SUP-HOLLIS",
       "orderDate": "2025-11-09",
       "status": "received",
@@ -17934,7 +17998,7 @@
         {
           "item": "BW-8110-100",
           "qty": 15,
-          "unitPrice": 18103.9,
+          "unitPrice": 19522.83,
           "requiredDate": "2026-06-25",
           "receivedDate": "2026-04-25",
           "receivedQty": 15
@@ -17977,7 +18041,7 @@
       }
     },
     {
-      "id": "PO-25-0162",
+      "id": "PO-25-0164",
       "supplier": "SUP-HALVORSEN",
       "orderDate": "2025-11-11",
       "status": "received",
@@ -18021,7 +18085,7 @@
       }
     },
     {
-      "id": "PO-25-0163",
+      "id": "PO-25-0165",
       "supplier": "SUP-TARN",
       "orderDate": "2025-11-13",
       "status": "received",
@@ -18031,8 +18095,8 @@
           "item": "BW-3126-100",
           "qty": 15,
           "unitPrice": 593.02,
-          "requiredDate": "2026-05-28",
-          "receivedDate": "2026-02-25",
+          "requiredDate": "2026-03-25",
+          "receivedDate": "2026-01-20",
           "receivedQty": 15
         },
         {
@@ -18057,7 +18121,7 @@
       }
     },
     {
-      "id": "PO-25-0164",
+      "id": "PO-25-0166",
       "supplier": "SUP-ORRIN",
       "orderDate": "2025-11-23",
       "status": "received",
@@ -18085,7 +18149,7 @@
       }
     },
     {
-      "id": "PO-25-0165",
+      "id": "PO-25-0167",
       "supplier": "SUP-HALDEN",
       "orderDate": "2025-11-24",
       "status": "received",
@@ -18105,7 +18169,7 @@
       }
     },
     {
-      "id": "PO-25-0166",
+      "id": "PO-25-0168",
       "supplier": "SUP-STRATUS",
       "orderDate": "2025-11-29",
       "status": "received",
@@ -18133,7 +18197,7 @@
       }
     },
     {
-      "id": "PO-25-0167",
+      "id": "PO-25-0169",
       "supplier": "SUP-CARDINAL",
       "orderDate": "2025-12-01",
       "status": "received",
@@ -18153,7 +18217,7 @@
       }
     },
     {
-      "id": "PO-25-0168",
+      "id": "PO-25-0170",
       "supplier": "SUP-NORTHGATE",
       "orderDate": "2025-12-01",
       "status": "received",
@@ -18162,7 +18226,7 @@
         {
           "item": "BW-6122-100",
           "qty": 87,
-          "unitPrice": 1711.57,
+          "unitPrice": 1429.64,
           "requiredDate": "2026-04-25",
           "receivedDate": "2026-06-23",
           "receivedQty": 87
@@ -18173,7 +18237,7 @@
       }
     },
     {
-      "id": "PO-25-0169",
+      "id": "PO-25-0171",
       "supplier": "SUP-COBALT",
       "orderDate": "2025-12-02",
       "status": "received",
@@ -18193,7 +18257,7 @@
       }
     },
     {
-      "id": "PO-25-0170",
+      "id": "PO-25-0172",
       "supplier": "SUP-HALDEN",
       "orderDate": "2025-12-12",
       "status": "received",
@@ -18221,7 +18285,7 @@
       }
     },
     {
-      "id": "PO-25-0171",
+      "id": "PO-25-0173",
       "supplier": "SUP-VANTAGE",
       "orderDate": "2025-12-28",
       "status": "received",
@@ -18282,7 +18346,7 @@
     },
     {
       "id": "PO-26-0103",
-      "supplier": "SUP-DUNMORE",
+      "supplier": "SUP-FERROW",
       "orderDate": "2026-02-01",
       "status": "received",
       "buyer": "EMP-09",
@@ -18338,7 +18402,7 @@
         {
           "item": "BW-7110-100",
           "qty": 10,
-          "unitPrice": 32357.71,
+          "unitPrice": 32956.92,
           "requiredDate": "2026-11-01",
           "receivedQty": 0
         }
@@ -18373,7 +18437,7 @@
         {
           "item": "BW-6122-100",
           "qty": 87,
-          "unitPrice": 1505.66,
+          "unitPrice": 1430.63,
           "requiredDate": "2026-07-21",
           "receivedDate": "2026-06-27",
           "receivedQty": 87
@@ -18578,8 +18642,8 @@
           "item": "BW-3126-100",
           "qty": 15,
           "unitPrice": 587.78,
-          "requiredDate": "2026-08-28",
-          "receivedDate": "2026-10-24",
+          "requiredDate": "2026-06-25",
+          "receivedDate": "2026-08-05",
           "receivedQty": 15
         },
         {
@@ -18693,6 +18757,14 @@
           "requiredDate": "2026-08-12",
           "receivedDate": "2026-06-08",
           "receivedQty": 25000
+        },
+        {
+          "item": "BW-6110-100",
+          "qty": 25000,
+          "unitPrice": 11.1,
+          "requiredDate": "2026-09-06",
+          "receivedDate": "2026-08-12",
+          "receivedQty": 25000
         }
       ],
       "prov": {
@@ -18720,6 +18792,26 @@
     },
     {
       "id": "PO-26-0117",
+      "supplier": "SUP-TARN",
+      "orderDate": "2026-03-15",
+      "status": "received",
+      "buyer": "EMP-09",
+      "lines": [
+        {
+          "item": "BW-3126-100",
+          "qty": 24,
+          "unitPrice": 710,
+          "requiredDate": "2026-07-22",
+          "receivedDate": "2026-06-20",
+          "receivedQty": 24
+        }
+      ],
+      "prov": {
+        "basis": "invented"
+      }
+    },
+    {
+      "id": "PO-26-0118",
       "supplier": "SUP-CARDINAL",
       "orderDate": "2026-04-05",
       "status": "received",
@@ -18739,7 +18831,7 @@
       }
     },
     {
-      "id": "PO-26-0118",
+      "id": "PO-26-0119",
       "supplier": "SUP-HALDEN",
       "orderDate": "2026-04-07",
       "status": "received",
@@ -18759,7 +18851,7 @@
       }
     },
     {
-      "id": "PO-26-0119",
+      "id": "PO-26-0120",
       "supplier": "SUP-COBALT",
       "orderDate": "2026-04-27",
       "status": "received",
@@ -18779,7 +18871,7 @@
       }
     },
     {
-      "id": "PO-26-0120",
+      "id": "PO-26-0121",
       "supplier": "SUP-NORTHGATE",
       "orderDate": "2026-05-03",
       "status": "open",
@@ -18837,7 +18929,7 @@
       }
     },
     {
-      "id": "PO-26-0121",
+      "id": "PO-26-0122",
       "supplier": "SUP-STRATUS",
       "orderDate": "2026-05-04",
       "status": "received",
@@ -18865,7 +18957,7 @@
       }
     },
     {
-      "id": "PO-26-0122",
+      "id": "PO-26-0123",
       "supplier": "SUP-HOLLIS",
       "orderDate": "2026-05-06",
       "status": "open",
@@ -18916,8 +19008,8 @@
       }
     },
     {
-      "id": "PO-26-0123",
-      "supplier": "SUP-DUNMORE",
+      "id": "PO-26-0124",
+      "supplier": "SUP-FERROW",
       "orderDate": "2026-05-07",
       "status": "received",
       "buyer": "EMP-09",
@@ -18925,7 +19017,7 @@
         {
           "item": "BW-3190-100",
           "qty": 47,
-          "unitPrice": 403.31,
+          "unitPrice": 422.84,
           "requiredDate": "2026-08-23",
           "receivedDate": "2026-09-02",
           "receivedQty": 47
@@ -18937,6 +19029,14 @@
           "requiredDate": "2026-08-04",
           "receivedDate": "2026-07-08",
           "receivedQty": 4
+        },
+        {
+          "item": "BW-3190-100",
+          "qty": 47,
+          "unitPrice": 420,
+          "requiredDate": "2026-08-14",
+          "receivedDate": "2026-08-05",
+          "receivedQty": 47
         }
       ],
       "prov": {
@@ -18944,7 +19044,7 @@
       }
     },
     {
-      "id": "PO-26-0124",
+      "id": "PO-26-0125",
       "supplier": "SUP-HALVORSEN",
       "orderDate": "2026-05-08",
       "status": "received",
@@ -18988,7 +19088,7 @@
       }
     },
     {
-      "id": "PO-26-0125",
+      "id": "PO-26-0126",
       "supplier": "SUP-VANTAGE",
       "orderDate": "2026-05-09",
       "status": "received",
@@ -18997,7 +19097,7 @@
         {
           "item": "BW-6110-100",
           "qty": 25000,
-          "unitPrice": 10.3,
+          "unitPrice": 11.13,
           "requiredDate": "2026-10-17",
           "receivedDate": "2026-09-07",
           "receivedQty": 25000
@@ -19008,7 +19108,7 @@
       }
     },
     {
-      "id": "PO-26-0126",
+      "id": "PO-26-0127",
       "supplier": "SUP-COBALT",
       "orderDate": "2026-05-14",
       "status": "received",
@@ -19029,6 +19129,14 @@
           "requiredDate": "2026-09-15",
           "receivedDate": "2026-10-22",
           "receivedQty": 24
+        },
+        {
+          "item": "BW-9610-100",
+          "qty": 3,
+          "unitPrice": 11700,
+          "requiredDate": "2026-06-23",
+          "receivedDate": "2026-06-17",
+          "receivedQty": 3
         }
       ],
       "prov": {
@@ -19036,7 +19144,7 @@
       }
     },
     {
-      "id": "PO-26-0127",
+      "id": "PO-26-0128",
       "supplier": "SUP-TARN",
       "orderDate": "2026-05-19",
       "status": "open",
@@ -19045,9 +19153,10 @@
         {
           "item": "BW-3126-100",
           "qty": 24,
-          "unitPrice": 592.01,
-          "requiredDate": "2026-11-29",
-          "receivedQty": 0
+          "unitPrice": 712.42,
+          "requiredDate": "2026-09-26",
+          "receivedDate": "2026-10-13",
+          "receivedQty": 24
         },
         {
           "item": "BW-1110-100",
@@ -19070,7 +19179,7 @@
       }
     },
     {
-      "id": "PO-26-0128",
+      "id": "PO-26-0129",
       "supplier": "SUP-HALDEN",
       "orderDate": "2026-05-20",
       "status": "received",
@@ -19090,7 +19199,7 @@
       }
     },
     {
-      "id": "PO-26-0129",
+      "id": "PO-26-0130",
       "supplier": "SUP-ORRIN",
       "orderDate": "2026-05-22",
       "status": "open",
@@ -19116,7 +19225,7 @@
       }
     },
     {
-      "id": "PO-26-0130",
+      "id": "PO-26-0131",
       "supplier": "SUP-STRATUS",
       "orderDate": "2026-06-01",
       "status": "open",
@@ -19135,7 +19244,7 @@
       }
     },
     {
-      "id": "PO-26-0131",
+      "id": "PO-26-0132",
       "supplier": "SUP-HALDEN",
       "orderDate": "2026-06-02",
       "status": "received",
@@ -19155,7 +19264,7 @@
       }
     },
     {
-      "id": "PO-26-0132",
+      "id": "PO-26-0133",
       "supplier": "SUP-CARDINAL",
       "orderDate": "2026-06-04",
       "status": "received",
@@ -19175,7 +19284,7 @@
       }
     },
     {
-      "id": "PO-26-0133",
+      "id": "PO-26-0134",
       "supplier": "SUP-ALTUS",
       "orderDate": "2026-06-05",
       "status": "open",
@@ -19194,7 +19303,7 @@
       }
     },
     {
-      "id": "PO-26-0134",
+      "id": "PO-26-0135",
       "supplier": "SUP-VEYRON",
       "orderDate": "2026-06-20",
       "status": "open",
@@ -19213,7 +19322,7 @@
       }
     },
     {
-      "id": "PO-26-0135",
+      "id": "PO-26-0136",
       "supplier": "SUP-COBALT",
       "orderDate": "2026-06-25",
       "status": "received",
@@ -19233,7 +19342,27 @@
       }
     },
     {
-      "id": "PO-26-0136",
+      "id": "PO-26-0137",
+      "supplier": "SUP-HOLLIS",
+      "orderDate": "2026-06-28",
+      "status": "received",
+      "buyer": "EMP-09",
+      "lines": [
+        {
+          "item": "BW-8210-110",
+          "qty": 8,
+          "unitPrice": 3400,
+          "requiredDate": "2026-10-19",
+          "receivedDate": "2026-10-03",
+          "receivedQty": 8
+        }
+      ],
+      "prov": {
+        "basis": "invented"
+      }
+    },
+    {
+      "id": "PO-26-0138",
       "supplier": "SUP-VEYRON",
       "orderDate": "2026-07-06",
       "status": "open",
@@ -19252,7 +19381,7 @@
       }
     },
     {
-      "id": "PO-26-0137",
+      "id": "PO-26-0139",
       "supplier": "SUP-VANTAGE",
       "orderDate": "2026-07-12",
       "status": "open",
@@ -19271,7 +19400,7 @@
       }
     },
     {
-      "id": "PO-26-0138",
+      "id": "PO-26-0140",
       "supplier": "SUP-CARDINAL",
       "orderDate": "2026-08-02",
       "status": "received",
@@ -19291,7 +19420,7 @@
       }
     },
     {
-      "id": "PO-26-0139",
+      "id": "PO-26-0141",
       "supplier": "SUP-HOLLIS",
       "orderDate": "2026-08-02",
       "status": "open",
@@ -19332,7 +19461,7 @@
       }
     },
     {
-      "id": "PO-26-0140",
+      "id": "PO-26-0142",
       "supplier": "SUP-HALVORSEN",
       "orderDate": "2026-08-03",
       "status": "open",
@@ -19372,7 +19501,7 @@
       }
     },
     {
-      "id": "PO-26-0141",
+      "id": "PO-26-0143",
       "supplier": "SUP-STRATUS",
       "orderDate": "2026-08-04",
       "status": "open",
@@ -19391,7 +19520,7 @@
       }
     },
     {
-      "id": "PO-26-0142",
+      "id": "PO-26-0144",
       "supplier": "SUP-HALDEN",
       "orderDate": "2026-08-05",
       "status": "open",
@@ -19425,7 +19554,7 @@
       }
     },
     {
-      "id": "PO-26-0143",
+      "id": "PO-26-0145",
       "supplier": "SUP-NORTHGATE",
       "orderDate": "2026-08-06",
       "status": "open",
@@ -19479,8 +19608,8 @@
       }
     },
     {
-      "id": "PO-26-0144",
-      "supplier": "SUP-DUNMORE",
+      "id": "PO-26-0146",
+      "supplier": "SUP-FERROW",
       "orderDate": "2026-08-09",
       "status": "open",
       "buyer": "EMP-09",
@@ -19506,7 +19635,7 @@
       }
     },
     {
-      "id": "PO-26-0145",
+      "id": "PO-26-0147",
       "supplier": "SUP-ORRIN",
       "orderDate": "2026-08-16",
       "status": "open",
@@ -19532,7 +19661,7 @@
       }
     },
     {
-      "id": "PO-26-0146",
+      "id": "PO-26-0148",
       "supplier": "SUP-TARN",
       "orderDate": "2026-08-18",
       "status": "open",
@@ -19542,7 +19671,7 @@
           "item": "BW-3126-100",
           "qty": 29,
           "unitPrice": 710.81,
-          "requiredDate": "2027-02-27",
+          "requiredDate": "2026-12-25",
           "receivedQty": 0
         },
         {
@@ -19565,7 +19694,7 @@
       }
     },
     {
-      "id": "PO-26-0147",
+      "id": "PO-26-0149",
       "supplier": "SUP-COBALT",
       "orderDate": "2026-08-20",
       "status": "open",
@@ -19600,7 +19729,7 @@
       }
     },
     {
-      "id": "PO-26-0148",
+      "id": "PO-26-0150",
       "supplier": "SUP-HOLLIS",
       "orderDate": "2026-09-01",
       "status": "open",
@@ -19609,7 +19738,7 @@
         {
           "item": "BW-8210-110",
           "qty": 10,
-          "unitPrice": 3209.21,
+          "unitPrice": 3422.62,
           "requiredDate": "2026-12-23",
           "receivedQty": 0
         },
@@ -19682,7 +19811,7 @@
       }
     },
     {
-      "id": "PO-26-0149",
+      "id": "PO-26-0151",
       "supplier": "SUP-STRATUS",
       "orderDate": "2026-09-02",
       "status": "open",
@@ -19771,7 +19900,7 @@
       }
     },
     {
-      "id": "PO-26-0150",
+      "id": "PO-26-0152",
       "supplier": "SUP-TARN",
       "orderDate": "2026-09-03",
       "status": "open",
@@ -19886,7 +20015,7 @@
           "item": "BW-M514-100",
           "qty": 2,
           "unitPrice": 1650,
-          "requiredDate": "2027-04-17",
+          "requiredDate": "2027-02-06",
           "receivedQty": 0
         },
         {
@@ -19902,7 +20031,7 @@
       }
     },
     {
-      "id": "PO-26-0151",
+      "id": "PO-26-0153",
       "supplier": "SUP-CARDINAL",
       "orderDate": "2026-09-05",
       "status": "open",
@@ -19949,7 +20078,7 @@
       }
     },
     {
-      "id": "PO-26-0152",
+      "id": "PO-26-0154",
       "supplier": "SUP-COBALT",
       "orderDate": "2026-09-05",
       "status": "open",
@@ -20045,7 +20174,7 @@
       }
     },
     {
-      "id": "PO-26-0153",
+      "id": "PO-26-0155",
       "supplier": "SUP-HALDEN",
       "orderDate": "2026-09-05",
       "status": "open",
@@ -20155,7 +20284,7 @@
       }
     },
     {
-      "id": "PO-26-0154",
+      "id": "PO-26-0156",
       "supplier": "SUP-HALVORSEN",
       "orderDate": "2026-09-05",
       "status": "open",
@@ -20237,7 +20366,7 @@
       }
     },
     {
-      "id": "PO-26-0155",
+      "id": "PO-26-0157",
       "supplier": "SUP-NORTHGATE",
       "orderDate": "2026-09-05",
       "status": "open",
@@ -20347,7 +20476,7 @@
       }
     },
     {
-      "id": "PO-26-0156",
+      "id": "PO-26-0158",
       "supplier": "SUP-VEYRON",
       "orderDate": "2026-09-05",
       "status": "open",
@@ -20394,7 +20523,7 @@
       }
     },
     {
-      "id": "PO-26-0157",
+      "id": "PO-26-0159",
       "supplier": "SUP-VANTAGE",
       "orderDate": "2026-09-07",
       "status": "open",
@@ -20413,7 +20542,7 @@
       }
     },
     {
-      "id": "PO-26-0158",
+      "id": "PO-26-0160",
       "supplier": "SUP-ALTUS",
       "orderDate": "2026-09-08",
       "status": "open",
@@ -20460,7 +20589,7 @@
       }
     },
     {
-      "id": "PO-26-0159",
+      "id": "PO-26-0161",
       "supplier": "SUP-ORRIN",
       "orderDate": "2026-09-14",
       "status": "open",
@@ -20479,8 +20608,8 @@
       }
     },
     {
-      "id": "PO-26-0160",
-      "supplier": "SUP-DUNMORE",
+      "id": "PO-26-0162",
+      "supplier": "SUP-FERROW",
       "orderDate": "2026-09-19",
       "status": "open",
       "buyer": "EMP-09",
@@ -20519,7 +20648,7 @@
       }
     },
     {
-      "id": "PO-26-0161",
+      "id": "PO-26-0163",
       "supplier": "SUP-AURELIO",
       "orderDate": "2026-09-20",
       "status": "open",
@@ -20538,7 +20667,7 @@
       }
     },
     {
-      "id": "PO-26-0162",
+      "id": "PO-26-0164",
       "supplier": "SUP-ALTUS",
       "orderDate": "2026-10-03",
       "status": "open",
@@ -20585,7 +20714,7 @@
       }
     },
     {
-      "id": "PO-26-0163",
+      "id": "PO-26-0165",
       "supplier": "SUP-CARDINAL",
       "orderDate": "2026-10-03",
       "status": "open",
@@ -20604,8 +20733,8 @@
       }
     },
     {
-      "id": "PO-26-0164",
-      "supplier": "SUP-DUNMORE",
+      "id": "PO-26-0166",
+      "supplier": "SUP-FERROW",
       "orderDate": "2026-10-03",
       "status": "open",
       "buyer": "EMP-09",
@@ -20630,7 +20759,7 @@
       }
     },
     {
-      "id": "PO-26-0165",
+      "id": "PO-26-0167",
       "supplier": "SUP-HALDEN",
       "orderDate": "2026-10-03",
       "status": "open",
@@ -20656,7 +20785,7 @@
       }
     },
     {
-      "id": "PO-26-0166",
+      "id": "PO-26-0168",
       "supplier": "SUP-HALVORSEN",
       "orderDate": "2026-10-03",
       "status": "open",
@@ -20675,7 +20804,7 @@
       }
     },
     {
-      "id": "PO-26-0167",
+      "id": "PO-26-0169",
       "supplier": "SUP-HOLLIS",
       "orderDate": "2026-10-03",
       "status": "open",
@@ -20701,7 +20830,7 @@
       }
     },
     {
-      "id": "PO-26-0168",
+      "id": "PO-26-0170",
       "supplier": "SUP-NORTHGATE",
       "orderDate": "2026-10-03",
       "status": "open",
@@ -20727,7 +20856,7 @@
       }
     },
     {
-      "id": "PO-26-0169",
+      "id": "PO-26-0171",
       "supplier": "SUP-TARN",
       "orderDate": "2026-10-03",
       "status": "open",
@@ -21805,7 +21934,8 @@
       "companyClass": "I",
       "faaClass": "minor",
       "program": [
-        "vesper"
+        "vesper",
+        "meridian"
       ],
       "itemChanges": [
         {
@@ -21858,7 +21988,62 @@
         "oneTimeCostUsd": 51500,
         "cutInDate": "2025-10-27",
         "cutInSerial": 4,
-        "variance": "Price rose to +$185 and +$175 per set when the ceramic ball allocation was confirmed. Cut-in slipped six weeks: Cobalt's bearing source had a ball allocation queue. One-time cost included an extra 40 h of rig time to repeat the fluting check."
+        "variance": "Price rose to +$185 and +$175 per set when the ceramic ball allocation was confirmed. Cut-in slipped six weeks: the bearing source at Cobalt had a ball allocation queue. One-time cost included an extra 40 h of rig time to repeat the fluting check."
+      },
+      "prov": {
+        "basis": "invented"
+      }
+    },
+    {
+      "id": "ECO-0238",
+      "ecr": "ECR-0296",
+      "title": "Flight deck display Rev B for the new vehicle-management software load",
+      "originator": "EMP-07",
+      "fileDate": "2025-06-09",
+      "approvedOn": "2025-07-15",
+      "releasedOn": "2025-07-17",
+      "decidedBy": "ccb",
+      "justificationCode": "C",
+      "companyClass": "I",
+      "faaClass": "minor",
+      "program": [
+        "vesper",
+        "meridian"
+      ],
+      "itemChanges": [
+        {
+          "item": "BW-7110-100",
+          "op": "revise",
+          "fromRev": "A",
+          "toRev": "B",
+          "changes": [
+            {
+              "field": "firmware_hardware_baseline",
+              "from": "HW-A / SW 4.1",
+              "to": "HW-B / SW 4.3"
+            },
+            {
+              "field": "unit_price_usd",
+              "from": 32400,
+              "to": 33000
+            }
+          ]
+        }
+      ],
+      "summary": "Compatibility with the VMC software load 5.0 interface. Altus ships a hardware-B display with a revised bus transceiver. No change to form or fit. Avionics lead time is 33 weeks, so the change was released well ahead of the cut-in.",
+      "forecast": {
+        "unitCostDeltaUsd": 1350,
+        "oneTimeCostUsd": 30000,
+        "cutInDate": "2026-03-02",
+        "cutInSerial": 5,
+        "notes": "Altus budgetary +$450 per display, three per aircraft."
+      },
+      "actual": {
+        "unitCostDeltaUsd": 1800,
+        "oneTimeCostUsd": 34000,
+        "cutInDate": "2026-03-09",
+        "cutInSerial": 5,
+        "variance": "One week late. The firm quote came in at +$600 per display, a third above the budgetary number. Integration retest used the planned bench slot."
       },
       "prov": {
         "basis": "invented"
@@ -21877,7 +22062,8 @@
       "companyClass": "I",
       "faaClass": "minor",
       "program": [
-        "vesper"
+        "vesper",
+        "meridian"
       ],
       "itemChanges": [
         {
@@ -21912,7 +22098,7 @@
         "oneTimeCostUsd": 168000,
         "cutInDate": "2026-01-12",
         "cutInSerial": 5,
-        "variance": "Saving was -$282 per module, not -$410: first-lot weld yield was 88% and the supplier priced rework in. Weld qualification failed first pull-test round and was repeated; cut-in slipped ten weeks and one-time cost ran 40% over."
+        "variance": "Saving was -$282 per module, not -$410: first-lot weld yield was 88% and the supplier priced rework in. Weld qualification failed the first pull-test round and was repeated; cut-in slipped ten weeks and one-time cost ran 40% over."
       },
       "prov": {
         "basis": "invented"
@@ -21931,8 +22117,7 @@
       "companyClass": "I",
       "faaClass": "major",
       "program": [
-        "vesper",
-        "meridian"
+        "vesper"
       ],
       "itemChanges": [
         {
@@ -21958,16 +22143,16 @@
       "forecast": {
         "unitCostDeltaUsd": 6900,
         "oneTimeCostUsd": 260000,
-        "cutInDate": "2025-12-01",
+        "cutInDate": "2026-03-02",
         "cutInSerial": 5,
-        "notes": "Hollis quote +$1,150 per actuator, six per aircraft. Qualification test estimated at 10 weeks."
+        "notes": "Hollis quote +$1,150 per actuator, six per aircraft. Actuator lead time is 26 weeks; qualification test estimated at 10 weeks."
       },
       "actual": {
         "unitCostDeltaUsd": 8460,
         "oneTimeCostUsd": 342000,
-        "cutInDate": "2026-02-09",
+        "cutInDate": "2026-05-04",
         "cutInSerial": 5,
-        "variance": "Price landed at +$1,410 per actuator after Hollis re-quoted for the extra harness and connector. Qualification test needed a second thermal-cycling run, and the FAA data review added three weeks. Cut-in slipped ten weeks to the next aircraft."
+        "variance": "Price landed at +$1,410 per actuator after Hollis re-quoted for the extra harness and connector. Qualification test needed a second thermal-cycling run, and the FAA data review added three weeks. Cut-in slipped nine weeks but stayed on the first production aircraft."
       },
       "prov": {
         "basis": "invented"
@@ -22027,62 +22212,7 @@
         "oneTimeCostUsd": 34300,
         "cutInDate": "2026-02-23",
         "cutInSerial": 5,
-        "variance": "Steady-state price landed exactly on forecast ($186.40) from the third lot. The first two lots cost $201.50 (25 pieces) and $188.90 (50 pieces): purchase price variance $502.50. Halden's first fixture failed CMM correlation and was rebuilt ($20,100 fixture and inspection against $12,400); cut-in slipped six weeks and one-time cost ran 29% over."
-      },
-      "prov": {
-        "basis": "invented"
-      }
-    },
-    {
-      "id": "ECO-0285",
-      "ecr": "ECR-0340",
-      "title": "Flight deck display Rev B for the new vehicle-management software load",
-      "originator": "EMP-07",
-      "fileDate": "2025-12-09",
-      "approvedOn": "2026-01-20",
-      "releasedOn": "2026-01-22",
-      "decidedBy": "ccb",
-      "justificationCode": "C",
-      "companyClass": "I",
-      "faaClass": "minor",
-      "program": [
-        "vesper",
-        "meridian"
-      ],
-      "itemChanges": [
-        {
-          "item": "BW-7110-100",
-          "op": "revise",
-          "fromRev": "A",
-          "toRev": "B",
-          "changes": [
-            {
-              "field": "firmware_hardware_baseline",
-              "from": "HW-A / SW 4.1",
-              "to": "HW-B / SW 4.3"
-            },
-            {
-              "field": "unit_price_usd",
-              "from": 32400,
-              "to": 33000
-            }
-          ]
-        }
-      ],
-      "summary": "Compatibility with the VMC software load 5.0 interface. Altus ships a hardware-B display with a revised bus transceiver. No change to form or fit.",
-      "forecast": {
-        "unitCostDeltaUsd": 1350,
-        "oneTimeCostUsd": 30000,
-        "cutInDate": "2026-03-02",
-        "cutInSerial": 5,
-        "notes": "Altus budgetary +$450 per display, three per aircraft."
-      },
-      "actual": {
-        "unitCostDeltaUsd": 1800,
-        "oneTimeCostUsd": 34000,
-        "cutInDate": "2026-03-02",
-        "cutInSerial": 5,
-        "variance": "On time. The firm quote came in at +$600 per display, a third above the budgetary number. Integration retest used the planned bench slot."
+        "variance": "Steady-state price landed exactly on forecast ($186.40) from the third lot. The first two lots cost $201.50 (25 pieces) and $188.90 (50 pieces): purchase price variance $502.50. The first fixture at Halden failed CMM correlation and was rebuilt ($20,100 fixture and inspection against $12,400); cut-in slipped six weeks and one-time cost ran 29% over."
       },
       "prov": {
         "basis": "invented"
@@ -22136,20 +22266,20 @@
         "oneTimeCostUsd": 71000,
         "cutInDate": "2026-07-06",
         "cutInSerial": 8,
-        "variance": "Sleeve price was +$120. The magnet regrind needed a new process qualification at Orrin, and Orrin's qualification furnace was booked: the change waited seven weeks for a slot, so cut-in moved two aircraft later. This is the supplier-slot pattern ECR-0419 and ECR-0421 now share."
+        "variance": "Sleeve price was +$120. The magnet regrind needed a new process qualification at Orrin. Orrin qualifies one lot per quarter on that furnace line and the line was booked, so the change waited seven weeks for a slot and cut-in moved two aircraft later."
       },
       "prov": {
         "basis": "invented"
       }
     },
     {
-      "id": "ECO-0309",
-      "ecr": "ECR-0362",
+      "id": "ECO-0302",
+      "ecr": "ECR-0356",
       "title": "Tighter capacity-match screening on cells",
       "originator": "EMP-04",
-      "fileDate": "2026-04-06",
-      "approvedOn": "2026-05-05",
-      "releasedOn": "2026-05-07",
+      "fileDate": "2026-02-23",
+      "approvedOn": "2026-03-24",
+      "releasedOn": "2026-03-26",
       "decidedBy": "ccb",
       "justificationCode": "D",
       "companyClass": "I",
@@ -22182,16 +22312,71 @@
       "forecast": {
         "unitCostDeltaUsd": 5443,
         "oneTimeCostUsd": 85000,
-        "cutInDate": "2026-06-29",
-        "cutInSerial": 7,
-        "notes": "+$0.60 per cell on 9,072 cells per aircraft."
+        "cutInDate": "2026-07-13",
+        "cutInSerial": 8,
+        "notes": "+$0.60 per cell on 9,072 cells per aircraft. Cell lead time is 20 weeks."
       },
       "actual": {
         "unitCostDeltaUsd": 7530,
         "oneTimeCostUsd": 91000,
-        "cutInDate": "2026-08-03",
-        "cutInSerial": 8,
-        "variance": "Price was +$0.83 per cell: Vantage's re-sort yield was 83% and the rejected band is priced into the accepted cells. Cut-in slipped five weeks while Vantage added a sorting shift."
+        "cutInDate": "2026-08-17",
+        "cutInSerial": 9,
+        "variance": "Price was +$0.83 per cell: the Vantage re-sort yield was 83% and the rejected band is priced into the accepted cells. Cut-in slipped five weeks while Vantage added a sorting shift, and the first re-sorted cells reached modules for the next aircraft."
+      },
+      "prov": {
+        "basis": "invented"
+      }
+    },
+    {
+      "id": "ECO-0309",
+      "ecr": "ECR-0362",
+      "title": "Keyed HV terminal connector on both motors",
+      "originator": "EMP-03",
+      "fileDate": "2026-04-14",
+      "approvedOn": "2026-05-12",
+      "releasedOn": "2026-05-14",
+      "decidedBy": "ccb",
+      "justificationCode": "S",
+      "companyClass": "I",
+      "faaClass": "minor",
+      "program": [
+        "vesper",
+        "meridian"
+      ],
+      "itemChanges": [
+        {
+          "item": "BW-3190-100",
+          "op": "revise",
+          "fromRev": "A",
+          "toRev": "B",
+          "changes": [
+            {
+              "field": "keying",
+              "from": "unkeyed",
+              "to": "keyed, phase-coded"
+            },
+            {
+              "field": "unit_price_usd",
+              "from": 400.6,
+              "to": 420
+            }
+          ]
+        }
+      ],
+      "summary": "NCR: a technician swapped two phases on an aft motor during build. A keyed, phase-coded connector makes miswiring impossible. Interchangeable at the motor.",
+      "forecast": {
+        "unitCostDeltaUsd": 264,
+        "oneTimeCostUsd": 9800,
+        "cutInDate": "2026-08-10",
+        "cutInSerial": 9,
+        "notes": "Quote +$22 per connector, twelve per aircraft. Connector lead time is 11 weeks."
+      },
+      "actual": {
+        "unitCostDeltaUsd": 233,
+        "oneTimeCostUsd": 8900,
+        "cutInDate": "2026-08-10",
+        "cutInSerial": 9,
+        "variance": "On time and slightly under: +$19.40 per connector after the firm quote. The only miss was three days on drawing release."
       },
       "prov": {
         "basis": "invented"
@@ -22202,9 +22387,9 @@
       "ecr": "ECR-0368",
       "title": "Superseded fastener standards in the aircraft fastener kit",
       "originator": "EMP-07",
-      "fileDate": "2026-05-26",
-      "approvedOn": "2026-06-02",
-      "releasedOn": "2026-06-02",
+      "fileDate": "2026-05-12",
+      "approvedOn": "2026-05-19",
+      "releasedOn": "2026-05-19",
       "decidedBy": "fast_track",
       "justificationCode": "C",
       "companyClass": "II",
@@ -22244,7 +22429,7 @@
         "oneTimeCostUsd": 0,
         "cutInDate": "2026-06-22",
         "cutInSerial": 7,
-        "variance": "On forecast. Six days from filing to release."
+        "variance": "On forecast. Seven days from filing to release."
       },
       "prov": {
         "basis": "invented",
@@ -22254,66 +22439,11 @@
     {
       "id": "ECO-0318",
       "ecr": "ECR-0372",
-      "title": "Keyed HV terminal connector on both motors",
-      "originator": "EMP-03",
+      "title": "Battery loop coolant pump, Rev B impeller and seal",
+      "originator": "EMP-06",
       "fileDate": "2026-06-02",
       "approvedOn": "2026-06-23",
       "releasedOn": "2026-06-25",
-      "decidedBy": "ccb",
-      "justificationCode": "S",
-      "companyClass": "I",
-      "faaClass": "minor",
-      "program": [
-        "vesper",
-        "meridian"
-      ],
-      "itemChanges": [
-        {
-          "item": "BW-3190-100",
-          "op": "revise",
-          "fromRev": "A",
-          "toRev": "B",
-          "changes": [
-            {
-              "field": "keying",
-              "from": "unkeyed",
-              "to": "keyed, phase-coded"
-            },
-            {
-              "field": "unit_price_usd",
-              "from": 400.6,
-              "to": 420
-            }
-          ]
-        }
-      ],
-      "summary": "NCR: a technician swapped two phases on an aft motor during build. A keyed, phase-coded connector makes miswiring impossible. Interchangeable at the motor.",
-      "forecast": {
-        "unitCostDeltaUsd": 264,
-        "oneTimeCostUsd": 9800,
-        "cutInDate": "2026-08-10",
-        "cutInSerial": 9,
-        "notes": "+$22 per connector, twelve per aircraft."
-      },
-      "actual": {
-        "unitCostDeltaUsd": 233,
-        "oneTimeCostUsd": 8900,
-        "cutInDate": "2026-08-10",
-        "cutInSerial": 9,
-        "variance": "On time and slightly under: +$19.40 per connector. The only miss was three days on drawing release."
-      },
-      "prov": {
-        "basis": "invented"
-      }
-    },
-    {
-      "id": "ECO-0326",
-      "ecr": "ECR-0381",
-      "title": "Battery loop coolant pump, Rev B impeller and seal",
-      "originator": "EMP-06",
-      "fileDate": "2026-07-21",
-      "approvedOn": "2026-08-18",
-      "releasedOn": "2026-08-20",
       "decidedBy": "ccb",
       "justificationCode": "D",
       "companyClass": "I",
@@ -22347,20 +22477,20 @@
           ]
         }
       ],
-      "summary": "Seal swelling after glycol-water soak exceeded limits. Rev B changes the seal and impeller materials. Same flow rating, same mounting.",
+      "summary": "Seal swelling after glycol-water soak exceeded limits. Rev B changes the seal and impeller materials. Same flow rating, same mounting. Test aircraft S/N 001-004 were refitted with Rev B pumps in September from a rework batch.",
       "forecast": {
         "unitCostDeltaUsd": 360,
         "oneTimeCostUsd": 14000,
         "cutInDate": "2026-10-05",
         "cutInSerial": 10,
-        "notes": "Hollis +$180 per pump, two per aircraft."
+        "notes": "Hollis +$180 per pump, two per aircraft. Pump lead time is 14 weeks."
       },
       "actual": {
         "unitCostDeltaUsd": 424,
         "oneTimeCostUsd": 17500,
         "cutInDate": "2026-10-12",
         "cutInSerial": 10,
-        "variance": "+$212 per pump after material price adders. One week late: soak-test report was reissued once."
+        "variance": "+$212 per pump after material price adders. One week late: the soak-test report was reissued once."
       },
       "prov": {
         "basis": "invented"
@@ -22725,9 +22855,9 @@
       "faaClass": "minor",
       "faaRationale": "Secondary structure that supports the controller only. Rev C is strictly stiffer with the same envelope and interfaces, mass up 0.12 kg per bracket, so no appreciable effect on weight, balance, strength, reliability or operating characteristics. Proposed minor under 14 CFR 21.93(a); the classification is Bowman's call as design approval holder and is pending Gideon's sign-off.",
       "classificationNote": "Class I because of cost and retrofit of aircraft already built. FAA minor. The two classifications are separate and disagree here.",
-      "description": "Replace the machined 7075 mounting bracket BW-5120-210 Rev B with Rev C on all twelve motor controllers (six forward, six aft). Rev C changes: plate stock 1.0 in to 1.25 in, web 5 mm to 8 mm, lower fillet radius 3 mm to 6 mm. Outer envelope, the four mounting holes and the isolator pattern do not change, so Rev C is interchangeable with Rev B at the controller and the harness. Mass goes from 0.41 kg to 0.53 kg per bracket (+1.4 kg per aircraft). Halden has quoted Rev C at $221.00 steady state, $239.50 for the first lot of 25, plus fixture and programming costs. Rev B has been the production revision since S/N 005 and is installed on S/N 001-010.",
-      "need": "NCR-0119: crack at the lower fillet at 8.2 h of the 20 h endurance profile; three of twelve rig brackets have initiated by 20 h. The Rev B stress check used a 212 Hz forcing line that Rev B did move, but the sixth electrical order of the aft motor at hover speed sits at 241 Hz, right on the new mode. Rev C moves the mode to 318 Hz, clear of every forcing line up to the 9th order, and the stress report supplement shows a fatigue margin of +14% at the fillet against -31% for Rev B.",
-      "consequencesIfDisapproved": "No aircraft can fly beyond the 5 h inspection interval with Rev B. S/N 001-004 carry the certification test program, so the test campaign stops. S/N 005-010 cannot be delivered, and controller installation stays held on every aircraft still in build.",
+      "description": "Replace the machined 7075 mounting bracket BW-5120-210 Rev B with Rev C on all twelve motor controllers (six forward, six aft). Rev C changes: plate stock 1.0 in to 1.25 in, web 5 mm to 8 mm, lower fillet radius 3 mm to 6 mm. Outer envelope, the four mounting holes and the isolator pattern do not change, so Rev C is interchangeable with Rev B at the controller and the harness. Mass goes from 0.41 kg to 0.53 kg per bracket (+1.4 kg per aircraft). Halden has quoted Rev C at $221.00 steady state, $239.50 for the first lot of 25, plus fixture and programming costs. Rev B has been the production revision since S/N 005 and is installed on S/N 001-010. The same bracket is in the Meridian aft lift controllers (eight per aircraft); no Meridian hardware is built, so Rev C simply becomes its baseline at +$276.80 per aircraft.",
+      "need": "NCR-0119: crack at the lower fillet at 8.2 h of the 20 h endurance profile; three of twelve rig brackets have initiated by 20 h. The Rev B stress check used a 212 Hz forcing line that Rev B did move, but the sixth electrical order of the aft motor at hover speed sits at 241 Hz, right on the new mode. Rev C moves the mode to 262 Hz, between the 6th and 7th orders (241 and 281 Hz), the only orders with energy in the hover profile, and the stress report supplement shows a fatigue margin of +14% at the fillet against -31% for Rev B.",
+      "consequencesIfDisapproved": "No aircraft can fly beyond the 5 h inspection interval with Rev B. S/N 001-004 carry the certification test program, so the test campaign stops. S/N 005-010 cannot be delivered, and controller installation stays held on every aircraft still in build. The first aircraft to reach that station is S/N 011 in about three weeks, which is why this is filed urgent.",
       "alternativesConsidered": "(1) Shot-peen the Rev B fillets: analysis gives +9% fatigue margin, not enough. (2) Add a doubler plate: adds a part and a bond, interferes with the cold-plate hose, and needs its own qualification. (3) Change the isolator durometer to move the mode: it moves the mode below the forcing line at hover but onto the 4th order at transition. (4) Do nothing and inspect every 5 h: not viable for a production aircraft.",
       "failureData": "Rig EP-3, controller position 4: crack at 8.2 h, 14 mm from flange edge into web. Positions 1 and 5: indications at 20 h. Fractography: fatigue initiation at fillet tangent, beach marks, no defect. Rev A to Rev B (ECO-0271) addressed a different mode at 212 Hz.",
       "testAndQualification": "Vibration re-qualification on the endurance rig: 20 h EP-3 profile plus a 2x margin run. Delta first-article inspection at Halden. Stress report supplement already drafted. No FAA project if classified minor.",
@@ -22858,7 +22988,8 @@
             "label": "Bracket unit cost, Rev C steady state vs Rev B",
             "basis": "supplier_quote",
             "unitCost": 34.6,
-            "note": "$221.00 vs $186.40 per bracket, 12 per aircraft. First lot of 25 at $239.50."
+            "quantity": 12,
+            "note": "$221.00 vs $186.40 per bracket, 12 brackets per aircraft. First lot of 25 at $239.50."
           },
           {
             "label": "Special tooling and fixtures (Halden fixture and CMM programs)",
@@ -22956,7 +23087,7 @@
       "faaClass": "major",
       "faaRationale": "Changes the propeller type design, its vibration and flutter characteristics, noise, and lift-system performance. Reopens 23 of the 797 means-of-compliance items and issue paper IP-07 (propeller and rotor). Needs an FAA project; major under 14 CFR 21.93(a).",
       "classificationNote": "Not interchangeable with the 2-blade assembly. Gideon to confirm the issue-paper impact; the 23-item figure is engineering's count.",
-      "description": "Replace the six 2-blade aft propellers (BW-4200-000) with 4-blade fixed-pitch propellers and remove the two blade dampers on each. New parts: 4-blade hub BW-4210-200, blade BW-4220-200 (four per propeller), spinner cap BW-4240-200. Removed from the assembly: 2-blade hub BW-4210-100, blade BW-4220-100, damper BW-4230-100, spinner BW-4240-100. The lock actuator BW-4250-100 stays. Tip speed drops 6% at the same hover thrust, so the aft motor runs at lower speed and higher torque; no hardware change to the aft motor, but the controller current limit and the hover software table need a new calibration. Net mass change -1.7 kg per aircraft (dampers out 2.5 kg, hubs and extra blades in 0.8 kg).",
+      "description": "Replace the six 2-blade aft propellers (BW-4200-000) with 4-blade fixed-pitch propellers and remove the two blade dampers on each. New parts: 4-blade hub BW-4210-200, blade BW-4220-200 (four per propeller), spinner cap BW-4240-200. Removed from the assembly: 2-blade hub BW-4210-100, blade BW-4220-100, damper BW-4230-100, spinner BW-4240-100. The lock actuator BW-4250-100 stays. Tip speed drops 6% at the same hover thrust, so the aft motor runs at lower speed and higher torque; no hardware change to the aft motor, but the controller current limit and the hover software table need a new calibration. Net mass change -1.7 kg per aircraft, -0.28 kg per propeller (dampers out 2.5 kg, hubs and extra blades in 0.8 kg).",
       "need": "NCR-0113: damper elastomer fretting after 38 h, trend says it will not reach 100 h, and the 2.1 dB hover noise exceedance at the 500 ft point. Four blades at lower tip speed gives an estimated 3.4 dB reduction and 3.1% better hover efficiency from lower disk loading per blade, and removes the dampers entirely. Launch customers have community noise commitments that depend on closing the 2.1 dB gap.",
       "consequencesIfDisapproved": "The dampers stay as a 25 h inspect item with a life of perhaps 60 h, the noise gap stays open, and two launch customers' noise requirements are at risk. We would need a redesigned damper (6 months) just to stand still.",
       "alternativesConsidered": "3-blade: 1.1 dB gain only and still needs dampers. 2-blade with a new damper: no noise gain. 4-blade chosen. The aft propellers are locked and faired in cruise so the extra blades add no cruise drag, but the lock position and fairing cap need re-design for four blades. Not re-assessed: the aft-boom vibration spectrum changes with four blades (blade-pass content moves), so the structures group should re-run the aft-boom and controller-bracket vibration survey.",
@@ -22982,7 +23113,7 @@
             {
               "field": "mass_kg",
               "from": 9.8,
-              "to": 8.1
+              "to": 9.52
             }
           ]
         },
@@ -23124,7 +23255,7 @@
         "retrofit": {
           "basis": "tbd",
           "from": "tbd",
-          "note": "Engineering recommends a retrofit kit for built aircraft S/N 005-030 before entry into service. Test aircraft S/N 001-004 excluded. Not assessed."
+          "note": "Engineering recommends a retrofit kit for built aircraft S/N 005-033 (everything before the proposed cut-in) before entry into service. Test aircraft S/N 001-004 excluded. Not assessed."
         },
         "interchangeable": false
       },
@@ -23183,7 +23314,7 @@
           {
             "label": "Retrofit kits and installation",
             "basis": "not_provided",
-            "note": "Retrofit recommended for S/N 005-030; not scoped."
+            "note": "Retrofit recommended for S/N 005-033; not scoped."
           }
         ],
         "logisticsSupport": [
@@ -23328,7 +23459,7 @@
       "faaRationale": "The pump is a system component with the same mounting, ports and connector. A flow increase does not change the pack safety assessment; it adds temperature margin. Proposed minor.",
       "description": "Raise the battery loop coolant pump to Rev C: impeller 48 mm to 54 mm, motor 180 W to 240 W, rated flow 12.0 to 14.2 L/min at 0.9 bar. Same housing, same ports and mounting, same connector. Mass +0.14 kg, electrical draw +60 W per pump, two pumps per aircraft. Hollis quotes Rev C at $3,820 against $3,400 for Rev B. Meridian uses the same pump, two per aircraft; Linnea has been told.",
       "need": "NCR-0112: hot-and-high climb at 45 C gave 11.4 L/min against 12.5 L/min needed, with the hottest module at 58 C against a 60 C limit. Rev C gives 14.2 L/min, which holds the module spread under 6 K and the hottest module near 54 C on the same profile.",
-      "consequencesIfDisapproved": "Hot-day climb stays restricted to 40 C ambient. Certification hot-day tests (planned January) cannot be run at the required 45 C.",
+      "consequencesIfDisapproved": "Hot-day climb stays restricted to 40 C ambient. Certification hot-day tests (planned January) cannot be run at the required 45 C without engineering samples of the Rev C pump.",
       "alternativesConsidered": "Two pumps in parallel per loop (more plumbing, +1.9 kg, needs a manifold change); larger lines (structure interference). Larger impeller chosen.",
       "testAndQualification": "Pump bench test, glycol soak, and a repeat of the hot-and-high climb on S/N 004. Hollis estimates 8 weeks.",
       "itemChanges": [
@@ -23377,6 +23508,11 @@
             {
               "description": "Qualification and soak testing",
               "oneTime": 36000
+            },
+            {
+              "description": "Engineering samples, four pumps, 8 weeks",
+              "unitPrice": 4800,
+              "qty": 4
             }
           ],
           "leadTimeWeeks": 18
@@ -23391,7 +23527,7 @@
         "retrofit": {
           "basis": "tbd",
           "from": "tbd",
-          "note": "S/N 005-012 retrofit only if hot-day certification needs it."
+          "note": "Hollis engineering samples (four pumps, 8 weeks) go on S/N 004 for the hot-day tests. S/N 005-014 retrofit only if hot-day certification needs it."
         },
         "interchangeable": true
       },
@@ -23424,7 +23560,7 @@
         ],
         "retrofit": [
           {
-            "label": "Retrofit S/N 005-012",
+            "label": "Retrofit S/N 005-014 and S/N 004 engineering samples",
             "basis": "not_provided"
           }
         ],
@@ -23461,7 +23597,7 @@
       "faaClass": "minor",
       "faaRationale": "Same mounting, ports and connector; polymer housing is rated for the glycol and temperature range. No appreciable effect on strength or reliability. Proposed minor.",
       "description": "Cost reduction on the battery loop pump. Rev C: injection-moulded PPS GF40 housing instead of machined stainless, motor 180 W to 150 W, rated flow 12.0 to 11.0 L/min. Mounting and connector unchanged. Hollis quotes Rev C at $3,015 against $3,400: -$385 per pump, two per aircraft, plus a one-time $48,000 for the mould. The pack loop requirement in TS-8210 rev 3 is 10.5 L/min, so 11.0 still has margin. Mass -0.31 kg per pump.",
-      "need": "Pump is the largest single thermal component by price after the heat exchangers, and the stainless housing is overspecified for the pressure. A 12% cost reduction at 650 aircraft per year is worth about $500k a year.",
+      "need": "The stainless housing is overspecified for the 0.9 bar loop pressure, and the part is bought twice per aircraft. An 11% cost reduction on this pump at 650 aircraft per year is worth about $500k a year.",
       "consequencesIfDisapproved": "No saving. The machined housing stays at about $1,100 of the pump price.",
       "alternativesConsidered": "Cast aluminium housing (-$210, needs a mould too and a coating step); keep machined, cut the motor only (-$120).",
       "testAndQualification": "Housing burst and glycol soak at 85 C, vibration profile. Hollis says 10 weeks.",
@@ -23591,9 +23727,9 @@
       "justificationCode": "D",
       "companyClass": "I",
       "faaClass": "major",
-      "faaRationale": "New magnet material grade in a flight-critical rotating part; changes rotor design data, torque constant (-3%) and the spin and thermal margins. Treated as major pending Gideon.",
-      "description": "Move the forward motor rotor magnets from SH to UH grade, same segment geometry and coating. UH has higher coercivity (Hcj 2,630 kA/m against 1,990) at slightly lower remanence (1.34 T against 1.40 T), so the torque constant drops about 3% and the controller current limit rises by the same amount. The set price goes from $8,000 to $9,350. Orrin runs UH only on its pilot furnace line; they said the next qualification slot is 2027-Q2 and they will not commit to a date until we place the qualification order.",
-      "need": "NCR-0115: 0.8% irreversible flux loss after three hot-day transition cycles at 163 C magnet temperature. The knee margin on SH is about 2 C at our worst case. UH gives about 35 C of margin. Interim software limit TL-212 caps transition thrust above 38 C ambient and costs us hot-day range.",
+      "faaRationale": "New magnet material grade in a flight-critical rotating part; changes rotor design data, torque constant (-6%) and the spin and thermal margins. Treated as major pending Gideon.",
+      "description": "Move the forward motor rotor magnets from SH to UH grade, same segment geometry and coating. UH has higher coercivity (Hcj 1,990 kA/m against 1,590) at lower remanence (1.31 T against 1.40 T), so the torque constant drops about 6% and the controller current limit rises by the same amount. The set price goes from $8,000 to $9,350. Orrin runs UH only on its pilot furnace line; they said the next qualification slot is 2027-Q2 and they will not commit to a date until we place the qualification order.",
+      "need": "NCR-0115: 0.8% irreversible flux loss after three hot-day transition cycles at 163 C magnet temperature. The knee margin on SH is about 2 C at our worst case. UH is rated to 180 C and gives about 30 C of margin. Interim software limit TL-212 caps transition thrust above 38 C ambient and costs us hot-day range.",
       "consequencesIfDisapproved": "The transition-thrust limit stays, and hot-day certification flight tests cannot show the required transition performance.",
       "alternativesConsidered": "Improve nacelle airflow at transition (structures change, 4 to 6 months, less margin gained); derate the motor (costs range); active cooling jackets on the rotor (new part). UH chosen as the least invasive.",
       "testAndQualification": "Orrin qualification lot, rotor spin and thermal cycling test, one repeat hot-day transition test on S/N 004, update of the motor performance data for certification.",
@@ -23611,13 +23747,13 @@
             },
             {
               "field": "coercivity_hcj_ka_m",
-              "from": 1990,
-              "to": 2630
+              "from": 1590,
+              "to": 1990
             },
             {
               "field": "remanence_br_t",
               "from": 1.4,
-              "to": 1.34
+              "to": 1.31
             },
             {
               "field": "unit_price_usd",
@@ -23653,7 +23789,7 @@
         "production": {
           "basis": "serial",
           "from": "30",
-          "note": "S/N 030 and subsequent (about October 2027). Assumes the 2027-Q2 slot holds and the 12-set qualification lot can be flown. Orrin has not confirmed either."
+          "note": "S/N 030 and subsequent (about October 2027). Assumes the 2027-Q2 slot holds and the 12-set qualification lot is flown on S/N 030 and 031. Production UH sets follow about 24 weeks after qualification, and S/N 032 onward is not planned. Orrin has not confirmed any date."
         },
         "retrofit": {
           "basis": "tbd",
@@ -23753,8 +23889,8 @@
             },
             {
               "field": "coercivity_hcj_ka_m",
-              "from": 1990,
-              "to": 2630
+              "from": 1590,
+              "to": 1990
             },
             {
               "field": "unit_price_usd",
@@ -23845,7 +23981,8 @@
         "Single source (Halden), plate lead time 6 weeks, first lot of 25 at $239.50 gives a purchase price variance of $18.50 per bracket against the new standard.",
         "Inventory: Rev B failed fatigue, so no use-up. Scrap stores, WIP, supplier-finished and every installed bracket; cancel the 60 not started at 10%. Use-up versus scrap is the biggest swing.",
         "Retrofit covers S/N 001-010 (120 brackets), not only the four test aircraft. Production cut-in S/N 011; S/N 011-014 wait at the controller-install station for about 14 weeks.",
-        "Aircraft are held, so the delay cost of S/N 011-014 is a real line that the originator left blank."
+        "Aircraft are held, so the delay cost of S/N 011-014 is a real line that the originator left blank.",
+        "The bracket is also in eight Meridian aft lift controllers; Meridian has no hardware yet, so the change only moves its baseline cost by $34.60 x 8 per aircraft. A shared item, a second program, no retrofit."
       ],
       "reference": {
         "steadyStateDeltaPerAircraftUsd": 415.2,
@@ -23873,7 +24010,7 @@
       "expect": [
         "Company Class I, FAA major (set separately), routine, justification O. Reopens 23 of 797 means-of-compliance items and issue paper IP-07.",
         "Per-propeller material change is +$1,440 (+$8,640 per aircraft, +0.3% of standard cost), tiny against $500k of tooling and about $650k of engineering: one-time cost dominates.",
-        "The cut-in date is driven by certification, 6 to 12 months, not by the 34-week blade tooling alone. Earliest realistic cut-in S/N 034 (December 2027).",
+        "The cut-in date is driven by certification, 6 to 12 months, not by the 34-week blade tooling alone. Earliest realistic cut-in S/N 034 (December 2027). Meridian is unaffected: it has its own lift rotors.",
         "Retrofit of built aircraft is unscoped and is the largest unknown. Inventory of 2-blade parts has no disposition.",
         "Hidden coupling (not detectable from shared entities): four blades change the aft-boom vibration spectrum that ECR-0417's bracket sits in. Interaction flags are best effort."
       ],
@@ -23943,7 +24080,7 @@
       "kind": "shared_supplier",
       "expect": [
         "No shared entity: BW-3120-340 (Vesper forward magnets) and BW-M512-340 (Meridian cruise magnets) are different items in different programs. Both are bought from Orrin Magnetics, the single source for both.",
-        "Both need the same new grade (UH) qualified in the same 2027-Q2 slot. Orrin runs one qualification lot per quarter, so one part number slips about 13 weeks to 2027-Q4 unless sequenced.",
+        "Both need the same new grade (UH) qualified in the same 2027-Q2 slot. Orrin runs one qualification lot per quarter, so one part number slips about 13 weeks to the 2027-Q3 slot unless sequenced.",
         "UH capacity is 1,200 sets per year on one furnace until 2028-Q3. Combined demand and the 24% extra furnace time per UH set matter.",
         "Combined effects differ from the sum: ordering both within 26 weeks earns a 6% UH raw-material price break and a 40% cheaper second qualification; a missed slot moves Vesper cut-in from S/N 030 (October 2027) to about S/N 037 (January 2028), or the Meridian rotor build and first flight (September 2027) back by a quarter.",
         "ECO-0297 (March 2026) already showed the same pattern: a seven-week wait for an Orrin qualification slot moved a cut-in by two aircraft."

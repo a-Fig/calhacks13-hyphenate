@@ -76,7 +76,8 @@ export const standardCostHistory: StdCostPoint[] = [
 /** Serial range completed in each future Vesper month, from the plan above. */
 export function serialRanges(): { month: MonthStr; first: number; last: number }[] {
   const out: { month: MonthStr; first: number; last: number }[] = [];
-  let n = builtAircraft.filter((a) => a.program === 'vesper').length;
+  // The 2026-10 plan row is already built (S/N 010 completed 2026-10-16), so counting starts from the aircraft completed before October.
+  let n = builtAircraft.filter((a) => a.program === 'vesper' && a.completed < '2026-10-01').length;
   const byMonth = new Map<MonthStr, number>();
   for (const r of volumePlan) if (r.program === 'vesper') byMonth.set(r.month, (byMonth.get(r.month) ?? 0) + r.units);
   for (const month of [...byMonth.keys()].sort()) {

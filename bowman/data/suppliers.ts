@@ -77,7 +77,7 @@ export const suppliers: Supplier[] = [
     prov: src(`${ARCHER} §3`, 'Honeywell supplies actuators, climate and thermal management (Q2 2022 letter). Name invented.'),
   },
   {
-    id: 'SUP-DUNMORE', name: 'Dunmore Interconnect', region: 'Latin America', country: 'Mexico',
+    id: 'SUP-FERROW', name: 'Ferrow Interconnect', region: 'Latin America', country: 'Mexico',
     supplies: 'HV and signal wire harnesses, connectors, junction boxes, charge inlet',
     singleSource: false, programs: ['vesper', 'meridian'], paymentTerms: 'Net 45',
     analog: 'Generic aerospace harness house', onTimeDeliveryPct: 87, qualityPpm: 1500,
@@ -113,7 +113,7 @@ export const supplierConstraints: SupplierConstraint[] = [
     kind: 'qualification_slot',
     description:
       'Orrin runs one qualification lot per quarter on its UH-grade (high-coercivity) furnace line, and each part number needs its own lot. ' +
-      'Open slots: 2027-Q2, then 2027-Q4. A second part number requested for the same quarter waits for the next slot (about 13 weeks). ' +
+      'Open slots: 2027-Q2, then 2027-Q3. A second part number requested for the same quarter waits for the next slot (about 13 weeks). ' +
       'Grade-level data (material certificate, demagnetisation curves) is shared between part numbers, so a second part number qualified within 26 weeks of the first costs 40% less. ' +
       'Ordering two part numbers inside one 26-week window also earns a 6% UH raw-material price break. UH yield is 71% against 88% for SH, so each UH set consumes about 24% more furnace time.',
     items: ['BW-3120-340', 'BW-M512-340'],
