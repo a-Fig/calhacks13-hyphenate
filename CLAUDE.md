@@ -71,9 +71,8 @@ Tyler, whether Ankit can also approve is open.
 - Every issue carries at least one label. The labels sit on independent axes:
   - **Kind.** `bug`, `Feature` or `Task`, spelled exactly so; `--add-label` fails on other
     spellings. An open design question takes `question` instead.
-  - **Priority.** Either a time (`priority: now`, `soon`, `future`) or a level (`high`, `medium`,
-    `low`), never both (2026-10-14). It goes on open issues only, one label each. A time suits work
-    tied to when it's needed; a level suits the rest.
+  - **Priority.** `priority: immediate`, `priority: before demo` or `priority: if time`
+    (2026-10-24). One label each, on open issues only.
   - **Where the work lives.** `PR needed` is a change in this repo. `non-PR needed` is work no PR
     can do: an account, a decision, something in the world. An issue can carry both.
   - **Who filed it.** A model filing on its own initiative adds `(from <model>)` to the title and
