@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { ChecklistIcon, CommentDiscussionIcon, FileDiffIcon, GitCommitIcon } from '@primer/octicons-react';
-import { PageHeader, UnderlineNav } from '@primer/react';
-import { useAssessment } from '../assessment/source.ts';
+import { PageHeader, Spinner, UnderlineNav } from '@primer/react';
+import { source, useAssessment } from '../assessment/source.ts';
 import type { ImpactAssessment } from '../assessment/types.ts';
 import { StateBadge, LevelLabel } from '../ui/Bits.tsx';
 import { WhyContext } from '../ui/Evidence.tsx';
@@ -116,7 +116,13 @@ function SummaryOnly({ e }: { e: NonNullable<ReturnType<typeof useAssessment>['s
         </div>
       </div>
       <main className="nx-container nx-tabbody">
-        <p className="nx-fg-muted">Only ECR-0417, ECR-0409 and ECR-0423 have a full page in this mock.</p>
+        {source.isMock ? (
+          <p className="nx-fg-muted">Only ECR-0417, ECR-0409 and ECR-0423 have a full page in this mock.</p>
+        ) : e.checks === 'running' ? (
+          <p className="nx-fg-muted"><Spinner size="small" /> Norn&rsquo;s impact checks are queued or running for this ECR. The page fills in when the cost check finishes.</p>
+        ) : (
+          <p className="nx-fg-muted">Norn has no impact checks for this ECR yet.</p>
+        )}
       </main>
     </>
   );

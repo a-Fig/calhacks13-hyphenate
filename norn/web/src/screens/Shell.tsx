@@ -17,9 +17,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </svg>
         </Link>
         <nav className="nx-gh-crumbs" aria-label="Breadcrumb">
-          <Link to="/">bowman-aviation</Link>
-          <span>/</span>
-          <Link to="/"><b>engineering-changes</b></Link>
+          <Link to="/"><b>bowman-aviation</b></Link>
         </nav>
         <span className="nx-sp" />
         <Person name="Helen Castellanos" size={24} />

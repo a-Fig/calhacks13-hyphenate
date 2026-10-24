@@ -3,7 +3,7 @@ import {
   AlertFillIcon, CheckCircleFillIcon, CheckIcon, CommentIcon, DotFillIcon, GitPullRequestIcon, SearchIcon,
 } from '@primer/octicons-react';
 import { ActionList, ActionMenu, AvatarStack, CounterLabel, Label, TextInput } from '@primer/react';
-import { useEcrList } from '../assessment/source.ts';
+import { source, useEcrList } from '../assessment/source.ts';
 import type { EcrSummary } from '../assessment/types.ts';
 import { isOpen, LevelLabel, Person, StateIcon } from '../ui/Bits.tsx';
 import { ago, usdK } from '../ui/fmt.ts';
@@ -93,7 +93,7 @@ export function EcrList() {
 
   return (
     <>
-      <RepoHeader mock />
+      <RepoHeader mock={source.isMock} />
       <main className="nx-container nx-list">
         <h2 className="nx-list-title">All ECRs</h2>
         <div className="nx-searchbar">

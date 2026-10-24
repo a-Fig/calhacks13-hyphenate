@@ -198,7 +198,9 @@ function agentRuns(s: Snapshot, pr: PrRow): ActivityEvent[] {
 
 export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | undefined {
   const runs = s.runs.filter(r => r.prId === pr.id);
-  const s2 = newest(runs, r => r.stage === 's2_cost' && r.status === 'done');
+  // While a new run waits for a worker, the page keeps the last numbers (the newest stale run that has
+  // results) and shows its checks as queued or running; with no results at all there is no page yet.
+  const s2 = newest(runs, r => r.stage === 's2_cost' && r.status === 'done') ?? newest(runs, r => r.stage === 's2_cost' && r.status === 'stale' && s.results.some(x => x.checkRunId === r.id));
   if (!s2) return undefined;
   const cr = currentCr(s, pr);
   const v = fromChecks(s.results.filter(r => r.checkRunId === s2.id).map(toRow));
@@ -293,6 +295,9 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
     const why = `${allowed(a.policy)} · ${a.reducer}${a.outcome !== 'applied' ? `, ${a.outcome}` : ''}`;
     if (a.reducer === 'ingest_ecr') events.push({ ...base, kind: 'policy', text: 'opened the ECR in Norn from the feed', detail: `${a.summary}. ${why}` });
     else if (a.reducer === 'complete_check' && /^s[12]_/.test(a.summary)) {
+      // A run an input change has since replaced is not shown: the timeline keeps the checks that stand.
+      const ran = runs.find(r => `check_run:${r.id}` === a.entity);
+      if (ran && !live(ran)) continue;
       const stage = /^(s\d_\w+)/.exec(a.summary)?.[1] ?? '';
       events.push({ ...base, kind: 'ran_checks', text: `ran the ${CHECK_STAGES[stage]?.name.toLowerCase() ?? stage} check`, detail: `${a.summary}. ${why}` });
     } else if (a.reducer === 'record_assumption') events.push({ ...base, kind: 'research', text: 'recorded an assumption', detail: `${a.summary}. ${why}` });

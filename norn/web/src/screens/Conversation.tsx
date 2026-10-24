@@ -90,8 +90,9 @@ function BotComment({ a }: { a: ImpactAssessment }) {
     <Timeline.Item className="nx-t-comment">
       <div className="nx-av-col"><Person name="Norn" kind="norn" size={40} /></div>
       <Timeline.Body className="nx-t-body">
-        <CommentBox name="norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? ''} edited right={a.level ? <LevelLabel level={a.level} long /> : undefined}>
-          <h3 className="nx-h3">Impact assessment <SavedRun /></h3>
+        <CommentBox name="norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? a.activity[a.activity.length - 1]?.at ?? ''} edited={a.source !== 'live'} right={a.level ? <LevelLabel level={a.level} long /> : undefined}>
+          <h3 className="nx-h3">Impact assessment <SavedRun source={a.source} /></h3>
+          {a.checks.some(c => c.state === 'queued' || c.state === 'running') && <p className="nx-fg-muted nx-small">These are the numbers of the previous run. Norn is checking the changed ECR again.</p>}
           <table className="nx-bot-table">
             <thead>
               <tr><th /><th>Point estimate</th><th>P10 &ndash; P90</th><th>Likelihood</th></tr>
@@ -273,15 +274,16 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
   const decided = a.ecr.status === 'Approved' || a.ecr.status === 'ECO released';
   const bad = a.checks.filter(c => c.state === 'attention').length;
   const ok = a.checks.filter(c => c.state === 'passed').length;
+  const working = a.checks.filter(c => c.state === 'queued' || c.state === 'running').length;
   const waiting = a.recommendation.verdict === 'wait' || a.recommendation.verdict === 'none';
   const noStatement = a.recommendation.verdict === 'none' && !a.statement;
 
   return (
     <section className="nx-merge" aria-label="Approval">
       <MergeRow
-        icon={bad ? <AlertFillIcon size={24} className="nx-fg-attention" /> : <CheckCircleFillIcon size={24} className="nx-fg-success" />}
-        title={bad ? `${bad} impact check${bad > 1 ? 's' : ''} need${bad > 1 ? '' : 's'} attention` : 'All impact checks have passed'}
-        sub={`${ok} passed${bad ? `, ${bad} need attention` : ''}`}
+        icon={working ? <Spinner size="medium" /> : bad ? <AlertFillIcon size={24} className="nx-fg-attention" /> : <CheckCircleFillIcon size={24} className="nx-fg-success" />}
+        title={working ? `${working} impact check${working > 1 ? 's are' : ' is'} queued or running` : bad ? `${bad} impact check${bad > 1 ? 's' : ''} need${bad > 1 ? '' : 's'} attention` : ok === a.checks.length ? 'All impact checks have passed' : 'Impact checks not complete'}
+        sub={`${ok} passed${bad ? `, ${bad} need attention` : ''}${working ? `, ${working} waiting` : ''}`}
         open={open}
         onToggle={() => setOpen(o => !o)}
       >

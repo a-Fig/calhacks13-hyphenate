@@ -26,6 +26,7 @@ export function Impact({ a, check }: { a: ImpactAssessment; check?: string }) {
   const base = `/ecr/${a.ecr.id}/impact`;
   const bad = a.checks.filter(c => c.state === 'attention').length;
   const pending = a.checks.filter(c => c.state === 'pending').length;
+  const working = a.checks.filter(c => c.state === 'queued' || c.state === 'running').length;
   const passed = a.checks.filter(c => c.state === 'passed').length;
   const stateWord = { passed: 'Passed', attention: 'Needs attention', running: 'Running', queued: 'Queued', pending: 'Not assessed yet', skipped: 'Skipped' }[current.state];
 
@@ -35,7 +36,7 @@ export function Impact({ a, check }: { a: ImpactAssessment; check?: string }) {
         <div className="nx-checks-title">
           Impact checks
           <span className="nx-fg-muted nx-small">
-            {[`${passed} passed`, bad ? `${bad} need attention` : '', pending ? `${pending} not assessed yet` : ''].filter(Boolean).join(', ')}
+            {[`${passed} passed`, bad ? `${bad} need attention` : '', working ? `${working} queued or running` : '', pending ? `${pending} not assessed yet` : ''].filter(Boolean).join(', ')}
           </span>
         </div>
         <ActionList>
