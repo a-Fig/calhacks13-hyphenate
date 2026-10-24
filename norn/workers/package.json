@@ -13,7 +13,9 @@
     "check:policy": "tsx src/checks-policy.ts",
     "ingest": "tsx src/ingest.ts",
     "check:pipeline": "tsx src/checks-pipeline.ts",
-    "check:package": "tsx src/checks-package.ts"
+    "check:package": "tsx src/checks-package.ts",
+    "check:config": "tsx src/checks-config.ts",
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@norn/bindings": "*",

@@ -51,6 +51,7 @@ import {
   type Ctx,
   type PrStatus,
 } from './core';
+import { COMPANY_CONFIG_KEY, checkCompanyConfig } from './company-config';
 
 function nonEmpty(s: string, what: string, max: number) {
   const v = s.trim();
@@ -137,6 +138,17 @@ export const registerActor = write(
 
 // Policy knobs, e.g. Bowman's deep_review_mode. Only known keys.
 export const setConfig = write('set_config', { key: t.string(), value: t.string() }, (ctx, a, call) => {
+  // The whole company config (#59) is accepted next to the knobs but is not one of CONFIG_DEFAULTS:
+  // it has no default, and its row appears when the first one is stored. See company-config.ts.
+  if (a.key === COMPANY_CONFIG_KEY) {
+    const stored = ctx.db.nornConfig.key.find(a.key);
+    const check = checkCompanyConfig(a.value, stored?.value);
+    if (!check.ok) throw new SenderError(check.error);
+    if (check.unchanged) return null;
+    if (stored) ctx.db.nornConfig.key.update({ key: a.key, value: a.value });
+    else ctx.db.nornConfig.insert({ key: a.key, value: a.value });
+    return { entity: `norn_config:${a.key}`, summary: check.summary, detail: check.detail };
+  }
   if (!(a.key in CONFIG_DEFAULTS)) throw new SenderError(`unknown config key '${a.key}'`);
   if (a.key === 'deep_review_mode' && a.value !== 'auto' && a.value !== 'on_request')
     throw new SenderError(`deep_review_mode is 'auto' or 'on_request'`);

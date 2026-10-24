@@ -1,5 +1,5 @@
 // Bowman's ERPNext settings for the Norn connector (norn/connectors/erpnext). Everything here is a name
-// that bowman/erp/seed.ts and bowman/erp/seed-planning.ts created. The connection (URL, key, secret) is not
+// that bowman/erp/seed.ts, seed-planning.ts and seed-mbom.ts created. The connection (URL, key, secret) is not
 // here: it comes from ERPNEXT_URL, ERPNEXT_API_KEY and ERPNEXT_API_SECRET in the untracked .env.
 //
 // bowman.config.ts will import `erpnext` from this file.
@@ -31,6 +31,9 @@ export const erpnext: ErpnextSettings = {
     },
     bom: { changeOrder: 'bw_eco', releasedOn: 'bw_released_on', decision: 'bw_decision_url' },
     purchaseOrder: { externalId: 'bw_po_id' },
+    // The dataset's work center ids (WC-STRUCT); ERPNext names the workstation 'Structure assembly'. Suppliers stay ERPNext's names
+    // ('Tarn Composites'): the PLM connector maps the PLM's supplier names to them, so quotes and price indexes link.
+    workCenter: { externalId: 'bw_work_center_id' },
     // The change package's tags, which a person enters and Norn reads back. bw_eco on the BOM is the seed's; the rest are added by bowman/erp/eco-setup.ts.
     itemPrice: { changeOrder: 'bw_eco', decision: 'bw_decision_url' },
     journalEntry: { changeOrder: 'bw_eco', entry: 'bw_eco_entry', decision: 'bw_decision_url' },
@@ -53,6 +56,19 @@ export const erpnext: ErpnextSettings = {
 export const erpnextCheck = {
   /** The dataset the ERP was seeded from, relative to the repo root. */
   reference: 'bowman/data/bowman.json',
+  /**
+   * The ERP holds the manufacturing BOM (bowman/erp/seed-mbom.ts), the dataset's `bom` is the engineering BOM. Expected in
+   * ERPNext: the engineering lines below each aircraft, the MBOM's lines for the top level, the build stations as items,
+   * and no labor on an aircraft's own item (its hours sit on its stations).
+   */
+  view: (ds: any) => {
+    const tops = new Set<string>(ds.programs.map((p: any) => p.topItem));
+    return {
+      ...ds,
+      items: [...ds.items.map((i: any) => (tops.has(i.code) ? { ...i, laborHours: undefined, workCenter: undefined } : i)), ...ds.mbom.items],
+      bom: [...ds.bom.filter((l: any) => !tops.has(l.parent)), ...ds.mbom.bom],
+    };
+  },
   /** Roll-up standard cost (USD) of each program's top item: Vesper V4 and Meridian M6. */
   rollups: { 'BW-0001-000': 2_800_019, 'BW-M000-000': 5_007_356.8 } as Record<string, number>,
   /**
