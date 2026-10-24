@@ -507,6 +507,13 @@ function notExact(route: Route): string {
   return `${what}; Norn acts only on an exact measure, worked out per draw of the forecast by the checks. It recommends instead.`;
 }
 
+/**
+ * Whether the outcome of an agent's action rests on the change's cost: the rule has a cost limit, it carries out a
+ * body's approval (the waiver compares tiers by cost), or it is the decision on a tier. An action that does not
+ * (`post_impact_statement`, `set_company_class`) is decided as before, without the exact measure.
+ */
+const dependsOnCost = (action: ActionId, rule: ActionRule): boolean => action === 'approve_ecr_at_tier' || rule.limits?.maxCost !== undefined || rule.carriesOutApproval === true;
+
 /** Actions that follow a decision: each needs an approved ECR before anyone, person or agent, can take it (`ACTIONS`). */
 const FOLLOW_ON: readonly ActionId[] = ['release_eco', ...ERP_ACTIONS];
 
@@ -661,7 +668,7 @@ function decide(config: CompanyConfig, input: DecideInput, route: Route, mayRero
     return result('escalate', `${rulePath}.escalateOn`, { escalatedFor: hit, recipients: [rule.escalateTo!] });
   }
 
-  if ((level === 'approve' || level === 'approve_sampled') && route.cost.basis !== 'measured') {
+  if ((level === 'approve' || level === 'approve_sampled') && dependsOnCost(action, rule) && route.cost.basis !== 'measured') {
     reasons.push({ rule: 'approval.costMeasure', text: notExact(route) });
     level = 'recommend';
     decidedBy = 'approval.costMeasure';

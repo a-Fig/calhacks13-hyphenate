@@ -690,14 +690,42 @@ describe('Norn acts only on an exact cost measure', () => {
     assert.match(flat(estimate), /estimated from the assessment's ranges/);
   });
 
-  it('with only the check\'s estimates, every action Norn would take is a recommendation', () => {
+  it('with only the check\'s estimates, every action whose outcome rests on the cost is a recommendation', () => {
     const approved = { approvedBy: 'trc' };
+    const costly = ACTION_IDS.filter((a) => {
+      const rule = config.autonomy.actions.find((r) => r.action === a);
+      return a === 'approve_ecr_at_tier' || rule?.limits?.maxCost !== undefined || rule?.carriesOutApproval === true;
+    });
+    assert.deepEqual([...costly].sort(), ['approve_ecr_at_tier', 'approve_fast_track_ecr', 'release_eco']);
     for (const id of ['ECR-0423', 'ECR-0417', 'ECR-0409', 'ECR-0406']) {
-      for (const action of ACTION_IDS) {
+      for (const action of costly) {
         const d = decideAction(config, { action, actor: NORN_, facts: { ...factsFor(id, false), ...approved } });
         assert.equal(d.actsNow, false, `${id} ${action}: ${d.outcome}`);
       }
     }
+  });
+
+  it('an action with no cost limit decides as before, with no cost at all', () => {
+    const noCost: EcrFacts = { ecrId: 'ECR-0423' };
+    const post = decideAction(config, { action: 'post_impact_statement', actor: NORN_, facts: noCost });
+    assert.equal(post.outcome, 'approve');
+    assert.equal(post.actsNow, true);
+    const cls = decideAction(config, { action: 'set_company_class', actor: NORN_, facts: noCost });
+    assert.equal(cls.outcome, 'approve_sampled');
+    assert.equal(cls.sample!.value, 0.8392148073762655);
+    assert.equal(cls.actsNow, true);
+    // Only the estimate from the check: the same.
+    assert.equal(decideAction(config, { action: 'post_impact_statement', actor: NORN_, facts: factsFor('ECR-0417', false) }).actsNow, true);
+  });
+
+  it('a cost-limited action still recommends without the exact measure, and acts with it', () => {
+    const none = decideAction(config, { action: 'approve_fast_track_ecr', actor: NORN_, facts: { ...factsFor('ECR-0423'), cost: undefined } });
+    assert.equal(none.outcome, 'recommend');
+    assert.equal(none.actsNow, false);
+    assert.match(flat(none), MEASURE_REASON);
+    const est = decideAction(config, { action: 'release_eco', actor: NORN_, facts: { ...factsFor('ECR-0423', false), approvedBy: 'fast_track' } });
+    assert.equal(est.outcome, 'recommend');
+    assert.equal(decideAction(config, { action: 'release_eco', actor: NORN_, facts: { ...factsFor('ECR-0423'), approvedBy: 'fast_track' } }).actsNow, true);
   });
 
   it('a row of +200,000 one-time and -190,000 unit cost nets to 10,000 inside the check, and is not a 10,000 spend', () => {

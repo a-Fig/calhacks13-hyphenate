@@ -103,7 +103,8 @@ route kept from an earlier cost cannot be reused. It never throws on a bad id or
 3. A person acting as themselves is approved, since roles carry no limits. The exception is `approve_ecr_at_tier`: a
    body's tier is shown to cover the change only by the exact cost measure, so without it the outcome is `recommend`.
 4. An agent gets the company's rule for the action. A detected `escalateOn` trigger escalates. A rule that would
-   `approve` or `approve_sampled` becomes `recommend` unless the cost is the exact measure. Otherwise `limits` are
+   `approve` or `approve_sampled` becomes `recommend` unless the cost is the exact measure, when its outcome rests on
+   the cost: the rule has a `maxCost` limit, carries out an approval, or is the decision on a tier. Otherwise `limits` are
    checked, and a failed one drops the level to `otherwise`. `carriesOutApproval` waives the limits when the approving
    body's tier is the tier of today's cost or above. Then the level applies: `approve_sampled` draws with `isSampled`.
 
@@ -116,9 +117,10 @@ The four ERP actions are `recommend` in the configuration, so they are always a 
   of the whole: spend and saving that both have a p90 of 100,000 can have a larger-of p90 of 200,000, and a forecast
   with p10, p50 and p90 of 297, 12,165 and 24,033 can have a p90 of 26,703 in size. So any outcome of `approve` or
   `approve_sampled`, and any `actsNow`, needs `cost.measured`, computed per draw by the checks. That covers every
-  action, including a person's `approve_ecr_at_tier`. It is stricter than some actions need: `post_impact_statement`
-  and `set_company_class` have no cost limit, and are held back too.
-  - **Until the checks emit `measured`, Norn recommends everything and acts on nothing.** That is the reason for the
+  action whose outcome rests on the cost: a rule with a `limits.maxCost` (the fast track, `release_eco`), `carriesOutApproval`,
+  and `approve_ecr_at_tier` including a person's. `post_impact_statement`, `set_company_class` and any other rule
+  without a cost limit decide as before, with no cost at all.
+  - **Until the checks emit `measured`, Norn acts on nothing whose outcome rests on the cost.** That is the reason for the
     follow-up that makes `costCheck` produce it.
   - **`measured` is an `ExactCostMeasure`:** `source: 'exact'`, `horizonMonths`, `savingsOffset`, `p50` and `p90`. It
     counts only if the first three match the configuration and the forecast's `windowMonths` is the horizon. In each
