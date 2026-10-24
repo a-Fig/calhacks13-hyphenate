@@ -109,7 +109,7 @@ const runW = await runOf(A, prW.id, 's1_bom_delta');
 await A.R.claimCheck({ checkRunId: runW.id, leaseMs: 30000 });
 await sleep(150);
 const attempt = A.conn.db.checkRun.id.find(runW.id)!.attempts;
-const good = (key: string) => ({ key, label: key, unit: 'x', p10: 1, p50: 2, p90: 3, detailJson: '{"mock":true}' });
+const good = (key: string) => ({ key, label: key, unit: 'x', p10: 1, p50: 2, p90: 3, detailJson: '{"mock":true}', mock: true });
 const bad = { ...good('bad'), p10: 5, p50: 2, p90: 3 };
 const logBefore = count(`select count(*) as n from action_log where entity = 'check_run:${runW.id}'`);
 const fail = await timed(() => A.R.completeCheck({ checkRunId: runW.id, attempt, results: [good('r1'), good('r2'), bad] }));

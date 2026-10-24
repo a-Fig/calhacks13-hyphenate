@@ -38,7 +38,7 @@ Folders are created as code lands.
 | State layer | `module/` | The SpacetimeDB module: the tables, the narrow write API, the action log and the policy gate |
 | Workers | `workers/` | Compute checks: BOM delta, cost, timeline, supply simulation |
 | Agent runner | `runner/` | Starts and steers Norn's agents as Claude Code sessions through the Agent SDK: extraction, classification, research, review, narration, post check. Streams every step into the action log |
-| Connectors | `connectors/` | Read from and write to the PLM and ERPNext over their REST APIs and webhooks |
+| Connectors | `connectors/` | Read the PLM and ERPNext over their REST APIs and webhooks, and post Norn's results to the PLM. ERPNext is read only |
 | Web | `web/` | Norn's own screens: an ECR's impact assessment, the "why" behind any number, the backlog roll-up, the audit trail |
 | MCP server | `mcp/` | The tools every agent works through: Norn's own agents, and a person's own agent connecting with credentials to act on their behalf |
 
@@ -48,9 +48,9 @@ Folders are created as code lands.
   records.
 - **Out to the PLM:** the impact statement, class and route on the ECR, through the same API a
   real PLM integration would use.
-- **ERPNext:** REST reads of items, BOMs, prices, stock, orders and history; writes of the new BOM,
-  standard cost and draft journal entries when an ECO releases. Its API user's permissions are in
-  `bowman/erp/`.
+- **ERPNext:** REST reads only: items, BOMs, prices, stock, orders and history, and the reads that
+  build the ERP change package on a released ECO (#72). Norn never writes to the ERP (#71). Its API
+  user is read-only (`bowman/erp/`).
 - **Agents:** MCP, with each agent's identity, the person it acts for, and what spawned it.
 - **Configuration:** one company config file, validated against Norn's config schema at start-up.
 

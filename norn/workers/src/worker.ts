@@ -1,13 +1,21 @@
 // Norn compute worker. Subscribes to queued check runs, claims the ones it can do, keeps the lease
 // alive, streams progress, writes results. Run several to see claims race and leases recover:
 //   WORKER_NAME=w1 npm run worker        (from norn/)
-// Stage handlers are mock compute (see stages.ts); the logs say so.
+// s1 and s2 run Norn's impact checks (impact.ts) on ECRs the PLM has sent a change request for, on
+// the ERP baseline (baseline.ts); every other stage, and an ECR with no change request, is mock
+// compute (stages.ts), and the logs and results say so.
+//   NORN_ERP_SETTINGS=<module exporting erpnext>   the company's ERPNext settings; the connection comes from the .env
+//   NORN_BASELINE_FILE=<baseline.json>             a test baseline instead of the ERP
+//   NORN_BASELINE_POLL_MS                          how often to re-read the baseline (default 60000)
+import { BaselineStore, baselineSourceFromEnv } from './baseline.ts';
 import { classify, connect, subscribe, withRetry } from './connect.ts';
+import { CHECKS_CODE_VERSION } from '../../checks/src/index.ts';
+import { REAL_STAGES, impactHandlers } from './impact.ts';
 import { sleep } from './sim.ts';
-import { AbortedError, HANDLERS, type RunCtx } from './stages.ts';
+import { AbortedError, FatalRunError, HANDLERS as MOCK_HANDLERS, type Result, type RunCtx } from './stages.ts';
 
 const name = process.env.WORKER_NAME ?? `worker-${process.pid}`;
-const handled = (process.env.NORN_STAGES?.split(',') ?? Object.keys(HANDLERS)).map(s => s.trim());
+const handled = (process.env.NORN_STAGES?.split(',') ?? Object.keys(MOCK_HANDLERS)).map(s => s.trim());
 const concurrency = Number(process.env.NORN_CONCURRENCY ?? 2);
 const leaseMs = Number(process.env.NORN_LEASE_MS ?? 10_000);
 
@@ -15,12 +23,33 @@ const log = (msg: string) => console.log(`${new Date().toISOString().slice(11, 2
 
 const client = await connect({ kind: 'agent', name, origin: 'norn', spawnedBy: 'Norn' });
 const { conn, identity, R } = client;
-log(`connected as ${identity.toHexString().slice(0, 12)}; stages ${handled.join(',')}; MOCK compute, no real model`);
+const baselines = new BaselineStore(await baselineSourceFromEnv(), r =>
+  withRetry(
+    () => R.recordBaseline({ hash: r.hash, asOf: r.asOf, source: r.source, countsJson: JSON.stringify(r.counts), warningsJson: JSON.stringify(r.warnings.slice(0, 50)) }),
+    { idempotent: true, label: 'record_baseline' }
+  ).then(() => undefined)
+);
+const HANDLERS: Record<string, (ctx: RunCtx) => Promise<Result[]>> = { ...MOCK_HANDLERS, ...impactHandlers(conn, baselines) };
+log(
+  `connected as ${identity.toHexString().slice(0, 12)}; stages ${handled.join(',')}; s1 and s2 are Norn's impact checks on ECRs with a change request, ` +
+    `baseline from ${baselines.source?.describe ?? 'nowhere (no source configured: those runs will fail)'}; everything else is MOCK compute`
+);
 
 // Queued runs to pick from, plus running ones: a claimed run leaves the first query the moment it
 // becomes 'running', and we need our attempt number from the server. (claimed_by is an Option
 // column and SQL subscriptions cannot compare it to a literal, so we filter on identity here.)
-await subscribe(conn, ["SELECT * FROM check_run WHERE status = 'queued'", "SELECT * FROM check_run WHERE status = 'running'"]);
+await subscribe(conn, [
+  "SELECT * FROM check_run WHERE status = 'queued'",
+  "SELECT * FROM check_run WHERE status = 'running'",
+  // What the real checks read: the change requests, the assumptions a run names, the baselines recorded.
+  'SELECT * FROM ecr_revision',
+  'SELECT * FROM assumption',
+  'SELECT * FROM baseline_snapshot',
+  'SELECT * FROM norn_config',
+]);
+const configured = conn.db.nornConfig.key.find('code_version')?.value ?? 'checks-0.2.0';
+if (configured !== CHECKS_CODE_VERSION)
+  log(`WARNING: norn_config code_version is '${configured}' but the checks library is '${CHECKS_CODE_VERSION}': results of the old library still count as current. Set code_version to '${CHECKS_CODE_VERSION}'.`);
 
 type RunRow = NonNullable<ReturnType<typeof conn.db.checkRun.id.find>>;
 const active = new Map<bigint, number>(); // run id -> attempt we hold (0 while claiming)
@@ -28,10 +57,19 @@ const skipUntil = new Map<bigint, number>();
 let pumping = false;
 let dirty = false;
 
+// A real check needs the baseline its run names. A worker that cannot produce it leaves the run
+// for one that can, instead of failing it for everyone.
+function canServe(r: RunRow): boolean {
+  if (!REAL_STAGES.includes(r.stage)) return true;
+  const inputs = JSON.parse(r.inputsJson) as { revision?: number; erpBaseline?: string };
+  if (inputs.revision === undefined) return true; // no change request: the mock handler
+  return baselines.canProvide(inputs.erpBaseline);
+}
+
 function candidates() {
   const now = Date.now();
   return [...conn.db.checkRun.iter()]
-    .filter(r => r.status === 'queued' && handled.includes(r.stage) && !active.has(r.id) && (skipUntil.get(r.id) ?? 0) <= now)
+    .filter(r => r.status === 'queued' && handled.includes(r.stage) && !active.has(r.id) && (skipUntil.get(r.id) ?? 0) <= now && canServe(r))
     // requested (a person is waiting) before automatic; then oldest first
     .sort((a, b) => Number(a.trigger !== 'requested') - Number(b.trigger !== 'requested') || Number(a.id - b.id));
 }
@@ -104,6 +142,7 @@ async function execute(run: RunRow) {
     prId: run.prId,
     stage: run.stage,
     inputHash: run.inputHash,
+    inputsJson: run.inputsJson,
     signal: abort.signal,
     log,
     progress: async p => {
@@ -143,6 +182,9 @@ async function execute(run: RunRow) {
       // Stale inputs, re-claimed after a lease expiry, or cancelled: the server has already moved
       // on, there is nothing to report.
       log(`abandoned run ${run.id}: ${c.message}`);
+    } else if (e instanceof FatalRunError) {
+      log(`run ${run.id} cannot succeed: ${e.message}`);
+      await R.failCheck({ checkRunId: run.id, attempt, error: e.message, retryable: false }).catch(err => log(`could not fail run ${run.id}: ${classify(err).message}`));
     } else if (c.code === 'invalid') {
       // Our own result was refused. Running it again would produce the same result, so fail the
       // run for good with the reason; that also tells whatever waits on it.
@@ -185,6 +227,13 @@ conn.db.checkRun.onInsert(() => void pump());
 conn.db.checkRun.onUpdate(() => void pump());
 setInterval(() => void pump(), 1000); // dependencies finishing do not touch a queued row
 void pump();
+
+// Keep Norn's record of the ERP baseline current: a change in the ERP re-checks every open ECR.
+if (baselines.source) {
+  const poll = () => baselines.refresh(log).catch(e => log(`baseline read failed: ${(e as Error).message}`));
+  void poll();
+  setInterval(poll, Number(process.env.NORN_BASELINE_POLL_MS ?? 60_000));
+}
 
 // A bug in one run must not take the worker, and every other run it holds, down with it.
 process.on('unhandledRejection', e => log(`unhandled rejection: ${e instanceof Error ? e.stack ?? e.message : String(e)}`));

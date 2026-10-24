@@ -9,7 +9,8 @@
 // refused).
 import { SenderError, t } from 'spacetimedb/server';
 import { ScheduleAt } from 'spacetimedb';
-import spacetimedb, { reaperSchedule } from './schema';
+import spacetimedb, { StatementAssumption, StatementClaim, StatementNumber, reaperSchedule } from './schema';
+import './scope'; // registers the job-scope rule with the policy gate
 import {
   CONFIG_DEFAULTS,
   OPEN_PR,
@@ -24,15 +25,20 @@ import {
   cfg,
   cfgInt,
   clearProgress,
+  currentBaseline,
   currentMain,
+  currentRevision,
   decisionText,
   digestOf,
+  effectiveAssumptions,
   enqueueDeepOnOpen,
+  fnv1a64,
   getPr,
   getRun,
   insertRun,
   logAction,
   missingDeps,
+  Refusal,
   plusMs,
   reconcile,
   reconcileAllOpen,
@@ -154,46 +160,156 @@ export const setConfig = write('set_config', { key: t.string(), value: t.string(
 
 // plmEcrNumber is the PLM's number for the ECR; '' means Norn originated it and it is stored as
 // 'NORN-<id>' until the PLM assigns one.
+type RevisionIn = { changeRequestJson: string; source: string; sourceRef: string };
+
+// Open an ECR, with its first change request if one came with it, in the caller's transaction.
+function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description: string }, first?: RevisionIn) {
+  const title = nonEmpty(a.title, 'title', 200);
+  if (a.description.length > 20000) throw new SenderError('description is too long (max 20000 characters)');
+  const plm = a.plmEcrNumber.trim();
+  if (plm.length > 64) throw new SenderError('plmEcrNumber is too long (max 64 characters)');
+  if (plm) {
+    const taken = ctx.db.pullRequest.plmEcrNumber.find(plm);
+    if (taken) throw new SenderError(`PLM ECR number '${plm}' is already filed as ECR-${taken.id}`);
+  }
+  const base = currentMain(ctx).version;
+  const pr = ctx.db.pullRequest.insert({
+    id: 0n,
+    kind: 'ecr',
+    plmEcrNumber: plm || `pending-${ctx.newUuidV4().toString()}`,
+    title,
+    description: a.description,
+    status: 'draft',
+    baseVersion: base,
+    revision: 1,
+    inputsDigest: '',
+    createdBy: ctx.sender,
+    createdAt: ctx.timestamp,
+    updatedAt: ctx.timestamp,
+    mergedVersion: undefined,
+  });
+  if (first) insertRevision(ctx, pr.id, first, checkedChangeRequest(first.changeRequestJson, plm));
+  // Start with the digest of its inputs so the first reconcile only enqueues, not "revises".
+  ctx.db.pullRequest.id.update({
+    ...pr,
+    plmEcrNumber: plm || `NORN-${pr.id}`,
+    inputsDigest: digestOf(stageInfos(ctx, pr)),
+  });
+  const outcome = reconcile(ctx, pr.id);
+  const deep = enqueueDeepOnOpen(ctx, pr.id);
+  return {
+    prId: pr.id,
+    entity: `pull_request:${pr.id}`,
+    summary: `opened ECR '${title}' (${plm || `NORN-${pr.id}`}) on baseline v${base}${first ? ', change request rev 1' : ''}; ${outcome}${deep ? `; ${deep} deep run(s) requested by config` : ''}`,
+  };
+}
+
 export const createPr = write(
   'create_pr',
   { plmEcrNumber: t.string(), title: t.string(), description: t.string() },
+  (ctx, a) => openPr(ctx, a)
+);
+
+// A change request must be a JSON object naming the ECR it belongs to (the checks library's
+// ChangeRequest: id, program, itemChanges, ...). Shape beyond that is the checks' business.
+const MAX_CHANGE_REQUEST = 200_000;
+function checkedChangeRequest(json: string, plmEcrNumber: string): string {
+  if (json.length > MAX_CHANGE_REQUEST) throw new SenderError(`changeRequestJson is too long (max ${MAX_CHANGE_REQUEST} characters)`);
+  const cr = parseJson(json, 'changeRequestJson');
+  if (!cr || typeof cr !== 'object' || Array.isArray(cr)) throw new SenderError('changeRequestJson must be a JSON object');
+  if (typeof cr.id !== 'string' || !cr.id) throw new SenderError('changeRequestJson needs the ECR number in `id`');
+  if (plmEcrNumber && cr.id !== plmEcrNumber) throw new SenderError(`changeRequestJson is for '${cr.id}', not '${plmEcrNumber}'`);
+  return fnv1a64(json);
+}
+
+function insertRevision(ctx: Ctx, prId: bigint, r: RevisionIn, digest: string) {
+  const source = nonEmpty(r.source, 'source', 32);
+  if (r.sourceRef.length > 128) throw new SenderError('sourceRef is too long (max 128 characters)');
+  let seq = 0;
+  for (const old of [...ctx.db.ecrRevision.prId.filter(prId)]) {
+    seq = Math.max(seq, old.seq);
+    if (old.current) ctx.db.ecrRevision.id.update({ ...old, current: false });
+  }
+  return ctx.db.ecrRevision.insert({
+    id: 0n,
+    prId,
+    seq: seq + 1,
+    changeRequestJson: r.changeRequestJson,
+    digest,
+    source,
+    sourceRef: r.sourceRef,
+    current: true,
+    createdBy: ctx.sender,
+    createdAt: ctx.timestamp,
+  });
+}
+
+// The ingest path (#40): an ECR the PLM reports, new or changed, in one transaction. Opens the ECR
+// if Norn has not seen its number, else updates its title, text and change request. Anything that
+// actually changed re-checks it through reconcile; reporting the same thing again writes nothing,
+// so a poller can repeat itself freely.
+export const ingestEcr = write(
+  'ingest_ecr',
+  { plmEcrNumber: t.string(), title: t.string(), description: t.string(), changeRequestJson: t.string(), source: t.string(), sourceRef: t.string() },
   (ctx, a) => {
+    const plm = nonEmpty(a.plmEcrNumber, 'plmEcrNumber', 64);
+    const rev: RevisionIn = { changeRequestJson: a.changeRequestJson, source: a.source, sourceRef: a.sourceRef };
+    const existing = ctx.db.pullRequest.plmEcrNumber.find(plm);
+    if (!existing) return openPr(ctx, { plmEcrNumber: plm, title: a.title, description: a.description }, rev);
+
+    const digest = checkedChangeRequest(a.changeRequestJson, plm);
     const title = nonEmpty(a.title, 'title', 200);
     if (a.description.length > 20000) throw new SenderError('description is too long (max 20000 characters)');
-    const plm = a.plmEcrNumber.trim();
-    if (plm.length > 64) throw new SenderError('plmEcrNumber is too long (max 64 characters)');
-    if (plm) {
-      const taken = ctx.db.pullRequest.plmEcrNumber.find(plm);
-      if (taken) throw new SenderError(`PLM ECR number '${plm}' is already filed as ECR-${taken.id}`);
+    const cur = currentRevision(ctx, existing.id);
+    const textChanged = title !== existing.title || a.description !== existing.description;
+    const crChanged = cur?.digest !== digest;
+    if (!textChanged && !crChanged) return null;
+    if (!OPEN_PR.includes(existing.status as PrStatus))
+      throw new SenderError(`ECR ${existing.id} (${plm}) is ${existing.status}; the PLM's later edits are not taken in`);
+
+    const what: string[] = [];
+    if (textChanged) {
+      ctx.db.pullRequest.id.update({ ...existing, title, description: a.description, updatedAt: ctx.timestamp });
+      what.push('text');
     }
-    const base = currentMain(ctx).version;
-    const pr = ctx.db.pullRequest.insert({
-      id: 0n,
-      kind: 'ecr',
-      plmEcrNumber: plm || `pending-${ctx.newUuidV4().toString()}`,
-      title,
-      description: a.description,
-      status: 'draft',
-      baseVersion: base,
-      revision: 1,
-      inputsDigest: '',
-      createdBy: ctx.sender,
-      createdAt: ctx.timestamp,
-      updatedAt: ctx.timestamp,
-      mergedVersion: undefined,
-    });
-    // Start with the digest of its inputs so the first reconcile only enqueues, not "revises".
-    ctx.db.pullRequest.id.update({
-      ...pr,
-      plmEcrNumber: plm || `NORN-${pr.id}`,
-      inputsDigest: digestOf(stageInfos(ctx, pr)),
-    });
-    const outcome = reconcile(ctx, pr.id);
-    const deep = enqueueDeepOnOpen(ctx, pr.id);
+    if (crChanged) {
+      const row = insertRevision(ctx, existing.id, rev, digest);
+      what.push(`change request rev ${row.seq}`);
+    }
     return {
-      prId: pr.id,
-      entity: `pull_request:${pr.id}`,
-      summary: `opened ECR '${title}' (${plm || `NORN-${pr.id}`}) on baseline v${base}; ${outcome}${deep ? `; ${deep} deep run(s) requested by config` : ''}`,
+      prId: existing.id,
+      entity: `pull_request:${existing.id}`,
+      summary: `${plm} from ${rev.source}: ${what.join(' and ')} updated; ${reconcile(ctx, existing.id)}`,
+    };
+  }
+);
+
+// A worker read the ERP baseline. A hash Norn has not seen as current becomes current and every
+// open ECR is re-checked against it; the same hash again only moves lastReadAt.
+export const recordBaseline = write(
+  'record_baseline',
+  { hash: t.string(), asOf: t.string(), source: t.string(), countsJson: t.string(), warningsJson: t.string() },
+  (ctx, a, call) => {
+    const hash = nonEmpty(a.hash, 'hash', 128);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(a.asOf)) throw new SenderError(`asOf must be 'YYYY-MM-DD', got '${a.asOf}'`);
+    const source = nonEmpty(a.source, 'source', 32);
+    parseJson(a.countsJson, 'countsJson');
+    parseJson(a.warningsJson, 'warningsJson');
+    if (a.countsJson.length + a.warningsJson.length > 20000) throw new SenderError('countsJson and warningsJson are too long (max 20000 characters together)');
+    const cur = currentBaseline(ctx);
+    if (cur?.hash === hash) {
+      ctx.db.baselineSnapshot.hash.update({ ...cur, lastReadAt: ctx.timestamp });
+      return null;
+    }
+    if (cur) ctx.db.baselineSnapshot.hash.update({ ...cur, current: false });
+    const seen = ctx.db.baselineSnapshot.hash.find(hash);
+    const row = { hash, asOf: a.asOf, source, countsJson: a.countsJson, warningsJson: a.warningsJson, current: true, lastReadAt: ctx.timestamp, recordedBy: ctx.sender };
+    if (seen) ctx.db.baselineSnapshot.hash.update({ ...seen, ...row });
+    else ctx.db.baselineSnapshot.insert({ ...row, firstReadAt: ctx.timestamp });
+    const n = reconcileAllOpen(ctx, call, `ERP baseline ${hash.slice(0, 12)}`);
+    return {
+      entity: `baseline_snapshot:${hash.slice(0, 12)}`,
+      summary: `ERP baseline ${cur ? `${cur.hash.slice(0, 12)} -> ` : ''}${hash.slice(0, 12)} (as of ${a.asOf}, ${source}); re-checked ${n} open ECR(s)`,
     };
   }
 );
@@ -300,6 +416,137 @@ export const addComment = write(
 );
 
 // ---------------------------------------------------------------------------------------------
+// Job scope (#56). Norn's MCP server verifies an agent's signed credential, then records here what
+// it may write to. The policy gate (scope.ts) holds every later write to it.
+// ---------------------------------------------------------------------------------------------
+
+export const grantScope = write(
+  'grant_scope',
+  { jobId: t.string(), anyEcr: t.bool(), prIds: t.array(t.u64()), maxLevel: t.u8(), expiresAt: t.timestamp() },
+  (ctx, a) => {
+    const jobId = nonEmpty(a.jobId, 'jobId', 64);
+    if (a.prIds.length > 50) throw new SenderError('a grant names at most 50 ECRs');
+    if (a.maxLevel > 3) throw new SenderError('maxLevel is 0 (no statements) to 3');
+    const labels = a.prIds.map(id => getPr(ctx, id).plmEcrNumber);
+    const ahead = a.expiresAt.microsSinceUnixEpoch - ctx.timestamp.microsSinceUnixEpoch;
+    if (ahead <= 0n) throw new SenderError('expiresAt is already past');
+    if (ahead > 24n * 3600n * 1_000_000n) throw new SenderError('a grant lasts at most 24 hours');
+    const row = { identity: ctx.sender, jobId, anyEcr: a.anyEcr, prIds: [...new Set(a.prIds)], maxLevel: a.maxLevel, expiresAt: a.expiresAt, grantedAt: ctx.timestamp };
+    if (ctx.db.actorScope.identity.find(ctx.sender)) ctx.db.actorScope.identity.update(row);
+    else ctx.db.actorScope.insert(row);
+    return {
+      entity: `actor_scope:${ctx.sender.toHexString().slice(0, 8)}`,
+      summary: `granted job ${jobId} write scope: ${a.anyEcr ? 'any ECR' : labels.join(', ') || 'no ECR'}, statements up to Level ${a.maxLevel}, until ${a.expiresAt.toISOString()}`,
+      detail: { jobId, anyEcr: a.anyEcr, prIds: a.prIds, maxLevel: a.maxLevel },
+    };
+  }
+);
+
+// ---------------------------------------------------------------------------------------------
+// Impact statements (#42). The agent that writes the statement narrates; it does not compute: a
+// number marked 'computation' must be a current check result of this ECR, to the digit, and an
+// assumption's source must be the one the assumption actually has.
+// ---------------------------------------------------------------------------------------------
+
+const EVIDENCE = ['fact', 'assumption', 'computation', 'judgment'];
+
+export const postImpactStatement = write(
+  'post_impact_statement',
+  {
+    prId: t.u64(),
+    level: t.u8(),
+    changeClass: t.string(),
+    route: t.string(),
+    headline: t.string(),
+    numbers: t.array(StatementNumber),
+    drivers: t.array(StatementClaim),
+    assumptions: t.array(StatementAssumption),
+    claims: t.array(StatementClaim),
+  },
+  (ctx, a) => {
+    const required = (v: string, what: string, max: number) => {
+      try {
+        return nonEmpty(v, what, max);
+      } catch (e) {
+        throw new Refusal((e as Error).message);
+      }
+    };
+    const pr = getPr(ctx, a.prId);
+    if (!OPEN_PR.includes(pr.status as PrStatus)) throw new Refusal(`${pr.plmEcrNumber} is ${pr.status}; its statement is frozen`);
+    if (a.level < 1 || a.level > 3) throw new Refusal('level must be 1, 2 or 3');
+    const changeClass = required(a.changeClass, 'changeClass', 80);
+    const route = required(a.route, 'route', 200);
+    const headline = required(a.headline, 'headline', 600);
+    if (a.numbers.length < 1 || a.numbers.length > 12) throw new Refusal('a statement has 1 to 12 headline numbers');
+    if (a.drivers.length > 8) throw new Refusal('a statement has at most 8 drivers');
+    if (a.claims.length > 12) throw new Refusal('a statement has at most 12 claims');
+    if (a.assumptions.length > 20) throw new Refusal('a statement lists at most 20 assumptions');
+    const evidence = (e: string, what: string) => {
+      if (!EVIDENCE.includes(e)) throw new Refusal(`${what}: evidence must be one of ${EVIDENCE.join(', ')}`);
+    };
+
+    // The newest result per key among runs that are still current ('done'; a stale run's are not).
+    const current = new Map<string, { id: bigint; label: string; unit: string; p10: number; p50: number; p90: number }>();
+    for (const r of ctx.db.checkResult.prId.filter(pr.id)) {
+      if (ctx.db.checkRun.id.find(r.checkRunId)?.status !== 'done') continue;
+      const seen = current.get(r.key);
+      if (!seen || r.id > seen.id) current.set(r.key, r);
+    }
+    for (const n of a.numbers) {
+      const what = `number '${n.key}'`;
+      required(n.key, `${what} key`, 80);
+      required(n.label, `${what} label`, 200);
+      if (n.unit.length > 24) throw new Refusal(`${what}: unit is too long (max 24 characters)`);
+      if (![n.p10, n.p50, n.p90].every(Number.isFinite) || !(n.p10 <= n.p50 && n.p50 <= n.p90))
+        throw new Refusal(`${what}: need finite p10 <= p50 <= p90`);
+      evidence(n.evidence, what);
+      if (n.evidence === 'computation') {
+        const r = current.get(n.resultKey);
+        if (!r) throw new Refusal(`${what} is marked computation, but ${pr.plmEcrNumber} has no current check result '${n.resultKey}'`);
+        if (n.label !== r.label || n.unit !== r.unit)
+          throw new Refusal(`${what} is marked computation, so it keeps the label and unit of check result '${n.resultKey}' ('${r.label}', '${r.unit}'), not '${n.label}', '${n.unit}'`);
+        if (r.p10 !== n.p10 || r.p50 !== n.p50 || r.p90 !== n.p90)
+          throw new Refusal(`${what} is marked computation but differs from check result '${n.resultKey}' (${r.p10} / ${r.p50} / ${r.p90}); quote it exactly or mark it judgment`);
+      }
+    }
+    for (const c of [...a.drivers, ...a.claims]) {
+      required(c.text, 'a driver or claim text', 600);
+      evidence(c.evidence, 'a driver or claim');
+    }
+    const seen = new Map(effectiveAssumptions(ctx, pr.id).map(x => [x.key, x]));
+    for (const x of a.assumptions) {
+      const known = seen.get(x.key);
+      if (!known) throw new Refusal(`assumption '${x.key}' is not one this ECR sees`);
+      if (known.source !== x.source)
+        throw new Refusal(`assumption '${x.key}' is ${known.source}, not ${x.source}; a statement may not relabel an assumption's source`);
+      if (x.note.length > 400) throw new Refusal(`assumption '${x.key}': note is too long (max 400 characters)`);
+    }
+
+    const row = ctx.db.impactStatement.insert({
+      id: 0n,
+      prId: pr.id,
+      level: a.level,
+      prRevision: pr.revision,
+      changeClass,
+      route,
+      headline,
+      numbers: a.numbers,
+      drivers: a.drivers,
+      assumptions: a.assumptions,
+      claims: a.claims,
+      author: ctx.sender,
+      createdAt: ctx.timestamp,
+    });
+    return {
+      prId: pr.id,
+      entity: `impact_statement:${row.id}`,
+      summary: `posted Level ${a.level} impact statement on ${pr.plmEcrNumber} (revision ${pr.revision}): ${headline.slice(0, 100)}`,
+      detail: { level: a.level, numbers: a.numbers.length, drivers: a.drivers.length, assumptions: a.assumptions.length, claims: a.claims.length },
+    };
+  }
+);
+
+// ---------------------------------------------------------------------------------------------
 // Baseline parts (the connectors fill this in; only the external key exists so far)
 // ---------------------------------------------------------------------------------------------
 
@@ -336,20 +583,20 @@ export const recordAssumption = write(
   },
   (ctx, a, call) => {
     if (a.prId !== 0n) {
-      const status = getPr(ctx, a.prId).status as PrStatus;
-      if (!OPEN_PR.includes(status)) throw new SenderError(`ECR ${a.prId} is ${status}; its assumptions are frozen`);
+      const pr = getPr(ctx, a.prId);
+      if (!OPEN_PR.includes(pr.status as PrStatus)) throw new Refusal(`${pr.plmEcrNumber} is ${pr.status}; its assumptions are frozen`);
     }
     const key = nonEmpty(a.key, 'key', 80);
     parseJson(a.distJson, 'distJson');
-    if (a.distJson.length > 4000) throw new SenderError('distJson is too long (max 4000 characters)');
-    if (!(SOURCES as readonly string[]).includes(a.source)) throw new SenderError(`source must be one of ${SOURCES.join(', ')}`);
+    if (a.distJson.length > 4000) throw new Refusal('distJson is too long (max 4000 characters)');
+    if (!(SOURCES as readonly string[]).includes(a.source)) throw new Refusal(`source must be one of ${SOURCES.join(', ')}`);
     for (const s of a.affects) stageDef(s);
 
     let cur: ReturnType<typeof ctx.db.assumption.id.find> | undefined;
     for (const r of ctx.db.assumption.prId.filter(a.prId)) if (r.key === key && r.current) cur = r;
     const curRev = cur?.rev ?? 0;
     if (a.expectedRev !== curRev)
-      throw new SenderError(`'${key}' is at revision ${curRev}, not ${a.expectedRev}: someone else edited it; reload and retry`);
+      throw new Refusal(`'${key}' is at revision ${curRev}, not ${a.expectedRev}: someone else edited it; reload and retry`);
     if (
       cur &&
       cur.distJson === a.distJson &&
@@ -528,6 +775,7 @@ const ResultInput = t.object('ResultInput', {
   p50: t.f64(),
   p90: t.f64(),
   detailJson: t.string(),
+  mock: t.bool(), // true for stand-in output; false only for numbers a worker actually computed
 });
 
 // Finish a run and store its results in the same transaction. If any result is invalid the whole
@@ -559,7 +807,7 @@ export const completeCheck = write(
         p90: r.p90,
         detailJson: r.detailJson,
         createdAt: ctx.timestamp,
-        mock: true, // no worker computes anything real yet
+        mock: r.mock,
       });
     }
     ctx.db.checkRun.id.update({ ...run, status: 'done', leaseExpiresAt: undefined, finishedAt: ctx.timestamp, note: '' });

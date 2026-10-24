@@ -9,6 +9,8 @@ export type Result = {
   p50: number;
   p90: number;
   detailJson: string;
+  /** True for stand-in output. The real s1 and s2 handlers (impact.ts) set false. */
+  mock: boolean;
 };
 
 /** Thrown by a handler that noticed the server no longer wants its work (stale inputs, run lost). */
@@ -19,11 +21,21 @@ export class AbortedError extends Error {
   }
 }
 
+/** Thrown by a handler whose run can never succeed as it stands (no baseline source, no seed): fail it for good, with the reason. */
+export class FatalRunError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FatalRunError';
+  }
+}
+
 export type RunCtx = {
   runId: bigint;
   prId: bigint;
   stage: string;
   inputHash: string;
+  /** What the hash was computed from (core.ts StageInputs): the seed, the change request revision, the baseline hash, the assumptions. */
+  inputsJson: string;
   /** Aborted when a heartbeat or progress call is told the run is stale or no longer ours. */
   signal: AbortSignal;
   /** Stream progress; resolves when the server has accepted it. Throws if the run is stale or lost. */
@@ -36,7 +48,7 @@ const detail = (extra: object = {}) => JSON.stringify({ ...MOCK, ...extra });
 
 function summarize(key: string, label: string, unit: string, draws: Float64Array, extra: object = {}): Result {
   const s = Float64Array.from(draws).sort();
-  return { key, label, unit, p10: quantile(s, 0.1), p50: quantile(s, 0.5), p90: quantile(s, 0.9), detailJson: detail(extra) };
+  return { key, label, unit, p10: quantile(s, 0.1), p50: quantile(s, 0.5), p90: quantile(s, 0.9), detailJson: detail(extra), mock: true };
 }
 
 async function quick(ctx: RunCtx, ms: number, make: (rand: () => number) => Result[]): Promise<Result[]> {
@@ -48,7 +60,7 @@ export const HANDLERS: Record<string, (ctx: RunCtx) => Promise<Result[]>> = {
   s1_bom_delta: ctx =>
     quick(ctx, 400, rand => {
       const n = 3 + Math.floor(rand() * 5);
-      return [{ key: 'bom_lines_changed', label: 'BOM lines changed', unit: 'lines', p10: n, p50: n, p90: n, detailJson: detail() }];
+      return [{ key: 'bom_lines_changed', label: 'BOM lines changed', unit: 'lines', p10: n, p50: n, p90: n, detailJson: detail(), mock: true }];
     }),
 
   s2_cost: ctx =>
@@ -98,7 +110,7 @@ export const HANDLERS: Record<string, (ctx: RunCtx) => Promise<Result[]>> = {
     const missed = draws.reduce((k, x) => k + (x > 1900 ? 1 : 0), 0) / total;
     return [
       summarize('cost_at_risk', 'Cost at risk per unit', 'USD', draws),
-      { key: 'p_miss_effectivity', label: 'Chance of missing the effectivity date', unit: 'probability', p10: missed, p50: missed, p90: missed, detailJson: detail() },
+      { key: 'p_miss_effectivity', label: 'Chance of missing the effectivity date', unit: 'probability', p10: missed, p50: missed, p90: missed, detailJson: detail(), mock: true },
     ];
   },
 
@@ -106,10 +118,10 @@ export const HANDLERS: Record<string, (ctx: RunCtx) => Promise<Result[]>> = {
   // NORN_AGENT_STAGE_MS stands in for an LLM call that outlives the lease.
   s0_extract: async ctx => {
     await sleep(Number(process.env.NORN_AGENT_STAGE_MS ?? 1500));
-    return [{ key: 'extracted_changes', label: 'Changes extracted from the ECR text', unit: 'changes', p10: 4, p50: 4, p90: 4, detailJson: detail({ note: 'MOCK: no LLM call was made' }) }];
+    return [{ key: 'extracted_changes', label: 'Changes extracted from the ECR text', unit: 'changes', p10: 4, p50: 4, p90: 4, detailJson: detail({ note: 'MOCK: no LLM call was made' }), mock: true }];
   },
   s5_card: async ctx => {
     await sleep(Number(process.env.NORN_AGENT_STAGE_MS ?? 1500));
-    return [{ key: 'impact_statement', label: 'Change impact statement', unit: 'card', p10: 1, p50: 1, p90: 1, detailJson: detail({ note: 'MOCK: no LLM call was made', pr: String(ctx.prId) }) }];
+    return [{ key: 'impact_statement', label: 'Change impact statement', unit: 'card', p10: 1, p50: 1, p90: 1, detailJson: detail({ note: 'MOCK: no LLM call was made', pr: String(ctx.prId) }), mock: true }];
   },
 };

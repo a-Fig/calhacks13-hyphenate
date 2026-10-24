@@ -1,0 +1,2 @@
+# Per-actor SpacetimeDB identities and e2e logs; never commit.
+.state/

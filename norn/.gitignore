@@ -2,3 +2,5 @@
 .tokens/
 # Spike artifacts (screenshots, timings) are summarised in NOTES.md instead.
 spike-out/
+# Baselines a worker read, cached by content hash (workers/src/baseline.ts).
+.cache/

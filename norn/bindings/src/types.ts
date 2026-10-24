@@ -30,6 +30,17 @@ export const ActionLog = __t.object("ActionLog", {
 });
 export type ActionLog = __Infer<typeof ActionLog>;
 
+export const ActorScope = __t.object("ActorScope", {
+  identity: __t.identity(),
+  jobId: __t.string(),
+  anyEcr: __t.bool(),
+  prIds: __t.array(__t.u64()),
+  maxLevel: __t.u8(),
+  expiresAt: __t.timestamp(),
+  grantedAt: __t.timestamp(),
+});
+export type ActorScope = __Infer<typeof ActorScope>;
+
 export const AgentEvent = __t.object("AgentEvent", {
   id: __t.u64(),
   eventKey: __t.string(),
@@ -78,6 +89,19 @@ export const Assumption = __t.object("Assumption", {
   createdAt: __t.timestamp(),
 });
 export type Assumption = __Infer<typeof Assumption>;
+
+export const BaselineSnapshot = __t.object("BaselineSnapshot", {
+  hash: __t.string(),
+  asOf: __t.string(),
+  source: __t.string(),
+  countsJson: __t.string(),
+  warningsJson: __t.string(),
+  current: __t.bool(),
+  firstReadAt: __t.timestamp(),
+  lastReadAt: __t.timestamp(),
+  recordedBy: __t.identity(),
+});
+export type BaselineSnapshot = __Infer<typeof BaselineSnapshot>;
 
 export const CallMeta = __t.object("CallMeta", {
   requestId: __t.string(),
@@ -144,6 +168,45 @@ export const Comment = __t.object("Comment", {
   createdAt: __t.timestamp(),
 });
 export type Comment = __Infer<typeof Comment>;
+
+export const EcrRevision = __t.object("EcrRevision", {
+  id: __t.u64(),
+  prId: __t.u64(),
+  seq: __t.u32(),
+  changeRequestJson: __t.string(),
+  digest: __t.string(),
+  source: __t.string(),
+  sourceRef: __t.string(),
+  current: __t.bool(),
+  createdBy: __t.identity(),
+  createdAt: __t.timestamp(),
+});
+export type EcrRevision = __Infer<typeof EcrRevision>;
+
+export const ImpactStatement = __t.object("ImpactStatement", {
+  id: __t.u64(),
+  prId: __t.u64(),
+  level: __t.u8(),
+  prRevision: __t.u32(),
+  changeClass: __t.string(),
+  route: __t.string(),
+  headline: __t.string(),
+  get numbers() {
+    return __t.array(StatementNumber);
+  },
+  get drivers() {
+    return __t.array(StatementClaim);
+  },
+  get assumptions() {
+    return __t.array(StatementAssumption);
+  },
+  get claims() {
+    return __t.array(StatementClaim);
+  },
+  author: __t.identity(),
+  createdAt: __t.timestamp(),
+});
+export type ImpactStatement = __Infer<typeof ImpactStatement>;
 
 export const MainVersion = __t.object("MainVersion", {
   version: __t.u32(),
@@ -214,6 +277,32 @@ export const ResultInput = __t.object("ResultInput", {
   p50: __t.f64(),
   p90: __t.f64(),
   detailJson: __t.string(),
+  mock: __t.bool(),
 });
 export type ResultInput = __Infer<typeof ResultInput>;
+
+export const StatementAssumption = __t.object("StatementAssumption", {
+  key: __t.string(),
+  source: __t.string(),
+  note: __t.string(),
+});
+export type StatementAssumption = __Infer<typeof StatementAssumption>;
+
+export const StatementClaim = __t.object("StatementClaim", {
+  text: __t.string(),
+  evidence: __t.string(),
+});
+export type StatementClaim = __Infer<typeof StatementClaim>;
+
+export const StatementNumber = __t.object("StatementNumber", {
+  key: __t.string(),
+  label: __t.string(),
+  unit: __t.string(),
+  p10: __t.f64(),
+  p50: __t.f64(),
+  p90: __t.f64(),
+  evidence: __t.string(),
+  resultKey: __t.string(),
+});
+export type StatementNumber = __Infer<typeof StatementNumber>;
 

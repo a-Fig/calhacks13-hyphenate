@@ -26,8 +26,8 @@ assessments.
 
 A live demo of Norn deployed at **Bowman Aviation**, a fictional Archer-like maker of electric
 aircraft that runs real software: an engineer files a change in Bowman's PLM, Norn's assessment
-appears on it, the board decides, and the result lands in Bowman's ERP, with any number traceable
-on request. Hyphenate's judges ask "would you hire it?", and what's real, what's simulated, and
+appears on it, the board decides, and the released change order carries the ERP change package
+for finance to enter, with any number traceable on request. Norn never writes to the ERP (#71). Hyphenate's judges ask "would you hire it?", and what's real, what's simulated, and
 how we know (`docs/hyphenate-track.md`). The seats Norn fills are the cost engineer, cost
 accountant and supply-chain analyst who write the impact assessment for the Change Control Board.
 The Devpost deadline is Sun Oct 25, 09:00 PT (`README.md`).
