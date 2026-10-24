@@ -37,7 +37,7 @@ export const TABLES = [
 ];
 
 export const fixed = (value: number) => JSON.stringify({ kind: 'fixed', value });
-export const result = (key: string) => ({ key, label: key, unit: 'x', p10: 1, p50: 2, p90: 3, detailJson: '{"mock":true}' });
+export const result = (key: string) => ({ key, label: key, unit: 'x', p10: 1, p50: 2, p90: 3, detailJson: '{"mock":true}', mock: true });
 export const CODE = ['s1_bom_delta', 's2_cost', 's3_timeline', 's4_supply'];
 
 export function kit(A: Client) {

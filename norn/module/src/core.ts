@@ -72,8 +72,10 @@ export const CONFIG_DEFAULTS: Record<string, string> = {
   deep_review_limit: '2',
   max_attempts: '3',
   lease_default_ms: '15000',
-  // Part of every input hash: bump it when worker logic changes so old results go stale.
-  code_version: 'dev-1',
+  // Part of every input hash: bump it when worker logic changes so old results go stale. It names
+  // the checks library's version (CHECKS_CODE_VERSION in norn/checks), so a new library re-checks
+  // every open ECR; workers warn when the two disagree.
+  code_version: 'checks-0.2.0',
   seed: 'norn-seed-1',
 };
 
@@ -157,15 +159,36 @@ export type StageInputs = {
   seed?: string;
   text?: string; // s0: digest of the ECR text
   bomVersion?: number; // s1: the baseline's bill of materials
-  overlay?: string; // s1: stands in for the ECR's edits until Change/Commit tables exist
+  // Code stages: the digest of the ECR's current change request (ecr_revision). Until an ECR has
+  // one, the ECR's id stands in for it, so two ECRs never share a hash.
+  overlay?: string;
+  revision?: number; // code stages: the ecr_revision seq the overlay digest belongs to
+  revisionSource?: string; // code stages: where that change request came from ('plm', or 'stub' for a test feed)
+  erpBaseline?: string; // code stages: the hash of the current ERP baseline (baseline_snapshot)
+  erpBaselineSource?: string; // code stages: where that baseline came from ('erp', or 'file' for a test baseline)
+  erpBaselineAsOf?: string; // code stages: the date that baseline is as of
   assumptions?: { id: string; key: string; rev: number }[]; // code stages: the assumptions that feed it
   upstream?: Record<string, string>; // stage -> its hash, for the stages this one reads
 };
 export type StageInfo = { hash: string; inputs: StageInputs };
 
+// The ECR's current change request, if the PLM has sent one.
+export function currentRevision(ctx: Ctx, prId: bigint) {
+  for (const r of ctx.db.ecrRevision.prId.filter(prId)) if (r.current) return r;
+  return undefined;
+}
+
+// The latest ERP baseline a worker recorded, if any.
+export function currentBaseline(ctx: Ctx) {
+  for (const b of ctx.db.baselineSnapshot.iter()) if (b.current) return b;
+  return undefined;
+}
+
 export function stageInfos(ctx: Ctx, pr: Pick<Pr, 'id' | 'baseVersion' | 'title' | 'description'>): Record<string, StageInfo> {
   const out: Record<string, StageInfo> = {};
   const assumptions = effectiveAssumptions(ctx, pr.id);
+  const rev = currentRevision(ctx, pr.id);
+  const erp = currentBaseline(ctx);
   for (const stage of STAGE_ORDER) {
     const def = STAGES[stage]!;
     const inputs: StageInputs = { stage, codeVersion: cfg(ctx, 'code_version') };
@@ -173,11 +196,21 @@ export function stageInfos(ctx: Ctx, pr: Pick<Pr, 'id' | 'baseVersion' | 'title'
     if (stage === 's0_extract') inputs.text = fnv1a64(`${pr.title}\n${pr.description}`);
     if (stage === 's1_bom_delta') {
       inputs.bomVersion = bomVersion(ctx, pr.baseVersion);
-      // The overlay is not modelled yet: the ECR's id stands in for it, so two ECRs never share a
-      // hash. When Change/Commit tables exist, the ECR's head commit id replaces it.
-      inputs.overlay = String(pr.id);
+      if (!rev) inputs.overlay = String(pr.id);
     }
     if (def.tier === 'code') {
+      // Every code stage reads the change request and the ERP baseline, so it names them itself:
+      // a worker computes on exactly what the run's inputs say.
+      if (rev) {
+        inputs.overlay = rev.digest;
+        inputs.revision = rev.seq;
+        inputs.revisionSource = rev.source;
+      }
+      if (erp) {
+        inputs.erpBaseline = erp.hash;
+        inputs.erpBaselineSource = erp.source;
+        inputs.erpBaselineAsOf = erp.asOf;
+      }
       inputs.assumptions = assumptions
         .filter(a => a.affects.length === 0 || a.affects.includes(stage))
         .map(a => ({ id: String(a.id), key: a.key, rev: a.rev }))
@@ -201,11 +234,18 @@ export function digestOf(infos: Record<string, StageInfo>): string {
 // Actors (#34)
 // ---------------------------------------------------------------------------------------------
 
+// What a credential lets this connection write to (actor_scope, written by grant_scope). Set for
+// agents that come in through Norn's MCP server; null for workers and the UI, which have no limit
+// of this kind. expiresAtMicros is microseconds since the Unix epoch.
+// maxLevel is the highest impact-statement level the credential may post (0: none).
+export type ActorScope = { jobId: string; anyEcr: boolean; prIds: bigint[]; maxLevel: number; expiresAtMicros: bigint };
+
 export type Actor = {
   kind: 'person' | 'agent' | 'unknown';
   name: string;
   origin: string;
   onBehalfOf: string | null;
+  scope?: ActorScope | null;
 };
 
 export function resolveActor(ctx: Ctx): Actor {
@@ -214,8 +254,10 @@ export function resolveActor(ctx: Ctx): Actor {
     return { kind: 'agent', name: 'norn-scheduler', origin: 'norn', onBehalfOf: null };
   }
   const p = ctx.db.principal.identity.find(ctx.sender);
-  if (p) return { kind: p.kind as Actor['kind'], name: p.name, origin: p.origin, onBehalfOf: p.onBehalfOf ?? null };
-  return { kind: 'unknown', name: `unregistered:${ctx.sender.toHexString().slice(0, 8)}`, origin: 'unknown', onBehalfOf: null };
+  const s = ctx.db.actorScope.identity.find(ctx.sender);
+  const scope: ActorScope | null = s ? { jobId: s.jobId, anyEcr: s.anyEcr, prIds: s.prIds, maxLevel: s.maxLevel, expiresAtMicros: s.expiresAt.microsSinceUnixEpoch } : null;
+  if (p) return { kind: p.kind as Actor['kind'], name: p.name, origin: p.origin, onBehalfOf: p.onBehalfOf ?? null, scope };
+  return { kind: 'unknown', name: `unregistered:${ctx.sender.toHexString().slice(0, 8)}`, origin: 'unknown', onBehalfOf: null, scope };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -230,12 +272,17 @@ export type PolicyRule = (ctx: Ctx, actor: Actor, reducer: string, args: Record<
 // Empty in the real module: there are no rules yet. The test module registers some to exercise the gate.
 export const POLICY_RULES: PolicyRule[] = [];
 
+// The first rule that denies or downgrades decides. If none does, the first rule that explicitly
+// allowed gives its reason (so the log says why, e.g. "job scope: ..."), else 'no rules yet'.
 export function authorize(ctx: Ctx, actor: Actor, reducer: string, args: Record<string, any>): Decision {
+  let allowed: Decision | undefined;
   for (const rule of POLICY_RULES) {
     const d = rule(ctx, actor, reducer, args);
-    if (d && d.effect !== 'allow') return d;
+    if (!d) continue;
+    if (d.effect !== 'allow') return d;
+    allowed ??= d;
   }
-  return { effect: 'allow', reason: 'no rules yet' };
+  return allowed ?? { effect: 'allow', reason: 'no rules yet' };
 }
 
 export function decisionText(d: Decision): string {
@@ -255,7 +302,7 @@ export type Logged = {
   detail?: unknown;
   /** Overrides the caller's spawnedBy (worker calls on a run say 'check_run:<id>'). */
   spawnedBy?: string;
-  outcome?: 'applied' | 'denied' | 'downgraded';
+  outcome?: 'applied' | 'denied' | 'downgraded' | 'rejected';
 };
 
 export type LogWho = { requestId: string; spawnedBy: string; policy: string };
@@ -289,6 +336,11 @@ export function logAction(ctx: Ctx, actor: Actor, who: LogWho, reducer: string, 
 // Every write reducer takes this first. requestId is the caller's own id, to match its call to
 // the outcome in action_log (a denial returns normally, so the log is where it shows up).
 // spawnedBy says what started this call: 'Norn', a parent agent run, ...
+// A validation failure worth an audit row. Throw it only before the body has written anything.
+// Callers without a job scope see an ordinary SenderError (workers and the UI rely on that); a
+// job-scoped agent gets a normal return and an action-log row with outcome 'rejected' (see write()).
+export class Refusal extends SenderError {}
+
 export const CallMeta = t.object('CallMeta', { requestId: t.string(), spawnedBy: t.string() });
 
 export type Call = {
@@ -344,7 +396,19 @@ export function write<P extends RowObj>(name: string, params: P, body: Body<P>, 
       decision,
       log: e => logAction(ctx, resolveActor(ctx), who, name, e),
     };
-    const entry = body(ctx, args as InferTypeOfRow<P>, call);
+    let entry: Logged | null;
+    try {
+      entry = body(ctx, args as InferTypeOfRow<P>, call);
+    } catch (e) {
+      // A Refusal is thrown before the body has written anything. A job-scoped agent gets a normal
+      // return and a log row (outcome 'rejected', with the reason) so the refusal can be audited;
+      // every other caller gets the SenderError it always got.
+      if (e instanceof Refusal && first.scope) {
+        logAction(ctx, resolveActor(ctx), who, name, { prId, entity: 'rejected', summary: `${name} rejected: ${e.message}`, outcome: 'rejected' });
+        return;
+      }
+      throw e;
+    }
     // Resolve the actor again: register_actor changes who the sender is mid-call.
     if (entry) logAction(ctx, resolveActor(ctx), who, name, { ...entry, outcome: entry.outcome ?? (downgradeOk ? 'downgraded' : 'applied') });
   }) as any);
