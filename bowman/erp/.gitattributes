@@ -1,0 +1,4 @@
+# up.sh runs under bash and compose.yml is copied to the Mac verbatim: keep LF on Windows checkouts.
+*.sh text eol=lf
+*.yml text eol=lf
+*.mjs text eol=lf

@@ -1,0 +1,6 @@
+{
+  "name": "bowman-erp",
+  "private": true,
+  "type": "module",
+  "description": "Scripts that stand up and seed Bowman's ERPNext. Plain Node 24, no dependencies; .ts files use erasable syntax only."
+}

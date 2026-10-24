@@ -89,6 +89,19 @@ export const Assumption = __t.object("Assumption", {
 });
 export type Assumption = __Infer<typeof Assumption>;
 
+export const BaselineSnapshot = __t.object("BaselineSnapshot", {
+  hash: __t.string(),
+  asOf: __t.string(),
+  source: __t.string(),
+  countsJson: __t.string(),
+  warningsJson: __t.string(),
+  current: __t.bool(),
+  firstReadAt: __t.timestamp(),
+  lastReadAt: __t.timestamp(),
+  recordedBy: __t.identity(),
+});
+export type BaselineSnapshot = __Infer<typeof BaselineSnapshot>;
+
 export const CallMeta = __t.object("CallMeta", {
   requestId: __t.string(),
   spawnedBy: __t.string(),
@@ -154,6 +167,20 @@ export const Comment = __t.object("Comment", {
   createdAt: __t.timestamp(),
 });
 export type Comment = __Infer<typeof Comment>;
+
+export const EcrRevision = __t.object("EcrRevision", {
+  id: __t.u64(),
+  prId: __t.u64(),
+  seq: __t.u32(),
+  changeRequestJson: __t.string(),
+  digest: __t.string(),
+  source: __t.string(),
+  sourceRef: __t.string(),
+  current: __t.bool(),
+  createdBy: __t.identity(),
+  createdAt: __t.timestamp(),
+});
+export type EcrRevision = __Infer<typeof EcrRevision>;
 
 export const ImpactStatement = __t.object("ImpactStatement", {
   id: __t.u64(),
@@ -249,6 +276,7 @@ export const ResultInput = __t.object("ResultInput", {
   p50: __t.f64(),
   p90: __t.f64(),
   detailJson: __t.string(),
+  mock: __t.bool(),
 });
 export type ResultInput = __Infer<typeof ResultInput>;
 
