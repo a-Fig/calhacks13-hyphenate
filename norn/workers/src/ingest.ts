@@ -93,7 +93,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const { R } = await connect({ kind: 'agent', name, origin: 'norn', spawnedBy: 'Norn' });
   if ((process.env.NORN_INGEST_SOURCE ?? 'plm') === 'plm') {
     const { runPlmIngest } = await import('./level1/ingest-plm.ts');
-    await runPlmIngest(R, log); // never returns
+    await runPlmIngest(R, log, { ingestOnce, itemOf }); // never returns
   }
   const source = sourceFromEnv();
   const pollMs = Number(process.env.NORN_INGEST_POLL_MS ?? 5000);

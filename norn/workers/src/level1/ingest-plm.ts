@@ -20,7 +20,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listEcrs, readChangeRequest, watchEcrs, type EcrListing, type PlmOptions } from '../../../connectors/plm/src/index.ts';
 import type { Client } from '../connect.ts';
-import { ingestOnce, itemOf, type IngestItem } from '../ingest.ts';
+// ingest.ts hands these in: it is the entry module, and importing it back from here would deadlock its top-level await.
+import type { IngestItem, ingestOnce as IngestOnce, itemOf as ItemOf } from '../ingest.ts';
 import { plmOptionsFromEnv } from './plm.ts';
 
 export const DEFAULT_STATES = ['Submitted', 'In CM Review', 'CCB Review'];
@@ -51,19 +52,19 @@ export const wanted = (o: PlmIngestOptions, e: Pick<EcrListing, 'name' | 'workfl
   o.states.includes(e.workflowState) && (o.only.length === 0 || o.only.includes(e.name));
 
 /** One ECR as the PLM has it now, as an ingest item. */
-export async function readItem(opts: PlmOptions, name: string): Promise<IngestItem> {
+export async function readItem(opts: PlmOptions, name: string, itemOf: typeof ItemOf): Promise<IngestItem> {
   const r = await readChangeRequest(opts, name);
   // The PLM's own title and text, as filed; the change request carries the structure the checks read.
   return { ...itemOf(r.change as Record<string, any>, r.modified), title: r.record.title || name, description: r.record.text.description };
 }
 
 /** Run until the process ends. */
-export async function runPlmIngest(R: Client['R'], log: (m: string) => void, o = plmIngestOptionsFromEnv()): Promise<void> {
+export async function runPlmIngest(R: Client['R'], log: (m: string) => void, deps: { ingestOnce: typeof IngestOnce; itemOf: typeof ItemOf }, o = plmIngestOptionsFromEnv()): Promise<void> {
   const opts = await plmOptionsFromEnv();
   mkdirSync(dirname(o.stateFile), { recursive: true });
   const sent = new Map<string, string>();
   const report = async (item: IngestItem) => {
-    const r = await ingestOnce(R, { name: 'plm', list: async () => [item] }, sent, log);
+    const r = await deps.ingestOnce(R, { name: 'plm', list: async () => [item] }, sent, log);
     if (r.failed) throw new Error(`could not report ${item.plmEcrNumber}`); // the watcher offers it again
   };
 
@@ -73,13 +74,13 @@ export async function runPlmIngest(R: Client['R'], log: (m: string) => void, o =
   const mark = all.at(-1)?.modified;
   const take = all.filter(e => wanted(o, e));
   log(`the PLM has ${all.length} ECR(s); ${take.length} to take in${o.only.length ? ` (only ${o.only.join(', ')})` : ''}: ${take.map(e => `${e.name} [${e.workflowState}]`).join(', ') || 'none'}`);
-  for (const e of take) await report(await readItem(opts, e.name));
+  for (const e of take) await report(await readItem(opts, e.name, deps.itemOf));
 
   const watcher = watchEcrs(
     opts,
     async change => {
       if (!wanted(o, change)) return;
-      await report(await readItem(opts, change.name));
+      await report(await readItem(opts, change.name, deps.itemOf));
     },
     { intervalMs: o.intervalMs, since: mark, stateFile: o.stateFile, onError: e => log(`PLM watch: ${(e as Error).message}`) }
   );
