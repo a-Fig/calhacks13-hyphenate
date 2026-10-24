@@ -51,9 +51,16 @@ export interface CostForecast {
   /** One-time plus recurring over the window, `headline.windowTotal`. */
   windowTotal: Range;
   /**
+   * The spend and the saving over the window, each as a range of positive amounts, kept apart. A company whose
+   * cost measure does not let savings offset spend (`savingsOffset` false) needs these: the net totals above
+   * cannot say how large either was (+200,000 of tooling and a 190,000 credit net to 10,000). Give them only
+   * when they are known, for example when every cost row has the same sign, so one of the two is zero.
+   */
+  gross?: { spend: Range; saving: Range };
+  /**
    * The size of the change's cost by the company's cost measure, already worked out for each draw of the
-   * forecast. The exact figure: it wins over the estimate made from the ranges above. The checks do not
-   * give it yet. It must be for the horizon the configuration names.
+   * forecast. The exact figure: it wins over the estimate made from the other fields. The checks do not give
+   * it yet. It counts only when `windowMonths` is the horizon the configuration names.
    */
   measured?: { p50: number; p90: number };
 }
@@ -62,13 +69,29 @@ export interface CostForecast {
 export interface CostCheckHeadline {
   window: { months: number };
   headline: { oneTimeTotal: Range; recurringWindow: Range; windowTotal: Range };
+  /** The cost rows by block. Optional: with them, `gross` is filled in when every row has the same sign. */
+  blocks?: Record<string, { total: Range }[]>;
 }
 
-/** The cost facts for a route, from a `costCheck` result. */
+/**
+ * The cost facts for a route, from a `costCheck` result. The check gives ranges of signed totals and no gross
+ * spend or saving, so `gross` is set only when every cost row is at or above zero at its p10 (all spend) or at
+ * or below zero at its p90 (all saving): then the window total is the spend, or minus the saving. A mix of the
+ * two leaves it out, and a company that does not net savings then has an unmeasured cost. To measure those, the
+ * checks would have to expose either `measured` (the cost measure's p50 and p90 per draw) or the per-draw
+ * gross spend and gross saving over the window.
+ */
 export function costForecastFromCheck(result: CostCheckHeadline): CostForecast {
   const { oneTimeTotal, recurringWindow, windowTotal } = result.headline;
   const range = ({ p10, p50, p90 }: Range): Range => ({ p10, p50, p90 });
-  return { windowMonths: result.window.months, oneTime: range(oneTimeTotal), recurringWindow: range(recurringWindow), windowTotal: range(windowTotal) };
+  const forecast: CostForecast = { windowMonths: result.window.months, oneTime: range(oneTimeTotal), recurringWindow: range(recurringWindow), windowTotal: range(windowTotal) };
+  const rows = Object.values(result.blocks ?? {}).flat();
+  const zero: Range = { p10: 0, p50: 0, p90: 0 };
+  if (rows.length > 0) {
+    if (rows.every((r) => r.total.p10 >= 0)) forecast.gross = { spend: range(windowTotal), saving: zero };
+    else if (rows.every((r) => r.total.p90 <= 0)) forecast.gross = { spend: zero, saving: { p10: -windowTotal.p90, p50: -windowTotal.p50, p90: -windowTotal.p10 } };
+  }
+  return forecast;
 }
 
 /**
@@ -126,8 +149,12 @@ export interface CostMeasurement {
   size: number | null;
   percentile: 'p50' | 'p90';
   horizonMonths: number;
-  /** 'measured': given by the checks per draw. 'estimated': worked out from the ranges. */
-  basis: 'measured' | 'estimated' | 'unmeasured';
+  /**
+   * 'measured': given by the checks per draw. 'estimated': worked out from the ranges, a figure to rely on if
+   * the draws stay on one side of zero. 'lower_bound': the true size is at least this, so it can route a change
+   * but cannot show it is within a limit. 'unmeasured': no figure.
+   */
+  basis: 'measured' | 'estimated' | 'lower_bound' | 'unmeasured';
   rule: string;
   why: string;
 }
@@ -202,54 +229,63 @@ function placeClass(config: CompanyConfig, axis: 'company' | 'regulatory', given
  * The size of the change's cost by `approval.costMeasure`, in the company currency.
  *
  * The configuration defines it per draw of the forecast: the larger of the spend and the saving (or the size of
- * their difference), taken at a percentile across the draws. The checks give ranges of the signed totals, not
- * the draws, so unless the facts carry the exact figure (`CostForecast.measured`) this works it out from the
- * ranges, leaning high so that a change is never routed lower than its forecast supports:
- * - at p90, each spend takes its p90 and each saving the size of its p10 (a saving of -3.0M, -2.0M, -1.5M is
- *   3.0M); at p50, both take the p50;
- * - with `savingsOffset` false, the spend is the one-time and recurring spends added, the saving the one-time
- *   and recurring savings added, and the size is the larger; with `savingsOffset` true it is the larger size
- *   of the window total's two ends.
- * Adding the ends over-states a change whose parts do not move together, which only raises its tier.
+ * their difference), taken at a percentile across the draws. The checks give ranges, not draws, so this is exact
+ * only when the facts carry the figure (`CostForecast.measured`). Otherwise it is an estimate, and an estimate
+ * can be wrong in either direction, so the rules below refuse one rather than guess:
+ * - the assessment must cover the configured horizon, `measured` included;
+ * - `savingsOffset` true: the size is |net total|. At p90 that is the larger end of the window total's p10 and
+ *   p90 when both lie on the same side of zero. If the range straddles zero the p90 of |net| can be larger than
+ *   either end (triangular(-40000, 0, 40000) has ends of about 22,111 and a p90 of |x| of 27,351), so the cost
+ *   is unmeasured. At p50 the larger end is an upper bound whichever side the range falls on.
+ *   Even on one side, the figure assumes the tails beyond p10 and p90 do not cross zero;
+ * - `savingsOffset` false: the size is the larger of the gross spend and the gross saving, which net totals
+ *   cannot give. Without `gross` the cost is unmeasured. When one of the two is zero, the other is the size.
+ *   When both are positive the larger is only a lower bound.
  */
 export function measureCost(config: CompanyConfig, cost: CostForecast | undefined): CostMeasurement {
   const m = config.approval.costMeasure;
   const base = { percentile: m.percentile, horizonMonths: m.horizonMonths, rule: 'approval.costMeasure' };
-  if (!cost) {
-    return { ...base, size: null, basis: 'unmeasured', why: 'There is no cost assessment yet, so the cost is unmeasured.' };
+  const unmeasured = (why: string): CostMeasurement => ({ ...base, size: null, basis: 'unmeasured', why });
+  if (!cost) return unmeasured('There is no cost assessment yet, so the cost is unmeasured.');
+  if (cost.windowMonths !== m.horizonMonths) {
+    return unmeasured(`The assessment covers ${cost.windowMonths} months of production and the cost measure needs ${m.horizonMonths}, so the cost is unmeasured.`);
   }
   if (cost.measured) {
     const size = cost.measured[m.percentile];
     return { ...base, size, basis: 'measured', why: `The ${m.percentile} size of the change over ${m.horizonMonths} months is ${money(config, size)}, as worked out per draw of the forecast.` };
   }
-  if (cost.windowMonths !== m.horizonMonths) {
-    return {
-      ...base,
-      size: null,
-      basis: 'unmeasured',
-      why: `The assessment covers ${cost.windowMonths} months of production and the cost measure needs ${m.horizonMonths}, so the cost is unmeasured.`,
-    };
-  }
-  const at = (r: Range): { high: number; low: number } => (m.percentile === 'p90' ? { high: r.p90, low: r.p10 } : { high: r.p50, low: r.p50 });
-  const spend = (r: Range): number => Math.max(0, at(r).high);
-  const saving = (r: Range): number => Math.max(0, -at(r).low);
-  let size: number;
-  let how: string;
+  const where = `The ${m.percentile} size of the change over ${m.horizonMonths} months`;
   if (m.savingsOffset) {
-    const net = at(cost.windowTotal);
-    size = Math.max(Math.abs(net.high), Math.abs(net.low));
-    how = `the larger end of the net cost over the window (${money(config, net.low)} to ${money(config, net.high)})`;
-  } else {
-    const spent = spend(cost.oneTime) + spend(cost.recurringWindow);
-    const saved = saving(cost.oneTime) + saving(cost.recurringWindow);
-    size = Math.max(spent, saved);
-    how = `the larger of the spend (${money(config, spent)}) and the saving (${money(config, saved)})`;
+    const net = cost.windowTotal;
+    const sameSide = net.p10 >= 0 || net.p90 <= 0;
+    if (m.percentile === 'p90' && !sameSide) {
+      return unmeasured(
+        `The net cost over ${m.horizonMonths} months runs from ${money(config, net.p10)} to ${money(config, net.p90)}, across zero, and the forecast's ranges cannot give the p90 size of a change that crosses zero, so the cost is unmeasured.`,
+      );
+    }
+    const size = m.percentile === 'p50' && sameSide ? Math.abs(net.p50) : Math.max(Math.abs(net.p10), Math.abs(net.p90));
+    return { ...base, size, basis: 'estimated', why: `${where} is ${money(config, size)}, estimated from the net cost's range (${money(config, net.p10)} to ${money(config, net.p90)}).` };
+  }
+  if (!cost.gross) {
+    return unmeasured(
+      "The company's cost measure does not let savings offset spend, and the assessment gives only net totals, which cannot show how large the spend or the saving is on its own, so the cost is unmeasured.",
+    );
+  }
+  const { spend, saving } = cost.gross;
+  const at = (r: Range): number => (m.percentile === 'p90' ? r.p90 : r.p50);
+  const isZero = (r: Range): boolean => r.p10 === 0 && r.p50 === 0 && r.p90 === 0;
+  const spent = at(spend);
+  const saved = at(saving);
+  const size = Math.max(spent, saved);
+  const detail = `the larger of the spend (${money(config, spent)}) and the saving (${money(config, saved)})`;
+  if (isZero(spend) || isZero(saving)) {
+    return { ...base, size, basis: 'estimated', why: `${where} is ${money(config, size)}: ${detail}, estimated from the forecast's ranges.` };
   }
   return {
     ...base,
     size,
-    basis: 'estimated',
-    why: `The ${m.percentile} size of the change over ${m.horizonMonths} months is ${money(config, size)}: ${how}, estimated from the forecast's ranges.`,
+    basis: 'lower_bound',
+    why: `${where} is at least ${money(config, size)}: ${detail}. The change has both a spend and a saving, and their ranges cannot show how the larger of the two behaves draw by draw, so the true size can be higher.`,
   };
 }
 
@@ -417,8 +453,6 @@ export interface DecideInput {
   action: string;
   actor: Actor;
   facts: EcrFacts;
-  /** The ECR's route. Left out, it is worked out from the facts. */
-  route?: Route;
 }
 
 /** Actions that follow a decision: each needs an approved ECR before anyone, person or agent, can take it (`ACTIONS`). */
@@ -438,13 +472,19 @@ function checkLimits(config: CompanyConfig, rule: ActionRule, facts: EcrFacts, r
   const checks: LimitCheck[] = [];
   if (limits.maxCost !== undefined) {
     const actual = route.cost.size;
-    const held = actual !== null && actual <= limits.maxCost;
+    const lower = route.cost.basis === 'lower_bound';
+    const held = actual !== null && !lower && actual <= limits.maxCost;
     checks.push({
       limit: 'maxCost',
       held,
       actual,
       allowed: limits.maxCost,
-      text: actual === null ? `The cost is unmeasured and the limit is ${money(config, limits.maxCost)}.` : `The change is ${money(config, actual)} against a limit of ${money(config, limits.maxCost)}.`,
+      text:
+        actual === null
+          ? `The cost is unmeasured and the limit is ${money(config, limits.maxCost)}.`
+          : lower
+            ? `The change is at least ${money(config, actual)}, and it cannot be shown to be within the limit of ${money(config, limits.maxCost)} because the true size can be higher.`
+            : `The change is ${money(config, actual)} against a limit of ${money(config, limits.maxCost)}.`,
     });
   }
   if (limits.maxP90SlipDays !== undefined) {
@@ -474,7 +514,7 @@ function checkLimits(config: CompanyConfig, rule: ActionRule, facts: EcrFacts, r
 
 /** Whether the body that approved the ECR still covers it: its tier is the tier of today's cost or one above. */
 function approvalCovers(config: CompanyConfig, facts: EcrFacts, route: Route): boolean {
-  if (!facts.approvedBy || facts.approvedBy === 'fast_track' || route.cost.size === null) return false;
+  if (!facts.approvedBy || facts.approvedBy === 'fast_track' || route.cost.size === null || route.cost.basis === 'lower_bound') return false;
   const index = config.approval.tiers.findIndex((t) => t.body === facts.approvedBy);
   return index >= route.tier.tierIndex;
 }
@@ -544,6 +584,9 @@ function decide(config: CompanyConfig, input: DecideInput, route: Route, mayRero
   }
   if (FOLLOW_ON.includes(action) && !facts.approvedBy) {
     return deny('ACTIONS', `${action} follows a decision, and this ECR has not been approved by a body or on the fast track.`);
+  }
+  if (FOLLOW_ON.includes(action) && facts.approvedBy !== 'fast_track' && !config.approval.bodies.some((b) => b.id === facts.approvedBy)) {
+    return deny('approval.bodies', `${action} follows a decision, and ${JSON.stringify(facts.approvedBy)} is neither the fast track nor an approval body in the configuration, so the ECR has not been approved.`);
   }
 
   // A person acting as themselves does what their role allows.
@@ -624,5 +667,6 @@ function decide(config: CompanyConfig, input: DecideInput, route: Route, mayRero
  * person's side only ever allows or refuses (roles carry no limits).
  */
 export function decideAction(config: CompanyConfig, input: DecideInput): ActionDecision {
-  return decide(config, input, input.route ?? routeEcr(config, input.facts), true);
+  // Always worked out here from this call's facts. A route kept from earlier describes the cost it was made at.
+  return decide(config, input, routeEcr(config, input.facts), true);
 }

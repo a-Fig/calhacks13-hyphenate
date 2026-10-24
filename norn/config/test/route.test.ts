@@ -190,21 +190,25 @@ describe('the cost measure', () => {
     windowTotal: net,
   });
 
+  const withGross = (f: CostForecast, spend: ReturnType<typeof range>, saving: ReturnType<typeof range>): CostForecast => ({ ...f, gross: { spend, saving } });
+
   it('measures a 3M saving as a 3M change, and routes it to the program management committee', () => {
     const saving = range(-3_000_000, -2_000_000, -1_500_000);
-    const m = measureCost(config, forecast(zero, saving));
-    assert.equal(m.size, 3_000_000);
-    assert.equal(routeEcr(config, { ecrId: 'ECR-0001', cost: forecast(zero, saving) }).tier.bodyId, 'pmc');
+    const f = withGross(forecast(zero, saving), zero, range(1_500_000, 2_000_000, 3_000_000));
+    assert.equal(measureCost(config, f).size, 3_000_000);
+    assert.equal(routeEcr(config, { ecrId: 'ECR-0001', cost: f }).tier.bodyId, 'pmc');
   });
 
-  it('measures 1.8M of tooling that saves 1M as 1.8M, not as the 0.8M it nets to', () => {
-    const f = forecast(range(1_800_000, 1_800_000, 1_800_000), range(-1_000_000, -1_000_000, -1_000_000));
-    assert.equal(measureCost(config, f).size, 1_800_000);
+  it('measures 1.8M of tooling that saves 1M as at least 1.8M, not as the 0.8M it nets to', () => {
+    const f = withGross(forecast(range(1_800_000, 1_800_000, 1_800_000), range(-1_000_000, -1_000_000, -1_000_000)), range(1_800_000, 1_800_000, 1_800_000), range(1_000_000, 1_000_000, 1_000_000));
+    const m = measureCost(config, f);
+    assert.equal(m.size, 1_800_000);
+    assert.equal(m.basis, 'lower_bound');
     assert.equal(routeEcr(config, { ecrId: 'ECR-0001', cost: f }).tier.bodyId, 'ccb');
   });
 
   it('puts exactly 150,000 in the first tier and one dollar more in the second', () => {
-    const at = (n: number) => routeEcr(config, { ecrId: 'ECR-0001', cost: forecast(range(n, n, n)) }).tier.bodyId;
+    const at = (n: number) => routeEcr(config, { ecrId: 'ECR-0001', cost: withGross(forecast(range(n, n, n)), range(n, n, n), zero) }).tier.bodyId;
     assert.equal(at(150_000), 'trc');
     assert.equal(at(150_001), 'ccb');
     assert.equal(at(2_000_000), 'ccb');
@@ -229,7 +233,7 @@ describe('the cost measure', () => {
   });
 
   it('follows the configuration: p50 and savingsOffset change the size', () => {
-    const f = forecast(range(1_000, 2_000, 3_000), range(-500, -400, -300));
+    const f = withGross(forecast(range(1_000, 2_000, 3_000), range(-500, -400, -300)), range(1_000, 2_000, 3_000), range(300, 400, 500));
     const copy = (change: (c: CompanyConfig) => void): CompanyConfig => {
       const c = structuredClone(config);
       change(c);
@@ -545,5 +549,99 @@ describe('every action has an answer, and every answer has its reasons', () => {
   it('is the same every time', () => {
     const input = { action: 'approve_fast_track_ecr', actor: NORN, facts: factsFor('ECR-0423') };
     assert.deepEqual(decideAction(config, input), decideAction(config, input));
+  });
+});
+
+// Regression tests for the review of e829bc0. Each input is the reviewer's, and each test failed before its fix.
+describe('when the facts cannot show an action is within its limits, it does not act', () => {
+  const r3 = (n: number) => ({ p10: n, p50: n, p90: n });
+  const fastTrack = (facts: EcrFacts) => decideAction(config, { action: 'approve_fast_track_ecr', actor: NORN, facts });
+  const withCost = (cost: CostForecast): EcrFacts => ({ ...factsFor('ECR-0423'), cost });
+
+  it('netted totals cannot stand in for the gross spend: +200,000 tooling and a -190,000 credit is not a 10,000 change', () => {
+    const netted: CostForecast = { windowMonths: 12, oneTime: r3(200_000), recurringWindow: r3(-190_000), windowTotal: r3(10_000) };
+    assert.equal(config.approval.costMeasure.savingsOffset, false);
+    const route = routeEcr(config, withCost(netted));
+    assert.equal(route.cost.basis, 'unmeasured');
+    assert.equal(route.cost.size, null);
+    assert.notEqual(route.tier.bodyId, 'trc');
+    const d = fastTrack(withCost(netted));
+    assert.equal(d.actsNow, false);
+    assert.equal(d.outcome, 'recommend');
+    assert.match(flat(d), /unmeasured/);
+  });
+
+  it('accepts the gross spend and saving when the caller gives them, and routes the larger: 200,000 goes to the CCB', () => {
+    const gross: CostForecast = { windowMonths: 12, oneTime: r3(200_000), recurringWindow: r3(-190_000), windowTotal: r3(10_000), gross: { spend: r3(200_000), saving: r3(190_000) } };
+    const route = routeEcr(config, withCost(gross));
+    assert.equal(route.cost.size, 200_000);
+    assert.equal(route.tier.bodyId, 'ccb');
+  });
+
+  it('a lower bound that mixes spend and saving routes the change but never lets an agent act on it', () => {
+    const small: CostForecast = { windowMonths: 12, oneTime: r3(10_000), recurringWindow: r3(-9_000), windowTotal: r3(1_000), gross: { spend: r3(10_000), saving: r3(9_000) } };
+    const route = routeEcr(config, withCost(small));
+    assert.equal(route.cost.size, 10_000);
+    assert.equal(route.cost.basis, 'lower_bound');
+    const d = fastTrack(withCost(small));
+    assert.equal(d.actsNow, false);
+    assert.equal(d.outcome, 'recommend');
+    assert.match(flat(d), /cannot be shown to be within/);
+  });
+
+  it('a spend with no saving in any draw is exact from its own range', () => {
+    const pure: CostForecast = { windowMonths: 12, oneTime: r3(0), recurringWindow: { p10: 100, p50: 200, p90: 300 }, windowTotal: { p10: 100, p50: 200, p90: 300 }, gross: { spend: { p10: 100, p50: 200, p90: 300 }, saving: r3(0) } };
+    const m = measureCost(config, pure);
+    assert.equal(m.size, 300);
+    assert.equal(m.basis, 'estimated');
+  });
+
+  it('a range that straddles zero does not bound the p90 size: triangular(-40000, 0, 40000) is not a 22,111 change', () => {
+    // Its p10 and p90 are about -22,111 and +22,111, but p90 of |x| is 27,351, over the 25,000 limit.
+    const straddle = { p10: -22_111, p50: 0, p90: 22_111 };
+    const offset = structuredClone(config);
+    offset.approval.costMeasure.savingsOffset = true;
+    const f = withCost({ windowMonths: 12, oneTime: straddle, recurringWindow: r3(0), windowTotal: straddle });
+    assert.equal(routeEcr(offset, f).cost.basis, 'unmeasured');
+    const d = decideAction(offset, { action: 'approve_fast_track_ecr', actor: NORN, facts: f });
+    assert.equal(d.actsNow, false);
+    assert.equal(d.outcome, 'recommend');
+  });
+
+  it('a range on one side of zero is used as it is, and a straddling one is a safe upper bound only at p50', () => {
+    const offset = structuredClone(config);
+    offset.approval.costMeasure.savingsOffset = true;
+    const net = (windowTotal: { p10: number; p50: number; p90: number }): CostForecast => ({ windowMonths: 12, oneTime: r3(0), recurringWindow: r3(0), windowTotal });
+    assert.equal(measureCost(offset, net({ p10: 100, p50: 150, p90: 300 })).size, 300);
+    assert.equal(measureCost(offset, net({ p10: -300, p50: -150, p90: -100 })).size, 300);
+    offset.approval.costMeasure.percentile = 'p50';
+    assert.equal(measureCost(offset, net({ p10: -22_111, p50: 0, p90: 20_000 })).size, 22_111);
+  });
+
+  it('a cached route cannot be reused after the facts change: 140,000 with technical review approval is not 3,000,000', () => {
+    const at = (size: number): EcrFacts => eligible('ECR-0417', size, { approvedBy: 'trc' });
+    const stale = routeEcr(config, at(140_000));
+    const fresh = decideAction(config, { action: 'release_eco', actor: NORN, facts: at(3_000_000), route: stale } as Parameters<typeof decideAction>[1]);
+    assert.equal(fresh.actsNow, false);
+    assert.equal(fresh.outcome, 'recommend');
+    assert.match(flat(fresh), /3,000,000 USD against a limit of 25,000 USD/);
+  });
+
+  it('an exact figure for another horizon is refused, like an estimate would be', () => {
+    const f = eligible('ECR-0423', 600);
+    const sixMonths: CostForecast = { ...f.cost!, windowMonths: 6, measured: { p50: 600, p90: 600 } };
+    const route = routeEcr(config, { ...f, cost: sixMonths });
+    assert.equal(route.cost.basis, 'unmeasured');
+    assert.equal(fastTrack({ ...f, cost: sixMonths }).actsNow, false);
+    assert.equal(fastTrack(f).actsNow, true);
+  });
+
+  it('an approval by something that is not a configured body does not satisfy the prerequisite', () => {
+    for (const action of ['release_eco', 'post_journal_entry', 'write_bom']) {
+      const d = decideAction(config, { action, actor: NORN, facts: { ...factsFor('ECR-0423'), approvedBy: 'not-a-body' } });
+      assert.equal(d.outcome, 'deny', action);
+      assert.match(flat(d), /not-a-body/);
+    }
+    assert.equal(decideAction(config, { action: 'release_eco', actor: NORN, facts: { ...factsFor('ECR-0423'), approvedBy: 'ccb' } }).outcome, 'approve');
   });
 });
