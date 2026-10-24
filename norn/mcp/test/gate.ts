@@ -148,6 +148,9 @@ const g2 = await call(A, 'get_ecr', { ecr: 'BWM-ECR-0417' });
 check('get_ecr shows the statement, and that it is current for this revision', g2.json?.statements?.[0]?.level === 1 && g2.json.statements[0].current === true && g2.json.statements[0].postedBy?.name === actorA);
 const sBad = await call(A, 'post_impact_statement', { ...stmtArgs, numbers: [{ key: 'x', evidence: 'computation', resultKey: 'no_such_result' }] });
 check('a computation number with no such current result is refused with what to do', sBad.isError && sBad.text.includes('no current check result'), sBad.text.slice(0, 120));
+check('...and it lists the result keys that do exist', sBad.text.includes('Current result keys:') && sBad.text.includes('unit_cost_delta'));
+const sPref = await call(A, 'post_impact_statement', { ...stmtArgs, numbers: [{ key: 'unit_cost', evidence: 'computation', resultKey: 's2_cost.unit_cost_delta' }], assumptions: [] });
+check('a result key written with its stage in front (s2_cost.unit_cost_delta) is accepted', !sPref.isError && sPref.json?.saved === true, sPref.text.slice(0, 120));
 const sOut = await call(A, 'post_impact_statement', { ...stmtArgs, ecr: 'BWM-ECR-0418', assumptions: [], numbers: [{ key: 'j', evidence: 'judgment', p10: 1, p50: 2, p90: 3 }] });
 check('a statement on another ECR is refused by the gate and logged', sOut.isError && sOut.text.includes('Refused by Norn') && [...norn.db.actionLog.prId.filter(ecr418.id)].some(l => l.reducer === 'post_impact_statement' && l.outcome === 'denied'));
 
@@ -167,6 +170,13 @@ check('...or level 4', /level must be 1, 2 or 3/.test(m3), m3.slice(0, 100));
 const m4 = await reject(raw.R.postImpactStatement({ meta: meta('s'), ...base, numbers: [{ key: 'k', label: 'k', unit: '', p10: 3, p50: 2, p90: 1, evidence: 'judgment', resultKey: '' }], assumptions: [] }));
 check('...or p10 above p90', /p10 <= p50 <= p90/.test(m4), m4.slice(0, 100));
 
+
+// an ECR filed a moment ago has no results yet; the tool must say so rather than invent anything
+const freshTitle = `gate check fresh ECR ${stamp}`;
+await raw.R.createPr({ meta: meta('fresh'), plmEcrNumber: `BWM-GATE-${stamp}`, title: freshTitle, description: 'Filed by the gate check.' });
+for (let i = 0; i < 100 && !norn.findEcr(`BWM-GATE-${stamp}`).pr; i++) await sleep(20);
+const fresh = await call(A, 'get_impact', { ecr: `BWM-GATE-${stamp}` });
+check('get_impact on an ECR with no results yet says so plainly (no_results, with what to do)', fresh.json?.state === 'no_results' && /No check results yet/.test(fresh.json.hint) && fresh.json.stages.every((s: any) => s.results.length === 0), `${fresh.json?.state}; ${fresh.json?.stages?.map((s: any) => s.state).join(',')}`);
 
 // assumptions
 const given = await call(A, 'propose_assumption', { ecr: 'BWM-ECR-0417', key: 'titanium_price_usd_per_kg', value: 99, rationale: 'x', sources: ['guess'] });

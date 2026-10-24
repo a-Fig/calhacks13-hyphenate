@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { registerErpTools } from './erp.ts';
 import type { ActorHandle, Norn } from './norn.ts';
 import type { Claims } from './token.ts';
-import { affectedParts, assumptionView, currentResult, ecrSummary, ecrView, effectiveAssumptions, historyOf, impactOf, partView } from './views.ts';
+import { affectedParts, assumptionView, bareResultKey, currentResult, currentResultKeys, ecrSummary, ecrView, effectiveAssumptions, historyOf, impactOf, partView } from './views.ts';
 
 export interface ToolContext {
   norn: Norn;
@@ -222,7 +222,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     'post_impact_statement',
     {
       description:
-        'Post a structured impact statement (level 1 to 3) on an ECR: change class, proposed approval route, a headline, headline numbers with p10/p50/p90, drivers, the assumptions it rests on, and claims, each with an evidence class. A number with evidence "computation" must name a result key from get_impact and is copied from that result: do not type its digits. Any other number needs p10, p50 and p90. Assumption sources are filled in from Norn\'s record. Use fixed likelihood words in prose (almost no chance, very unlikely, unlikely, roughly even, likely, very likely, almost certain).',
+        'Post a structured impact statement (level 1 to 3) on an ECR: change class, proposed approval route, a headline, headline numbers with p10/p50/p90, drivers, the assumptions it rests on, and claims, each with an evidence class. A number with evidence "computation" must name the key of a result from get_impact (e.g. "unit_cost_delta") and is copied from that result: do not type its digits. Any other number needs p10, p50 and p90. Assumption sources are filled in from Norn\'s record. Use fixed likelihood words in prose (almost no chance, very unlikely, unlikely, roughly even, likely, very likely, almost certain).',
       inputSchema: {
         ecr: ECR,
         level: z.number().int().min(1).max(3).describe('1 = impact screen, 2 = researched, 3 = Norn\'s final verdict.'),
@@ -255,9 +255,13 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       const numbers = (a.numbers as any[]).map(n => {
         if (n.evidence === 'computation') {
           if (!n.resultKey) throw new ToolFailure(`Number '${n.key}' is a computation, so it needs resultKey (a key from get_impact).`);
-          const r = currentResult(norn, pr.id, n.resultKey);
-          if (!r) throw new ToolFailure(`Number '${n.key}': ${pr.plmEcrNumber} has no current check result '${n.resultKey}'. Call get_impact; if the results are missing or stale, do not present the number as a computation.`);
-          return { key: n.key, label: n.label ?? r.label, unit: n.unit ?? r.unit, p10: r.p10, p50: r.p50, p90: r.p90, evidence: 'computation', resultKey: n.resultKey };
+          const resultKey = bareResultKey(n.resultKey);
+          const r = currentResult(norn, pr.id, resultKey);
+          if (!r) {
+            const keys = currentResultKeys(norn, pr.id);
+            throw new ToolFailure(`Number '${n.key}': ${pr.plmEcrNumber} has no current check result '${n.resultKey}'. ${keys.length ? `Current result keys: ${keys.join(', ')}.` : 'It has no current results; call get_impact, and if they are missing or stale do not present the number as a computation.'}`);
+          }
+          return { key: n.key, label: n.label ?? r.label, unit: n.unit ?? r.unit, p10: r.p10, p50: r.p50, p90: r.p90, evidence: 'computation', resultKey };
         }
         if (![n.p10, n.p50, n.p90].every((x: unknown) => typeof x === 'number')) throw new ToolFailure(`Number '${n.key}' is a ${n.evidence}, so it needs p10, p50 and p90.`);
         return { key: n.key, label: n.label ?? n.key, unit: n.unit ?? '', p10: n.p10, p50: n.p50, p90: n.p90, evidence: n.evidence, resultKey: n.resultKey ?? '' };

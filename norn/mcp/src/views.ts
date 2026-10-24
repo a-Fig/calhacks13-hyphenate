@@ -77,6 +77,19 @@ export function currentResult(norn: Norn, prId: bigint, key: string): CheckResul
   return best;
 }
 
+/** The keys of every result that comes from a finished run, for an error message. */
+export function currentResultKeys(norn: Norn, prId: bigint): string[] {
+  const keys = new Set<string>();
+  for (const r of norn.db.checkResult.prId.filter(prId)) if (norn.db.checkRun.id.find(r.checkRunId)?.status === 'done') keys.add(r.key);
+  return [...keys].sort();
+}
+
+/** A result key as an agent may write it: `unit_cost_delta`, or with its stage in front (`s2_cost.unit_cost_delta`). */
+export function bareResultKey(ref: string): string {
+  const dot = ref.indexOf('.');
+  return dot > 0 && STAGES.some(s => s.stage === ref.slice(0, dot)) ? ref.slice(dot + 1) : ref;
+}
+
 function resultView(r: CheckResult, traceChars: number, onlyKey?: string) {
   return {
     key: r.key,

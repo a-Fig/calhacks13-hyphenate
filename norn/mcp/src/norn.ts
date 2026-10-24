@@ -17,6 +17,7 @@ import { DisconnectedError, InternalError, SenderError, Timestamp, UnknownCallRe
 import type { Claims } from './token.ts';
 
 export const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+const CALL_TIMEOUT_MS = 20_000;
 
 export interface NornOptions {
   uri: string;
@@ -187,10 +188,19 @@ export class Norn {
     const requestId = newRequestId(claims.jobId);
     const fn = (actor.conn.reducers as unknown as Reducers)[reducer];
     if (!fn) throw new Error(`no reducer '${reducer}' in the bindings`);
+    let timer: NodeJS.Timeout | undefined;
     try {
-      await fn.call(actor.conn.reducers, { ...args, meta: { requestId, spawnedBy: claims.spawnedBy } });
+      // A hung database must not hang the agent's tool call for ever.
+      await Promise.race([
+        fn.call(actor.conn.reducers, { ...args, meta: { requestId, spawnedBy: claims.spawnedBy } }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new UnknownCallResultError()), CALL_TIMEOUT_MS);
+        }),
+      ]);
     } catch (e) {
       return { requestId, error: describeError(e) };
+    } finally {
+      clearTimeout(timer);
     }
     return { requestId, row: await this.outcome(requestId, snake(reducer)) };
   }
@@ -242,9 +252,9 @@ export class Norn {
     const prIds: bigint[] = [];
     if (!anyEcr) {
       for (const ref of claims.ecrs) {
-        const { pr } = this.findEcr(ref);
+        const { pr, known } = this.findEcr(ref);
         if (!pr || pr.plmEcrNumber.toLowerCase() !== ref.toLowerCase())
-          throw new ActorError(403, `the token names ECR '${ref}', which Norn does not have`);
+          throw new ActorError(403, `the token names ECR '${ref}', which Norn does not have (tokens carry the full PLM number; Norn has: ${known.join(', ') || 'none'})`);
         prIds.push(pr.id);
       }
     }

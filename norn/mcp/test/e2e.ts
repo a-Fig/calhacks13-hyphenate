@@ -2,7 +2,8 @@
 // only Norn's MCP server, reads ECR-0417 and its impact results, posts a comment, and tries one
 // write to a different ECR. Then the database is asked who acted, for whom, and what the gate did.
 //
-//   npm run e2e -w @norn/mcp
+//   npm run e2e -w @norn/mcp               one session: read, comment, one refused write
+//   npm run e2e -w @norn/mcp -- --statement  and a second session that posts a Level 1 impact statement
 //
 // Needs SpacetimeDB on 127.0.0.1:3000 and this laptop's Claude login (one Haiku session, at most 8
 // turns). It rebuilds the separate database `norn-mcp`; it never touches `norn`.
@@ -110,6 +111,59 @@ for (const l of mine) {
 }
 const reg = [...norn.db.actionLog.iter()].filter(l => l.actorName === identity.actor && (l.reducer === 'register_actor' || l.reducer === 'grant_scope'));
 void reg;
+
+// ---- optional second session: a Level 1 impact statement -----------------------------------------------
+if (process.argv.includes('--statement')) {
+  const id2 = { actor: 'agent:norn/statement/BWM-ECR-0417', onBehalfOf: null, spawnedBy: 'norn' };
+  const job2 = `e2e-stmt-${stamp}`;
+  const entry2 = nornMcpFor(id2, { jobId: job2, role: 'level1-writeup', ecrs: ['BWM-ECR-0417'], url: server.url, ttlSeconds: 900 });
+  const log2 = join(stateDir, 'e2e', `${job2}.jsonl`);
+  const file2 = jsonlFileSink(log2);
+  const mem2 = memorySink();
+  const runner2 = new Runner({ sink: teeSink(file2, mem2), config: { concurrency: 1 } });
+  console.log(`
+running a second ${CHEAP_MODEL} session as ${id2.actor}, acting for nobody (job ${job2})`);
+  const r2 = await runner2.run({
+    id: job2,
+    role: 'level1-writeup',
+    model: CHEAP_MODEL,
+    maxTurns: 10,
+    timeoutMs: 240_000,
+    systemPrompt: spec.systemPrompt,
+    prompt: [
+      "Do these steps in order, using only Norn's tools.",
+      '1. Read ECR BWM-ECR-0417 with get_ecr, its impact with get_impact, and its assumptions with list_assumptions.',
+      '2. Post a Level 1 impact statement on BWM-ECR-0417 with post_impact_statement.',
+      '   - Change class "Class I", route "CCB". The headline is one sentence and says the numbers are mock.',
+      '   - Headline numbers: the per-unit cost change and the weeks until the change reaches the line, both as computation, using their result keys from get_impact.',
+      '   - Two drivers, as judgment. Two assumptions the numbers lean on, each with a note. One claim, as fact: that the ECR says the bracket cracked in fatigue test.',
+      '3. Finish with one sentence saying whether the statement was saved.',
+    ].join('\n'),
+    mcpServers: { [NORN_MCP_SERVER_NAME]: entry2 },
+    allowedTools: nornTools('read', 'post_impact_statement'),
+    identity: id2,
+  });
+  await file2.close();
+  console.log(`job ${r2.status} in ${(r2.durationMs / 1000).toFixed(1)} s, ${r2.numTurns} turn(s)${r2.error ? `, error ${r2.error.kind}: ${r2.error.message}` : ''}`);
+  console.log(`agent's last words: ${r2.result ?? '(none)'}`);
+  console.log(`tool calls: ${mem2.events.filter(e => e.type === 'tool_call').map((e: any) => e.tool.replace('mcp__norn__', '')).join(', ')}`);
+  await sleep(500);
+  const p2 = [...norn.db.principal.iter()].find(p => p.name === id2.actor);
+  const st = [...norn.db.impactStatement.prId.filter(ecr417.id)];
+  const results = [...norn.db.checkResult.prId.filter(ecr417.id)];
+  const sameAsResult = (n: { resultKey: string; p10: number; p50: number; p90: number }) => results.some(r => r.key === n.resultKey && r.p10 === n.p10 && r.p50 === n.p50 && r.p90 === n.p90);
+  const assumptionsNow = [...norn.db.assumption.prId.filter(0n), ...norn.db.assumption.prId.filter(ecr417.id)].filter(a => a.current);
+  check('second session: the job succeeded', r2.status === 'succeeded', `${r2.status} ${r2.error?.message ?? ''}`);
+  check('...it posted one statement, authored by its own principal, acting for nobody', st.length === 1 && !!p2 && st[0]!.author.isEqual(p2.identity) && p2.onBehalfOf === undefined, `${st.length} statement(s)`);
+  const s0 = st[0];
+  check('...it is Level 1 with class, route, headline, numbers, drivers, assumptions and claims', !!s0 && s0.level === 1 && !!s0.changeClass && !!s0.route && !!s0.headline && s0.numbers.length >= 2 && s0.drivers.length >= 1 && s0.assumptions.length >= 1 && s0.claims.length >= 1, s0 ? `${s0.changeClass} / ${s0.route}; ${s0.numbers.length} numbers, ${s0.drivers.length} drivers, ${s0.assumptions.length} assumptions, ${s0.claims.length} claims` : '');
+  check('...every number marked computation is exactly a check result', !!s0 && s0.numbers.filter(n => n.evidence === 'computation').length >= 2 && s0.numbers.filter(n => n.evidence === 'computation').every(sameAsResult));
+  check('...every assumption carries the source Norn holds for it', !!s0 && s0.assumptions.every(a => assumptionsNow.find(x => x.key === a.key)?.source === a.source), s0?.assumptions.map(a => `${a.key}:${a.source}`).join(' '));
+  console.log('  headline: ' + s0?.headline);
+  for (const n of s0?.numbers ?? []) console.log(`  number ${n.key} [${n.evidence}] ${n.p10.toFixed(2)} / ${n.p50.toFixed(2)} / ${n.p90.toFixed(2)} ${n.unit}`);
+  const row2 = [...norn.db.actionLog.iter()].find(l => l.actorName === id2.actor && l.reducer === 'post_impact_statement');
+  console.log(`  action log: #${row2?.id} ${row2?.outcome} post_impact_statement actor=${row2?.actorName} onBehalfOf=${row2?.onBehalfOf ?? '-'} spawnedBy=${row2?.spawnedBy}; policy: ${row2?.policy}`);
+}
 
 await server.close();
 norn.close();
