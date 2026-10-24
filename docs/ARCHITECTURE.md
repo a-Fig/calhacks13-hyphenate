@@ -6,7 +6,7 @@ Drafted 2026-10-24 for CalHacks 13; rewritten the same day around a Git-style br
 
 **Epistemic status.**
 - The product description comes from conversations with Archer senior staff. We have not seen a real ECR/ECO, BOM, supplier file, or their PLM system, so every data shape and workflow state below is an assumption.
-- SpacetimeDB facts in §9 were read from its docs on 2026-10-24 (version 2.8 at the time). The docs are marketing-heavy in places and several limits are unstated, so they are marked as unverified.
+- SpacetimeDB facts in §9 come from its docs, read on 2026-10-24, and from an independent review of the docs and release notes the same day. The docs are marketing-heavy in places and several limits are unstated, so unverified items are marked. Nothing in §9 has been run.
 - The PLM/ECO process facts in §2 come from vendor blogs and ERP/PLM documentation, not independent studies.
 
 ---
@@ -84,7 +84,7 @@ Names and fields are provisional.
 **Branches and PRs**
 - `Branch(id, kind: ecr | integration, base_version, head_commit)`
 - `Commit(id, branch, parent, author_kind: agent | human, author, message, created_at)`
-- `Change(commit, entity_type, entity_id, field, op: set | add | remove, value_json, source_span)`: the overlay. `source_span` points into the ECR text for agent-extracted changes, with a confidence.
+- `Change(commit, entity_type, entity_id, field, op: set | add | remove, expected_old, value_json, source_span)`: the overlay. `expected_old` is the value the author saw on `main`; rebasing onto a newer `main` is a three-way check of `expected_old` against the current value, and a mismatch is a textual conflict (§6). `source_span` points into the ECR text for agent-extracted changes, with a confidence.
 - `PullRequest(id, branch, status: draft | review | approved | merged | closed, title)`, `Review(pr, reviewer, verdict)`, `Comment(pr, author, anchor, body)`
 - `IntegrationMember(integration_branch, ecr_branch, position)`
 
@@ -113,7 +113,7 @@ Each check runs on (base, head) for a branch and produces a result plus a delta 
 Notes:
 - **S0 is the fragile check.** ECR prose is free-form and may reference part numbers that don't map cleanly. Low-confidence changes are surfaced on the PR page for a human to confirm instead of flowing downstream silently.
 - **Gap-filling.** Real ECRs will rarely state a requalification duration or a tooling cost. An agent proposes a distribution from category defaults and comparable parts and records it as an `agent_estimated` assumption with a rationale. The card flags it. A finance reader can see which numbers rest on guesses and edit them.
-- **S4 compares routes on shared random draws.** Old route versus new route use the same random numbers, so the difference isn't simulation noise.
+- **S4 compares routes on shared random draws.** Old route versus new route use the same random numbers, so the difference isn't simulation noise. The same applies to cost and timeline deltas: percentiles of two distributions cannot be subtracted, so a forecast diff is the percentiles of the per-draw difference (paired simulation), not p50(head) − p50(base).
 - **DAG.** `S0 → S1 → {S2, S3, S4} → S5`. If S3 turns out to need S4's lead-time results the DAG gets an edge.
 
 ## 6. Integration branch and conflicts
@@ -139,12 +139,13 @@ Minimum viable version: one effectivity date per ECO and a simple inventory burn
 
 - **Workers** claim a pending check run whose dependencies are done, run it, and write results. Claiming is atomic (one worker wins), and each claim has a lease so a crashed worker's run is retried.
 - **Invalidation is a reconcile loop.** When `main` advances, or a branch gets a new commit, the expected `input_hash` for each check changes. Any check without a matching completed run is enqueued. Because the hash is a pure function of inputs, this stays correct even if enqueueing is not atomic with the change.
-- **Idempotency.** A check's output is keyed by `(branch, stage, input_hash)`. Re-running a completed key is a no-op.
+- **Idempotency.** A check's output is keyed by `(branch, stage, input_hash)`. Re-running a completed key is a no-op. The hash covers canonical JSON of everything that affects the result: `main` version, overlay, assumptions, seed, and code/worker version.
+- **Edit bursts and approvals.** Assumption edits are debounced so a reviewer typing doesn't trigger a burst of recomputes. A new revision of a PR dismisses approvals given on the previous one.
 - **Determinism.** Seeds and code version are in the hash. Only S0, gap-filling, and S5 involve an LLM; their outputs are stored, not re-derived.
 
 ## 9. State layer: SpacetimeDB or not (decision open)
 
-The team has a strong preference for SpacetimeDB and wants a reason it fits, not just a reason it doesn't hurt. An independent review was requested on 2026-10-24; its result should be folded into this section. Until then, this is the author's analysis.
+The team has a strong preference for SpacetimeDB and wants a reason it fits, not just a reason it doesn't hurt. Status on 2026-10-24: SpacetimeDB is the leading option, conditional on the spike below. Both the author's analysis and an independent review (a separate agent, briefed with the workload and the docs findings but not the author's conclusion) are recorded here.
 
 ### What the layer must provide
 
@@ -156,13 +157,18 @@ The team has a strong preference for SpacetimeDB and wants a reason it fits, not
 
 It does **not** need analytics, large data, or heavy compute.
 
-### What the SpacetimeDB docs say (read 2026-10-24, version 2.8)
+### What the SpacetimeDB docs say (read 2026-10-24)
+
+The independent review put the current release at 2.13.0 (21 Oct 2026), not the 2.8 the first read showed, and noted breaking changes in recent minors (2.12 rejects HS256 JWTs; 2.13 changed TypeScript `Result` types). Pin the version. [Releases](https://github.com/clockworklabs/SpacetimeDB/releases).
 
 - Reducers are transactional and cannot do I/O. Procedures can make HTTP calls (30 s default timeout, capped at 180 s), must open transactions manually, and cannot send HTTP while holding one. Procedures are marked unstable in C#, C++ and Rust.
 - Views are subscribable. Query-builder views update incrementally; procedural views re-run when their read set changes. Documented operators are semijoin and `count()`; no sum or group-by was found.
 - Subscription SQL: no aggregates, joins limited to two tables with indexed join columns. One-off queries document only `COUNT`.
-- Modules: Rust, C#, TypeScript (new in 2.0), C++. Official client SDKs: TypeScript, Rust, C#, C++. No official Python SDK was found, so a Python worker would use the HTTP API (unverified).
-- All data is held in RAM on a single node. The FAQ says it is "designed for any real-time application" and "purpose-built for real-time applications, not batch processing or analytics".
+- Modules: Rust, C#, TypeScript (new in 2.0), C++. Official client SDKs: TypeScript, Rust, C#, C++. There is no official Python SDK (the PyPI `spacetimedb-sdk` 0.7.0 is stale). A Python worker has three documented routes: `POST /v1/database/:db/call/:reducer` (JSON array of arguments; also works for procedures), `POST /v1/database/:db/sql` (queries and DML), and a raw websocket at `/subscribe` using the `v1.json.spacetimedb` text protocol. See the [HTTP API](https://spacetimedb.com/docs/http/database).
+- All data is held in RAM. The FAQ says Maincloud handles replication; the review found no "single node" statement (my earlier wording was an inference). The FAQ says it is "designed for any real-time application" and "purpose-built for real-time applications, not batch processing or analytics".
+- Reducers "may execute concurrently". No documented reducer time limit and no named isolation level were found. Subscription updates arrive as one atomic message per transaction, in commit order. Equality filters on indexed columns are cheap, so a per-`pr_id` subscription is fine. The TypeScript client reconnects automatically since 2.12.
+- Modules can expose their own HTTP routes (beta, bypasses normal auth checks). Scheduled functions run concurrently since 2.10.1.
+- Schema changes: adding a column at the end with a default is safe; most other changes need `--delete-data`. Keep a reseed script.
 - Scheduled tables can trigger reducers or procedures at set times.
 - No native branching or forking was found. The overlay model in §4 is ordinary tables either way.
 
@@ -178,6 +184,22 @@ Two earlier arguments are weaker than the first draft of this spec claimed:
 - *Atomic invalidation cascade.* With hash-keyed runs (§8), a reconcile loop is correct without it.
 - *DB as agent queue.* Doable, but Postgres with `SELECT ... FOR UPDATE SKIP LOCKED` is equally mature.
 
+### Independent review (summary)
+
+Verdict: a conditional yes, as the coordination and live-state layer only. If the team writes Python and nobody wants to write the module in TypeScript, use Supabase (Postgres + Realtime) instead. Do not use Dolt.
+
+Where it beats the alternatives (the reviewer's inference, not tested):
+1. **One transaction, one update on every screen.** A single `edit_assumption` reducer can check the expected revision, write the new one, mark old runs stale, enqueue jobs and dismiss stale approvals. Every viewer receives that as one update, so nobody sees half-invalidated checks. Postgres can do this in a function, but a client on Supabase Realtime gets separate row events and has to refetch. This revises the first-draft argument: hash-keyed runs make staleness *correct* without atomicity (§8), but atomicity still gives viewers a *consistent screen*, which matters for a live demo.
+2. **The job queue comes almost free.** A `claim` reducer with a lease is race-free; workers learn of new jobs via subscription; a scheduled reducer reclaims expired leases.
+3. **No backend to write.** The module is the backend and generates typed TypeScript bindings. With SQLite the API, websocket fan-out and client cache would be roughly 300–500 lines (the reviewer's estimate).
+
+Where it is worse:
+- **Python workers are second-class**: HTTP polling, or a small TypeScript process using the SDK in front of them (budget 1–2 hours). Monte Carlo over a few hundred parts in Node is fine.
+- **No ad-hoc analytics.** Every roll-up is code that writes rows.
+- **Schema changes in a hurry cost a republish** (see above).
+- **Learning curve**: 2–4 hours to a first live table for a new team, versus about 30 minutes for Supabase (the reviewer's estimate).
+- **Dolt**: branches and diffs operate on raw table cells, not on the meaning of a change; no realtime; adds a server.
+
 ### Alternatives
 
 | Option | Strong at | Costs |
@@ -189,14 +211,15 @@ Two earlier arguments are weaker than the first draft of this spec claimed:
 
 ### Spike (time-boxed) before committing
 
-The spike exercises the real scenario, not a toy:
-1. Two worker processes claim and complete check runs through a reducer/lease; a crashed worker's run is retried.
-2. Two browsers subscribe to one PR (filtered by `pr_id`) and see check results arrive live.
-3. A reviewer edits an assumption in one browser; the other browser sees it; checks re-enqueue by the reconcile loop.
-4. A worker in our chosen compute language can do (1) and write results back (native SDK, or HTTP API for Python).
-5. A long-running worker task (tens of seconds) behaves as expected; check whether a procedure or an external worker is the right place for the LLM calls.
+The spike exercises the real scenario, not a toy. The reviewer estimated about 4 hours; that figure is unverified.
+1. **Worker over HTTP** (Python if that's our compute language): claim a check run, write results, and hit a reducer error. Confirm the HTTP status and error message are reliable enough to build retry logic on.
+2. **Two browsers on one PR** (subscription filtered by `pr_id`): an assumption edit invalidates old checks atomically on both screens, and switching PRs is clean (subscribe to the new one before unsubscribing from the old one, per the docs).
+3. **Streaming progress**: a Monte Carlo worker writes progress rows at about 2 per second with percentile arrays, and the UI keeps up.
+4. **Crash recovery**: a killed worker's lease expires and the run is retried by another worker.
+5. **Iteration speed**: republishing after a column change plus reseeding takes under a minute.
+6. **Hosting**: a Maincloud deploy with anonymous demo users works, or we decide to run locally with `spacetime start` for the demo.
 
-Adopt it if 1–3 are smooth and 4 has an acceptable path. If 4 forces a language we don't want, or any of 1–3 takes unreasonable time, fall back.
+Adopt it if 1–3 are smooth and 4–6 are acceptable. If the Python path is painful, or any of 1–3 takes unreasonable time, switch to Postgres + Supabase Realtime. The narrow API below keeps that switch contained.
 
 ### Fallback and portability
 
