@@ -20,7 +20,7 @@ async function open(name) {
   await ctx.addInitScript(RECORDER);
   const page = await ctx.newPage();
   page.on('pageerror', e => console.log(`[${name} pageerror]`, e.message));
-  await page.goto(`${BASE}/?as=${name}`);
+  await page.goto(`${BASE}/spike?as=${name}`);
   await page.waitForSelector('[data-testid="conn"][data-status="connected"]');
   await page.click('[data-testid="ecr-1"]');
   await page.waitForFunction(() => document.querySelector('[data-testid="pr-page"]')?.dataset.loadingFor === '');
