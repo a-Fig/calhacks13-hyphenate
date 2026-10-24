@@ -12,7 +12,9 @@
     "spike:crash": "tsx src/spike/s4-crash.ts",
     "check:policy": "tsx src/checks-policy.ts",
     "ingest": "tsx src/ingest.ts",
-    "check:pipeline": "tsx src/checks-pipeline.ts"
+    "check:pipeline": "tsx src/checks-pipeline.ts",
+    "check:config": "tsx src/checks-config.ts",
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@norn/bindings": "*",
