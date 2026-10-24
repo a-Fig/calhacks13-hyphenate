@@ -163,7 +163,7 @@ try {
   const { shootImpactTab } = await import('./screenshot.ts');
   let shotPath = '';
   try {
-    shotPath = await shootImpactTab({ ecr: ECR, out: shot });
+    shotPath = await shootImpactTab({ ecr: ECR, out: shot, expect: 'Bottom line' });
     say(`screenshot saved`);
   } catch (e) {
     say(`screenshot failed: ${(e as Error).message}`);
