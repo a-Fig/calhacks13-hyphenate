@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bowman } from '../../../bowman/data/index.ts';
 import { costCheck } from '../src/cost.ts';
+import { point } from '../src/dist.ts';
 import type { ChangeRequest } from '../src/types.ts';
 
 const SEED = 'norn-seed-1';
@@ -22,6 +23,23 @@ test('a row that nets a spend against a saving is measured by its gross componen
   // The row's own total is about 10,000; the rule without offsets sees the 200,000 spend.
   assert.ok(gross.p50 >= 195_000 && gross.p90 >= gross.p50, `gross ${gross.p50} / ${gross.p90}`);
   assert.ok(net.p90 < 50_000, `net ${net.p90}`);
+});
+
+test('each stock location is its own component: a rework credit does not offset a scrap write-off', () => {
+  const e = ecr('ECR-0417');
+  e.inventoryProposal = [
+    { item: 'BW-5120-210', location: 'stores', disposition: 'scrap' },
+    { item: 'BW-5120-210', location: 'wip', disposition: 'rework' },
+  ] as ChangeRequest['inventoryProposal'];
+  const assumptions = [
+    { id: 'recovery:BW-5120-210', source: 'agent_estimated' as const, rationale: 'test', dist: point(0) },
+    { id: 'rework:ECR-0417:BW-5120-210:wip', source: 'agent_estimated' as const, rationale: 'test', dist: point(-17_000) },
+  ];
+  const r = costCheck(bowman, e, { seed: SEED, assumptions, measures: [GROSS] });
+  const m = exact(r.measures[0]!);
+  const w = r.headline.windowTotal;
+  // Every other component is a spend, so the gross measure is the window total without the 17,000 credit.
+  assert.ok(Math.abs(m.p50 - (w.p50 + 17_000)) <= 0.01, `gross ${m.p50} vs window ${w.p50}`);
 });
 
 test('a change whose costs all point one way measures the same as its window total', () => {

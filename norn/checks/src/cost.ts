@@ -950,7 +950,10 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   function measureOf(m: CostMeasureRequest): CostMeasure {
     if (m.horizonMonths !== windowMonths)
       return { source: 'unavailable', horizonMonths: m.horizonMonths, savingsOffset: m.savingsOffset, reason: `the check's window is ${windowMonths} months, not ${m.horizonMonths}` };
-    const keys = rows.flatMap((r) => (r.recurring ? [`${r.id}/total`] : [...(r.oneTime ? [`${r.id}/oneTime`] : []), ...(r.unit ? [`${r.id}/extended`] : [])]));
+    // A stock disposition row sums its locations, which can have opposite signs (a scrap and a rework credit),
+    // so each location is its own component.
+    const partsOf = new Map(inventory.map((inv) => [inv.rowId, inv.parts.map((_, k) => `${inv.rowId}/part${k}`)]));
+    const keys = rows.flatMap((r) => (r.recurring ? [`${r.id}/total`] : partsOf.get(r.id) ?? [...(r.oneTime ? [`${r.id}/oneTime`] : []), ...(r.unit ? [`${r.id}/extended`] : [])]));
     const comps = keys.map((k) => run1.arrays.get(k)!);
     const size = new Float64Array(n);
     for (let i = 0; i < n; i++) {
