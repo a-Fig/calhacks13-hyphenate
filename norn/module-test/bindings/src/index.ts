@@ -51,6 +51,7 @@ import RecordAssumptionReducer from "./record_assumption_reducer";
 import RecordBaselineReducer from "./record_baseline_reducer";
 import RegisterActorReducer from "./register_actor_reducer";
 import ReportProgressReducer from "./report_progress_reducer";
+import RequestFastTrackApprovalReducer from "./request_fast_track_approval_reducer";
 import SetConfigReducer from "./set_config_reducer";
 import SetPrStatusReducer from "./set_pr_status_reducer";
 import UpsertPartReducer from "./upsert_part_reducer";
@@ -61,6 +62,7 @@ import UpsertPartReducer from "./upsert_part_reducer";
 import ActionLogRow from "./action_log_table";
 import ActorScopeRow from "./actor_scope_table";
 import AgentEventRow from "./agent_event_table";
+import ApprovalRow from "./approval_table";
 import AssumptionRow from "./assumption_table";
 import BaselineSnapshotRow from "./baseline_snapshot_table";
 import CheckProgressRow from "./check_progress_table";
@@ -74,6 +76,7 @@ import NornConfigRow from "./norn_config_table";
 import PartRow from "./part_table";
 import PrincipalRow from "./principal_table";
 import PullRequestRow from "./pull_request_table";
+import RecommendationRow from "./recommendation_table";
 
 /** Type-only namespace exports for generated type groups. */
 
@@ -131,6 +134,23 @@ const tablesSchema = __schema({
       { name: 'agent_event_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, AgentEventRow),
+  approval: __table({
+    name: 'approval',
+    indexes: [
+      { accessor: 'id', name: 'approval_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'prId', name: 'approval_pr_id_idx_btree', algorithm: 'btree', columns: [
+        'prId',
+      ] },
+      { accessor: 'status', name: 'approval_status_idx_btree', algorithm: 'btree', columns: [
+        'status',
+      ] },
+    ],
+    constraints: [
+      { name: 'approval_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ApprovalRow),
   assumption: __table({
     name: 'assumption',
     indexes: [
@@ -312,6 +332,20 @@ const tablesSchema = __schema({
       { name: 'pull_request_plm_ecr_number_key', constraint: 'unique', columns: ['plmEcrNumber'] },
     ],
   }, PullRequestRow),
+  recommendation: __table({
+    name: 'recommendation',
+    indexes: [
+      { accessor: 'id', name: 'recommendation_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'prId', name: 'recommendation_pr_id_idx_btree', algorithm: 'btree', columns: [
+        'prId',
+      ] },
+    ],
+    constraints: [
+      { name: 'recommendation_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, RecommendationRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
@@ -333,6 +367,7 @@ const reducersSchema = __reducers(
   __reducerSchema("record_baseline", RecordBaselineReducer),
   __reducerSchema("register_actor", RegisterActorReducer),
   __reducerSchema("report_progress", ReportProgressReducer),
+  __reducerSchema("request_fast_track_approval", RequestFastTrackApprovalReducer),
   __reducerSchema("set_config", SetConfigReducer),
   __reducerSchema("set_pr_status", SetPrStatusReducer),
   __reducerSchema("upsert_part", UpsertPartReducer),

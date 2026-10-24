@@ -5,6 +5,7 @@ import { SenderError, t } from 'spacetimedb/server';
 import type { InferSchema, InferTypeOfRow, ReducerCtx, ReducerExport, RowObj } from 'spacetimedb/server';
 import { Timestamp } from 'spacetimedb';
 import spacetimedb from './schema';
+import { COMPANY_CONFIG_KEY } from './company-config';
 
 export type Ctx = ReducerCtx<InferSchema<typeof spacetimedb>>;
 export type Pr = NonNullable<ReturnType<Ctx['db']['pullRequest']['id']['find']>>;
@@ -169,8 +170,33 @@ export type StageInputs = {
   erpBaselineAsOf?: string; // code stages: the date that baseline is as of
   assumptions?: { id: string; key: string; rev: number }[]; // code stages: the assumptions that feed it
   upstream?: Record<string, string>; // stage -> its hash, for the stages this one reads
+  // s2: the cost measure the company's approval rule asks for (its configuration's approval.costMeasure).
+  // The cost check computes it exactly per draw; naming it here makes a change of measure re-run the check.
+  costMeasure?: CostMeasureInput;
 };
 export type StageInfo = { hash: string; inputs: StageInputs };
+
+export type CostMeasureInput = { horizonMonths: number; savingsOffset: boolean };
+
+// The cost measure named by the stored company configuration, or undefined when there is none (or it
+// does not name one). A light read of the stored text: the full validation is gate.ts's. Cached by text,
+// because every hash computation asks.
+let measureRead: { text: string; measure: CostMeasureInput | undefined } | undefined;
+export function configuredCostMeasure(ctx: Ctx): CostMeasureInput | undefined {
+  const text = ctx.db.nornConfig.key.find(COMPANY_CONFIG_KEY)?.value;
+  if (text === undefined) return undefined;
+  if (measureRead?.text === text) return measureRead.measure;
+  let measure: CostMeasureInput | undefined;
+  try {
+    const m = JSON.parse(text)?.approval?.costMeasure;
+    if (m && Number.isInteger(m.horizonMonths) && m.horizonMonths > 0 && typeof m.savingsOffset === 'boolean')
+      measure = { horizonMonths: m.horizonMonths, savingsOffset: m.savingsOffset };
+  } catch {
+    measure = undefined;
+  }
+  measureRead = { text, measure };
+  return measure;
+}
 
 // The ECR's current change request, if the PLM has sent one.
 export function currentRevision(ctx: Ctx, prId: bigint) {
@@ -194,6 +220,10 @@ export function stageInfos(ctx: Ctx, pr: Pick<Pr, 'id' | 'baseVersion' | 'title'
     const inputs: StageInputs = { stage, codeVersion: cfg(ctx, 'code_version') };
     if (def.seeded) inputs.seed = cfg(ctx, 'seed');
     if (stage === 's0_extract') inputs.text = fnv1a64(`${pr.title}\n${pr.description}`);
+    if (stage === 's2_cost') {
+      const measure = configuredCostMeasure(ctx);
+      if (measure) inputs.costMeasure = measure;
+    }
     if (stage === 's1_bom_delta') {
       inputs.bomVersion = bomVersion(ctx, pr.baseVersion);
       if (!rev) inputs.overlay = String(pr.id);
@@ -266,23 +296,29 @@ export function resolveActor(ctx: Ctx): Actor {
 // instead of approving). write() honours it.
 // ---------------------------------------------------------------------------------------------
 
-export type Decision = { effect: 'allow' | 'deny' | 'downgrade'; reason: string; downgradeTo?: string };
+// `detail` is what the rule worked from and found (the company gate's reasons, limits and route). write() puts
+// it in the action log row of the call, under `gate`.
+export type Decision = { effect: 'allow' | 'deny' | 'downgrade'; reason: string; downgradeTo?: string; detail?: unknown };
 export type PolicyRule = (ctx: Ctx, actor: Actor, reducer: string, args: Record<string, any>) => Decision | null;
 
-// Empty in the real module: there are no rules yet. The test module registers some to exercise the gate.
+// scope.ts (a credential's limits) registers first, then gate.ts (the company's configuration). The test module
+// registers more to exercise the gate.
 export const POLICY_RULES: PolicyRule[] = [];
 
-// The first rule that denies or downgrades decides. If none does, the first rule that explicitly
-// allowed gives its reason (so the log says why, e.g. "job scope: ..."), else 'no rules yet'.
+// The first rule that denies or downgrades decides. If none does, every rule that explicitly allowed
+// gives its reason, in the order the rules were registered (so the log says why, e.g. "job scope: ...; ..."),
+// and the first allow's detail is kept. With no rule at all: 'no rules yet'.
 export function authorize(ctx: Ctx, actor: Actor, reducer: string, args: Record<string, any>): Decision {
-  let allowed: Decision | undefined;
+  const allowed: Decision[] = [];
   for (const rule of POLICY_RULES) {
     const d = rule(ctx, actor, reducer, args);
     if (!d) continue;
     if (d.effect !== 'allow') return d;
-    allowed ??= d;
+    allowed.push(d);
   }
-  return allowed ?? { effect: 'allow', reason: 'no rules yet' };
+  if (allowed.length === 0) return { effect: 'allow', reason: 'no rules yet' };
+  const detail = allowed.find(d => d.detail !== undefined)?.detail;
+  return { effect: 'allow', reason: allowed.map(d => d.reason).join('; '), ...(detail === undefined ? {} : { detail }) };
 }
 
 export function decisionText(d: Decision): string {
@@ -368,6 +404,13 @@ function validMeta(meta: { requestId: string; spawnedBy: string }) {
   return { requestId, spawnedBy };
 }
 
+// A call's log detail: what the body recorded, with the policy's own findings under `gate` when it made any.
+function gateDetail(decision: Decision, detail: unknown): unknown {
+  if (decision.detail === undefined) return detail;
+  const own = detail && typeof detail === 'object' && !Array.isArray(detail) ? (detail as object) : detail === undefined ? {} : { value: detail };
+  return { ...own, gate: decision.detail };
+}
+
 // Return null from a body that wrote nothing worth recording: an idempotent no-op, or ephemeral
 // state written many times a second (lease extensions, progress ticks).
 export function write<P extends RowObj>(name: string, params: P, body: Body<P>, opts: WriteOpts<P> = {}): ReducerExport<any, any> {
@@ -384,7 +427,7 @@ export function write<P extends RowObj>(name: string, params: P, body: Body<P>, 
     if (decision.effect === 'deny' || (decision.effect === 'downgrade' && !downgradeOk)) {
       // A denial is an outcome, not an error: return normally so the log row is kept.
       const why = decision.effect === 'deny' ? decision.reason : `no weaker action is available here (${decision.reason})`;
-      logAction(ctx, first, who, name, { prId, entity: 'denied', summary: `${name} refused: ${why}`, outcome: 'denied' });
+      logAction(ctx, first, who, name, { prId, entity: 'denied', summary: `${name} refused: ${why}`, detail: gateDetail(decision, undefined), outcome: 'denied' });
       return;
     }
 
@@ -410,7 +453,7 @@ export function write<P extends RowObj>(name: string, params: P, body: Body<P>, 
       throw e;
     }
     // Resolve the actor again: register_actor changes who the sender is mid-call.
-    if (entry) logAction(ctx, resolveActor(ctx), who, name, { ...entry, outcome: entry.outcome ?? (downgradeOk ? 'downgraded' : 'applied') });
+    if (entry) logAction(ctx, resolveActor(ctx), who, name, { ...entry, detail: gateDetail(decision, entry.detail), outcome: entry.outcome ?? (downgradeOk ? 'downgraded' : 'applied') });
   }) as any);
 }
 
@@ -500,10 +543,19 @@ export function settleBlocked(ctx: Ctx, prId: bigint): void {
   }
 }
 
+// What reconcile asks of the approval rules in gate.ts (which needs the company configuration code
+// that this file does not import). gate.ts fills it in.
+export const APPROVAL_HOOKS: {
+  /** An approved ECR's inputs changed. Returns why its approval is withdrawn, or null if it stands (and must be re-checked). */
+  onInputsChanged?: (ctx: Ctx, pr: Pr) => string | null;
+  /** An approved ECR has been brought up to date: if its checks have finished, decide whether the approval stands. Returns a note, or ''. */
+  settle?: (ctx: Ctx, prId: bigint) => string;
+} = {};
+
 // Bring one ECR in step with the baseline and its inputs, inside the caller's transaction:
 //  0. move it onto the current baseline version;
-//  1. if its inputs changed, bump the revision and withdraw any approval (approval is of a
-//     specific forecast);
+//  1. if its inputs changed, bump the revision. An approval is of a specific forecast, so it is
+//     withdrawn, unless only the baseline changed (APPROVAL_HOOKS.onInputsChanged decides);
 //  2. mark every run whose hash no longer matches as stale (queued, running, done and blocked alike);
 //  3. enqueue a fresh automatic run for each code stage that has no run on the current inputs.
 //     Deep stages are never enqueued here: they go stale and wait to be requested again (#10).
@@ -525,10 +577,11 @@ export function reconcile(ctx: Ctx, prId: bigint): string {
   const infos = stageInfos(ctx, pr);
   const digest = digestOf(infos);
   if (digest !== pr.inputsDigest) {
-    const withdrawn = pr.status === 'approved';
-    pr = { ...pr, inputsDigest: digest, revision: pr.revision + 1, status: withdrawn ? 'review' : pr.status };
+    let why: string | null = null; // why an approval is withdrawn; null when there is none or it stands
+    if (pr.status === 'approved') why = APPROVAL_HOOKS.onInputsChanged ? APPROVAL_HOOKS.onInputsChanged(ctx, pr) : 'its inputs changed';
+    pr = { ...pr, inputsDigest: digest, revision: pr.revision + 1, status: why !== null ? 'review' : pr.status };
     ctx.db.pullRequest.id.update({ ...pr, updatedAt: ctx.timestamp });
-    notes.push(`revision ${pr.revision}${withdrawn ? ', approval withdrawn' : ''}`);
+    notes.push(`revision ${pr.revision}${why !== null ? `, approval withdrawn: ${why}` : pr.status === 'approved' ? ', approval stands while its checks are repeated' : ''}`);
   }
 
   let staled = 0;
@@ -562,6 +615,10 @@ export function reconcile(ctx: Ctx, prId: bigint): string {
   settleBlocked(ctx, prId);
   if (staled) notes.push(`${staled} run(s) stale`);
   if (enqueued) notes.push(`${enqueued} run(s) enqueued`);
+  // An approval that stands may already be settled: a configuration change can move the tier without
+  // any check needing to run again.
+  const settled = pr.status === 'approved' ? APPROVAL_HOOKS.settle?.(ctx, prId) : '';
+  if (settled) notes.push(settled);
   return notes.length ? notes.join('; ') : 'no change';
 }
 

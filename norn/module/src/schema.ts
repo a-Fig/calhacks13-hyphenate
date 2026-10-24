@@ -325,6 +325,74 @@ const baselineSnapshot = table(
   }
 );
 
+// An agent's answer to one of the configuration's fast-track tests: whether the test's text is true of the
+// ECR, and what it rests on (request_fast_track_approval).
+export const TestAnswer = t.object('TestAnswer', { testId: t.string(), holds: t.bool(), evidence: t.string() });
+
+// One line of why: the rule in the company's configuration (a path or id), and what it says.
+export const GateReason = t.object('GateReason', { rule: t.string(), text: t.string() });
+
+// An approval, standing until it is withdrawn or the ECR is released (#43). One row per approval
+// event, kept after it ends: the history of who approved what on which numbers. At most one row per
+// ECR is 'standing'. It records what the approval rested on, so a later change can be judged against
+// it: `ownDigest` (the ECR's own title, text, change request and assumptions) and the approval tier
+// the cost pointed to. A change to the first withdraws the approval; a change to the baseline keeps
+// it unless the re-checked numbers point to a different tier (gate.ts, settleApproval).
+const approval = table(
+  { name: 'approval', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    prId: t.u64().index('btree'),
+    prRevision: t.u32(), // the ECR's revision when it was approved
+    kind: t.string(), // 'fast_track' | 'tier'
+    bodyId: t.string(), // 'fast_track', or the approval body that decided; '' when there was no company configuration
+    tierId: t.string(), // the tier the cost pointed to; '' without a configuration
+    tierIndex: t.i32(), // its position in the configuration's tiers; -1 without one
+    costSize: t.f64(), // the measured size of the change the tier rests on; -1 when it was not measured
+    costBasis: t.string(), // 'measured' | 'estimated' | 'lower_bound' | 'unmeasured' | 'none'
+    ownDigest: t.string(), // fingerprint of the ECR's own inputs when it was approved
+    decisionJson: t.string(), // the gate's decision: reasons, limits, sample, route
+    answersJson: t.string(), // a fast-track approval's answers to the configuration's tests, and the classes proposed
+    status: t.string().index('btree'), // standing | withdrawn | released
+    // True while the ECR's inputs have changed under a standing approval and its checks have not all
+    // finished again. The ECR cannot be released until they have (set_pr_status checks the runs, not this flag).
+    pendingRecheck: t.bool(),
+    approverKind: t.string(),
+    approverName: t.string(),
+    approverOrigin: t.string(),
+    onBehalfOf: t.option(t.string()),
+    sender: t.identity(),
+    at: t.timestamp(),
+    endedAt: t.option(t.timestamp()),
+    endedReason: t.string(), // why it was withdrawn (or 'released as baseline vN')
+  }
+);
+
+// What the gate did instead of an approval it would not allow the actor to give: a recommendation
+// to the people who decide (#43). Append-only. `outcome` is the decision's: 'recommend', 'escalate',
+// or 'sampled' (drawn for the blind second check, which is not built yet, so it waits).
+const recommendation = table(
+  { name: 'recommendation', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    prId: t.u64().index('btree'),
+    prRevision: t.u32(), // the ECR's revision it was made on; a reader can tell it is out of date
+    action: t.string(), // the company's action id, e.g. 'approve_ecr_at_tier'
+    outcome: t.string(),
+    recommenderKind: t.string(),
+    recommenderName: t.string(),
+    recommenderOrigin: t.string(),
+    onBehalfOf: t.option(t.string()),
+    sender: t.identity(),
+    reasons: t.array(GateReason),
+    recipients: t.array(t.string()), // role ids that get it
+    answersJson: t.string(), // the fast-track answers and proposed classes the agent gave, '' for other actions
+    decisionJson: t.string(), // the gate's whole decision
+    awaitingSecondCheck: t.bool(),
+    at: t.timestamp(),
+  }
+);
+
 // Drives reap_expired_leases. Private: clients have no use for it.
 const reaperSchedule = table(
   { name: 'reaper_schedule' },
@@ -351,6 +419,8 @@ const spacetimedb = schema({
   impactStatement,
   ecrRevision,
   baselineSnapshot,
+  approval,
+  recommendation,
   reaperSchedule,
 });
 
