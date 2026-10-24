@@ -36,10 +36,11 @@ Folders are created as code lands.
 | Part | Folder | Does |
 |---|---|---|
 | State layer | `module/` | The SpacetimeDB module: the tables, the narrow write API, the action log and the policy gate |
-| Workers | `workers/` | Compute checks (BOM delta, cost, timeline, supply simulation) and Norn's agents (extraction, classification, research, review, narration, post check) |
+| Workers | `workers/` | Compute checks: BOM delta, cost, timeline, supply simulation |
+| Agent runner | `runner/` | Starts and steers Norn's agents as Claude Code sessions through the Agent SDK: extraction, classification, research, review, narration, post check. Streams every step into the action log |
 | Connectors | `connectors/` | Read from and write to the PLM and ERPNext over their REST APIs and webhooks |
 | Web | `web/` | Norn's own screens: an ECR's impact assessment, the "why" behind any number, the backlog roll-up, the audit trail |
-| MCP server | `mcp/` | Lets a person's own agent connect with credentials and act on their behalf |
+| MCP server | `mcp/` | The tools every agent works through: Norn's own agents, and a person's own agent connecting with credentials to act on their behalf |
 
 ## Interfaces
 
@@ -50,12 +51,13 @@ Folders are created as code lands.
 - **ERPNext:** REST reads of items, BOMs, prices, stock, orders and history; writes of the new BOM,
   standard cost and draft journal entries when an ECO releases. Its API user's permissions are in
   `bowman/erp/`.
-- **Outside agents:** MCP, with each agent's identity and the person it acts for.
+- **Agents:** MCP, with each agent's identity, the person it acts for, and what spawned it.
 - **Configuration:** one company config file, validated against Norn's config schema at start-up.
 
 ## Stack
 
-TypeScript throughout, SpacetimeDB for state and live updates, Claude models for the agents
-(decided; `ARCHITECTURE.md` §9-10). How to run it goes in `CLAUDE.md`'s commands once it exists.
+TypeScript throughout, SpacetimeDB for state and live updates, and Claude Code sessions through
+the Claude Agent SDK for the agents (decided; `ARCHITECTURE.md` §9-10, `docs/PLAN.md` §4). How to
+run it goes in `CLAUDE.md`'s commands once it exists.
 
 Issues: label `area: norn`.

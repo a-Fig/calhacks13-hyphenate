@@ -94,14 +94,23 @@ Norn is a general platform, tuned to one company by configuration (#34). Detail 
   assessment (`GLOSSARY.md`).
 - **Checks.** Code computes every number. Agents read prose, propose assumptions, research, and
   write the narration (`norn/ARCHITECTURE.md` §3, §5).
-- **Agents.** Norn's own agents run inside Norn. People's own agents (for example Claude Code on an
-  engineer's laptop) connect over MCP with credentials and act on that person's behalf.
+- **Agents.** Norn's own agents are Claude Code sessions that Norn starts and steers through the
+  Claude Agent SDK, the way T3 Code drives Claude Code (Tyler, 2026-10-24). They run on Tyler's home
+  server and work as real agents: they reach Bowman's data through Norn's MCP tools, and can search
+  the web like a person would. People's own agents (for example Claude Code on an engineer's laptop)
+  connect to the same MCP tools with credentials and act on that person's behalf. Both kinds go
+  through the same policy gate and the same action log.
+- **What powers them.** Tyler's Claude subscription, through a token made with `claude
+  setup-token`. That's fine for a demo on his own account. Anthropic doesn't let a shipped product
+  offer claude.ai login, so a real Norn would run on the customer's API key or cloud provider; say
+  so if a judge asks. Norn's agents share the subscription's usage limits with whoever is building
+  at the time.
 - **Configuration.** Everything company-specific is a config file: vocabulary, the ECR form,
   change classes, the approval matrix, roles, autonomy limits, materiality thresholds. Bowman's is
   in `bowman/norn-config/`. There is no settings screen.
 - **Connectors** to the PLM and the ERP, using only the interfaces a real PLM and SAP expose.
 - **Stack** (decided): TypeScript throughout, SpacetimeDB as the state and live-update layer,
-  Claude models for the agents.
+  Claude Code sessions through the Agent SDK for the agents.
 
 ## 5. Trust: identity, permissions and the audit trail
 
