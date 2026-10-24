@@ -188,6 +188,7 @@ export const ImpactStatement = __t.object("ImpactStatement", {
   prId: __t.u64(),
   level: __t.u8(),
   prRevision: __t.u32(),
+  checkRunId: __t.u64(),
   changeClass: __t.string(),
   route: __t.string(),
   headline: __t.string(),
@@ -245,6 +246,15 @@ export const Principal = __t.object("Principal", {
   registeredAt: __t.timestamp(),
 });
 export type Principal = __Infer<typeof Principal>;
+
+export const PublicationClaim = __t.object("PublicationClaim", {
+  prId: __t.u64(),
+  statementId: __t.u64(),
+  holder: __t.identity(),
+  processId: __t.string(),
+  expiresAt: __t.timestamp(),
+});
+export type PublicationClaim = __Infer<typeof PublicationClaim>;
 
 export const PullRequest = __t.object("PullRequest", {
   id: __t.u64(),
