@@ -1,0 +1,6 @@
+{
+  "database": "norn",
+  "module-path": "./module",
+  "server": "local",
+  "generate": [{ "language": "typescript", "out-dir": "./bindings/src" }]
+}

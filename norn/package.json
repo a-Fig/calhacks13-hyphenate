@@ -1,0 +1,20 @@
+{
+  "name": "norn",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Norn: forecast the production impact of an engineering change. Skeleton + SpacetimeDB spike.",
+  "workspaces": ["module", "bindings", "workers", "web"],
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "db:start": "spacetime start",
+    "db:publish": "spacetime publish norn --module-path module --server local --yes",
+    "db:reset": "spacetime publish norn --module-path module --server local --delete-data=always --yes",
+    "db:generate": "spacetime generate --lang typescript --module-path module --out-dir bindings/src --yes",
+    "db:logs": "spacetime logs norn --server local -f",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build -w @norn/module && npm run build -w @norn/web",
+    "worker": "npm run start -w @norn/workers",
+    "seed": "npm run seed -w @norn/workers",
+    "web": "npm run dev -w @norn/web"
+  }
+}
