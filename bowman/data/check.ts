@@ -249,6 +249,15 @@ for (const r of d.volumePlan) {
   const map = r.program === 'vesper' ? vYear : mYear;
   map.set(r.month.slice(0, 4), (map.get(r.month.slice(0, 4)) ?? 0) + r.units);
 }
+for (const program of ['vesper', 'meridian'] as const) {
+  const months = new Set(d.volumePlan.filter((r) => r.program === program).map((r) => r.month));
+  for (let y = 2026; y <= 2030; y++) {
+    for (let mth = 1; mth <= 12; mth++) {
+      const month = `${y}-${String(mth).padStart(2, '0')}`;
+      if (month >= '2026-10') ok(months.has(month), `${program} volume plan has no row for ${month}`);
+    }
+  }
+}
 const wantV: Record<string, number> = { '2026': 3, '2027': 24, '2028': 72, '2029': 210, '2030': 548 };
 for (const [y, n] of Object.entries(wantV)) ok(vYear.get(y) === n, `Vesper ${y} volume ${vYear.get(y)} != ${n}`);
 ok(mYear.get('2030') === 24, `Meridian 2030 volume ${mYear.get('2030')} != 24`);
@@ -280,6 +289,23 @@ for (const it of d.items) {
   if (it.status === 'proposed') continue;
   const last = it.revHistory[it.revHistory.length - 1];
   ok(last?.rev === it.rev, `item ${it.code} rev ${it.rev} != last revHistory rev ${last?.rev}`);
+}
+// The actual unit-cost delta of each ECO equals the price change times the quantity per aircraft
+{
+  const qtyPer = new Map<ItemCode, number>();
+  const walk = (code: ItemCode, mult: number) => {
+    qtyPer.set(code, (qtyPer.get(code) ?? 0) + mult);
+    for (const k of kids.get(code) ?? []) walk(k.child, mult * k.qty);
+  };
+  walk(vesper.topItem, 1);
+  for (const e of d.history) {
+    let delta = 0;
+    for (const ch of e.itemChanges) {
+      const p = ch.changes.find((c) => c.field === 'unit_price_usd');
+      if (p && typeof p.from === 'number' && typeof p.to === 'number') delta += (p.to - p.from) * (qtyPer.get(ch.item) ?? 0);
+    }
+    ok(near(delta, e.actual.unitCostDeltaUsd, Math.max(2, 0.01 * Math.abs(delta))), `${e.id}: price changes imply ${delta.toFixed(0)} per aircraft, actual says ${e.actual.unitCostDeltaUsd}`);
+  }
 }
 // Mean forecast error, for the summary
 const costErr = d.history.map((e) => (e.actual.unitCostDeltaUsd - e.forecast.unitCostDeltaUsd) / Math.abs(e.forecast.unitCostDeltaUsd));

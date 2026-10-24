@@ -39,12 +39,14 @@ for (const [ys, units] of Object.entries(PLAN)) {
     }
   });
 }
-for (const [ys, units] of Object.entries(MERIDIAN)) {
-  const y = Number(ys);
-  units.forEach((u, i) => {
-    if (u === 0) return;
-    volumePlan.push({ month: mm(y, i), program: 'meridian', units: u, kind: y >= 2029 ? 'production' : 'development', site: y >= 2029 ? 'GA' : 'CA' });
-  });
+// Meridian has a row for every month, zeros included, so the series is continuous.
+for (let y = 2026; y <= 2030; y++) {
+  for (let i = 0; i < 12; i++) {
+    const month = mm(y, i);
+    if (month < '2026-10') continue;
+    const u = MERIDIAN[y]?.[i] ?? 0;
+    volumePlan.push({ month, program: 'meridian', units: u, kind: month >= '2029-01' ? 'production' : 'development', site: month >= '2029-01' ? 'GA' : 'CA' });
+  }
 }
 
 /** Aircraft built to date. S/N 001-004 are test aircraft; 005-010 are production, in the hangar and not delivered. */

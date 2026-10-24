@@ -2,6 +2,31 @@ import type { Company, Person, Program, Site, WorkCenter } from './types.ts';
 import { ARCHER, IMPACT, INV, PRACTICE, inv, src } from './prov.ts';
 
 export const company: Company = {
+  changeControl: {
+    ccbCadence: 'Monthly, second Thursday. An emergency ECR gets a decision in 48 hours, an urgent one within 30 days.',
+    ccbMeetings: ['2026-11-12', '2026-12-10', '2027-01-14', '2027-02-11', '2027-03-11', '2027-04-08', '2027-05-13', '2027-06-10'],
+    approvalTiers: [
+      { upToUsd: 150_000, approver: 'Technical Review Committee (engineering director, quality, certification, CM analyst); also reviews everything above' },
+      { upToUsd: 2_000_000, approver: 'Change Control Board (chaired by the Vesper program manager)' },
+      { upToUsd: Number.MAX_SAFE_INTEGER, approver: 'Program Management Committee (CFO and executive team)' },
+    ],
+    fastTrackApprover: 'The CM analyst and the owning design engineer, without convening the board',
+    fastTrackCriteria: [
+      'Company Class II and FAA minor',
+      'No change to form, fit, function or interchangeability',
+      'Swaps from the pre-authorized equivalents list, obsolescence replacements and documentation fixes',
+      'Same supplier, no tooling change, no first-article or PPAP trigger',
+    ],
+    neverFastTrack: [
+      'Anything touching safety or a flight-safety part',
+      'Interchangeability or interface changes',
+      'Retrofit of built or delivered aircraft',
+      'Supplier process, location or tooling changes that need first-article inspection or PPAP',
+      'FAA-major changes (14 CFR 21.93)',
+    ],
+    targetDays: { emergency: 2, urgent: 30, routine: 60 },
+    prov: src(`${PRACTICE} §2 and §4`, 'Dollar tiers ($150,000 and $2,000,000) from the WSR-88D CCB charter, 7 Mar 2024; never-fast-track list from the published examples; meeting dates and cadence invented.'),
+  },
   name: 'Bowman Aviation',
   short: 'Bowman',
   description:
@@ -117,7 +142,7 @@ export const people: Person[] = [
     prov: INV,
   },
   {
-    id: 'EMP-05', name: 'Priya Venkataraman', title: 'Director of Engineering', department: 'Engineering', seat: 'program_manager', site: 'CA',
+    id: 'EMP-05', name: 'Priya Venkataraman', title: 'Director of Engineering', department: 'Engineering', seat: 'engineering_director', site: 'CA',
     email: mail('Priya', 'Venkataraman'), reportsTo: 'EMP-01', ccbRole: 'member',
     responsibilities: 'Technical approval for engineering changes, line manager of the design engineers.',
     prov: INV,
@@ -165,7 +190,7 @@ export const people: Person[] = [
     prov: src(`${ARCHER} §6`, 'Archer posts a Sr. Product Quality Engineer, Powertrain (Teamcenter, SAP).'),
   },
   {
-    id: 'EMP-13', name: 'Marcus Edelstein', title: 'VP Operations and Supply Chain', department: 'Operations', seat: 'manufacturing_engineer', site: 'CA',
+    id: 'EMP-13', name: 'Marcus Edelstein', title: 'VP Operations and Supply Chain', department: 'Operations', seat: 'operations_vp', site: 'CA',
     email: mail('Marcus', 'Edelstein'), reportsTo: 'EMP-15', ccbRole: 'member',
     responsibilities: 'Owns the line, tooling and assembly-time estimates; line manager of procurement and planning.',
     prov: INV,
@@ -181,6 +206,12 @@ export const people: Person[] = [
     email: mail('Gideon', 'Falk'), ccbRole: 'member',
     responsibilities: 'Decides FAA major versus minor for every change as design-approval holder; owns the certification plan and means-of-compliance items.',
     prov: src(`${PRACTICE} §4`, 'The design approval holder, not a DER, classifies major versus minor (FAA Order 8110.37G).'),
+  },
+  {
+    id: 'EMP-18', name: 'Owen Tillery', title: 'Manufacturing Engineer, Final Assembly', department: 'Operations', seat: 'manufacturing_engineer', site: 'CA',
+    email: mail('Owen', 'Tillery'), reportsTo: 'EMP-13', ccbRole: 'member',
+    responsibilities: 'Estimates assembly time, tooling and line changes for each ECR, owns the controller-install station and the retrofit work instructions.',
+    prov: src(`${ARCHER} §6`, 'Archer posts manufacturing engineer roles (fuselage, electric motor).'),
   },
   {
     id: 'EMP-17', name: 'Nikhil Desai', title: 'Design Engineer, Meridian Propulsion', department: 'Engineering', seat: 'design_engineer', site: 'CA',

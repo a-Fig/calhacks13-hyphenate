@@ -36,7 +36,22 @@ export interface Range3 {
 
 // ---------------------------------------------------------------- company
 
+/** How changes are approved at Bowman. Dollar tiers and the never-fast-track list follow the published examples. */
+export interface ChangeControlPolicy {
+  ccbCadence: string;
+  ccbMeetings: DateStr[];
+  /** Approval tiers by net cost of the change, USD. Configurable in Norn; defaults from the WSR-88D CCB charter. */
+  approvalTiers: { upToUsd: number; approver: string }[];
+  fastTrackApprover: string;
+  fastTrackCriteria: string[];
+  neverFastTrack: string[];
+  /** Target days from filing to decision. */
+  targetDays: { emergency: number; urgent: number; routine: number };
+  prov: Provenance;
+}
+
 export interface Company {
+  changeControl: ChangeControlPolicy;
   name: string;
   short: string;
   description: string;
@@ -103,6 +118,8 @@ export type Seat =
   | 'certification'
   | 'manufacturing_engineer'
   | 'program_manager'
+  | 'engineering_director'
+  | 'operations_vp'
   | 'cfo';
 
 export interface Person {

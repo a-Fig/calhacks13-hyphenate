@@ -168,7 +168,7 @@ export const ecrs: Ecr[] = [
       'NCR-0119: crack at the lower fillet at 8.2 h of the 20 h endurance profile; three of twelve rig brackets have initiated by 20 h. The Rev B stress check used a 212 Hz forcing line that Rev B did move, but the sixth electrical order of the aft motor at hover speed sits at 241 Hz, right on the new mode. ' +
       'Rev C moves the mode to 318 Hz, clear of every forcing line up to the 9th order, and the stress report supplement shows a fatigue margin of +14% at the fillet against -31% for Rev B.',
     consequencesIfDisapproved:
-      'No aircraft can fly beyond the 5 h inspection interval with Rev B. S/N 001-004 are the certification flight-test aircraft, so the flight-test campaign stops. S/N 005-010 cannot be delivered, and controller installation stays held on every aircraft still in build.',
+      'No aircraft can fly beyond the 5 h inspection interval with Rev B. S/N 001-004 carry the certification test program, so the test campaign stops. S/N 005-010 cannot be delivered, and controller installation stays held on every aircraft still in build.',
     alternativesConsidered:
       '(1) Shot-peen the Rev B fillets: analysis gives +9% fatigue margin, not enough. (2) Add a doubler plate: adds a part and a bond, interferes with the cold-plate hose, and needs its own qualification. ' +
       '(3) Change the isolator durometer to move the mode: it moves the mode below the forcing line at hover but onto the 4th order at transition. (4) Do nothing and inspect every 5 h: not viable for a production aircraft.',
@@ -298,7 +298,7 @@ export const ecrs: Ecr[] = [
       },
     ],
     effectivity: {
-      production: { basis: 'tbd', from: 'tbd', note: 'After FAA acceptance of the major change. Engineering suggests S/N 031 (about November 2027) if certification testing goes to plan.' },
+      production: { basis: 'tbd', from: 'tbd', note: 'After FAA acceptance of the major change. Engineering suggests S/N 034 (about December 2027) if certification testing goes to plan; blade tooling alone is 34 weeks to first articles.' },
       retrofit: { basis: 'tbd', from: 'tbd', note: 'Engineering recommends a retrofit kit for built aircraft S/N 005-030 before entry into service. Test aircraft S/N 001-004 excluded. Not assessed.' },
       interchangeable: false,
     },
@@ -393,7 +393,7 @@ export const ecrs: Ecr[] = [
         leadTimeWeeks: 18,
       },
     ],
-    effectivity: { production: { basis: 'serial', from: '13', note: 'S/N 013 and subsequent (January 2027).' }, retrofit: { basis: 'tbd', from: 'tbd', note: 'S/N 005-012 retrofit only if hot-day certification needs it.' }, interchangeable: true },
+    effectivity: { production: { basis: 'serial', from: '15', note: 'S/N 015 and subsequent (March 2027), the earliest delivery on the Hollis 18-week quote. Test time not included.' }, retrofit: { basis: 'tbd', from: 'tbd', note: 'S/N 005-012 retrofit only if hot-day certification needs it.' }, interchangeable: true },
     inventoryProposal: [{ item: 'BW-8210-110', location: 'stores', disposition: 'tbd', note: 'Rev B still usable for aircraft not flown hot.' }],
     costPage: {
       production: [
@@ -439,7 +439,7 @@ export const ecrs: Ecr[] = [
         note: 'Mould lead time 14 weeks.',
       },
     ],
-    effectivity: { production: { basis: 'serial', from: '15', note: 'S/N 015 and subsequent (March 2027), after mould and qualification.' }, interchangeable: true },
+    effectivity: { production: { basis: 'serial', from: '17', note: 'S/N 017 and subsequent (April 2027), after the 14-week mould and qualification.' }, interchangeable: true },
     inventoryProposal: [{ item: 'BW-8210-110', location: 'stores', disposition: 'use_until_depleted' }],
     costPage: {
       production: [
@@ -493,7 +493,7 @@ export const ecrs: Ecr[] = [
       },
     ],
     effectivity: {
-      production: { basis: 'serial', from: '30', note: 'S/N 030 and subsequent (about October 2027), if the 2027-Q2 qualification slot holds.' },
+      production: { basis: 'serial', from: '30', note: 'S/N 030 and subsequent (about October 2027). Assumes the 2027-Q2 slot holds and the 12-set qualification lot can be flown. Orrin has not confirmed either.' },
       retrofit: { basis: 'tbd', from: 'tbd', note: 'Motors on built aircraft keep SH under the transition-thrust limit. Retrofit not requested.' },
       interchangeable: true,
     },

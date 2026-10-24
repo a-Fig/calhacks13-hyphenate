@@ -45,7 +45,7 @@ export const demoScenarios: Scenario[] = [
     expect: [
       'Company Class I, FAA major (set separately), routine, justification O. Reopens 23 of 797 means-of-compliance items and issue paper IP-07.',
       'Per-propeller material change is +$1,440 (+$8,640 per aircraft, +0.3% of standard cost), tiny against $500k of tooling and about $650k of engineering: one-time cost dominates.',
-      'The cut-in date is driven by certification, 6 to 12 months, not by the 34-week blade tooling alone. Earliest realistic cut-in S/N 031 (November 2027).',
+      'The cut-in date is driven by certification, 6 to 12 months, not by the 34-week blade tooling alone. Earliest realistic cut-in S/N 034 (December 2027).',
       'Retrofit of built aircraft is unscoped and is the largest unknown. Inventory of 2-blade parts has no disposition.',
       'Hidden coupling (not detectable from shared entities): four blades change the aft-boom vibration spectrum that ECR-0417\'s bracket sits in. Interaction flags are best effort.',
     ],
@@ -79,7 +79,7 @@ export const demoScenarios: Scenario[] = [
       'No shared entity: BW-3120-340 (Vesper forward magnets) and BW-M512-340 (Meridian cruise magnets) are different items in different programs. Both are bought from Orrin Magnetics, the single source for both.',
       'Both need the same new grade (UH) qualified in the same 2027-Q2 slot. Orrin runs one qualification lot per quarter, so one part number slips about 13 weeks to 2027-Q4 unless sequenced.',
       'UH capacity is 1,200 sets per year on one furnace until 2028-Q3. Combined demand and the 24% extra furnace time per UH set matter.',
-      'Combined effects differ from the sum: ordering both within 26 weeks earns a 6% UH raw-material price break and a 40% cheaper second qualification; a missed slot moves Vesper cut-in from S/N 030 to about S/N 034 or Meridian first flight past September 2027.',
+      'Combined effects differ from the sum: ordering both within 26 weeks earns a 6% UH raw-material price break and a 40% cheaper second qualification; a missed slot moves Vesper cut-in from S/N 030 (October 2027) to about S/N 037 (January 2028), or the Meridian rotor build and first flight (September 2027) back by a quarter.',
       'ECO-0297 (March 2026) already showed the same pattern: a seven-week wait for an Orrin qualification slot moved a cut-in by two aircraft.',
     ],
     reference: { vesperQualificationUsd: 96000, meridianQualificationUsd: 142000, secondQualificationDiscount: 0.4, rawMaterialPriceBreak: 0.06 },

@@ -1,7 +1,7 @@
 import type { Dataset } from './types.ts';
 import { company, people, programs, sites, workCenters } from './company.ts';
 import { supplierConstraints, suppliers } from './suppliers.ts';
-import { bom, items, purchaseOrders, rateFactors, sourcing, stock } from './derive.ts';
+import { bom, items, otdBySupplier, purchaseOrders, rateFactors, sourcing, stock } from './derive.ts';
 import { builtAircraft, builtProv, standardCostHistory, stdCostProv, volumePlan, volumeProv } from './volume.ts';
 import { history } from './history.ts';
 import { ecrs, ncrs } from './changes.ts';
@@ -28,8 +28,9 @@ export const bowman: Dataset = {
   sites,
   programs,
   workCenters,
-  people,
-  suppliers,
+  people: [...people].sort((a, b) => a.id.localeCompare(b.id)),
+  // On-time delivery is measured from the generated PO history where there is enough of it.
+  suppliers: suppliers.map((s) => ({ ...s, onTimeDeliveryPct: otdBySupplier.get(s.id) ?? s.onTimeDeliveryPct })),
   supplierConstraints,
   items,
   bom,

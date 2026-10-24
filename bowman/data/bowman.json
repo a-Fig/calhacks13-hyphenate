@@ -42,6 +42,57 @@
     }
   },
   "company": {
+    "changeControl": {
+      "ccbCadence": "Monthly, second Thursday. An emergency ECR gets a decision in 48 hours, an urgent one within 30 days.",
+      "ccbMeetings": [
+        "2026-11-12",
+        "2026-12-10",
+        "2027-01-14",
+        "2027-02-11",
+        "2027-03-11",
+        "2027-04-08",
+        "2027-05-13",
+        "2027-06-10"
+      ],
+      "approvalTiers": [
+        {
+          "upToUsd": 150000,
+          "approver": "Technical Review Committee (engineering director, quality, certification, CM analyst); also reviews everything above"
+        },
+        {
+          "upToUsd": 2000000,
+          "approver": "Change Control Board (chaired by the Vesper program manager)"
+        },
+        {
+          "upToUsd": 9007199254740991,
+          "approver": "Program Management Committee (CFO and executive team)"
+        }
+      ],
+      "fastTrackApprover": "The CM analyst and the owning design engineer, without convening the board",
+      "fastTrackCriteria": [
+        "Company Class II and FAA minor",
+        "No change to form, fit, function or interchangeability",
+        "Swaps from the pre-authorized equivalents list, obsolescence replacements and documentation fixes",
+        "Same supplier, no tooling change, no first-article or PPAP trigger"
+      ],
+      "neverFastTrack": [
+        "Anything touching safety or a flight-safety part",
+        "Interchangeability or interface changes",
+        "Retrofit of built or delivered aircraft",
+        "Supplier process, location or tooling changes that need first-article inspection or PPAP",
+        "FAA-major changes (14 CFR 21.93)"
+      ],
+      "targetDays": {
+        "emergency": 2,
+        "urgent": 30,
+        "routine": 60
+      },
+      "prov": {
+        "basis": "sourced",
+        "ref": "docs/IN-PRACTICE.md §2 and §4",
+        "note": "Dollar tiers ($150,000 and $2,000,000) from the WSR-88D CCB charter, 7 Mar 2024; never-fast-track list from the published examples; meeting dates and cadence invented."
+      }
+    },
     "name": "Bowman Aviation",
     "short": "Bowman",
     "description": "Fictional Archer-like electric-aircraft maker. HQ and pilot production line in California, high-rate plant in Georgia. Builds the Vesper V4 piloted eVTOL air taxi and is developing the Meridian M6 hybrid-electric cargo and medevac VTOL.",
@@ -285,7 +336,7 @@
       "name": "Priya Venkataraman",
       "title": "Director of Engineering",
       "department": "Engineering",
-      "seat": "program_manager",
+      "seat": "engineering_director",
       "site": "CA",
       "email": "priya.venkataraman@bowman-aviation.example",
       "reportsTo": "EMP-01",
@@ -413,7 +464,7 @@
       "name": "Marcus Edelstein",
       "title": "VP Operations and Supply Chain",
       "department": "Operations",
-      "seat": "manufacturing_engineer",
+      "seat": "operations_vp",
       "site": "CA",
       "email": "marcus.edelstein@bowman-aviation.example",
       "reportsTo": "EMP-15",
@@ -453,6 +504,21 @@
       }
     },
     {
+      "id": "EMP-16",
+      "name": "Linnea Brandt",
+      "title": "Program Manager, Meridian",
+      "department": "Programs",
+      "seat": "program_manager",
+      "site": "CA",
+      "email": "linnea.brandt@bowman-aviation.example",
+      "reportsTo": "EMP-15",
+      "ccbRole": "member",
+      "responsibilities": "Owns Meridian schedule and cost; files Meridian ECRs and watches shared-supplier exposure with Vesper.",
+      "prov": {
+        "basis": "invented"
+      }
+    },
+    {
       "id": "EMP-17",
       "name": "Nikhil Desai",
       "title": "Design Engineer, Meridian Propulsion",
@@ -467,18 +533,20 @@
       }
     },
     {
-      "id": "EMP-16",
-      "name": "Linnea Brandt",
-      "title": "Program Manager, Meridian",
-      "department": "Programs",
-      "seat": "program_manager",
+      "id": "EMP-18",
+      "name": "Owen Tillery",
+      "title": "Manufacturing Engineer, Final Assembly",
+      "department": "Operations",
+      "seat": "manufacturing_engineer",
       "site": "CA",
-      "email": "linnea.brandt@bowman-aviation.example",
-      "reportsTo": "EMP-15",
+      "email": "owen.tillery@bowman-aviation.example",
+      "reportsTo": "EMP-13",
       "ccbRole": "member",
-      "responsibilities": "Owns Meridian schedule and cost; files Meridian ECRs and watches shared-supplier exposure with Vesper.",
+      "responsibilities": "Estimates assembly time, tooling and line changes for each ECR, owns the controller-install station and the retrofit work instructions.",
       "prov": {
-        "basis": "invented"
+        "basis": "sourced",
+        "ref": "docs/research/archer-public-data.md §6",
+        "note": "Archer posts manufacturing engineer roles (fuselage, electric motor)."
       }
     }
   ],
@@ -496,7 +564,7 @@
       ],
       "paymentTerms": "Net 45",
       "analog": "FACC (key fuselage and wing elements for Archer)",
-      "onTimeDeliveryPct": 88,
+      "onTimeDeliveryPct": 81,
       "qualityPpm": 1800,
       "prov": {
         "basis": "sourced",
@@ -517,7 +585,7 @@
       ],
       "paymentTerms": "Net 30",
       "analog": "Hexcel (carbon fiber prepreg; letter of intent only, April 2022)",
-      "onTimeDeliveryPct": 91,
+      "onTimeDeliveryPct": 90,
       "qualityPpm": 900,
       "prov": {
         "basis": "sourced",
@@ -538,7 +606,7 @@
       ],
       "paymentTerms": "Net 30, 20% deposit on blanket orders",
       "analog": "Molicel / E-One Moli (battery cells; MOU only, November 2022)",
-      "onTimeDeliveryPct": 93,
+      "onTimeDeliveryPct": 88,
       "qualityPpm": 120,
       "prov": {
         "basis": "sourced",
@@ -559,7 +627,7 @@
       ],
       "paymentTerms": "Net 30",
       "analog": "Generic European rare-earth magnet maker (Archer press names no magnet supplier)",
-      "onTimeDeliveryPct": 84,
+      "onTimeDeliveryPct": 90,
       "qualityPpm": 650,
       "prov": {
         "basis": "invented",
@@ -579,7 +647,7 @@
       ],
       "paymentTerms": "Net 30",
       "analog": "Generic aerospace machine shop (Supplier A in the ECR-0417 worked example)",
-      "onTimeDeliveryPct": 90,
+      "onTimeDeliveryPct": 76,
       "qualityPpm": 1200,
       "prov": {
         "basis": "sourced",
@@ -600,7 +668,7 @@
       ],
       "paymentTerms": "Net 45",
       "analog": "Generic power-semiconductor and motor-component maker",
-      "onTimeDeliveryPct": 86,
+      "onTimeDeliveryPct": 76,
       "qualityPpm": 700,
       "prov": {
         "basis": "invented",
@@ -620,7 +688,7 @@
       ],
       "paymentTerms": "Net 45",
       "analog": "DUC Helices / MT-Propeller class of composite propeller maker",
-      "onTimeDeliveryPct": 87,
+      "onTimeDeliveryPct": 83,
       "qualityPpm": 1100,
       "prov": {
         "basis": "sourced",
@@ -662,7 +730,7 @@
       ],
       "paymentTerms": "Net 60",
       "analog": "Safran Electronics & Defense (UCAP flight control computer, four per Archer airframe)",
-      "onTimeDeliveryPct": 85,
+      "onTimeDeliveryPct": 100,
       "qualityPpm": 400,
       "prov": {
         "basis": "sourced",
@@ -683,7 +751,7 @@
       ],
       "paymentTerms": "Net 45",
       "analog": "Honeywell (actuators, climate and thermal management for Archer)",
-      "onTimeDeliveryPct": 89,
+      "onTimeDeliveryPct": 90,
       "qualityPpm": 800,
       "prov": {
         "basis": "sourced",
@@ -704,7 +772,7 @@
       ],
       "paymentTerms": "Net 45",
       "analog": "Generic aerospace harness house",
-      "onTimeDeliveryPct": 87,
+      "onTimeDeliveryPct": 85,
       "qualityPpm": 1500,
       "prov": {
         "basis": "invented",
@@ -724,7 +792,7 @@
       ],
       "paymentTerms": "Net 45",
       "analog": "Generic landing-gear and cabin-interior supplier (Archer: \"Seats, landing gear: nothing found\")",
-      "onTimeDeliveryPct": 86,
+      "onTimeDeliveryPct": 88,
       "qualityPpm": 1400,
       "prov": {
         "basis": "invented",
@@ -744,7 +812,7 @@
       ],
       "paymentTerms": "Net 30",
       "analog": "Generic aerospace hardware distributor",
-      "onTimeDeliveryPct": 95,
+      "onTimeDeliveryPct": 78,
       "qualityPpm": 500,
       "prov": {
         "basis": "invented",
@@ -9473,7 +9541,7 @@
       "qualified": true,
       "soleSource": true,
       "requalMonths": 14,
-      "capacityPerYear": 1200,
+      "capacityPerYear": 9000,
       "priceValidUntil": "2027-06-30",
       "prov": {
         "basis": "sourced",
@@ -9764,7 +9832,7 @@
       "qualified": true,
       "soleSource": true,
       "requalMonths": 14,
-      "capacityPerYear": 1200,
+      "capacityPerYear": 9000,
       "priceValidUntil": "2027-06-30",
       "prov": {
         "basis": "sourced",
@@ -12425,7 +12493,7 @@
       "qualified": true,
       "soleSource": true,
       "requalMonths": 14,
-      "capacityPerYear": 1200,
+      "capacityPerYear": 9000,
       "priceValidUntil": "2027-06-30",
       "prov": {
         "basis": "sourced",
@@ -16171,7 +16239,7 @@
           "item": "BW-3190-100",
           "qty": 20,
           "unitPrice": 399.4,
-          "requiredDate": "2025-05-16",
+          "requiredDate": "2025-05-28",
           "receivedDate": "2025-05-07",
           "receivedQty": 20
         },
@@ -16179,7 +16247,7 @@
           "item": "BW-9110-100",
           "qty": 2,
           "unitPrice": 28584.72,
-          "requiredDate": "2025-04-28",
+          "requiredDate": "2025-05-10",
           "receivedDate": "2025-05-07",
           "receivedQty": 2
         }
@@ -16199,7 +16267,7 @@
           "item": "BW-2100-100",
           "qty": 2,
           "unitPrice": 15742.68,
-          "requiredDate": "2025-08-01",
+          "requiredDate": "2025-08-24",
           "receivedDate": "2025-07-28",
           "receivedQty": 2
         },
@@ -16207,7 +16275,7 @@
           "item": "BW-9420-100",
           "qty": 6,
           "unitPrice": 4184.8,
-          "requiredDate": "2025-06-02",
+          "requiredDate": "2025-06-19",
           "receivedDate": "2025-05-25",
           "receivedQty": 6
         },
@@ -16215,7 +16283,7 @@
           "item": "BW-9440-030",
           "qty": 60,
           "unitPrice": 39.48,
-          "requiredDate": "2025-06-08",
+          "requiredDate": "2025-06-25",
           "receivedDate": "2025-06-22",
           "receivedQty": 60
         }
@@ -16235,7 +16303,7 @@
           "item": "BW-4110-100",
           "qty": 9,
           "unitPrice": 6321.51,
-          "requiredDate": "2025-07-01",
+          "requiredDate": "2025-07-22",
           "receivedDate": "2025-07-19",
           "receivedQty": 9
         },
@@ -16243,7 +16311,7 @@
           "item": "BW-4120-100",
           "qty": 44,
           "unitPrice": 1452.71,
-          "requiredDate": "2025-07-02",
+          "requiredDate": "2025-07-23",
           "receivedDate": "2025-06-08",
           "receivedQty": 44
         },
@@ -16251,7 +16319,7 @@
           "item": "BW-4220-100",
           "qty": 18,
           "unitPrice": 1257.32,
-          "requiredDate": "2025-07-15",
+          "requiredDate": "2025-08-05",
           "receivedDate": "2025-07-13",
           "receivedQty": 18
         },
@@ -16259,7 +16327,7 @@
           "item": "BW-4230-100",
           "qty": 18,
           "unitPrice": 528.41,
-          "requiredDate": "2025-07-10",
+          "requiredDate": "2025-07-31",
           "receivedDate": "2025-07-05",
           "receivedQty": 18
         }
@@ -16279,7 +16347,7 @@
           "item": "BW-8110-100",
           "qty": 9,
           "unitPrice": 18082.05,
-          "requiredDate": "2025-08-20",
+          "requiredDate": "2025-09-16",
           "receivedDate": "2025-09-17",
           "receivedQty": 9
         },
@@ -16287,7 +16355,7 @@
           "item": "BW-8210-110",
           "qty": 3,
           "unitPrice": 3174.8,
-          "requiredDate": "2025-05-24",
+          "requiredDate": "2025-06-08",
           "receivedDate": "2025-05-20",
           "receivedQty": 3
         },
@@ -16295,7 +16363,7 @@
           "item": "BW-8230-100",
           "qty": 3,
           "unitPrice": 10214.13,
-          "requiredDate": "2025-05-25",
+          "requiredDate": "2025-06-09",
           "receivedDate": "2025-04-16",
           "receivedQty": 3
         },
@@ -16303,7 +16371,7 @@
           "item": "BW-8280-100",
           "qty": 2,
           "unitPrice": 19234.68,
-          "requiredDate": "2025-05-20",
+          "requiredDate": "2025-06-04",
           "receivedDate": "2025-04-29",
           "receivedQty": 2
         },
@@ -16311,7 +16379,7 @@
           "item": "BW-8220-110",
           "qty": 3,
           "unitPrice": 2812.97,
-          "requiredDate": "2025-05-21",
+          "requiredDate": "2025-06-05",
           "receivedDate": "2025-06-13",
           "receivedQty": 3
         }
@@ -16331,7 +16399,7 @@
           "item": "BW-7110-100",
           "qty": 6,
           "unitPrice": 32538.47,
-          "requiredDate": "2025-10-01",
+          "requiredDate": "2025-11-05",
           "receivedDate": "2025-09-21",
           "receivedQty": 6
         }
@@ -16351,7 +16419,7 @@
           "item": "BW-1215-100",
           "qty": 2,
           "unitPrice": 4061.8,
-          "requiredDate": "2025-04-20",
+          "requiredDate": "2025-04-29",
           "receivedDate": "2025-05-09",
           "receivedQty": 2
         },
@@ -16379,7 +16447,7 @@
           "item": "BW-5110-100",
           "qty": 26,
           "unitPrice": 2772.34,
-          "requiredDate": "2025-08-29",
+          "requiredDate": "2025-09-27",
           "receivedDate": "2025-10-01",
           "receivedQty": 26
         },
@@ -16387,7 +16455,7 @@
           "item": "BW-5210-100",
           "qty": 26,
           "unitPrice": 2085.34,
-          "requiredDate": "2025-08-30",
+          "requiredDate": "2025-09-28",
           "receivedDate": "2025-09-04",
           "receivedQty": 26
         },
@@ -16395,7 +16463,7 @@
           "item": "BW-6122-100",
           "qty": 52,
           "unitPrice": 1712.15,
-          "requiredDate": "2025-06-26",
+          "requiredDate": "2025-07-15",
           "receivedDate": "2025-06-26",
           "receivedQty": 52
         },
@@ -16403,7 +16471,7 @@
           "item": "BW-3110-100",
           "qty": 9,
           "unitPrice": 7418.28,
-          "requiredDate": "2025-06-12",
+          "requiredDate": "2025-06-29",
           "receivedDate": "2025-05-16",
           "receivedQty": 9
         },
@@ -16411,7 +16479,7 @@
           "item": "BW-3210-100",
           "qty": 9,
           "unitPrice": 4881.15,
-          "requiredDate": "2025-06-13",
+          "requiredDate": "2025-06-30",
           "receivedDate": "2025-06-09",
           "receivedQty": 9
         },
@@ -16419,7 +16487,7 @@
           "item": "BW-6140-100",
           "qty": 9,
           "unitPrice": 2937.72,
-          "requiredDate": "2025-06-18",
+          "requiredDate": "2025-07-07",
           "receivedDate": "2025-05-30",
           "receivedQty": 9
         }
@@ -16439,7 +16507,7 @@
           "item": "BW-1910-100",
           "qty": 600,
           "unitPrice": 84.02,
-          "requiredDate": "2025-06-06",
+          "requiredDate": "2025-06-23",
           "receivedDate": "2025-05-11",
           "receivedQty": 600
         }
@@ -16459,7 +16527,7 @@
           "item": "BW-3140-100",
           "qty": 9,
           "unitPrice": 931.94,
-          "requiredDate": "2025-05-26",
+          "requiredDate": "2025-06-10",
           "receivedDate": "2025-05-28",
           "receivedQty": 9
         },
@@ -16467,7 +16535,7 @@
           "item": "BW-3240-100",
           "qty": 9,
           "unitPrice": 688.9,
-          "requiredDate": "2025-06-02",
+          "requiredDate": "2025-06-17",
           "receivedDate": "2025-05-03",
           "receivedQty": 9
         },
@@ -16475,7 +16543,7 @@
           "item": "BW-9610-100",
           "qty": 1,
           "unitPrice": 11759.92,
-          "requiredDate": "2025-03-27",
+          "requiredDate": "2025-03-31",
           "receivedDate": "2025-03-19",
           "receivedQty": 1
         }
@@ -16495,7 +16563,7 @@
           "item": "BW-3220-340",
           "qty": 9,
           "unitPrice": 4292.32,
-          "requiredDate": "2025-08-14",
+          "requiredDate": "2025-09-09",
           "receivedDate": "2025-07-09",
           "receivedQty": 9
         }
@@ -16515,7 +16583,7 @@
           "item": "BW-3126-100",
           "qty": 12,
           "unitPrice": 587.05,
-          "requiredDate": "2025-08-08",
+          "requiredDate": "2025-09-02",
           "receivedDate": "2025-08-14",
           "receivedQty": 12
         },
@@ -16523,7 +16591,7 @@
           "item": "BW-1110-100",
           "qty": 2,
           "unitPrice": 70613.12,
-          "requiredDate": "2025-08-13",
+          "requiredDate": "2025-09-07",
           "receivedDate": "2025-09-01",
           "receivedQty": 2
         },
@@ -16531,7 +16599,7 @@
           "item": "BW-1120-100",
           "qty": 2,
           "unitPrice": 57913.54,
-          "requiredDate": "2025-08-08",
+          "requiredDate": "2025-09-02",
           "receivedDate": "2025-11-09",
           "receivedQty": 2
         }
@@ -16551,7 +16619,7 @@
           "item": "BW-6110-100",
           "qty": 10000,
           "unitPrice": 10.27,
-          "requiredDate": "2025-07-11",
+          "requiredDate": "2025-08-01",
           "receivedDate": "2025-06-25",
           "receivedQty": 10000
         }
@@ -16571,7 +16639,7 @@
           "item": "BW-7200-100",
           "qty": 8,
           "unitPrice": 42099.49,
-          "requiredDate": "2025-10-13",
+          "requiredDate": "2025-11-17",
           "receivedDate": "2025-09-23",
           "receivedQty": 8
         }
@@ -16591,7 +16659,7 @@
           "item": "BW-3120-340",
           "qty": 12,
           "unitPrice": 7063.65,
-          "requiredDate": "2025-08-23",
+          "requiredDate": "2025-09-18",
           "receivedDate": "2025-07-23",
           "receivedQty": 12
         }
@@ -16611,7 +16679,7 @@
           "item": "BW-7210-100",
           "qty": 3,
           "unitPrice": 47636.43,
-          "requiredDate": "2025-10-18",
+          "requiredDate": "2025-11-22",
           "receivedDate": "2025-11-27",
           "receivedQty": 3
         }
@@ -16631,7 +16699,7 @@
           "item": "BW-1910-100",
           "qty": 800,
           "unitPrice": 85,
-          "requiredDate": "2025-07-29",
+          "requiredDate": "2025-08-15",
           "receivedDate": "2025-08-18",
           "receivedQty": 800
         }
@@ -16651,7 +16719,7 @@
           "item": "BW-1215-100",
           "qty": 3,
           "unitPrice": 4095.95,
-          "requiredDate": "2025-06-14",
+          "requiredDate": "2025-06-23",
           "receivedDate": "2025-06-07",
           "receivedQty": 3
         }
@@ -16671,7 +16739,7 @@
           "item": "BW-9610-100",
           "qty": 2,
           "unitPrice": 11692.62,
-          "requiredDate": "2025-05-21",
+          "requiredDate": "2025-05-25",
           "receivedDate": "2025-06-05",
           "receivedQty": 2
         }
@@ -16691,7 +16759,7 @@
           "item": "BW-6110-100",
           "qty": 15000,
           "unitPrice": 10.25,
-          "requiredDate": "2025-09-13",
+          "requiredDate": "2025-10-04",
           "receivedDate": "2025-09-27",
           "receivedQty": 15000
         }
@@ -16711,7 +16779,7 @@
           "item": "BW-3190-100",
           "qty": 24,
           "unitPrice": 399.18,
-          "requiredDate": "2025-08-15",
+          "requiredDate": "2025-08-27",
           "receivedDate": "2025-08-03",
           "receivedQty": 24
         },
@@ -16719,7 +16787,7 @@
           "item": "BW-9110-100",
           "qty": 2,
           "unitPrice": 28819.86,
-          "requiredDate": "2025-07-22",
+          "requiredDate": "2025-08-03",
           "receivedDate": "2025-07-30",
           "receivedQty": 2
         }
@@ -16739,7 +16807,7 @@
           "item": "BW-9420-100",
           "qty": 8,
           "unitPrice": 4265.02,
-          "requiredDate": "2025-08-26",
+          "requiredDate": "2025-09-12",
           "receivedDate": "2025-09-03",
           "receivedQty": 8
         },
@@ -16747,7 +16815,7 @@
           "item": "BW-9440-030",
           "qty": 60,
           "unitPrice": 39.5,
-          "requiredDate": "2025-09-10",
+          "requiredDate": "2025-09-27",
           "receivedDate": "2025-08-18",
           "receivedQty": 60
         }
@@ -16767,7 +16835,7 @@
           "item": "BW-4110-100",
           "qty": 12,
           "unitPrice": 6393.54,
-          "requiredDate": "2025-09-27",
+          "requiredDate": "2025-10-18",
           "receivedDate": "2025-09-24",
           "receivedQty": 12
         },
@@ -16775,7 +16843,7 @@
           "item": "BW-4120-100",
           "qty": 58,
           "unitPrice": 1470.46,
-          "requiredDate": "2025-09-29",
+          "requiredDate": "2025-10-20",
           "receivedDate": "2025-10-17",
           "receivedQty": 58
         },
@@ -16783,7 +16851,7 @@
           "item": "BW-4220-100",
           "qty": 24,
           "unitPrice": 1266.74,
-          "requiredDate": "2025-10-13",
+          "requiredDate": "2025-11-03",
           "receivedDate": "2025-10-08",
           "receivedQty": 24
         },
@@ -16791,7 +16859,7 @@
           "item": "BW-4230-100",
           "qty": 24,
           "unitPrice": 536.31,
-          "requiredDate": "2025-10-05",
+          "requiredDate": "2025-10-26",
           "receivedDate": "2025-11-27",
           "receivedQty": 24
         }
@@ -16811,7 +16879,7 @@
           "item": "BW-8110-100",
           "qty": 12,
           "unitPrice": 17918.38,
-          "requiredDate": "2025-11-18",
+          "requiredDate": "2025-12-15",
           "receivedDate": "2025-11-08",
           "receivedQty": 12
         },
@@ -16819,7 +16887,7 @@
           "item": "BW-8210-110",
           "qty": 4,
           "unitPrice": 3201.21,
-          "requiredDate": "2025-08-21",
+          "requiredDate": "2025-09-05",
           "receivedDate": "2025-09-08",
           "receivedQty": 4
         },
@@ -16827,7 +16895,7 @@
           "item": "BW-8230-100",
           "qty": 4,
           "unitPrice": 10332.62,
-          "requiredDate": "2025-08-21",
+          "requiredDate": "2025-09-05",
           "receivedDate": "2025-08-26",
           "receivedQty": 4
         },
@@ -16835,7 +16903,7 @@
           "item": "BW-8280-100",
           "qty": 2,
           "unitPrice": 19382.27,
-          "requiredDate": "2025-08-16",
+          "requiredDate": "2025-08-31",
           "receivedDate": "2025-10-10",
           "receivedQty": 2
         },
@@ -16843,7 +16911,7 @@
           "item": "BW-8220-110",
           "qty": 4,
           "unitPrice": 2836.32,
-          "requiredDate": "2025-08-24",
+          "requiredDate": "2025-09-08",
           "receivedDate": "2025-09-07",
           "receivedQty": 4
         }
@@ -16863,7 +16931,7 @@
           "item": "BW-5110-100",
           "qty": 35,
           "unitPrice": 2771.95,
-          "requiredDate": "2025-11-26",
+          "requiredDate": "2025-12-25",
           "receivedDate": "2026-03-04",
           "receivedQty": 35
         },
@@ -16871,7 +16939,7 @@
           "item": "BW-5210-100",
           "qty": 35,
           "unitPrice": 2077.3,
-          "requiredDate": "2025-12-02",
+          "requiredDate": "2025-12-31",
           "receivedDate": "2026-01-05",
           "receivedQty": 35
         },
@@ -16879,7 +16947,7 @@
           "item": "BW-6122-100",
           "qty": 70,
           "unitPrice": 1710.7,
-          "requiredDate": "2025-09-24",
+          "requiredDate": "2025-10-13",
           "receivedDate": "2025-08-22",
           "receivedQty": 70
         },
@@ -16887,7 +16955,7 @@
           "item": "BW-3110-100",
           "qty": 12,
           "unitPrice": 7465.91,
-          "requiredDate": "2025-09-07",
+          "requiredDate": "2025-09-24",
           "receivedDate": "2025-09-06",
           "receivedQty": 12
         },
@@ -16895,7 +16963,7 @@
           "item": "BW-3210-100",
           "qty": 12,
           "unitPrice": 4937.6,
-          "requiredDate": "2025-09-05",
+          "requiredDate": "2025-09-22",
           "receivedDate": "2025-08-25",
           "receivedQty": 12
         },
@@ -16903,7 +16971,7 @@
           "item": "BW-6140-100",
           "qty": 12,
           "unitPrice": 2949.07,
-          "requiredDate": "2025-09-13",
+          "requiredDate": "2025-10-02",
           "receivedDate": "2025-09-05",
           "receivedQty": 12
         }
@@ -16923,7 +16991,7 @@
           "item": "BW-3126-100",
           "qty": 12,
           "unitPrice": 591.86,
-          "requiredDate": "2025-10-30",
+          "requiredDate": "2025-11-24",
           "receivedDate": "2025-12-13",
           "receivedQty": 12
         },
@@ -16931,7 +16999,7 @@
           "item": "BW-1110-100",
           "qty": 2,
           "unitPrice": 71675.91,
-          "requiredDate": "2025-11-05",
+          "requiredDate": "2025-11-30",
           "receivedDate": "2025-11-17",
           "receivedQty": 2
         },
@@ -16939,7 +17007,7 @@
           "item": "BW-1120-100",
           "qty": 2,
           "unitPrice": 58378.24,
-          "requiredDate": "2025-11-01",
+          "requiredDate": "2025-11-26",
           "receivedDate": "2025-11-10",
           "receivedQty": 2
         }
@@ -16959,7 +17027,7 @@
           "item": "BW-3140-100",
           "qty": 12,
           "unitPrice": 934.54,
-          "requiredDate": "2025-08-23",
+          "requiredDate": "2025-09-07",
           "receivedDate": "2025-09-01",
           "receivedQty": 12
         },
@@ -16967,7 +17035,7 @@
           "item": "BW-3240-100",
           "qty": 12,
           "unitPrice": 686.96,
-          "requiredDate": "2025-09-02",
+          "requiredDate": "2025-09-17",
           "receivedDate": "2025-08-06",
           "receivedQty": 12
         }
@@ -17007,7 +17075,7 @@
           "item": "BW-3120-340",
           "qty": 12,
           "unitPrice": 7098.7,
-          "requiredDate": "2025-11-21",
+          "requiredDate": "2025-12-17",
           "receivedDate": "2025-12-07",
           "receivedQty": 12
         },
@@ -17015,7 +17083,7 @@
           "item": "BW-3220-340",
           "qty": 12,
           "unitPrice": 4232.53,
-          "requiredDate": "2025-11-13",
+          "requiredDate": "2025-12-09",
           "receivedDate": "2026-01-10",
           "receivedQty": 12
         }
@@ -17035,7 +17103,7 @@
           "item": "BW-2100-100",
           "qty": 2,
           "unitPrice": 15866.2,
-          "requiredDate": "2025-11-02",
+          "requiredDate": "2025-11-25",
           "receivedDate": "2025-11-26",
           "receivedQty": 2
         }
@@ -17055,7 +17123,7 @@
           "item": "BW-1910-100",
           "qty": 800,
           "unitPrice": 84.12,
-          "requiredDate": "2025-09-23",
+          "requiredDate": "2025-10-10",
           "receivedDate": "2025-09-26",
           "receivedQty": 800
         }
@@ -17075,7 +17143,7 @@
           "item": "BW-7110-100",
           "qty": 8,
           "unitPrice": 32399.41,
-          "requiredDate": "2026-01-28",
+          "requiredDate": "2026-03-04",
           "receivedDate": "2026-01-14",
           "receivedQty": 8
         }
@@ -17095,7 +17163,7 @@
           "item": "BW-1215-100",
           "qty": 3,
           "unitPrice": 4074.65,
-          "requiredDate": "2025-08-14",
+          "requiredDate": "2025-08-23",
           "receivedDate": "2025-09-19",
           "receivedQty": 3
         }
@@ -17115,7 +17183,7 @@
           "item": "BW-7200-100",
           "qty": 11,
           "unitPrice": 42216.42,
-          "requiredDate": "2026-02-05",
+          "requiredDate": "2026-03-12",
           "receivedDate": "2026-02-18",
           "receivedQty": 11
         }
@@ -17135,7 +17203,7 @@
           "item": "BW-6110-100",
           "qty": 15000,
           "unitPrice": 10.31,
-          "requiredDate": "2025-11-11",
+          "requiredDate": "2025-12-02",
           "receivedDate": "2025-11-27",
           "receivedQty": 15000
         }
@@ -17155,7 +17223,7 @@
           "item": "BW-9610-100",
           "qty": 2,
           "unitPrice": 11738.79,
-          "requiredDate": "2025-07-24",
+          "requiredDate": "2025-07-28",
           "receivedDate": "2025-08-15",
           "receivedQty": 2
         }
@@ -17175,7 +17243,7 @@
           "item": "BW-7210-100",
           "qty": 3,
           "unitPrice": 47587.96,
-          "requiredDate": "2026-02-21",
+          "requiredDate": "2026-03-28",
           "receivedDate": "2026-02-20",
           "receivedQty": 3
         }
@@ -17195,7 +17263,7 @@
           "item": "BW-1910-100",
           "qty": 800,
           "unitPrice": 87.53,
-          "requiredDate": "2025-11-20",
+          "requiredDate": "2025-12-07",
           "receivedDate": "2025-11-03",
           "receivedQty": 800
         }
@@ -17215,7 +17283,7 @@
           "item": "BW-9420-100",
           "qty": 8,
           "unitPrice": 4244.99,
-          "requiredDate": "2025-11-20",
+          "requiredDate": "2025-12-07",
           "receivedDate": "2025-11-05",
           "receivedQty": 8
         }
@@ -17235,7 +17303,7 @@
           "item": "BW-5110-100",
           "qty": 35,
           "unitPrice": 2639.23,
-          "requiredDate": "2026-02-20",
+          "requiredDate": "2026-03-21",
           "receivedDate": "2026-01-30",
           "receivedQty": 35
         },
@@ -17243,7 +17311,7 @@
           "item": "BW-5210-100",
           "qty": 35,
           "unitPrice": 1996.66,
-          "requiredDate": "2026-03-06",
+          "requiredDate": "2026-04-04",
           "receivedDate": "2026-02-09",
           "receivedQty": 35
         },
@@ -17251,7 +17319,7 @@
           "item": "BW-6122-100",
           "qty": 70,
           "unitPrice": 1711.41,
-          "requiredDate": "2025-12-30",
+          "requiredDate": "2026-01-18",
           "receivedDate": "2026-01-10",
           "receivedQty": 70
         },
@@ -17259,7 +17327,7 @@
           "item": "BW-3110-100",
           "qty": 12,
           "unitPrice": 7441.1,
-          "requiredDate": "2025-12-05",
+          "requiredDate": "2025-12-22",
           "receivedDate": "2025-11-21",
           "receivedQty": 12
         },
@@ -17267,7 +17335,7 @@
           "item": "BW-3210-100",
           "qty": 12,
           "unitPrice": 5032.52,
-          "requiredDate": "2025-12-10",
+          "requiredDate": "2025-12-27",
           "receivedDate": "2025-12-10",
           "receivedQty": 12
         },
@@ -17275,7 +17343,7 @@
           "item": "BW-6140-100",
           "qty": 12,
           "unitPrice": 2993.61,
-          "requiredDate": "2025-12-16",
+          "requiredDate": "2026-01-04",
           "receivedDate": "2026-03-08",
           "receivedQty": 12
         }
@@ -17295,7 +17363,7 @@
           "item": "BW-3190-100",
           "qty": 24,
           "unitPrice": 400.51,
-          "requiredDate": "2025-11-09",
+          "requiredDate": "2025-11-21",
           "receivedDate": "2025-11-18",
           "receivedQty": 24
         },
@@ -17303,7 +17371,7 @@
           "item": "BW-9110-100",
           "qty": 2,
           "unitPrice": 29219.58,
-          "requiredDate": "2025-10-26",
+          "requiredDate": "2025-11-07",
           "receivedDate": "2025-11-08",
           "receivedQty": 2
         }
@@ -17323,7 +17391,7 @@
           "item": "BW-1215-100",
           "qty": 3,
           "unitPrice": 4123.78,
-          "requiredDate": "2025-10-13",
+          "requiredDate": "2025-10-22",
           "receivedDate": "2025-09-24",
           "receivedQty": 3
         },
@@ -17351,7 +17419,7 @@
           "item": "BW-4110-100",
           "qty": 12,
           "unitPrice": 6398.96,
-          "requiredDate": "2026-01-03",
+          "requiredDate": "2026-01-24",
           "receivedDate": "2026-01-20",
           "receivedQty": 12
         },
@@ -17359,7 +17427,7 @@
           "item": "BW-4120-100",
           "qty": 58,
           "unitPrice": 1483.18,
-          "requiredDate": "2025-12-29",
+          "requiredDate": "2026-01-19",
           "receivedDate": "2026-01-11",
           "receivedQty": 58
         },
@@ -17367,7 +17435,7 @@
           "item": "BW-4220-100",
           "qty": 24,
           "unitPrice": 1277.99,
-          "requiredDate": "2026-01-14",
+          "requiredDate": "2026-02-04",
           "receivedDate": "2026-01-28",
           "receivedQty": 24
         },
@@ -17375,7 +17443,7 @@
           "item": "BW-4230-100",
           "qty": 24,
           "unitPrice": 537.45,
-          "requiredDate": "2026-01-03",
+          "requiredDate": "2026-01-24",
           "receivedDate": "2026-01-31",
           "receivedQty": 24
         }
@@ -17395,7 +17463,7 @@
           "item": "BW-8110-100",
           "qty": 12,
           "unitPrice": 17955.32,
-          "requiredDate": "2026-02-22",
+          "requiredDate": "2026-03-21",
           "receivedDate": "2026-02-17",
           "receivedQty": 12
         },
@@ -17403,7 +17471,7 @@
           "item": "BW-8210-110",
           "qty": 4,
           "unitPrice": 3207.24,
-          "requiredDate": "2025-11-25",
+          "requiredDate": "2025-12-10",
           "receivedDate": "2025-11-15",
           "receivedQty": 4
         },
@@ -17411,7 +17479,7 @@
           "item": "BW-8230-100",
           "qty": 4,
           "unitPrice": 10334.87,
-          "requiredDate": "2025-11-18",
+          "requiredDate": "2025-12-03",
           "receivedDate": "2025-11-19",
           "receivedQty": 4
         },
@@ -17419,7 +17487,7 @@
           "item": "BW-8280-100",
           "qty": 2,
           "unitPrice": 19504.46,
-          "requiredDate": "2025-11-18",
+          "requiredDate": "2025-12-03",
           "receivedDate": "2025-11-05",
           "receivedQty": 2
         },
@@ -17427,7 +17495,7 @@
           "item": "BW-8220-110",
           "qty": 4,
           "unitPrice": 2882.38,
-          "requiredDate": "2025-11-26",
+          "requiredDate": "2025-12-11",
           "receivedDate": "2025-12-09",
           "receivedQty": 4
         }
@@ -17447,7 +17515,7 @@
           "item": "BW-3140-100",
           "qty": 12,
           "unitPrice": 927.68,
-          "requiredDate": "2025-11-19",
+          "requiredDate": "2025-12-04",
           "receivedDate": "2025-11-01",
           "receivedQty": 12
         }
@@ -17467,7 +17535,7 @@
           "item": "BW-3126-100",
           "qty": 12,
           "unitPrice": 586.77,
-          "requiredDate": "2026-01-30",
+          "requiredDate": "2026-02-24",
           "receivedDate": "2026-01-30",
           "receivedQty": 12
         },
@@ -17475,7 +17543,7 @@
           "item": "BW-1110-100",
           "qty": 2,
           "unitPrice": 71549.15,
-          "requiredDate": "2026-02-04",
+          "requiredDate": "2026-03-01",
           "receivedDate": "2026-01-19",
           "receivedQty": 2
         },
@@ -17483,7 +17551,7 @@
           "item": "BW-1120-100",
           "qty": 2,
           "unitPrice": 58571.54,
-          "requiredDate": "2026-02-02",
+          "requiredDate": "2026-02-27",
           "receivedDate": "2025-11-20",
           "receivedQty": 2
         }
@@ -17503,7 +17571,7 @@
           "item": "BW-3220-340",
           "qty": 12,
           "unitPrice": 4383.93,
-          "requiredDate": "2026-02-12",
+          "requiredDate": "2026-03-10",
           "receivedDate": "2026-01-12",
           "receivedQty": 12
         }
@@ -17523,7 +17591,7 @@
           "item": "BW-9440-030",
           "qty": 60,
           "unitPrice": 39.82,
-          "requiredDate": "2025-12-15",
+          "requiredDate": "2026-01-01",
           "receivedDate": "2025-12-17",
           "receivedQty": 60
         }
@@ -17543,7 +17611,7 @@
           "item": "BW-6110-100",
           "qty": 15000,
           "unitPrice": 10.33,
-          "requiredDate": "2026-01-16",
+          "requiredDate": "2026-02-06",
           "receivedDate": "2026-01-16",
           "receivedQty": 15000
         }
@@ -17563,7 +17631,7 @@
           "item": "BW-3240-100",
           "qty": 15,
           "unitPrice": 683.9,
-          "requiredDate": "2025-12-08",
+          "requiredDate": "2025-12-23",
           "receivedDate": "2025-11-08",
           "receivedQty": 15
         },
@@ -17571,7 +17639,7 @@
           "item": "BW-9610-100",
           "qty": 2,
           "unitPrice": 11828.57,
-          "requiredDate": "2025-09-29",
+          "requiredDate": "2025-10-03",
           "receivedDate": "2025-09-29",
           "receivedQty": 2
         }
@@ -17591,7 +17659,7 @@
           "item": "BW-2100-100",
           "qty": 3,
           "unitPrice": 16026.84,
-          "requiredDate": "2026-02-04",
+          "requiredDate": "2026-02-27",
           "receivedDate": "2026-01-09",
           "receivedQty": 3
         }
@@ -17611,7 +17679,7 @@
           "item": "BW-3120-340",
           "qty": 15,
           "unitPrice": 7378.1,
-          "requiredDate": "2026-02-26",
+          "requiredDate": "2026-03-24",
           "receivedDate": "2026-03-23",
           "receivedQty": 15
         }
@@ -17631,7 +17699,7 @@
           "item": "BW-1910-100",
           "qty": 1000,
           "unitPrice": 87.13,
-          "requiredDate": "2026-01-26",
+          "requiredDate": "2026-02-12",
           "receivedDate": "2026-03-05",
           "receivedQty": 1000
         }
@@ -17651,7 +17719,7 @@
           "item": "BW-7110-100",
           "qty": 10,
           "unitPrice": 32540.01,
-          "requiredDate": "2026-05-28",
+          "requiredDate": "2026-07-02",
           "receivedDate": "2026-07-03",
           "receivedQty": 10
         }
@@ -17671,7 +17739,7 @@
           "item": "BW-1215-100",
           "qty": 4,
           "unitPrice": 4172.97,
-          "requiredDate": "2025-12-13",
+          "requiredDate": "2025-12-22",
           "receivedDate": "2025-11-26",
           "receivedQty": 4
         }
@@ -17691,7 +17759,7 @@
           "item": "BW-7200-100",
           "qty": 13,
           "unitPrice": 42551.75,
-          "requiredDate": "2026-06-12",
+          "requiredDate": "2026-07-17",
           "receivedDate": "2026-06-15",
           "receivedQty": 13
         },
@@ -17699,7 +17767,7 @@
           "item": "BW-7210-100",
           "qty": 4,
           "unitPrice": 47887.1,
-          "requiredDate": "2026-06-19",
+          "requiredDate": "2026-07-24",
           "receivedDate": "2026-06-25",
           "receivedQty": 4
         }
@@ -17719,7 +17787,7 @@
           "item": "BW-6110-100",
           "qty": 15000,
           "unitPrice": 10.26,
-          "requiredDate": "2026-03-18",
+          "requiredDate": "2026-04-08",
           "receivedDate": "2026-04-29",
           "receivedQty": 15000
         }
@@ -17739,7 +17807,7 @@
           "item": "BW-9420-100",
           "qty": 10,
           "unitPrice": 4312.7,
-          "requiredDate": "2026-02-19",
+          "requiredDate": "2026-03-08",
           "receivedDate": "2026-03-16",
           "receivedQty": 10
         }
@@ -17759,7 +17827,7 @@
           "item": "BW-3140-100",
           "qty": 15,
           "unitPrice": 1126.34,
-          "requiredDate": "2026-02-16",
+          "requiredDate": "2026-03-03",
           "receivedDate": "2026-02-26",
           "receivedQty": 15
         },
@@ -17767,7 +17835,7 @@
           "item": "BW-9610-100",
           "qty": 2,
           "unitPrice": 11677.75,
-          "requiredDate": "2025-12-02",
+          "requiredDate": "2025-12-06",
           "receivedDate": "2025-11-24",
           "receivedQty": 2
         }
@@ -17787,7 +17855,7 @@
           "item": "BW-3190-100",
           "qty": 29,
           "unitPrice": 403.25,
-          "requiredDate": "2026-02-11",
+          "requiredDate": "2026-02-23",
           "receivedDate": "2026-01-20",
           "receivedQty": 29
         },
@@ -17795,7 +17863,7 @@
           "item": "BW-9110-100",
           "qty": 3,
           "unitPrice": 29525.4,
-          "requiredDate": "2026-01-21",
+          "requiredDate": "2026-02-02",
           "receivedDate": "2026-01-26",
           "receivedQty": 3
         }
@@ -17815,7 +17883,7 @@
           "item": "BW-5110-100",
           "qty": 44,
           "unitPrice": 2628.8,
-          "requiredDate": "2026-05-23",
+          "requiredDate": "2026-06-21",
           "receivedDate": "2026-06-30",
           "receivedQty": 44
         },
@@ -17823,7 +17891,7 @@
           "item": "BW-5210-100",
           "qty": 44,
           "unitPrice": 2005.44,
-          "requiredDate": "2026-06-03",
+          "requiredDate": "2026-07-02",
           "receivedDate": "2026-08-08",
           "receivedQty": 44
         },
@@ -17831,7 +17899,7 @@
           "item": "BW-3110-100",
           "qty": 15,
           "unitPrice": 7523.83,
-          "requiredDate": "2026-03-11",
+          "requiredDate": "2026-03-28",
           "receivedDate": "2026-02-23",
           "receivedQty": 15
         },
@@ -17839,7 +17907,7 @@
           "item": "BW-3210-100",
           "qty": 15,
           "unitPrice": 4996.26,
-          "requiredDate": "2026-03-07",
+          "requiredDate": "2026-03-24",
           "receivedDate": "2026-05-04",
           "receivedQty": 15
         },
@@ -17847,7 +17915,7 @@
           "item": "BW-6140-100",
           "qty": 15,
           "unitPrice": 3004.71,
-          "requiredDate": "2026-03-13",
+          "requiredDate": "2026-04-01",
           "receivedDate": "2026-04-05",
           "receivedQty": 15
         }
@@ -17867,7 +17935,7 @@
           "item": "BW-8110-100",
           "qty": 15,
           "unitPrice": 18103.9,
-          "requiredDate": "2026-05-29",
+          "requiredDate": "2026-06-25",
           "receivedDate": "2026-04-25",
           "receivedQty": 15
         },
@@ -17875,7 +17943,7 @@
           "item": "BW-8210-110",
           "qty": 5,
           "unitPrice": 3201.58,
-          "requiredDate": "2026-02-26",
+          "requiredDate": "2026-03-13",
           "receivedDate": "2026-02-13",
           "receivedQty": 5
         },
@@ -17883,7 +17951,7 @@
           "item": "BW-8230-100",
           "qty": 5,
           "unitPrice": 10440.36,
-          "requiredDate": "2026-02-16",
+          "requiredDate": "2026-03-03",
           "receivedDate": "2026-02-25",
           "receivedQty": 5
         },
@@ -17891,7 +17959,7 @@
           "item": "BW-8280-100",
           "qty": 3,
           "unitPrice": 19594.61,
-          "requiredDate": "2026-02-15",
+          "requiredDate": "2026-03-02",
           "receivedDate": "2026-01-29",
           "receivedQty": 3
         },
@@ -17899,7 +17967,7 @@
           "item": "BW-8220-110",
           "qty": 5,
           "unitPrice": 2864.16,
-          "requiredDate": "2026-02-21",
+          "requiredDate": "2026-03-08",
           "receivedDate": "2026-03-11",
           "receivedQty": 5
         }
@@ -17919,7 +17987,7 @@
           "item": "BW-4110-100",
           "qty": 15,
           "unitPrice": 6457.62,
-          "requiredDate": "2026-03-31",
+          "requiredDate": "2026-04-21",
           "receivedDate": "2026-04-05",
           "receivedQty": 15
         },
@@ -17927,7 +17995,7 @@
           "item": "BW-4120-100",
           "qty": 72,
           "unitPrice": 1498.57,
-          "requiredDate": "2026-04-05",
+          "requiredDate": "2026-04-26",
           "receivedDate": "2026-06-05",
           "receivedQty": 72
         },
@@ -17935,7 +18003,7 @@
           "item": "BW-4220-100",
           "qty": 29,
           "unitPrice": 1296.43,
-          "requiredDate": "2026-04-16",
+          "requiredDate": "2026-05-07",
           "receivedDate": "2026-05-16",
           "receivedQty": 29
         },
@@ -17943,7 +18011,7 @@
           "item": "BW-4230-100",
           "qty": 29,
           "unitPrice": 544.84,
-          "requiredDate": "2026-04-09",
+          "requiredDate": "2026-04-30",
           "receivedDate": "2026-07-05",
           "receivedQty": 29
         }
@@ -17963,7 +18031,7 @@
           "item": "BW-3126-100",
           "qty": 15,
           "unitPrice": 593.02,
-          "requiredDate": "2026-05-03",
+          "requiredDate": "2026-05-28",
           "receivedDate": "2026-02-25",
           "receivedQty": 15
         },
@@ -17971,7 +18039,7 @@
           "item": "BW-1110-100",
           "qty": 3,
           "unitPrice": 72433.78,
-          "requiredDate": "2026-05-13",
+          "requiredDate": "2026-06-07",
           "receivedDate": "2026-05-27",
           "receivedQty": 3
         },
@@ -17979,7 +18047,7 @@
           "item": "BW-1120-100",
           "qty": 3,
           "unitPrice": 58819.12,
-          "requiredDate": "2026-04-30",
+          "requiredDate": "2026-05-25",
           "receivedDate": "2026-05-10",
           "receivedQty": 3
         }
@@ -17999,7 +18067,7 @@
           "item": "BW-3120-340",
           "qty": 15,
           "unitPrice": 7373.16,
-          "requiredDate": "2026-05-22",
+          "requiredDate": "2026-06-17",
           "receivedDate": "2026-05-30",
           "receivedQty": 15
         },
@@ -18007,7 +18075,7 @@
           "item": "BW-3220-340",
           "qty": 15,
           "unitPrice": 4426.29,
-          "requiredDate": "2026-05-17",
+          "requiredDate": "2026-06-12",
           "receivedDate": "2026-05-28",
           "receivedQty": 15
         }
@@ -18047,7 +18115,7 @@
           "item": "BW-2100-100",
           "qty": 3,
           "unitPrice": 16079.92,
-          "requiredDate": "2026-05-03",
+          "requiredDate": "2026-05-26",
           "receivedDate": "2026-03-29",
           "receivedQty": 3
         },
@@ -18055,7 +18123,7 @@
           "item": "BW-9440-030",
           "qty": 60,
           "unitPrice": 39.98,
-          "requiredDate": "2026-03-21",
+          "requiredDate": "2026-04-07",
           "receivedDate": "2026-03-28",
           "receivedQty": 60
         }
@@ -18075,7 +18143,7 @@
           "item": "BW-1910-100",
           "qty": 1000,
           "unitPrice": 86.55,
-          "requiredDate": "2026-03-23",
+          "requiredDate": "2026-04-09",
           "receivedDate": "2026-03-30",
           "receivedQty": 1000
         }
@@ -18095,7 +18163,7 @@
           "item": "BW-6122-100",
           "qty": 87,
           "unitPrice": 1711.57,
-          "requiredDate": "2026-04-06",
+          "requiredDate": "2026-04-25",
           "receivedDate": "2026-06-23",
           "receivedQty": 87
         }
@@ -18115,7 +18183,7 @@
           "item": "BW-3240-100",
           "qty": 15,
           "unitPrice": 865.06,
-          "requiredDate": "2026-03-10",
+          "requiredDate": "2026-03-25",
           "receivedDate": "2026-02-25",
           "receivedQty": 15
         }
@@ -18135,7 +18203,7 @@
           "item": "BW-1215-100",
           "qty": 4,
           "unitPrice": 4189.79,
-          "requiredDate": "2026-02-13",
+          "requiredDate": "2026-02-22",
           "receivedDate": "2026-02-08",
           "receivedQty": 4
         },
@@ -18163,7 +18231,7 @@
           "item": "BW-6110-100",
           "qty": 15000,
           "unitPrice": 10.31,
-          "requiredDate": "2026-05-17",
+          "requiredDate": "2026-06-07",
           "receivedDate": "2026-04-05",
           "receivedQty": 15000
         }
@@ -18183,7 +18251,7 @@
           "item": "BW-9610-100",
           "qty": 2,
           "unitPrice": 11705.63,
-          "requiredDate": "2026-01-29",
+          "requiredDate": "2026-02-02",
           "receivedDate": "2026-02-08",
           "receivedQty": 2
         }
@@ -18203,7 +18271,7 @@
           "item": "BW-1910-100",
           "qty": 1000,
           "unitPrice": 90.35,
-          "requiredDate": "2026-05-23",
+          "requiredDate": "2026-06-09",
           "receivedDate": "2026-05-28",
           "receivedQty": 1000
         }
@@ -18223,7 +18291,7 @@
           "item": "BW-3190-100",
           "qty": 29,
           "unitPrice": 400.94,
-          "requiredDate": "2026-05-08",
+          "requiredDate": "2026-05-20",
           "receivedDate": "2026-06-03",
           "receivedQty": 29
         },
@@ -18231,7 +18299,7 @@
           "item": "BW-9110-100",
           "qty": 3,
           "unitPrice": 29565.21,
-          "requiredDate": "2026-04-19",
+          "requiredDate": "2026-05-01",
           "receivedDate": "2026-04-10",
           "receivedQty": 3
         }
@@ -18251,7 +18319,7 @@
           "item": "BW-9420-100",
           "qty": 10,
           "unitPrice": 4306.87,
-          "requiredDate": "2026-05-26",
+          "requiredDate": "2026-06-12",
           "receivedDate": "2026-05-29",
           "receivedQty": 10
         }
@@ -18271,7 +18339,7 @@
           "item": "BW-7110-100",
           "qty": 10,
           "unitPrice": 32357.71,
-          "requiredDate": "2026-09-27",
+          "requiredDate": "2026-11-01",
           "receivedQty": 0
         }
       ],
@@ -18290,7 +18358,7 @@
           "item": "BW-5110-100",
           "qty": 44,
           "unitPrice": 2596.86,
-          "requiredDate": "2026-08-23",
+          "requiredDate": "2026-09-21",
           "receivedDate": "2026-08-03",
           "receivedQty": 44
         },
@@ -18298,7 +18366,7 @@
           "item": "BW-5210-100",
           "qty": 44,
           "unitPrice": 1971.5,
-          "requiredDate": "2026-09-04",
+          "requiredDate": "2026-10-03",
           "receivedDate": "2026-10-15",
           "receivedQty": 44
         },
@@ -18306,7 +18374,7 @@
           "item": "BW-6122-100",
           "qty": 87,
           "unitPrice": 1505.66,
-          "requiredDate": "2026-07-02",
+          "requiredDate": "2026-07-21",
           "receivedDate": "2026-06-27",
           "receivedQty": 87
         },
@@ -18314,7 +18382,7 @@
           "item": "BW-3110-100",
           "qty": 15,
           "unitPrice": 7587.44,
-          "requiredDate": "2026-06-11",
+          "requiredDate": "2026-06-28",
           "receivedDate": "2026-06-12",
           "receivedQty": 15
         },
@@ -18322,7 +18390,7 @@
           "item": "BW-3210-100",
           "qty": 15,
           "unitPrice": 5102.17,
-          "requiredDate": "2026-06-08",
+          "requiredDate": "2026-06-25",
           "receivedDate": "2026-07-04",
           "receivedQty": 15
         },
@@ -18330,7 +18398,7 @@
           "item": "BW-6140-100",
           "qty": 15,
           "unitPrice": 3038.87,
-          "requiredDate": "2026-06-14",
+          "requiredDate": "2026-07-03",
           "receivedDate": "2026-05-07",
           "receivedQty": 15
         }
@@ -18350,7 +18418,7 @@
           "item": "BW-1215-100",
           "qty": 4,
           "unitPrice": 4163.3,
-          "requiredDate": "2026-04-13",
+          "requiredDate": "2026-04-22",
           "receivedDate": "2026-03-22",
           "receivedQty": 4
         },
@@ -18378,7 +18446,7 @@
           "item": "BW-4110-100",
           "qty": 15,
           "unitPrice": 6541.95,
-          "requiredDate": "2026-06-30",
+          "requiredDate": "2026-07-21",
           "receivedDate": "2026-06-28",
           "receivedQty": 15
         },
@@ -18386,7 +18454,7 @@
           "item": "BW-4120-100",
           "qty": 72,
           "unitPrice": 1494.7,
-          "requiredDate": "2026-07-07",
+          "requiredDate": "2026-07-28",
           "receivedDate": "2026-05-07",
           "receivedQty": 72
         },
@@ -18394,7 +18462,7 @@
           "item": "BW-4220-100",
           "qty": 29,
           "unitPrice": 1294.53,
-          "requiredDate": "2026-07-14",
+          "requiredDate": "2026-08-04",
           "receivedDate": "2026-07-08",
           "receivedQty": 29
         },
@@ -18402,7 +18470,7 @@
           "item": "BW-4230-100",
           "qty": 29,
           "unitPrice": 544.39,
-          "requiredDate": "2026-07-15",
+          "requiredDate": "2026-08-05",
           "receivedDate": "2026-07-24",
           "receivedQty": 29
         }
@@ -18422,7 +18490,7 @@
           "item": "BW-8110-100",
           "qty": 15,
           "unitPrice": 19495.33,
-          "requiredDate": "2026-08-29",
+          "requiredDate": "2026-09-25",
           "receivedDate": "2026-08-17",
           "receivedQty": 15
         },
@@ -18430,7 +18498,7 @@
           "item": "BW-8210-110",
           "qty": 5,
           "unitPrice": 3166.22,
-          "requiredDate": "2026-06-02",
+          "requiredDate": "2026-06-17",
           "receivedDate": "2026-04-25",
           "receivedQty": 5
         },
@@ -18438,7 +18506,7 @@
           "item": "BW-8230-100",
           "qty": 5,
           "unitPrice": 10524.55,
-          "requiredDate": "2026-05-19",
+          "requiredDate": "2026-06-03",
           "receivedDate": "2026-07-16",
           "receivedQty": 5
         },
@@ -18446,7 +18514,7 @@
           "item": "BW-8280-100",
           "qty": 3,
           "unitPrice": 19870.36,
-          "requiredDate": "2026-05-19",
+          "requiredDate": "2026-06-03",
           "receivedDate": "2026-06-01",
           "receivedQty": 3
         },
@@ -18454,7 +18522,7 @@
           "item": "BW-8220-110",
           "qty": 5,
           "unitPrice": 2922.27,
-          "requiredDate": "2026-05-19",
+          "requiredDate": "2026-06-03",
           "receivedDate": "2026-04-17",
           "receivedQty": 5
         }
@@ -18474,7 +18542,7 @@
           "item": "BW-3140-100",
           "qty": 15,
           "unitPrice": 1119.19,
-          "requiredDate": "2026-05-21",
+          "requiredDate": "2026-06-05",
           "receivedDate": "2026-05-21",
           "receivedQty": 15
         },
@@ -18482,7 +18550,7 @@
           "item": "BW-3240-100",
           "qty": 15,
           "unitPrice": 861.64,
-          "requiredDate": "2026-06-04",
+          "requiredDate": "2026-06-19",
           "receivedDate": "2026-07-03",
           "receivedQty": 15
         },
@@ -18490,7 +18558,7 @@
           "item": "BW-9610-100",
           "qty": 2,
           "unitPrice": 11753.18,
-          "requiredDate": "2026-03-24",
+          "requiredDate": "2026-03-28",
           "receivedDate": "2026-03-10",
           "receivedQty": 2
         }
@@ -18510,7 +18578,7 @@
           "item": "BW-3126-100",
           "qty": 15,
           "unitPrice": 587.78,
-          "requiredDate": "2026-08-03",
+          "requiredDate": "2026-08-28",
           "receivedDate": "2026-10-24",
           "receivedQty": 15
         },
@@ -18518,7 +18586,7 @@
           "item": "BW-1110-100",
           "qty": 3,
           "unitPrice": 72546.04,
-          "requiredDate": "2026-08-09",
+          "requiredDate": "2026-09-03",
           "receivedDate": "2026-07-11",
           "receivedQty": 3
         },
@@ -18526,7 +18594,7 @@
           "item": "BW-1120-100",
           "qty": 3,
           "unitPrice": 58712.58,
-          "requiredDate": "2026-07-31",
+          "requiredDate": "2026-08-25",
           "receivedDate": "2026-08-12",
           "receivedQty": 3
         }
@@ -18546,7 +18614,7 @@
           "item": "BW-7200-100",
           "qty": 13,
           "unitPrice": 43019.2,
-          "requiredDate": "2026-10-07",
+          "requiredDate": "2026-11-11",
           "receivedDate": "2026-09-21",
           "receivedQty": 13
         }
@@ -18566,7 +18634,7 @@
           "item": "BW-3120-340",
           "qty": 15,
           "unitPrice": 7818.3,
-          "requiredDate": "2026-08-22",
+          "requiredDate": "2026-09-17",
           "receivedDate": "2026-08-22",
           "receivedQty": 15
         },
@@ -18574,7 +18642,7 @@
           "item": "BW-3220-340",
           "qty": 15,
           "unitPrice": 4652.56,
-          "requiredDate": "2026-08-18",
+          "requiredDate": "2026-09-13",
           "receivedDate": "2026-08-06",
           "receivedQty": 15
         }
@@ -18594,7 +18662,7 @@
           "item": "BW-2100-100",
           "qty": 4,
           "unitPrice": 16201.59,
-          "requiredDate": "2026-08-03",
+          "requiredDate": "2026-08-26",
           "receivedDate": "2026-10-02",
           "receivedQty": 4
         },
@@ -18602,7 +18670,7 @@
           "item": "BW-9440-030",
           "qty": 60,
           "unitPrice": 40.64,
-          "requiredDate": "2026-06-24",
+          "requiredDate": "2026-07-11",
           "receivedDate": "2026-05-28",
           "receivedQty": 60
         }
@@ -18622,7 +18690,7 @@
           "item": "BW-6110-100",
           "qty": 25000,
           "unitPrice": 10.3,
-          "requiredDate": "2026-07-22",
+          "requiredDate": "2026-08-12",
           "receivedDate": "2026-06-08",
           "receivedQty": 25000
         }
@@ -18642,7 +18710,7 @@
           "item": "BW-7210-100",
           "qty": 6,
           "unitPrice": 48208.38,
-          "requiredDate": "2026-10-22",
+          "requiredDate": "2026-11-26",
           "receivedQty": 0
         }
       ],
@@ -18661,7 +18729,7 @@
           "item": "BW-1910-100",
           "qty": 1400,
           "unitPrice": 90.01,
-          "requiredDate": "2026-07-26",
+          "requiredDate": "2026-08-12",
           "receivedDate": "2026-08-03",
           "receivedQty": 1400
         }
@@ -18681,7 +18749,7 @@
           "item": "BW-1215-100",
           "qty": 6,
           "unitPrice": 4216.77,
-          "requiredDate": "2026-06-09",
+          "requiredDate": "2026-06-18",
           "receivedDate": "2026-05-22",
           "receivedQty": 6
         }
@@ -18701,7 +18769,7 @@
           "item": "BW-9610-100",
           "qty": 3,
           "unitPrice": 11651.99,
-          "requiredDate": "2026-05-25",
+          "requiredDate": "2026-05-29",
           "receivedDate": "2026-05-24",
           "receivedQty": 3
         }
@@ -18721,21 +18789,21 @@
           "item": "BW-5110-100",
           "qty": 70,
           "unitPrice": 2607.29,
-          "requiredDate": "2026-11-24",
+          "requiredDate": "2026-12-23",
           "receivedQty": 0
         },
         {
           "item": "BW-5210-100",
           "qty": 70,
           "unitPrice": 1973.29,
-          "requiredDate": "2026-12-01",
+          "requiredDate": "2026-12-30",
           "receivedQty": 0
         },
         {
           "item": "BW-6122-100",
           "qty": 139,
           "unitPrice": 1418.77,
-          "requiredDate": "2026-09-24",
+          "requiredDate": "2026-10-13",
           "receivedDate": "2026-09-09",
           "receivedQty": 139
         },
@@ -18743,7 +18811,7 @@
           "item": "BW-3110-100",
           "qty": 24,
           "unitPrice": 7701.71,
-          "requiredDate": "2026-09-10",
+          "requiredDate": "2026-09-27",
           "receivedDate": "2026-08-09",
           "receivedQty": 24
         },
@@ -18751,7 +18819,7 @@
           "item": "BW-3210-100",
           "qty": 24,
           "unitPrice": 5137.23,
-          "requiredDate": "2026-09-06",
+          "requiredDate": "2026-09-23",
           "receivedDate": "2026-08-13",
           "receivedQty": 24
         },
@@ -18759,7 +18827,7 @@
           "item": "BW-6140-100",
           "qty": 24,
           "unitPrice": 3067.65,
-          "requiredDate": "2026-09-06",
+          "requiredDate": "2026-09-25",
           "receivedDate": "2026-09-11",
           "receivedQty": 24
         }
@@ -18779,7 +18847,7 @@
           "item": "BW-9420-100",
           "qty": 16,
           "unitPrice": 4393.9,
-          "requiredDate": "2026-08-24",
+          "requiredDate": "2026-09-10",
           "receivedDate": "2026-08-01",
           "receivedQty": 16
         },
@@ -18787,7 +18855,7 @@
           "item": "BW-9440-030",
           "qty": 60,
           "unitPrice": 40.97,
-          "requiredDate": "2026-09-19",
+          "requiredDate": "2026-10-06",
           "receivedDate": "2026-10-03",
           "receivedQty": 60
         }
@@ -18807,14 +18875,14 @@
           "item": "BW-8110-100",
           "qty": 24,
           "unitPrice": 19299.5,
-          "requiredDate": "2026-11-24",
+          "requiredDate": "2026-12-21",
           "receivedQty": 0
         },
         {
           "item": "BW-8210-110",
           "qty": 8,
           "unitPrice": 3162.5,
-          "requiredDate": "2026-09-04",
+          "requiredDate": "2026-09-19",
           "receivedDate": "2026-08-13",
           "receivedQty": 8
         },
@@ -18822,7 +18890,7 @@
           "item": "BW-8230-100",
           "qty": 8,
           "unitPrice": 10608.34,
-          "requiredDate": "2026-08-12",
+          "requiredDate": "2026-08-27",
           "receivedDate": "2026-07-28",
           "receivedQty": 8
         },
@@ -18830,7 +18898,7 @@
           "item": "BW-8280-100",
           "qty": 4,
           "unitPrice": 20192.95,
-          "requiredDate": "2026-08-20",
+          "requiredDate": "2026-09-04",
           "receivedDate": "2026-08-31",
           "receivedQty": 4
         },
@@ -18838,7 +18906,7 @@
           "item": "BW-8220-110",
           "qty": 8,
           "unitPrice": 2912.95,
-          "requiredDate": "2026-08-21",
+          "requiredDate": "2026-09-05",
           "receivedDate": "2026-07-23",
           "receivedQty": 8
         }
@@ -18858,7 +18926,7 @@
           "item": "BW-3190-100",
           "qty": 47,
           "unitPrice": 403.31,
-          "requiredDate": "2026-08-11",
+          "requiredDate": "2026-08-23",
           "receivedDate": "2026-09-02",
           "receivedQty": 47
         },
@@ -18866,7 +18934,7 @@
           "item": "BW-9110-100",
           "qty": 4,
           "unitPrice": 29682.36,
-          "requiredDate": "2026-07-23",
+          "requiredDate": "2026-08-04",
           "receivedDate": "2026-07-08",
           "receivedQty": 4
         }
@@ -18886,7 +18954,7 @@
           "item": "BW-4110-100",
           "qty": 24,
           "unitPrice": 6534.37,
-          "requiredDate": "2026-09-25",
+          "requiredDate": "2026-10-16",
           "receivedDate": "2026-08-25",
           "receivedQty": 24
         },
@@ -18894,7 +18962,7 @@
           "item": "BW-4120-100",
           "qty": 116,
           "unitPrice": 1524.93,
-          "requiredDate": "2026-10-01",
+          "requiredDate": "2026-10-22",
           "receivedDate": "2026-09-25",
           "receivedQty": 116
         },
@@ -18902,7 +18970,7 @@
           "item": "BW-4220-100",
           "qty": 47,
           "unitPrice": 1314.37,
-          "requiredDate": "2026-10-15",
+          "requiredDate": "2026-11-05",
           "receivedDate": "2026-10-09",
           "receivedQty": 47
         },
@@ -18910,7 +18978,7 @@
           "item": "BW-4230-100",
           "qty": 47,
           "unitPrice": 554.41,
-          "requiredDate": "2026-10-12",
+          "requiredDate": "2026-11-02",
           "receivedDate": "2026-10-13",
           "receivedQty": 47
         }
@@ -18930,7 +18998,7 @@
           "item": "BW-6110-100",
           "qty": 25000,
           "unitPrice": 10.3,
-          "requiredDate": "2026-09-26",
+          "requiredDate": "2026-10-17",
           "receivedDate": "2026-09-07",
           "receivedQty": 25000
         }
@@ -18950,7 +19018,7 @@
           "item": "BW-3140-100",
           "qty": 24,
           "unitPrice": 1128.06,
-          "requiredDate": "2026-08-20",
+          "requiredDate": "2026-09-04",
           "receivedDate": "2026-07-17",
           "receivedQty": 24
         },
@@ -18958,7 +19026,7 @@
           "item": "BW-3240-100",
           "qty": 24,
           "unitPrice": 861.53,
-          "requiredDate": "2026-08-31",
+          "requiredDate": "2026-09-15",
           "receivedDate": "2026-10-22",
           "receivedQty": 24
         }
@@ -18978,21 +19046,21 @@
           "item": "BW-3126-100",
           "qty": 24,
           "unitPrice": 592.01,
-          "requiredDate": "2026-11-04",
+          "requiredDate": "2026-11-29",
           "receivedQty": 0
         },
         {
           "item": "BW-1110-100",
           "qty": 4,
           "unitPrice": 72739.38,
-          "requiredDate": "2026-11-09",
+          "requiredDate": "2026-12-04",
           "receivedQty": 0
         },
         {
           "item": "BW-1120-100",
           "qty": 4,
           "unitPrice": 59695.89,
-          "requiredDate": "2026-11-03",
+          "requiredDate": "2026-11-28",
           "receivedDate": "2026-10-16",
           "receivedQty": 4
         }
@@ -19032,14 +19100,14 @@
           "item": "BW-3120-340",
           "qty": 24,
           "unitPrice": 7831.19,
-          "requiredDate": "2026-11-19",
+          "requiredDate": "2026-12-15",
           "receivedQty": 0
         },
         {
           "item": "BW-3220-340",
           "qty": 24,
           "unitPrice": 4583.4,
-          "requiredDate": "2026-11-13",
+          "requiredDate": "2026-12-09",
           "receivedQty": 0
         }
       ],
@@ -19058,7 +19126,7 @@
           "item": "BW-2100-100",
           "qty": 4,
           "unitPrice": 16594.46,
-          "requiredDate": "2026-11-02",
+          "requiredDate": "2026-11-25",
           "receivedQty": 0
         }
       ],
@@ -19077,7 +19145,7 @@
           "item": "BW-1215-100",
           "qty": 6,
           "unitPrice": 4235.13,
-          "requiredDate": "2026-08-04",
+          "requiredDate": "2026-08-13",
           "receivedDate": "2026-07-27",
           "receivedQty": 6
         }
@@ -19097,7 +19165,7 @@
           "item": "BW-1910-100",
           "qty": 1400,
           "unitPrice": 90.12,
-          "requiredDate": "2026-09-24",
+          "requiredDate": "2026-10-11",
           "receivedDate": "2026-09-26",
           "receivedQty": 1400
         }
@@ -19117,7 +19185,7 @@
           "item": "BW-7110-100",
           "qty": 16,
           "unitPrice": 33212.13,
-          "requiredDate": "2027-01-22",
+          "requiredDate": "2027-02-26",
           "receivedQty": 0
         }
       ],
@@ -19136,7 +19204,7 @@
           "item": "BW-7200-100",
           "qty": 21,
           "unitPrice": 42663.38,
-          "requiredDate": "2027-02-06",
+          "requiredDate": "2027-03-13",
           "receivedQty": 0
         }
       ],
@@ -19155,7 +19223,7 @@
           "item": "BW-9610-100",
           "qty": 3,
           "unitPrice": 11627.68,
-          "requiredDate": "2026-07-23",
+          "requiredDate": "2026-07-27",
           "receivedDate": "2026-08-11",
           "receivedQty": 3
         }
@@ -19175,7 +19243,7 @@
           "item": "BW-7210-100",
           "qty": 7,
           "unitPrice": 48609.1,
-          "requiredDate": "2027-02-22",
+          "requiredDate": "2027-03-29",
           "receivedQty": 0
         }
       ],
@@ -19194,7 +19262,7 @@
           "item": "BW-6110-100",
           "qty": 30000,
           "unitPrice": 11.02,
-          "requiredDate": "2026-11-29",
+          "requiredDate": "2026-12-20",
           "receivedQty": 0
         }
       ],
@@ -19213,7 +19281,7 @@
           "item": "BW-1910-100",
           "qty": 1800,
           "unitPrice": 92.11,
-          "requiredDate": "2026-11-22",
+          "requiredDate": "2026-12-09",
           "receivedDate": "2026-10-21",
           "receivedQty": 1800
         }
@@ -19233,21 +19301,21 @@
           "item": "BW-8110-100",
           "qty": 29,
           "unitPrice": 19419.65,
-          "requiredDate": "2027-02-23",
+          "requiredDate": "2027-03-22",
           "receivedQty": 0
         },
         {
           "item": "BW-8230-100",
           "qty": 10,
           "unitPrice": 10778.58,
-          "requiredDate": "2026-11-08",
+          "requiredDate": "2026-11-23",
           "receivedQty": 0
         },
         {
           "item": "BW-8280-100",
           "qty": 5,
           "unitPrice": 20114.04,
-          "requiredDate": "2026-11-15",
+          "requiredDate": "2026-11-30",
           "receivedDate": "2026-10-17",
           "receivedQty": 5
         },
@@ -19255,7 +19323,7 @@
           "item": "BW-8220-110",
           "qty": 10,
           "unitPrice": 2978.85,
-          "requiredDate": "2026-11-22",
+          "requiredDate": "2026-12-07",
           "receivedQty": 0
         }
       ],
@@ -19274,28 +19342,28 @@
           "item": "BW-4110-100",
           "qty": 29,
           "unitPrice": 6614.17,
-          "requiredDate": "2026-12-21",
+          "requiredDate": "2027-01-11",
           "receivedQty": 0
         },
         {
           "item": "BW-4120-100",
           "qty": 144,
           "unitPrice": 1527.14,
-          "requiredDate": "2027-01-06",
+          "requiredDate": "2027-01-27",
           "receivedQty": 0
         },
         {
           "item": "BW-4220-100",
           "qty": 58,
           "unitPrice": 1315.51,
-          "requiredDate": "2027-01-11",
+          "requiredDate": "2027-02-01",
           "receivedQty": 0
         },
         {
           "item": "BW-4230-100",
           "qty": 58,
           "unitPrice": 553.5,
-          "requiredDate": "2027-01-14",
+          "requiredDate": "2027-02-04",
           "receivedQty": 0
         }
       ],
@@ -19314,7 +19382,7 @@
           "item": "BW-9420-100",
           "qty": 20,
           "unitPrice": 4396.13,
-          "requiredDate": "2026-11-24",
+          "requiredDate": "2026-12-11",
           "receivedQty": 0
         }
       ],
@@ -19333,7 +19401,7 @@
           "item": "BW-1215-100",
           "qty": 7,
           "unitPrice": 4271.92,
-          "requiredDate": "2026-10-07",
+          "requiredDate": "2026-10-16",
           "receivedDate": "2026-10-20",
           "receivedQty": 7
         },
@@ -19367,42 +19435,42 @@
           "item": "BW-5110-100",
           "qty": 87,
           "unitPrice": 2538.45,
-          "requiredDate": "2027-02-22",
+          "requiredDate": "2027-03-23",
           "receivedQty": 0
         },
         {
           "item": "BW-5210-100",
           "qty": 87,
           "unitPrice": 1908.59,
-          "requiredDate": "2027-03-03",
+          "requiredDate": "2027-04-01",
           "receivedQty": 0
         },
         {
           "item": "BW-6122-100",
           "qty": 173,
           "unitPrice": 1419.26,
-          "requiredDate": "2026-12-27",
+          "requiredDate": "2027-01-15",
           "receivedQty": 0
         },
         {
           "item": "BW-3110-100",
           "qty": 29,
           "unitPrice": 7692.89,
-          "requiredDate": "2026-12-06",
+          "requiredDate": "2026-12-23",
           "receivedQty": 0
         },
         {
           "item": "BW-3210-100",
           "qty": 29,
           "unitPrice": 5193.41,
-          "requiredDate": "2026-12-09",
+          "requiredDate": "2026-12-26",
           "receivedQty": 0
         },
         {
           "item": "BW-6140-100",
           "qty": 29,
           "unitPrice": 3098.61,
-          "requiredDate": "2026-12-10",
+          "requiredDate": "2026-12-29",
           "receivedQty": 0
         }
       ],
@@ -19421,14 +19489,14 @@
           "item": "BW-3190-100",
           "qty": 58,
           "unitPrice": 421.27,
-          "requiredDate": "2026-11-12",
+          "requiredDate": "2026-11-24",
           "receivedQty": 0
         },
         {
           "item": "BW-9110-100",
           "qty": 5,
           "unitPrice": 30088.84,
-          "requiredDate": "2026-10-25",
+          "requiredDate": "2026-11-06",
           "receivedDate": "2026-10-23",
           "receivedQty": 5
         }
@@ -19448,14 +19516,14 @@
           "item": "BW-3120-340",
           "qty": 29,
           "unitPrice": 8023.77,
-          "requiredDate": "2027-02-22",
+          "requiredDate": "2027-03-20",
           "receivedQty": 0
         },
         {
           "item": "BW-3220-340",
           "qty": 29,
           "unitPrice": 4830.56,
-          "requiredDate": "2027-02-07",
+          "requiredDate": "2027-03-05",
           "receivedQty": 0
         }
       ],
@@ -19474,21 +19542,21 @@
           "item": "BW-3126-100",
           "qty": 29,
           "unitPrice": 710.81,
-          "requiredDate": "2027-02-02",
+          "requiredDate": "2027-02-27",
           "receivedQty": 0
         },
         {
           "item": "BW-1110-100",
           "qty": 5,
           "unitPrice": 73142.31,
-          "requiredDate": "2027-02-12",
+          "requiredDate": "2027-03-09",
           "receivedQty": 0
         },
         {
           "item": "BW-1120-100",
           "qty": 5,
           "unitPrice": 59182.15,
-          "requiredDate": "2027-02-07",
+          "requiredDate": "2027-03-04",
           "receivedQty": 0
         }
       ],
@@ -19507,14 +19575,14 @@
           "item": "BW-3140-100",
           "qty": 29,
           "unitPrice": 1114.3,
-          "requiredDate": "2026-11-26",
+          "requiredDate": "2026-12-11",
           "receivedQty": 0
         },
         {
           "item": "BW-3240-100",
           "qty": 29,
           "unitPrice": 855.55,
-          "requiredDate": "2026-11-26",
+          "requiredDate": "2026-12-11",
           "receivedDate": "2026-10-21",
           "receivedQty": 29
         },
@@ -19522,7 +19590,7 @@
           "item": "BW-9610-100",
           "qty": 4,
           "unitPrice": 11632.54,
-          "requiredDate": "2026-09-27",
+          "requiredDate": "2026-10-01",
           "receivedDate": "2026-09-19",
           "receivedQty": 4
         }
@@ -19542,7 +19610,7 @@
           "item": "BW-8210-110",
           "qty": 10,
           "unitPrice": 3209.21,
-          "requiredDate": "2026-12-08",
+          "requiredDate": "2026-12-23",
           "receivedQty": 0
         },
         {
@@ -19624,14 +19692,14 @@
           "item": "BW-2100-100",
           "qty": 5,
           "unitPrice": 16617.88,
-          "requiredDate": "2027-02-05",
+          "requiredDate": "2027-02-28",
           "receivedQty": 0
         },
         {
           "item": "BW-9440-030",
           "qty": 60,
           "unitPrice": 41.6,
-          "requiredDate": "2026-12-23",
+          "requiredDate": "2027-01-09",
           "receivedQty": 0
         },
         {
@@ -19844,7 +19912,7 @@
           "item": "BW-1910-100",
           "qty": 1800,
           "unitPrice": 92.63,
-          "requiredDate": "2027-01-19",
+          "requiredDate": "2027-02-05",
           "receivedQty": 0
         },
         {
@@ -20336,7 +20404,7 @@
           "item": "BW-6110-100",
           "qty": 30000,
           "unitPrice": 11.17,
-          "requiredDate": "2027-01-25",
+          "requiredDate": "2027-02-15",
           "receivedQty": 0
         }
       ],
@@ -20480,7 +20548,7 @@
           "item": "BW-7110-100",
           "qty": 20,
           "unitPrice": 33074.03,
-          "requiredDate": "2027-05-28",
+          "requiredDate": "2027-07-02",
           "receivedQty": 0
         },
         {
@@ -20572,7 +20640,7 @@
           "item": "BW-1215-100",
           "qty": 7,
           "unitPrice": 4297.12,
-          "requiredDate": "2026-12-08",
+          "requiredDate": "2026-12-17",
           "receivedQty": 0
         },
         {
@@ -21240,9 +21308,121 @@
       "site": "GA"
     },
     {
+      "month": "2026-10",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2026-11",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2026-12",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2027-01",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2027-02",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2027-03",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2027-04",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2027-05",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2027-06",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2027-07",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2027-08",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
       "month": "2027-09",
       "program": "meridian",
       "units": 1,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2027-10",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2027-11",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2027-12",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2028-01",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2028-02",
+      "program": "meridian",
+      "units": 0,
       "kind": "development",
       "site": "CA"
     },
@@ -21254,11 +21434,88 @@
       "site": "CA"
     },
     {
+      "month": "2028-04",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2028-05",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2028-06",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2028-07",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2028-08",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
       "month": "2028-09",
       "program": "meridian",
       "units": 1,
       "kind": "development",
       "site": "CA"
+    },
+    {
+      "month": "2028-10",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2028-11",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2028-12",
+      "program": "meridian",
+      "units": 0,
+      "kind": "development",
+      "site": "CA"
+    },
+    {
+      "month": "2029-01",
+      "program": "meridian",
+      "units": 0,
+      "kind": "production",
+      "site": "GA"
+    },
+    {
+      "month": "2029-02",
+      "program": "meridian",
+      "units": 0,
+      "kind": "production",
+      "site": "GA"
+    },
+    {
+      "month": "2029-03",
+      "program": "meridian",
+      "units": 0,
+      "kind": "production",
+      "site": "GA"
     },
     {
       "month": "2029-04",
@@ -21268,9 +21525,23 @@
       "site": "GA"
     },
     {
+      "month": "2029-05",
+      "program": "meridian",
+      "units": 0,
+      "kind": "production",
+      "site": "GA"
+    },
+    {
       "month": "2029-06",
       "program": "meridian",
       "units": 1,
+      "kind": "production",
+      "site": "GA"
+    },
+    {
+      "month": "2029-07",
+      "program": "meridian",
+      "units": 0,
       "kind": "production",
       "site": "GA"
     },
@@ -21688,7 +21959,7 @@
         "unitCostDeltaUsd": 6900,
         "oneTimeCostUsd": 260000,
         "cutInDate": "2025-12-01",
-        "cutInSerial": 4,
+        "cutInSerial": 5,
         "notes": "Hollis quote +$1,150 per actuator, six per aircraft. Qualification test estimated at 10 weeks."
       },
       "actual": {
@@ -22456,7 +22727,7 @@
       "classificationNote": "Class I because of cost and retrofit of aircraft already built. FAA minor. The two classifications are separate and disagree here.",
       "description": "Replace the machined 7075 mounting bracket BW-5120-210 Rev B with Rev C on all twelve motor controllers (six forward, six aft). Rev C changes: plate stock 1.0 in to 1.25 in, web 5 mm to 8 mm, lower fillet radius 3 mm to 6 mm. Outer envelope, the four mounting holes and the isolator pattern do not change, so Rev C is interchangeable with Rev B at the controller and the harness. Mass goes from 0.41 kg to 0.53 kg per bracket (+1.4 kg per aircraft). Halden has quoted Rev C at $221.00 steady state, $239.50 for the first lot of 25, plus fixture and programming costs. Rev B has been the production revision since S/N 005 and is installed on S/N 001-010.",
       "need": "NCR-0119: crack at the lower fillet at 8.2 h of the 20 h endurance profile; three of twelve rig brackets have initiated by 20 h. The Rev B stress check used a 212 Hz forcing line that Rev B did move, but the sixth electrical order of the aft motor at hover speed sits at 241 Hz, right on the new mode. Rev C moves the mode to 318 Hz, clear of every forcing line up to the 9th order, and the stress report supplement shows a fatigue margin of +14% at the fillet against -31% for Rev B.",
-      "consequencesIfDisapproved": "No aircraft can fly beyond the 5 h inspection interval with Rev B. S/N 001-004 are the certification flight-test aircraft, so the flight-test campaign stops. S/N 005-010 cannot be delivered, and controller installation stays held on every aircraft still in build.",
+      "consequencesIfDisapproved": "No aircraft can fly beyond the 5 h inspection interval with Rev B. S/N 001-004 carry the certification test program, so the test campaign stops. S/N 005-010 cannot be delivered, and controller installation stays held on every aircraft still in build.",
       "alternativesConsidered": "(1) Shot-peen the Rev B fillets: analysis gives +9% fatigue margin, not enough. (2) Add a doubler plate: adds a part and a bond, interferes with the cold-plate hose, and needs its own qualification. (3) Change the isolator durometer to move the mode: it moves the mode below the forcing line at hover but onto the 4th order at transition. (4) Do nothing and inspect every 5 h: not viable for a production aircraft.",
       "failureData": "Rig EP-3, controller position 4: crack at 8.2 h, 14 mm from flange edge into web. Positions 1 and 5: indications at 20 h. Fractography: fatigue initiation at fillet tangent, beach marks, no defect. Rev A to Rev B (ECO-0271) addressed a different mode at 212 Hz.",
       "testAndQualification": "Vibration re-qualification on the endurance rig: 20 h EP-3 profile plus a 2x margin run. Delta first-article inspection at Halden. Stress report supplement already drafted. No FAA project if classified minor.",
@@ -22848,7 +23119,7 @@
         "production": {
           "basis": "tbd",
           "from": "tbd",
-          "note": "After FAA acceptance of the major change. Engineering suggests S/N 031 (about November 2027) if certification testing goes to plan."
+          "note": "After FAA acceptance of the major change. Engineering suggests S/N 034 (about December 2027) if certification testing goes to plan; blade tooling alone is 34 weeks to first articles."
         },
         "retrofit": {
           "basis": "tbd",
@@ -23114,8 +23385,8 @@
       "effectivity": {
         "production": {
           "basis": "serial",
-          "from": "13",
-          "note": "S/N 013 and subsequent (January 2027)."
+          "from": "15",
+          "note": "S/N 015 and subsequent (March 2027), the earliest delivery on the Hollis 18-week quote. Test time not included."
         },
         "retrofit": {
           "basis": "tbd",
@@ -23253,8 +23524,8 @@
       "effectivity": {
         "production": {
           "basis": "serial",
-          "from": "15",
-          "note": "S/N 015 and subsequent (March 2027), after mould and qualification."
+          "from": "17",
+          "note": "S/N 017 and subsequent (April 2027), after the 14-week mould and qualification."
         },
         "interchangeable": true
       },
@@ -23382,7 +23653,7 @@
         "production": {
           "basis": "serial",
           "from": "30",
-          "note": "S/N 030 and subsequent (about October 2027), if the 2027-Q2 qualification slot holds."
+          "note": "S/N 030 and subsequent (about October 2027). Assumes the 2027-Q2 slot holds and the 12-set qualification lot can be flown. Orrin has not confirmed either."
         },
         "retrofit": {
           "basis": "tbd",
@@ -23602,7 +23873,7 @@
       "expect": [
         "Company Class I, FAA major (set separately), routine, justification O. Reopens 23 of 797 means-of-compliance items and issue paper IP-07.",
         "Per-propeller material change is +$1,440 (+$8,640 per aircraft, +0.3% of standard cost), tiny against $500k of tooling and about $650k of engineering: one-time cost dominates.",
-        "The cut-in date is driven by certification, 6 to 12 months, not by the 34-week blade tooling alone. Earliest realistic cut-in S/N 031 (November 2027).",
+        "The cut-in date is driven by certification, 6 to 12 months, not by the 34-week blade tooling alone. Earliest realistic cut-in S/N 034 (December 2027).",
         "Retrofit of built aircraft is unscoped and is the largest unknown. Inventory of 2-blade parts has no disposition.",
         "Hidden coupling (not detectable from shared entities): four blades change the aft-boom vibration spectrum that ECR-0417's bracket sits in. Interaction flags are best effort."
       ],
@@ -23674,7 +23945,7 @@
         "No shared entity: BW-3120-340 (Vesper forward magnets) and BW-M512-340 (Meridian cruise magnets) are different items in different programs. Both are bought from Orrin Magnetics, the single source for both.",
         "Both need the same new grade (UH) qualified in the same 2027-Q2 slot. Orrin runs one qualification lot per quarter, so one part number slips about 13 weeks to 2027-Q4 unless sequenced.",
         "UH capacity is 1,200 sets per year on one furnace until 2028-Q3. Combined demand and the 24% extra furnace time per UH set matter.",
-        "Combined effects differ from the sum: ordering both within 26 weeks earns a 6% UH raw-material price break and a 40% cheaper second qualification; a missed slot moves Vesper cut-in from S/N 030 to about S/N 034 or Meridian first flight past September 2027.",
+        "Combined effects differ from the sum: ordering both within 26 weeks earns a 6% UH raw-material price break and a 40% cheaper second qualification; a missed slot moves Vesper cut-in from S/N 030 (October 2027) to about S/N 037 (January 2028), or the Meridian rotor build and first flight (September 2027) back by a quarter.",
         "ECO-0297 (March 2026) already showed the same pattern: a seven-week wait for an Orrin qualification slot moved a cut-in by two aircraft."
       ],
       "reference": {

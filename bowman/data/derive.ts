@@ -76,10 +76,13 @@ for (const r of rows) {
 // ------------------------------------------------------------------ sourcing
 
 const LEAD_FROM_SUGGESTED_BASIS = new Set(['cells', 'magnets', 'prepreg', 'avionics']);
-const capacityByItem = new Map<ItemCode, number>();
-for (const c of supplierConstraints) {
-  if (c.kind === 'capacity' && c.capacityPerYear !== undefined) for (const it of c.items) capacityByItem.set(it, c.capacityPerYear);
-}
+// Annual capacity of the supplier for the item as bought today. UH-grade capacity (a future grade) is in supplierConstraints.
+const capacityByItem = new Map<ItemCode, number>([
+  ['BW-3120-340', 9000], ['BW-3220-340', 9000], ['BW-M512-340', 9000], // SH grade magnet sets across all rotors
+  ['BW-6110-100', 180000], // 2027 cell allocation; see CON-VANTAGE-ALLOC
+  ['BW-M310-100', 24],
+]);
+void supplierConstraints;
 
 function sourcingProv(r: BuyRow) {
   if (r.prov.basis === 'sourced') {
@@ -209,7 +212,7 @@ for (const code of KEY_ITEMS) {
     if (r.moq >= 25) qty = Math.ceil(qty / r.moq) * r.moq;
     const price = cents(pathPrice(r, d) * (1 + (rnd() - 0.5) * 0.016));
     const leadWeeks = sampleLead(r, rnd);
-    const required = addDays(d, Math.round(LEAD[r.lead].p50 * 7));
+    const required = addDays(d, Math.round(LEAD[r.lead].p50 * 7 * 1.15)); // supplier promise date: quoted lead time plus a cushion
     const received = addDays(d, Math.round(leadWeeks * 7) + Math.round((rnd() - 0.5) * 6));
     const done = received <= TODAY;
     rawLines.push({
@@ -339,4 +342,22 @@ for (const r of rows) {
     stores = 96; wip = 48; supplierFinished = 60; onOrder = 60;
   }
   stock.push({ item: r.code, stores, wip, finishedGoods, supplierFinished, onOrder, inField, uom: r.uom, monthlyUse, prov: STOCK_PROV });
+}
+
+// ------------------------------------------------------------------ supplier on-time delivery, measured from the PO history
+
+/** Share of received lines that arrived within 7 days of the promise date, by supplier (suppliers with at least 4 lines). */
+export const otdBySupplier = new Map<SupplierId, number>();
+{
+  const tally = new Map<SupplierId, { n: number; ok: number }>();
+  for (const po of purchaseOrders) {
+    for (const l of po.lines) {
+      if (!l.receivedDate) continue;
+      const t = tally.get(po.supplier) ?? { n: 0, ok: 0 };
+      t.n++;
+      if (l.receivedDate <= addDays(l.requiredDate, 7)) t.ok++;
+      tally.set(po.supplier, t);
+    }
+  }
+  for (const [s, t] of tally) if (t.n >= 4) otdBySupplier.set(s, Math.round((100 * t.ok) / t.n));
 }

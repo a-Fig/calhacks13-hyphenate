@@ -51,7 +51,7 @@ export const history: Eco[] = [
       { item: 'BW-8110-100', op: 'revise', fromRev: 'A', toRev: 'B', changes: [{ field: 'position_sensors', from: 1, to: 2 }, { field: 'unit_price_usd', from: 17990, to: 19400 }] },
     ],
     summary: 'A single-sensor failure mode in the tilt actuator could not be shown to be extremely improbable. A second, independent position sensor closes the issue-paper finding. FAA major: it changes the system safety assessment.',
-    forecast: { unitCostDeltaUsd: 6900, oneTimeCostUsd: 260000, cutInDate: '2025-12-01', cutInSerial: 4, notes: 'Hollis quote +$1,150 per actuator, six per aircraft. Qualification test estimated at 10 weeks.' },
+    forecast: { unitCostDeltaUsd: 6900, oneTimeCostUsd: 260000, cutInDate: '2025-12-01', cutInSerial: 5, notes: 'Hollis quote +$1,150 per actuator, six per aircraft. Qualification test estimated at 10 weeks.' },
     actual: {
       unitCostDeltaUsd: 8460, oneTimeCostUsd: 342000, cutInDate: '2026-02-09', cutInSerial: 5,
       variance: 'Price landed at +$1,410 per actuator after Hollis re-quoted for the extra harness and connector. Qualification test needed a second thermal-cycling run, and the FAA data review added three weeks. Cut-in slipped ten weeks to the next aircraft.',
