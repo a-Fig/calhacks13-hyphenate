@@ -1,6 +1,6 @@
-// What Norn's assessment hands the write-back when the CCB approves ECR-0417 and its ECO is released: the new standard
-// cost of the bracket and the three journal entries. Built from the dataset's answer key (bowman/data/scenarios.ts, S1)
-// until Norn's own assessment produces it; the connector (norn/connectors/erpnext/src/write.ts) takes any such release.
+// What Norn's assessment hands the ERP change package when the CCB approves ECR-0417 and its ECO is released: the new
+// standard cost of the bracket and the three journal entries. Built from the dataset's answer key (bowman/data/scenarios.ts,
+// S1) until Norn's own assessment produces it; the connector (norn/connectors/erpnext/src/package.ts) takes any such release.
 //
 // The accounting for each entry is in norn/connectors/erpnext/NOTES.md ("Journal entries").
 import assert from 'node:assert/strict';

@@ -1,5 +1,6 @@
-// A small ERPNext REST client: token auth, list reads in one request each, and the POST and PUT the
-// ECO write-back (write.ts) uses. Never logs or throws headers, keys or secrets.
+// A small ERPNext REST client: token auth and GET requests only, with list reads in one request each. It has no
+// way to send anything else: Norn never writes to the ERP (issue #71), and a test (test/package.test.ts) keeps it so.
+// Never logs or throws headers, keys or secrets.
 
 import type { ErpnextConnection } from './options.ts';
 
@@ -37,27 +38,11 @@ export class ErpnextClient {
     this.#timeout = c.timeoutMs ?? 30_000;
   }
 
-  get<T>(path: string, query: Record<string, unknown> = {}): Promise<T> {
-    return this.request<T>('GET', path, query);
-  }
-
-  /** Creates or calls a method. `body` is JSON. */
-  post<T>(path: string, body: unknown): Promise<T> {
-    return this.request<T>('POST', path, {}, body);
-  }
-
-  /** Updates a document with the fields in `body`. */
-  put<T>(path: string, body: unknown): Promise<T> {
-    return this.request<T>('PUT', path, {}, body);
-  }
-
-  async request<T>(method: 'GET' | 'POST' | 'PUT', path: string, query: Record<string, unknown> = {}, payload?: unknown): Promise<T> {
+  async get<T>(path: string, query: Record<string, unknown> = {}): Promise<T> {
     const url = new URL(this.#base + path);
     for (const [k, v] of Object.entries(query)) if (v !== undefined) url.searchParams.set(k, typeof v === 'string' ? v : JSON.stringify(v));
     this.requests++;
-    const headers: Record<string, string> = { Authorization: this.#auth, Accept: 'application/json' };
-    if (payload !== undefined) headers['Content-Type'] = 'application/json';
-    const r = await fetch(url, { method, headers, body: payload === undefined ? undefined : JSON.stringify(payload), signal: AbortSignal.timeout(this.#timeout) });
+    const r = await fetch(url, { method: 'GET', headers: { Authorization: this.#auth, Accept: 'application/json' }, signal: AbortSignal.timeout(this.#timeout) });
     const text = await r.text();
     let body: any;
     try { body = JSON.parse(text); } catch { body = undefined; }

@@ -1,9 +1,11 @@
-// Undoes a released ECO in Bowman's ERPNext so the demo can run again, as Administrator.
+// Undoes the lines a person entered for a released ECO in Bowman's ERPNext so the demo can run again, as Administrator.
+// It stays because the change package (norn/connectors/erpnext/src/package.ts) is entered by hand and a rehearsal is entered
+// more than once. Norn itself writes nothing to the ERP (issue #71); this script is for the person resetting the demo.
 //
 //   node bowman/erp/reset-eco.ts ECO-0319              undo it
 //   node bowman/erp/reset-eco.ts ECO-0319 --dry-run    say what it would do
 //
-// What it undoes (everything the ECO write-back, norn/connectors/erpnext/src/write.ts, tagged with the ECO number):
+// What it undoes (everything entered for the ECO and tagged with its number in the "Released by ECO" field):
 //   1. Journal entries: drafts are deleted. A submitted one has posted to the ledger, so it is left and reported; cancel it
 //      in ERPNext first.
 //   2. BOMs: the version before the ECO's is made active and default again, the ECO's version is replaced by it in the parent
@@ -62,7 +64,7 @@ async function waitFor(log: string): Promise<void> {
   throw new Error(`${log} did not finish in 2 minutes`);
 }
 
-// The ECO's own BOMs, newest first: the write-back made children before parents, so this undoes parents first.
+// The ECO's own BOMs, newest first: a person enters the children before the parents (the package orders them so), so this undoes parents first.
 const tagged = await list("BOM", [["bw_eco", "=", eco], ["company", "=", COMPANY], ["docstatus", "=", 1]], ["name", "item", "creation"], "creation desc");
 for (const n of tagged) {
   const earlier = (await list("BOM", [["item", "=", n.item], ["company", "=", COMPANY], ["docstatus", "=", 1], ["name", "!=", n.name]], ["name", "creation", "is_active", "is_default", "bw_eco"], "creation desc"))

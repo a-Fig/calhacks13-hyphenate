@@ -31,14 +31,14 @@ export const erpnext: ErpnextSettings = {
     },
     bom: { changeOrder: 'bw_eco', releasedOn: 'bw_released_on', decision: 'bw_decision_url' },
     purchaseOrder: { externalId: 'bw_po_id' },
-    // The write-back's tags. bw_eco on the BOM is the seed's; the rest are added by bowman/erp/eco-setup.ts.
+    // The change package's tags, which a person enters and Norn reads back. bw_eco on the BOM is the seed's; the rest are added by bowman/erp/eco-setup.ts.
     itemPrice: { changeOrder: 'bw_eco', decision: 'bw_decision_url' },
     journalEntry: { changeOrder: 'bw_eco', entry: 'bw_eco_entry', decision: 'bw_decision_url' },
   },
-  // The ECO write-back's journal entries name accounts by role; these are Bowman's. All three are in ERPNext's US chart
+  // The ECO change package's journal entries name accounts by role; these are Bowman's. All three are in ERPNext's US chart
   // except the reserve, which bowman/erp/eco-setup.ts adds: with perpetual inventory a journal entry cannot credit
   // 11410 - Inventory on Hand, so a stock write-down is booked to a reserve until the stock is issued out.
-  write: {
+  changePackage: {
     accounts: {
       scrapExpense: '51900 - Inventory Shrinkage and Adjustments - BWA',
       inventoryReserve: '11420 - Reserve for Obsolete Inventory - BWA',
