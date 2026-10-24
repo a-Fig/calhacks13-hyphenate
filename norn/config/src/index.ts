@@ -7,3 +7,4 @@ export type { Issue } from './kit.ts';
 export { withDefaults } from './defaults.ts';
 export { findOne } from './pick.ts';
 export { hash32, isSampled, sampleValue, type SampleKey } from './sample.ts';
+export * from './route.ts';
