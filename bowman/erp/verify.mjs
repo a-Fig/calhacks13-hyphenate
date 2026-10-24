@@ -1,5 +1,7 @@
-// Calls every ERPNext operation Norn will use, as the Norn Agent user, against throwaway test
-// documents in the Bowman company, then removes the test documents (as Administrator).
+// Checks the ERPNext operations behind a released ECO's change package, and that Norn only reads. A person enters the
+// package's lines (norn/connectors/erpnext/src/package.ts); this script plays that person as Administrator against
+// throwaway test documents in the Bowman company, to confirm the sequence works, and as the Norn Agent user it checks the
+// reads and that every write is refused. Then it removes the test documents (as Administrator).
 //
 //   node bowman/erp/verify.mjs            run and clean up
 //   node bowman/erp/verify.mjs --keep     leave the test documents in place
@@ -55,7 +57,7 @@ function errText(b) {
   }
 }
 
-/** One recorded call. who = "norn" | "admin". */
+/** One recorded call. who = "norn" (read-only) | "admin" (plays the person who enters the package). */
 async function call(label, who, method, path, { query, body } = {}) {
   const client = who === "norn" ? norn : admin;
   const r = await client.req(method, path, { query, body, allow: true });
@@ -178,14 +180,14 @@ await step("1. read an Item (Norn)", async () => {
 
 // ---- 2. Item Price on "Standard Cost" --------------------------------------------------------
 const prices = {};
-await step("2. Item Price on Standard Cost (Norn)", async () => {
+await step("2. Item Price on Standard Cost (Administrator)", async () => {
   const mk = (item, rate, from) => ({ item_code: item, price_list: "Standard Cost", price_list_rate: rate, buying: 1, currency: "USD", valid_from: from });
-  prices.P1a = data(expect(await call("create P1 standard cost 10 from 2026-01-01", "norn", "POST", "/api/resource/Item Price", { body: mk(P1, 10, "2026-01-01") }), 200, "item price create"));
-  prices.P2 = data(await call("create P2 standard cost 20", "norn", "POST", "/api/resource/Item Price", { body: mk(P2, 20, "2026-01-01") }));
-  prices.P3 = data(await call("create P3 standard cost 30", "norn", "POST", "/api/resource/Item Price", { body: mk(P3, 30, "2026-01-01") }));
+  prices.P1a = data(expect(await call("create P1 standard cost 10 from 2026-01-01", "admin", "POST", "/api/resource/Item Price", { body: mk(P1, 10, "2026-01-01") }), 200, "item price create"));
+  prices.P2 = data(await call("create P2 standard cost 20", "admin", "POST", "/api/resource/Item Price", { body: mk(P2, 20, "2026-01-01") }));
+  prices.P3 = data(await call("create P3 standard cost 30", "admin", "POST", "/api/resource/Item Price", { body: mk(P3, 30, "2026-01-01") }));
   // Supersede: close the old row, then add the new one with a later valid_from.
-  expect(await call("close old P1 row (valid_upto)", "norn", "PUT", `/api/resource/Item Price/${enc(prices.P1a.name)}`, { body: { valid_upto: "2026-06-30" } }), 200, "item price close");
-  prices.P1b = data(expect(await call("create P1 standard cost 12 from 2026-07-01", "norn", "POST", "/api/resource/Item Price", { body: mk(P1, 12, "2026-07-01") }), 200, "item price supersede"));
+  expect(await call("close old P1 row (valid_upto)", "admin", "PUT", `/api/resource/Item Price/${enc(prices.P1a.name)}`, { body: { valid_upto: "2026-06-30" } }), 200, "item price close");
+  prices.P1b = data(expect(await call("create P1 standard cost 12 from 2026-07-01", "admin", "POST", "/api/resource/Item Price", { body: mk(P1, 12, "2026-07-01") }), 200, "item price supersede"));
   await call("read prices back with the research filter shape", "norn", "GET", "/api/resource/Item Price", {
     query: { filters: [["buying", "=", 1], ["item_code", "like", `${PFX}-%`]], fields: ["name", "item_code", "supplier", "price_list", "price_list_rate", "lead_time_days", "valid_from", "valid_upto"], limit_page_length: 0 },
   });
@@ -205,37 +207,37 @@ const bomBody = (item, rows) => ({
   buying_price_list: "Standard Cost",
   items: rows.map(([item_code, qty, bom_no]) => ({ item_code, qty, uom: "Nos", ...(bom_no ? { bom_no } : {}) })),
 });
-await step("3. create + submit a BOM (Norn): POST then frappe.client.submit", async () => {
-  const r = expect(await call("create SUB BOM v1 (draft)", "norn", "POST", "/api/resource/BOM", { body: bomBody(SUB, [[P1, 2], [P2, 1]]) }), 200, "bom create");
+await step("3. create + submit a BOM (Administrator): POST then frappe.client.submit", async () => {
+  const r = expect(await call("create SUB BOM v1 (draft)", "admin", "POST", "/api/resource/BOM", { body: bomBody(SUB, [[P1, 2], [P2, 1]]) }), 200, "bom create");
   bom.sub1 = r.body.data.name;
   console.log(`    name=${bom.sub1} docstatus=${r.body.data.docstatus} raw_material_cost=${r.body.data.raw_material_cost} total_cost=${r.body.data.total_cost}`);
-  const s = expect(await call("submit SUB BOM v1 via frappe.client.submit", "norn", "POST", "/api/method/frappe.client.submit", { body: { doc: r.body.data } }), 200, "bom submit");
+  const s = expect(await call("submit SUB BOM v1 via frappe.client.submit", "admin", "POST", "/api/method/frappe.client.submit", { body: { doc: r.body.data } }), 200, "bom submit");
   console.log(`    after submit: docstatus=${s.body.message?.docstatus}`);
 });
 
-await step("3b. BOM posted with docstatus 1 in one call (Norn), uses SUB v1 as a sub-assembly", async () => {
+await step("3b. BOM posted with docstatus 1 in one call (Administrator), uses SUB v1 as a sub-assembly", async () => {
   const body = { ...bomBody(TOP, [[SUB, 1, bom.sub1]]), docstatus: 1 };
-  const r = await call("create TOP BOM v1 with docstatus:1", "norn", "POST", "/api/resource/BOM", { body });
+  const r = await call("create TOP BOM v1 with docstatus:1", "admin", "POST", "/api/resource/BOM", { body });
   if (r.status === 200) {
     bom.top1 = r.body.data.name;
     console.log(`    one-shot POST worked: name=${bom.top1} docstatus=${r.body.data.docstatus}`);
   } else {
     // Fall back to the two-call path so the later steps still run.
-    const d = expect(await call("create TOP BOM v1 (draft)", "norn", "POST", "/api/resource/BOM", { body: bomBody(TOP, [[SUB, 1, bom.sub1]]) }), 200, "top create");
+    const d = expect(await call("create TOP BOM v1 (draft)", "admin", "POST", "/api/resource/BOM", { body: bomBody(TOP, [[SUB, 1, bom.sub1]]) }), 200, "top create");
     bom.top1 = d.body.data.name;
-    await call("submit TOP BOM v1", "norn", "POST", "/api/method/frappe.client.submit", { body: { doc: d.body.data } });
+    await call("submit TOP BOM v1", "admin", "POST", "/api/method/frappe.client.submit", { body: { doc: d.body.data } });
   }
 });
 
 // ---- 4. second BOM, retire the first, replace and recost -------------------------------------
-await step("4a. second BOM for SUB; PUT docstatus:1 to submit (Norn)", async () => {
-  const r = expect(await call("create SUB BOM v2 (draft)", "norn", "POST", "/api/resource/BOM", { body: bomBody(SUB, [[P1, 2], [P2, 2], [P3, 1]]) }), 200, "bom v2 create");
+await step("4a. second BOM for SUB; PUT docstatus:1 to submit (Administrator)", async () => {
+  const r = expect(await call("create SUB BOM v2 (draft)", "admin", "POST", "/api/resource/BOM", { body: bomBody(SUB, [[P1, 2], [P2, 2], [P3, 1]]) }), 200, "bom v2 create");
   bom.sub2 = r.body.data.name;
-  const s = await call("submit SUB BOM v2 via PUT docstatus:1", "norn", "PUT", `/api/resource/BOM/${enc(bom.sub2)}`, { body: { docstatus: 1, modified: r.body.data.modified } });
+  const s = await call("submit SUB BOM v2 via PUT docstatus:1", "admin", "PUT", `/api/resource/BOM/${enc(bom.sub2)}`, { body: { docstatus: 1, modified: r.body.data.modified } });
   console.log(`    name=${bom.sub2}; PUT docstatus:1 -> ${s.status}`);
   if (s.status >= 300) {
     const g = (await norn.get(`/api/resource/BOM/${enc(bom.sub2)}`)).body.data;
-    await call("submit SUB BOM v2 via frappe.client.submit (fallback)", "norn", "POST", "/api/method/frappe.client.submit", { body: { doc: g } });
+    await call("submit SUB BOM v2 via frappe.client.submit (fallback)", "admin", "POST", "/api/method/frappe.client.submit", { body: { doc: g } });
   }
   for (const n of [bom.sub1, bom.sub2]) {
     const g = (await call(`read ${n}`, "norn", "GET", `/api/resource/BOM/${enc(n)}`)).body.data;
@@ -245,8 +247,8 @@ await step("4a. second BOM for SUB; PUT docstatus:1 to submit (Norn)", async () 
   console.log(`    Item.default_bom=${it.default_bom}`);
 });
 
-await step("4b. set the first BOM inactive while a parent BOM still uses it (Norn): research order, expected to be refused", async () => {
-  expect(await call("retire SUB BOM v1 before replacing it", "norn", "PUT", `/api/resource/BOM/${enc(bom.sub1)}`, { body: { is_active: 0 } }), 417, "retire refused while linked");
+await step("4b. set the first BOM inactive while a parent BOM still uses it (Administrator): expected to be refused", async () => {
+  expect(await call("retire SUB BOM v1 before replacing it", "admin", "PUT", `/api/resource/BOM/${enc(bom.sub1)}`, { body: { is_active: 0 } }), 417, "retire refused while linked");
   const g = (await norn.get(`/api/resource/BOM/${enc(bom.sub1)}`)).body.data;
   console.log(`    ${bom.sub1}: docstatus=${g.docstatus} is_active=${g.is_active} is_default=${g.is_default}`);
 });
@@ -265,8 +267,8 @@ async function pollLog(name, label, maxSeconds = 120) {
   console.log(`    ${label} log ${name}: still not finished after ${maxSeconds} s`);
 }
 
-await step("4c. replace SUB v1 with v2 in parent BOMs (Norn): enqueue_replace_bom", async () => {
-  const r = await call("enqueue_replace_bom", "norn", "POST", "/api/method/erpnext.manufacturing.doctype.bom_update_tool.bom_update_tool.enqueue_replace_bom", {
+await step("4c. replace SUB v1 with v2 in parent BOMs (Administrator): enqueue_replace_bom", async () => {
+  const r = await call("enqueue_replace_bom", "admin", "POST", "/api/method/erpnext.manufacturing.doctype.bom_update_tool.bom_update_tool.enqueue_replace_bom", {
     body: { boms: { current_bom: bom.sub1, new_bom: bom.sub2 } },
   });
   expect(r, 200, "replace bom");
@@ -279,17 +281,17 @@ await step("4c. replace SUB v1 with v2 in parent BOMs (Norn): enqueue_replace_bo
   console.log(`    ${bom.top1} sub-assembly row bom_no=${t.items[0].bom_no} rate=${t.items[0].rate} (want ${bom.sub2}); docstatus=${t.docstatus}`);
 });
 
-await step("4c2. now set the first BOM inactive (Norn): PUT is_active:0", async () => {
-  expect(await call("retire SUB BOM v1 after replacing it", "norn", "PUT", `/api/resource/BOM/${enc(bom.sub1)}`, { body: { is_active: 0 } }), 200, "bom retire");
+await step("4c2. now set the first BOM inactive (Administrator): PUT is_active:0", async () => {
+  expect(await call("retire SUB BOM v1 after replacing it", "admin", "PUT", `/api/resource/BOM/${enc(bom.sub1)}`, { body: { is_active: 0 } }), 200, "bom retire");
   const g = (await norn.get(`/api/resource/BOM/${enc(bom.sub1)}`)).body.data;
   console.log(`    ${bom.sub1}: docstatus=${g.docstatus} is_active=${g.is_active} is_default=${g.is_default}`);
 });
 
 await step("4c3. top-level item: new BOM, retire the old one (no parents to replace in)", async () => {
-  const r = expect(await call("create TOP BOM v2 (draft)", "norn", "POST", "/api/resource/BOM", { body: bomBody(TOP, [[SUB, 1, bom.sub2], [P3, 4]]) }), 200, "top v2 create");
+  const r = expect(await call("create TOP BOM v2 (draft)", "admin", "POST", "/api/resource/BOM", { body: bomBody(TOP, [[SUB, 1, bom.sub2], [P3, 4]]) }), 200, "top v2 create");
   bom.top2 = r.body.data.name;
-  expect(await call("submit TOP BOM v2 via PUT docstatus:1 (no modified)", "norn", "PUT", `/api/resource/BOM/${enc(bom.top2)}`, { body: { docstatus: 1 } }), 200, "top v2 submit");
-  expect(await call("retire TOP BOM v1", "norn", "PUT", `/api/resource/BOM/${enc(bom.top1)}`, { body: { is_active: 0 } }), 200, "top v1 retire");
+  expect(await call("submit TOP BOM v2 via PUT docstatus:1 (no modified)", "admin", "PUT", `/api/resource/BOM/${enc(bom.top2)}`, { body: { docstatus: 1 } }), 200, "top v2 submit");
+  expect(await call("retire TOP BOM v1", "admin", "PUT", `/api/resource/BOM/${enc(bom.top1)}`, { body: { is_active: 0 } }), 200, "top v1 retire");
   for (const n of [bom.top1, bom.top2]) {
     const g = (await norn.get(`/api/resource/BOM/${enc(n)}`)).body.data;
     console.log(`    ${n}: docstatus=${g.docstatus} is_active=${g.is_active} is_default=${g.is_default} total_cost=${g.total_cost}`);
@@ -298,8 +300,8 @@ await step("4c3. top-level item: new BOM, retire the old one (no parents to repl
   console.log(`    Item.default_bom=${it.default_bom}`);
 });
 
-await step("4d. recost all BOMs (Norn): enqueue_update_cost", async () => {
-  const r = await call("enqueue_update_cost", "norn", "POST", "/api/method/erpnext.manufacturing.doctype.bom_update_tool.bom_update_tool.enqueue_update_cost");
+await step("4d. recost all BOMs (Administrator): enqueue_update_cost", async () => {
+  const r = await call("enqueue_update_cost", "admin", "POST", "/api/method/erpnext.manufacturing.doctype.bom_update_tool.bom_update_tool.enqueue_update_cost");
   expect(r, 200, "update cost");
   if (r.status === 200) {
     createdLogs.push(r.body.message.name);
@@ -312,10 +314,10 @@ await step("4d. recost all BOMs (Norn): enqueue_update_cost", async () => {
   }
 });
 
-// ---- 5. draft Journal Entry ------------------------------------------------------------------
+// ---- 5. Journal Entry --------------------------------------------------------------------------
 let je;
-await step("5. draft Journal Entry (Norn), and a refused submit", async () => {
-  const r = await call("create draft Journal Entry", "norn", "POST", "/api/resource/Journal Entry", {
+await step("5. Journal Entry (Administrator creates it; Norn reads it and cannot submit or edit it)", async () => {
+  const r = await call("create Journal Entry (draft)", "admin", "POST", "/api/resource/Journal Entry", {
     body: {
       voucher_type: "Journal Entry",
       company: COMPANY,
@@ -330,12 +332,12 @@ await step("5. draft Journal Entry (Norn), and a refused submit", async () => {
   expect(r, 200, "je create");
   je = r.body.data;
   console.log(`    name=${je?.name} docstatus=${je?.docstatus} total_debit=${je?.total_debit}`);
-  const s = await call("try to submit it (must be refused)", "norn", "POST", "/api/method/frappe.client.submit", { body: { doc: je } });
-  expect(s, 403, "je submit refused");
-  const g = (await norn.get(`/api/resource/Journal Entry/${enc(je.name)}`)).body.data;
-  console.log(`    docstatus still ${g.docstatus}`);
-  const u = await call("try to edit the draft (write not granted)", "norn", "PUT", `/api/resource/Journal Entry/${enc(je.name)}`, { body: { user_remark: REMARK + " edited" } });
-  console.log(`    PUT on own draft -> ${u.status}`);
+  const g = expect(await call("Norn reads the draft", "norn", "GET", `/api/resource/Journal Entry/${enc(je.name)}`), 200, "je read");
+  console.log(`    docstatus ${g.body.data?.docstatus}, total_debit ${g.body.data?.total_debit}`);
+  expect(await call("Norn tries to submit it (must be refused)", "norn", "POST", "/api/method/frappe.client.submit", { body: { doc: je } }), 403, "je submit refused");
+  expect(await call("Norn tries to edit it (must be refused)", "norn", "PUT", `/api/resource/Journal Entry/${enc(je.name)}`, { body: { user_remark: REMARK + " edited" } }), 403, "je edit refused");
+  const a = (await norn.get(`/api/resource/Journal Entry/${enc(je.name)}`)).body.data;
+  console.log(`    docstatus still ${a.docstatus}`);
 });
 
 // ---- 6. Version history ----------------------------------------------------------------------
@@ -359,11 +361,11 @@ await step("6. Version history (Norn)", async () => {
 });
 
 // ---- 6b. overlapping Item Price rows ----------------------------------------------------------
-await step("6b. what happens if the old Item Price row is NOT closed before adding a newer one (Norn)", async () => {
+await step("6b. what happens if the old Item Price row is NOT closed before adding a newer one (Administrator)", async () => {
   const mk = (rate, from) => ({ item_code: P2, price_list: "Standard Cost", price_list_rate: rate, buying: 1, currency: "USD", valid_from: from });
-  const r = await call("create overlapping P2 row (25 from 2026-07-01; the 20 row from 2026-01-01 has no valid_upto)", "norn", "POST", "/api/resource/Item Price", { body: mk(25, "2026-07-01") });
+  const r = await call("create overlapping P2 row (25 from 2026-07-01; the 20 row from 2026-01-01 has no valid_upto)", "admin", "POST", "/api/resource/Item Price", { body: mk(25, "2026-07-01") });
   console.log(`    overlapping row accepted: ${r.status === 200}`);
-  const d = await call("draft BOM costing P2 only", "norn", "POST", "/api/resource/BOM", { body: bomBody(OVL, [[P2, 1]]) });
+  const d = await call("draft BOM costing P2 only", "admin", "POST", "/api/resource/BOM", { body: bomBody(OVL, [[P2, 1]]) });
   console.log(`    draft BOM raw_material_cost for 1 x P2 = ${d.body.data?.raw_material_cost} (20 = older row used, 25 = newer valid_from used)`);
 });
 
@@ -383,7 +385,14 @@ await step("7b. read access on every granted doctype (Norn)", async () => {
   }
 });
 
-await step("7c. things Norn must not be able to do", async () => {
+await step("7c. things Norn must not be able to do (every write)", async () => {
+  // Norn writes nothing to the ERP (issue #71): not the documents of a change package, and not the BOM tool calls either.
+  expect(await call("create an Item Price", "norn", "POST", "/api/resource/Item Price", { body: { item_code: P1, price_list: "Standard Cost", price_list_rate: 99, buying: 1, currency: "USD", valid_from: "2027-01-01" } }), 403, "item price create refused");
+  expect(await call("close an Item Price row", "norn", "PUT", `/api/resource/Item Price/${enc(prices.P1a.name)}`, { body: { valid_upto: "2026-03-31" } }), 403, "item price edit refused");
+  expect(await call("create a BOM", "norn", "POST", "/api/resource/BOM", { body: bomBody(SUB, [[P1, 1]]) }), 403, "bom create refused");
+  expect(await call("retire a BOM", "norn", "PUT", `/api/resource/BOM/${enc(bom.top2)}`, { body: { is_active: 0 } }), 403, "bom edit refused");
+  expect(await call("create a Journal Entry", "norn", "POST", "/api/resource/Journal Entry", { body: { voucher_type: "Journal Entry", company: COMPANY, posting_date: "2026-10-24", user_remark: REMARK, accounts: [{ account: "51900 - Inventory Shrinkage and Adjustments - BWA", debit_in_account_currency: 1 }, { account: "21210 - Accrued Expenses - BWA", credit_in_account_currency: 1 }] } }), 403, "je create refused");
+  expect(await call("enqueue_replace_bom", "norn", "POST", "/api/method/erpnext.manufacturing.doctype.bom_update_tool.bom_update_tool.enqueue_replace_bom", { body: { boms: { current_bom: bom.sub2, new_bom: bom.sub1 } } }), 403, "replace bom refused");
   expect(await call("create an Item", "norn", "POST", "/api/resource/Item", { body: { item_code: `${PFX}-NOPE`, item_name: "x", item_group: "Purchased Parts", stock_uom: "Nos" } }), 403, "item create refused");
   expect(await call("delete the submitted BOM", "norn", "DELETE", `/api/resource/BOM/${enc(bom.top1)}`), 403, "bom delete refused");
   expect(await call("cancel a BOM", "norn", "POST", "/api/method/frappe.client.cancel", { body: { doctype: "BOM", name: bom.top1 } }), 403, "bom cancel refused");

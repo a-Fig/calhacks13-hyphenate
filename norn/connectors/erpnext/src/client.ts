@@ -1,4 +1,5 @@
-// A small read-only ERPNext REST client: token auth, list reads in one request each.
+// A small ERPNext REST client: token auth and GET requests only, with list reads in one request each. It has no
+// way to send anything else: Norn never writes to the ERP (issue #71), and a test (test/package.test.ts) keeps it so.
 // Never logs or throws headers, keys or secrets.
 
 import type { ErpnextConnection } from './options.ts';
@@ -41,7 +42,7 @@ export class ErpnextClient {
     const url = new URL(this.#base + path);
     for (const [k, v] of Object.entries(query)) if (v !== undefined) url.searchParams.set(k, typeof v === 'string' ? v : JSON.stringify(v));
     this.requests++;
-    const r = await fetch(url, { headers: { Authorization: this.#auth, Accept: 'application/json' }, signal: AbortSignal.timeout(this.#timeout) });
+    const r = await fetch(url, { method: 'GET', headers: { Authorization: this.#auth, Accept: 'application/json' }, signal: AbortSignal.timeout(this.#timeout) });
     const text = await r.text();
     let body: any;
     try { body = JSON.parse(text); } catch { body = undefined; }
@@ -50,6 +51,7 @@ export class ErpnextClient {
       // Frappe puts the human message in _server_messages, a JSON string of JSON strings.
       let msg = '';
       try { msg = JSON.parse(body._server_messages).map((m: string) => JSON.parse(m).message).join(' | ').replace(/<[^>]+>/g, ''); } catch { /* no message */ }
+      if (!msg && typeof body?.exception === 'string') msg = body.exception.split(': ').slice(1).join(': ');
       throw new ErpnextError(r.status, decodeURIComponent(url.pathname), [kind, msg].filter(Boolean).join(' - '));
     }
     return body as T;
