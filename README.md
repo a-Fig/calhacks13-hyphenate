@@ -27,12 +27,7 @@ Prizes are $8,000, $5,000 and $3,000 for the top 3 teams, plus an expedited inte
 ## Team
 
 - Tyler Darisme ([a-Fig](https://github.com/a-Fig))
-- Abrham Dawit
-- Zemen Bariagabr
 - Ankit
-- Belal Elboheisy
-
-Cal Hacks caps teams at 4 people (Hacker Guide), and Devpost lists 2 to 4. This list has 5 names.
 
 ## Our idea
 
