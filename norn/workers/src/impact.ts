@@ -106,6 +106,34 @@ function readOverride(row: { key: string; distJson: string; source: string; rati
 
 const real = (rows: CheckResultRow[]): Result[] => rows.map(r => ({ ...r, mock: false }));
 
+/**
+ * A run's assumptions, by the ids its inputs name, as the library takes them. Throws AbortedError when one is not in the cache.
+ * With `withPeers` (s4), the other open ECRs' assumptions the inputs name are read too; the ECR being checked wins a key it
+ * shares with a peer.
+ */
+export function assumptionsOf(conn: DbConnection, inputs: Inputs, withPeers = false) {
+  const overrides: AssumptionOverride[] = [];
+  const problems: { key: string; id: string; problem: string }[] = [];
+  const seenIds = new Set<string>();
+  const seenKeys = new Set<string>();
+  const read = (a: { id: string }) => {
+    if (seenIds.has(a.id)) return; // a baseline assumption every ECR shares is read once
+    seenIds.add(a.id);
+    const row = conn.db.assumption.id.find(BigInt(a.id));
+    if (!row) throw new AbortedError(); // not in the cache yet, or replaced: the run is stale
+    if (withPeers && seenKeys.has(row.key)) return;
+    const o = toOverride(row);
+    if (typeof o === 'string') problems.push({ key: row.key, id: a.id, problem: o });
+    else overrides.push(o);
+    seenKeys.add(row.key);
+  };
+  for (const a of inputs.assumptions ?? []) read(a);
+  // s4 compares this ECR with the other open ones as each of them is assumed to go (its decision lag, its
+  // quote). The inputs name those assumptions too, so a retry reads the same ones.
+  if (withPeers) for (const peer of inputs.peers ?? []) for (const a of peer.assumptions ?? []) read(a);
+  return { overrides, problems };
+}
+
 export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
   /** The change request and baseline this run is on, or null when the ECR has no change request. */
   async function prepare(ctx: RunCtx) {
@@ -123,30 +151,6 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
     const baseline = await baselines.get(inputs.erpBaseline, ctx.log);
     if (!baseline) throw new AbortedError(); // the ERP has moved on; the new baseline is recorded and this run is stale
     return { inputs, baseline, ecr: JSON.parse(rev.changeRequestJson) as ChangeRequest };
-  }
-
-  /** The run's assumptions, by the ids its inputs name, as the library takes them. */
-  function assumptionsOf(inputs: Inputs, withPeers = false) {
-    const overrides: AssumptionOverride[] = [];
-    const problems: { key: string; id: string; problem: string }[] = [];
-    const seenIds = new Set<string>();
-    const seenKeys = new Set<string>();
-    const read = (a: { id: string }) => {
-      if (seenIds.has(a.id)) return; // a baseline assumption every ECR shares is read once
-      seenIds.add(a.id);
-      const row = conn.db.assumption.id.find(BigInt(a.id));
-      if (!row) throw new AbortedError(); // not in the cache yet, or replaced: the run is stale
-      if (withPeers && seenKeys.has(row.key)) return; // the ECR being checked wins a key it shares with a peer
-      const o = toOverride(row);
-      if (typeof o === 'string') problems.push({ key: row.key, id: a.id, problem: o });
-      else overrides.push(o);
-      seenKeys.add(row.key);
-    };
-    for (const a of inputs.assumptions ?? []) read(a);
-    // s4 compares this ECR with the other open ones as each of them is assumed to go (its decision lag, its
-    // quote). The inputs name those assumptions too, so a retry reads the same ones.
-    if (withPeers) for (const peer of inputs.peers ?? []) for (const a of peer.assumptions ?? []) read(a);
-    return { overrides, problems };
   }
 
   /**
@@ -189,7 +193,7 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
     s2_cost: async (ctx: RunCtx): Promise<Result[]> => {
       const p = await prepare(ctx);
       if (!p) return HANDLERS.s2_cost!(ctx);
-      const { overrides, problems } = assumptionsOf(p.inputs);
+      const { overrides, problems } = assumptionsOf(conn, p.inputs);
       const t0 = Date.now();
       const r = costCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs) });
       // Assumptions the library could not be given are reported, never dropped silently.
@@ -200,7 +204,7 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
     s3_timeline: async (ctx: RunCtx): Promise<Result[]> => {
       const p = await prepare(ctx);
       if (!p) return HANDLERS.s3_timeline!(ctx);
-      const { overrides, problems } = assumptionsOf(p.inputs);
+      const { overrides, problems } = assumptionsOf(conn, p.inputs);
       const t0 = Date.now();
       const r = timelineCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs) });
       const rows = withProblems(real(timelineRows(r)), problems);
@@ -210,7 +214,7 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
     s4_supply: async (ctx: RunCtx): Promise<Result[]> => {
       const p = await prepare(ctx);
       if (!p) return HANDLERS.s4_supply!(ctx);
-      const { overrides, problems } = assumptionsOf(p.inputs, true);
+      const { overrides, problems } = assumptionsOf(conn, p.inputs, true);
       const peers = peersNamed(p.inputs);
       const t0 = Date.now();
       const r = supplyCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs), peers });

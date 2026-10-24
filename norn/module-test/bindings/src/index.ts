@@ -50,6 +50,8 @@ import PostImpactStatementReducer from "./post_impact_statement_reducer";
 import RecordAgentEventsReducer from "./record_agent_events_reducer";
 import RecordAssumptionReducer from "./record_assumption_reducer";
 import RecordBaselineReducer from "./record_baseline_reducer";
+import RecordEcoReleaseReducer from "./record_eco_release_reducer";
+import RecordErpPackageReducer from "./record_erp_package_reducer";
 import RegisterActorReducer from "./register_actor_reducer";
 import ReleasePublicationReducer from "./release_publication_reducer";
 import ReportProgressReducer from "./report_progress_reducer";
@@ -69,7 +71,9 @@ import CheckProgressRow from "./check_progress_table";
 import CheckResultRow from "./check_result_table";
 import CheckRunRow from "./check_run_table";
 import CommentRow from "./comment_table";
+import EcoReleaseRow from "./eco_release_table";
 import EcrRevisionRow from "./ecr_revision_table";
+import ErpPackageRow from "./erp_package_table";
 import ImpactStatementRow from "./impact_statement_table";
 import MainVersionRow from "./main_version_table";
 import NornConfigRow from "./norn_config_table";
@@ -221,6 +225,17 @@ const tablesSchema = __schema({
       { name: 'comment_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, CommentRow),
+  ecoRelease: __table({
+    name: 'eco_release',
+    indexes: [
+      { accessor: 'prId', name: 'eco_release_pr_id_idx_btree', algorithm: 'btree', columns: [
+        'prId',
+      ] },
+    ],
+    constraints: [
+      { name: 'eco_release_pr_id_key', constraint: 'unique', columns: ['prId'] },
+    ],
+  }, EcoReleaseRow),
   ecrRevision: __table({
     name: 'ecr_revision',
     indexes: [
@@ -235,6 +250,17 @@ const tablesSchema = __schema({
       { name: 'ecr_revision_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, EcrRevisionRow),
+  erpPackage: __table({
+    name: 'erp_package',
+    indexes: [
+      { accessor: 'prId', name: 'erp_package_pr_id_idx_btree', algorithm: 'btree', columns: [
+        'prId',
+      ] },
+    ],
+    constraints: [
+      { name: 'erp_package_pr_id_key', constraint: 'unique', columns: ['prId'] },
+    ],
+  }, ErpPackageRow),
   impactStatement: __table({
     name: 'impact_statement',
     indexes: [
@@ -346,6 +372,8 @@ const reducersSchema = __reducers(
   __reducerSchema("record_agent_events", RecordAgentEventsReducer),
   __reducerSchema("record_assumption", RecordAssumptionReducer),
   __reducerSchema("record_baseline", RecordBaselineReducer),
+  __reducerSchema("record_eco_release", RecordEcoReleaseReducer),
+  __reducerSchema("record_erp_package", RecordErpPackageReducer),
   __reducerSchema("register_actor", RegisterActorReducer),
   __reducerSchema("release_publication", ReleasePublicationReducer),
   __reducerSchema("report_progress", ReportProgressReducer),
