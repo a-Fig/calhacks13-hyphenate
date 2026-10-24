@@ -48,10 +48,21 @@ npm run typecheck            # tsc for module, module-test, workers, web
 npm run build                # spacetime build + vite build
 npm run check:module         # 48 rule checks against a live database (stop real workers first); NORN_DB=norn-test runs them on the test module
 npm run check:policy         # 6 policy-gate checks, on norn-test
+npm run check:gate           # the company gate end to end (#43): needs a scratch database named in NORN_DB, never norn
 npm run spike:errors | spike:crash | spike:browsers | spike:streaming
 ```
 
 Install on Windows: the documented one-liner `iwr https://windows.spacetimedb.com -useb | iex` did nothing in a non-interactive shell (it starts `%TEMP%\spacetime-install.exe`, which asks for confirmation in a dialog). `& "$env:TEMP\spacetime-install.exe" --yes` installed it to `%LOCALAPPDATA%\SpacetimeDB`. Open shells need that folder added to PATH by hand. `spacetime version list` shows `2.13.0 (current)`.
+
+## The company gate (#43)
+
+`module/src/gate.ts` registers a policy rule after the job-scope rule. It maps a write to one of the configuration's actions (`set_pr_status` to `approved` is `approve_ecr_at_tier`, to `merged` is `release_eco`, `post_impact_statement`, and the new `request_fast_track_approval` is `approve_fast_track_ecr`), builds the facts about the ECR from the tables on its current inputs, and asks `config/src/route.ts`. Every other write is allowed and the reason says so. With no company configuration stored the gate allows and says so; a stored configuration that does not validate denies the gated actions. The decision's reasons go in `action_log.detail_json` under `gate`.
+
+- `approval` has one row per approval: who gave it, at which tier and on what cost, the fast-track answers, whether it `standing`, `withdrawn` or `released`, and `pending_recheck` while its checks are repeated.
+- `recommendation` is append-only: what the gate filed instead of an approval or release it would not let the actor give (who, which ECR revision, the decision, the reasons, the roles that receive it).
+- The exact cost measure the configuration names is a stored `check_result` (`cost_measure:<months>:<net|larger>`). The gate reads it back only when the horizon and savings rule match the configuration.
+
+An approval stays when only the baseline changed. It is withdrawn, with the reason in the log, if the re-checked numbers move the ECR to a different approval tier or if the ECR's own revision changes. Until every code check has finished on the current inputs the approval is pending a re-check and the ECR cannot be released.
 
 ## What is in the schema (*revised*)
 

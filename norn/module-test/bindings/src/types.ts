@@ -75,6 +75,32 @@ export const AgentEventInput = __t.object("AgentEventInput", {
 });
 export type AgentEventInput = __Infer<typeof AgentEventInput>;
 
+export const Approval = __t.object("Approval", {
+  id: __t.u64(),
+  prId: __t.u64(),
+  prRevision: __t.u32(),
+  kind: __t.string(),
+  bodyId: __t.string(),
+  tierId: __t.string(),
+  tierIndex: __t.i32(),
+  costSize: __t.f64(),
+  costBasis: __t.string(),
+  ownDigest: __t.string(),
+  decisionJson: __t.string(),
+  answersJson: __t.string(),
+  status: __t.string(),
+  pendingRecheck: __t.bool(),
+  approverKind: __t.string(),
+  approverName: __t.string(),
+  approverOrigin: __t.string(),
+  onBehalfOf: __t.option(__t.string()),
+  sender: __t.identity(),
+  at: __t.timestamp(),
+  endedAt: __t.option(__t.timestamp()),
+  endedReason: __t.string(),
+});
+export type Approval = __Infer<typeof Approval>;
+
 export const Assumption = __t.object("Assumption", {
   id: __t.u64(),
   prId: __t.u64(),
@@ -210,6 +236,12 @@ export const ErpPackage = __t.object("ErpPackage", {
 });
 export type ErpPackage = __Infer<typeof ErpPackage>;
 
+export const GateReason = __t.object("GateReason", {
+  rule: __t.string(),
+  text: __t.string(),
+});
+export type GateReason = __Infer<typeof GateReason>;
+
 export const ImpactStatement = __t.object("ImpactStatement", {
   id: __t.u64(),
   prId: __t.u64(),
@@ -306,6 +338,28 @@ export const ReaperSchedule = __t.object("ReaperSchedule", {
 });
 export type ReaperSchedule = __Infer<typeof ReaperSchedule>;
 
+export const Recommendation = __t.object("Recommendation", {
+  id: __t.u64(),
+  prId: __t.u64(),
+  prRevision: __t.u32(),
+  action: __t.string(),
+  outcome: __t.string(),
+  recommenderKind: __t.string(),
+  recommenderName: __t.string(),
+  recommenderOrigin: __t.string(),
+  onBehalfOf: __t.option(__t.string()),
+  sender: __t.identity(),
+  get reasons() {
+    return __t.array(GateReason);
+  },
+  recipients: __t.array(__t.string()),
+  answersJson: __t.string(),
+  decisionJson: __t.string(),
+  awaitingSecondCheck: __t.bool(),
+  at: __t.timestamp(),
+});
+export type Recommendation = __Infer<typeof Recommendation>;
+
 export const ResultInput = __t.object("ResultInput", {
   key: __t.string(),
   label: __t.string(),
@@ -342,4 +396,11 @@ export const StatementNumber = __t.object("StatementNumber", {
   resultKey: __t.string(),
 });
 export type StatementNumber = __Infer<typeof StatementNumber>;
+
+export const TestAnswer = __t.object("TestAnswer", {
+  testId: __t.string(),
+  holds: __t.bool(),
+  evidence: __t.string(),
+});
+export type TestAnswer = __Infer<typeof TestAnswer>;
 

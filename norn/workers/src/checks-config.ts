@@ -136,7 +136,7 @@ try {
   const cRows = setConfigRows(c0);
   const cCfg = cRows.find((l) => l.entity === `norn_config:${COMPANY_CONFIG_KEY}`);
   check('a changed file stores the config and the one knob that changed (deep_review_limit 2 -> 3), and not deep_review_mode', cRows.length === 2 && cRows.some((l) => l.entity === 'norn_config:deep_review_limit' && l.summary === 'deep_review_limit: 2 -> 3') && knob('deep_review_mode') === 'on_request', cRows.map((l) => l.entity).join(', '));
-  check('the summary names the old and new hash and the top-level sections that changed (materiality, reviewDepth)', cCfg !== undefined && cCfg.summary.startsWith(`company_config: ${configHash(t1)} -> ${configHash(t2)} (`) && cCfg.summary.endsWith('changed: materiality, reviewDepth'), cCfg?.summary);
+  check('the summary names the old and new hash and the top-level sections that changed (materiality, reviewDepth)', cCfg !== undefined && cCfg.summary.startsWith(`company_config: ${configHash(t1)} -> ${configHash(t2)} (`) && /; changed: materiality, reviewDepth; re-checked \d+ open ECR\(s\)$/.test(cCfg.summary), cCfg?.summary);
   check('...without embedding the old or the new JSON (about 20 KB each) in the summary or the detail', cCfg !== undefined && cCfg.summary.length < 400 && cCfg.detailJson.length < 1000 && ![t1, t2].some((t) => cCfg.summary.includes(t.slice(0, 100)) || cCfg.detailJson.includes(t.slice(0, 100))), `summary ${cCfg?.summary.length} chars, detail ${cCfg?.detailJson.length} chars, config ${t2.length} chars`);
   check('...and the worker reported the same hashes', c.out.includes(`company_config ${configHash(t1)} -> ${configHash(t2)}`) && c.out.includes('deep_review_limit 2 -> 3'), c.out.split('\n').find((l) => l.includes('company config')) ?? c.out);
 

@@ -9,8 +9,9 @@
 // refused).
 import { SenderError, t } from 'spacetimedb/server';
 import { ScheduleAt } from 'spacetimedb';
-import spacetimedb, { StatementAssumption, StatementClaim, StatementNumber, reaperSchedule } from './schema';
+import spacetimedb, { StatementAssumption, StatementClaim, StatementNumber, TestAnswer, reaperSchedule } from './schema';
 import './scope'; // registers the job-scope rule with the policy gate
+import { assertReleasable, codeStagesNotDone, endApproval, recordApproval, recordRecommendation, settleApproval, standingApproval } from './gate'; // registers the company rule, after the job-scope rule
 import {
   CONFIG_DEFAULTS,
   OPEN_PR,
@@ -148,7 +149,10 @@ export const setConfig = write('set_config', { key: t.string(), value: t.string(
     if (check.unchanged) return null;
     if (stored) ctx.db.nornConfig.key.update({ key: a.key, value: a.value });
     else ctx.db.nornConfig.insert({ key: a.key, value: a.value });
-    return { entity: `norn_config:${a.key}`, summary: check.summary, detail: check.detail };
+    // The cost measure is an input of the cost check, and the tiers decide what an approval stands on:
+    // every open ECR is brought up to date, and an approval whose tier moved is withdrawn.
+    const n = reconcileAllOpen(ctx, call, 'company configuration changed');
+    return { entity: `norn_config:${a.key}`, summary: `${check.summary}; re-checked ${n} open ECR(s)`, detail: check.detail };
   }
   if (!(a.key in CONFIG_DEFAULTS)) throw new SenderError(`unknown config key '${a.key}'`);
   if (a.key === 'deep_review_mode' && a.value !== 'auto' && a.value !== 'on_request')
@@ -439,15 +443,12 @@ export const setPrStatus = write(
 
     if (to === 'approved') {
       // Approval is of a specific forecast: every cheap check must have finished on today's inputs.
-      const infos = stageInfos(ctx, pr);
-      const notReady = STAGE_ORDER.filter(s => STAGES[s]!.tier === 'code').filter(
-        s => ![...ctx.db.checkRun.prId.filter(pr.id)].some(r => r.stage === s && r.status === 'done' && r.inputHash === infos[s]!.hash)
-      );
+      const notReady = codeStagesNotDone(ctx, pr);
       if (notReady.length)
         throw new SenderError(`cannot approve ECR ${pr.id}: checks not finished on current inputs (${notReady.join(', ')})`);
       if (call.decision.effect === 'downgrade') {
-        // The policy gate allows a recommendation but not an approval. The recommendation record
-        // itself comes with #43; for now the log row is the record.
+        // The policy gate allows a recommendation but not an approval: file it, with who and why.
+        recordRecommendation(ctx, call, pr, 'approve_ecr_at_tier');
         return {
           prId: pr.id,
           entity: `pull_request:${pr.id}`,
@@ -461,10 +462,28 @@ export const setPrStatus = write(
       const main = currentMain(ctx);
       if (pr.baseVersion !== main.version)
         throw new SenderError(`ECR ${pr.id} is based on baseline v${pr.baseVersion}, but the baseline is at v${main.version}; it must be re-checked first`);
+      // Never released on checks that have not finished on its current inputs, nor at a tier other than the one it was approved at.
+      assertReleasable(ctx, pr);
+      if (call.decision.effect === 'downgrade') {
+        recordRecommendation(ctx, call, pr, 'release_eco');
+        return {
+          prId: pr.id,
+          entity: `pull_request:${pr.id}`,
+          summary: `recommends release; not released (${call.decision.reason})`,
+          outcome: 'downgraded',
+        };
+      }
     }
 
     // Finish with this ECR's own row first, so the re-check of other ECRs below never touches it.
     ctx.db.pullRequest.id.update({ ...pr, status: to, updatedAt: ctx.timestamp });
+    // The approval record follows the status: one is made when the ECR is approved, and one that
+    // stands ends when the ECR leaves 'approved' (a release ends it below, with the version it made).
+    if (to === 'approved') recordApproval(ctx, call, pr, 'tier');
+    else if (from === 'approved' && to !== 'merged') {
+      const standing = standingApproval(ctx, pr.id);
+      if (standing) endApproval(ctx, standing, 'withdrawn', to === 'closed' ? 'the ECR was closed' : `moved back to ${to} by ${call.actor.name}`);
+    }
 
     if (to === 'merged' || to === 'closed') {
       // Nothing left to compute for an ECR that is released or abandoned.
@@ -488,6 +507,8 @@ export const setPrStatus = write(
       // it, with a log row on each ECR whose state changed.
       const row = appendMain(ctx, { cause: 'eco', mergedPrId: pr.id, note: `ECO from ECR ${pr.id}: ${pr.title}` });
       ctx.db.pullRequest.id.update({ ...getPr(ctx, pr.id), mergedVersion: row.version });
+      const standing = standingApproval(ctx, pr.id);
+      if (standing) endApproval(ctx, standing, 'released', `released as baseline v${row.version}`);
       const n = reconcileAllOpen(ctx, call, `ECR ${pr.id} released as baseline v${row.version}`);
       extra = `; baseline v${row.parent} -> v${row.version}, re-checked ${n} other open ECR(s)`;
     } else if (from === 'closed') {
@@ -499,7 +520,7 @@ export const setPrStatus = write(
     }
     return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: `${from} -> ${to}${extra}` };
   },
-  { downgradable: a => a.status === 'approved' }
+  { downgradable: a => a.status === 'approved' || a.status === 'merged' }
 );
 
 export const addComment = write(
@@ -518,6 +539,45 @@ export const addComment = write(
     });
     return { prId: a.prId, entity: `comment:${c.id}`, summary: `commented${c.anchor ? ` on ${c.anchor}` : ''}` };
   }
+);
+
+// ---------------------------------------------------------------------------------------------
+// The fast track (#22, #43). An agent (or a person) asks to approve an ECR on the fast track and
+// brings its answers to the configuration's tests, with the classes it proposes. The gate decides
+// from the company's rules: approve, approve with a draw for the blind second check, recommend (to
+// the people who decide), or escalate. The answers are stored with the decision either way.
+// ---------------------------------------------------------------------------------------------
+
+export const requestFastTrackApproval = write(
+  'request_fast_track_approval',
+  {
+    prId: t.u64(),
+    answers: t.array(TestAnswer),
+    companyClass: t.string(), // the company class the agent proposes; '' for none
+    regulatoryClass: t.string(),
+    triggers: t.array(t.string()), // the named conditions the agent saw on the ECR (its own report)
+  },
+  (ctx, a, call) => {
+    const pr = getPr(ctx, a.prId);
+    if (pr.status !== 'review') throw new SenderError(`ECR ${pr.id} is ${pr.status}; the fast track decides ECRs in review`);
+    if (call.decision.detail === undefined)
+      throw new SenderError("no company configuration is stored: the fast track is the company's rule, and there is none to apply");
+    const notReady = codeStagesNotDone(ctx, pr);
+    if (notReady.length) throw new SenderError(`cannot approve ECR ${pr.id}: checks not finished on current inputs (${notReady.join(', ')})`);
+    if (call.decision.effect === 'downgrade') {
+      recordRecommendation(ctx, call, pr, 'approve_fast_track_ecr');
+      return {
+        prId: pr.id,
+        entity: `pull_request:${pr.id}`,
+        summary: `recommends approval; not approved (${call.decision.reason})`,
+        outcome: 'downgraded',
+      };
+    }
+    ctx.db.pullRequest.id.update({ ...pr, status: 'approved', updatedAt: ctx.timestamp });
+    recordApproval(ctx, call, pr, 'fast_track');
+    return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: `review -> approved on the fast track (${call.decision.reason})` };
+  },
+  { downgradable: () => true }
 );
 
 // ---------------------------------------------------------------------------------------------
@@ -954,7 +1014,7 @@ const ResultInput = t.object('ResultInput', {
 export const completeCheck = write(
   'complete_check',
   { checkRunId: t.u64(), attempt: t.u32(), results: t.array(ResultInput) },
-  (ctx, a) => {
+  (ctx, a, call) => {
     const run = ownRun(ctx, a.checkRunId, a.attempt);
     for (const r of a.results) {
       if (![r.p10, r.p50, r.p90].every(Number.isFinite) || !(r.p10 <= r.p50 && r.p50 <= r.p90))
@@ -983,6 +1043,10 @@ export const completeCheck = write(
     }
     ctx.db.checkRun.id.update({ ...run, status: 'done', leaseExpiresAt: undefined, finishedAt: ctx.timestamp, note: '' });
     clearProgress(ctx, run.id);
+    // The last code check of an approved ECR whose inputs changed ends its re-check: the approval stands
+    // or is withdrawn now, and the log says which and why.
+    const settled = STAGES[run.stage]?.tier === 'code' ? settleApproval(ctx, run.prId) : '';
+    if (settled) call.log({ prId: run.prId, entity: `pull_request:${run.prId}`, summary: settled, spawnedBy: `check_run:${run.id}` });
     return { prId: run.prId, entity: `check_run:${run.id}`, summary: `${run.stage} done: ${a.results.length} result(s)`, spawnedBy: `check_run:${run.id}` };
   }
 );

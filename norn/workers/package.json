@@ -19,6 +19,7 @@
     "level1:e2e": "tsx src/level1/e2e.ts",
     "test:level1": "tsx --test src/level1/*.test.ts",
     "check:config": "tsx src/checks-config.ts",
+    "check:gate": "tsx src/checks-gate.ts",
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {

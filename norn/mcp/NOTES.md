@@ -177,8 +177,10 @@ Allowed writes log the reason too: `allow (job scope: job <id> may write to <ECR
 - **`scope.ts`**: the rule, registered into `POLICY_RULES` by a side-effect import from
   `reducers.ts`, so the test module has it too. #43 will rewrite the gate's rules around Bowman's
   configuration; this rule is about the credential and should survive that.
-- **`authorize()`** returns the reason of the first rule that explicitly allowed (it used to ignore
-  it); with no such rule it still says `allow (no rules yet)`, which `check:policy` expects.
+- **`authorize()`** returns the reasons of every rule that explicitly allowed, joined with `; ` in the
+  order the rules were registered (the job scope first, then the company gate, `gate.ts`, #43). With
+  no company configuration stored the gate's reason is `no company configuration is stored, so no
+  company limits apply`, which `check:policy` expects; with no rule at all it says `no rules yet`.
 - **`Refusal`** (core.ts) and the **`rejected`** outcome of `action_log`: see step 5. `record_assumption`
   (frozen ECR, revision conflict, bad source or JSON) and `post_impact_statement` (every validation)
   throw it.

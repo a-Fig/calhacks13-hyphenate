@@ -5,7 +5,8 @@ import type { CompanyConfig } from './schema.ts';
 
 /** A copy of `config` with every documented default filled in. Filling twice changes nothing. */
 export function withDefaults(config: CompanyConfig): CompanyConfig {
-  const copy = structuredClone(config);
+  // A JSON copy, not structuredClone: the SpacetimeDB module runs this, and its JavaScript runtime has no structuredClone.
+  const copy: CompanyConfig = JSON.parse(JSON.stringify(config));
   for (const rule of copy.autonomy.actions) {
     if (rule.limits && rule.otherwise === undefined) rule.otherwise = 'recommend';
   }

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bowman } from '../../../bowman/data/index.ts';
 import { costCheck } from '../src/cost.ts';
+import { costCheckRows, costMeasureKey } from '../src/rows.ts';
 import { point } from '../src/dist.ts';
 import type { ChangeRequest } from '../src/types.ts';
 
@@ -79,4 +80,25 @@ test('measures are paired with the run: same seed, same numbers, and none unless
   assert.deepEqual(a.measures, b.measures);
   assert.equal(exact(a.measures[0]!).draws, a.draws);
   assert.deepEqual(costCheck(bowman, ecr('ECR-0417'), { seed: SEED }).measures, []);
+});
+
+test('the cost rows carry each exact measure as its own row, and none for a measure that is unavailable', () => {
+  const r = costCheck(bowman, ecr('ECR-0423'), { seed: SEED, measures: [GROSS, NET, { horizonMonths: 6, savingsOffset: false }] });
+  const rows = costCheckRows(r);
+  const exactOnes = r.measures.slice(0, 2).map((m) => exact(m));
+  for (const m of exactOnes) {
+    const row = rows.find((x) => x.key === costMeasureKey(m.horizonMonths, m.savingsOffset));
+    assert.ok(row, `a row for ${m.savingsOffset ? 'net' : 'larger'}`);
+    assert.equal(row.p50, m.p50);
+    assert.equal(row.p90, m.p90);
+    assert.equal(row.p10, m.p50, 'the measure has no p10, so it repeats p50');
+    const detail = JSON.parse(row.detailJson);
+    assert.deepEqual([detail.source, detail.horizonMonths, detail.savingsOffset], ['exact', 12, m.savingsOffset]);
+  }
+  assert.deepEqual(rows.filter((x) => x.key.startsWith('cost_measure:')).map((x) => x.key), ['cost_measure:12:larger', 'cost_measure:12:net']);
+  // The one that could not be computed is reported in the detail row instead.
+  const detail = JSON.parse(rows.find((x) => x.key === 'detail')!.detailJson);
+  assert.equal(detail.measures[2].source, 'unavailable');
+  // Asking for no measure adds no row.
+  assert.equal(costCheckRows(costCheck(bowman, ecr('ECR-0423'), { seed: SEED })).filter((x) => x.key.startsWith('cost_measure:')).length, 0);
 });

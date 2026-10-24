@@ -1,5 +1,6 @@
 // The text and fingerprint that the module and the worker both use for a stored configuration.
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import { COMPANY_CONFIG_KEY, canonicalJson, configHash } from '../src/index.ts';
 
@@ -20,4 +21,22 @@ describe('configHash', () => {
 
 describe('the stored key', () => {
   it('is company_config', () => assert.equal(COMPANY_CONFIG_KEY, 'company_config'));
+});
+
+describe('withDefaults in the module runtime', () => {
+  it('does not need structuredClone, which SpacetimeDB modules do not have', async () => {
+    const { loadConfigFile, withDefaults } = await import('../src/index.ts');
+    const loaded = await loadConfigFile(fileURLToPath(new URL('../../../bowman/norn-config/bowman.config.ts', import.meta.url)));
+    assert.ok(loaded.ok);
+    const saved = globalThis.structuredClone;
+    // @ts-expect-error the module runtime has no such global
+    delete globalThis.structuredClone;
+    try {
+      const filled = withDefaults(loaded.config);
+      assert.notEqual(filled, loaded.config);
+      assert.deepEqual(withDefaults(filled), filled);
+    } finally {
+      globalThis.structuredClone = saved;
+    }
+  });
 });

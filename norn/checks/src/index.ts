@@ -11,4 +11,4 @@ export {
 } from './supply.ts';
 export { PLAN_DEFAULTS, type PlanDefaults, type PlanOptions, type Stat } from './plan.ts';
 export { formatMoney, formatUsd, renderCostPage } from './format.ts';
-export { bomDeltaRows, costCheckRows, supplyCheckRows, timelineRows, type CheckResultRow } from './rows.ts';
+export { bomDeltaRows, costCheckRows, costMeasureKey, supplyCheckRows, timelineRows, type CheckResultRow } from './rows.ts';

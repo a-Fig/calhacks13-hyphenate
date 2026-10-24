@@ -34,6 +34,8 @@ export type Inputs = {
   erpBaselineSource?: string;
   erpBaselineAsOf?: string;
   assumptions?: { id: string; key: string; rev: number }[];
+  /** s2: the cost measure the company's approval rule asks for, which the check computes exactly. Absent without a company configuration. */
+  costMeasure?: { horizonMonths: number; savingsOffset: boolean };
   /** s4: the other open ECRs' change requests it compared this one with. */
   peers?: { pr: string; revision: number; overlay: string; assumptions?: { id: string; key: string; rev: number }[] }[];
 };
@@ -195,7 +197,8 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
       if (!p) return HANDLERS.s2_cost!(ctx);
       const { overrides, problems } = assumptionsOf(conn, p.inputs);
       const t0 = Date.now();
-      const r = costCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs) });
+      const measures = p.inputs.costMeasure ? [p.inputs.costMeasure] : [];
+      const r = costCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs), measures, ...(p.inputs.costMeasure ? { windowMonths: p.inputs.costMeasure.horizonMonths } : {}) });
       // Assumptions the library could not be given are reported, never dropped silently.
       const rows = withProblems(real(costCheckRows(r)), problems);
       ctx.log(`s2 on ${p.ecr.id} rev ${p.inputs.revision}: ${r.draws} draws in ${Date.now() - t0} ms, converged ${r.convergence.converged}, ${overrides.length} assumption(s)${problems.length ? `, ${problems.length} unreadable` : ''}`);
