@@ -39,8 +39,9 @@ export const demoScenarios: Scenario[] = [
       scrapNetOfSalvageUsd: r2(scrapCost),
       cancellationChargeUsd: r2(cancelCost),
       oneTimeTotalUsd: r2(oneTimeNre + retrofitParts + retrofitLabor + scrapCost + cancelCost),
-      // Booked as purchase price variance, so not in oneTimeTotalUsd. An assessment may show it as its
-      // own one-time row ("first-lot price premium"); its total is then oneTimeTotalUsd plus this.
+      // Halden's first-lot premium. IN-PRACTICE's worked example counts it as one-time; this key keeps it
+      // out of oneTimeTotalUsd because Bowman books it as purchase price variance. An assessment that shows
+      // it as its own one-time row (Norn does) totals oneTimeTotalUsd plus this: $148,240.50.
       firstLotPremiumUsd: r2(25 * (FIRST_LOT - NEW)),
     },
     prov: src(`${PRACTICE} §1`, 'Worked example, with retrofit scope and inventory adjusted to the dataset (10 built aircraft instead of 4).'),
