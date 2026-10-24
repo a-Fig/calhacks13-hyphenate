@@ -46,6 +46,7 @@ const opts: ErpnextOptions = {
   url: 'http://erp.test', apiKey: 'k', apiSecret: 's', company: 'Co', asOf: '2026-06-01',
   standardCostPriceList: 'Cost', supplierPriceList: 'Quotes', programItemGroup: 'Aircraft',
   warehouses: { Main: 'stores', Vendor: 'supplierFinished' },
+  supplierFinishedOnOpenOrders: true,
   programName: (n) => n.replace(/ air vehicle$/, ''),
   customFields: {
     item: { revision: 'rev', status: 'st', programs: 'prog' },

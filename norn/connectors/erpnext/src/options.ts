@@ -60,6 +60,14 @@ export interface ErpnextSettings {
   supplierPriceList: string;
   /** Warehouse name to the stock location it counts as. Warehouses not listed are ignored. */
   warehouses: Record<string, StockLocationKey>;
+  /**
+   * True when units in the `supplierFinished` warehouse are also still on their open purchase orders, so
+   * they sit in the Bin's ordered quantity too. On order is then ordered minus supplier-finished, so they
+   * are not counted twice. Default: false, on order is the ordered quantity.
+   */
+  supplierFinishedOnOpenOrders?: boolean;
+  /** IANA time zone the company dates its records in; decides "today" when no `asOf` is given. Default: this machine's. */
+  timeZone?: string;
   /** Item group whose items are a program's top item (the finished product). */
   programItemGroup: string;
   /** Program display name from its top item's name. Default: the item name. */

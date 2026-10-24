@@ -34,7 +34,8 @@ export interface ReadResult {
 const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || 0);
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
-export const today = () => new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD in local time
+/** Today as 'YYYY-MM-DD' in the given time zone (default: this machine's). */
+export const today = (timeZone?: string) => new Date().toLocaleDateString('sv-SE', { timeZone });
 
 /** True when a price row's validity window holds the date. Frappe omits null dates. */
 export function validOn(row: { valid_from?: string; valid_upto?: string }, date: string): boolean {
@@ -75,7 +76,7 @@ export function explodeQty(bom: BomLine[], top: ItemCode): Map<ItemCode, number>
 export async function readBaseline(opts: ErpnextOptions): Promise<ReadResult> {
   const t0 = Date.now();
   const c = new ErpnextClient(opts);
-  const asOf = opts.asOf ?? today();
+  const asOf = opts.asOf ?? today(opts.timeZone);
   const cf = opts.customFields ?? {};
   const itemF = cf.item ?? {};
   const quoteF = cf.quote ?? {};
@@ -235,8 +236,8 @@ export async function readBaseline(opts: ErpnextOptions): Promise<ReadResult> {
     const supplierFinished = b?.supplierFinished ?? 0;
     return {
       item: i.name, stores: r6(b?.stores ?? 0), wip: r6(b?.wip ?? 0), finishedGoods: r6(b?.finishedGoods ?? 0), supplierFinished: r6(supplierFinished),
-      // Quantity at a supplier is finished but still on its open PO, so it is not counted twice.
-      onOrder: r6(Math.max(0, (b?.ordered ?? 0) - supplierFinished)), inField: r6(inField.get(i.name) ?? 0),
+      onOrder: r6(opts.supplierFinishedOnOpenOrders ? Math.max(0, (b?.ordered ?? 0) - supplierFinished) : (b?.ordered ?? 0)),
+      inField: r6(inField.get(i.name) ?? 0),
     };
   });
 
