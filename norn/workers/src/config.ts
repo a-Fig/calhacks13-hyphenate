@@ -21,7 +21,7 @@ import {
   type ConfigEntry,
   type Issue,
 } from '../../config/src/index.ts';
-import { withRetry, type Client } from './connect.ts';
+import { newRequestId, subscribe, withRetry, type Client } from './connect.ts';
 
 export const COMPANY_CONFIG_ENV = 'NORN_COMPANY_CONFIG';
 
@@ -58,15 +58,35 @@ export function changedEntries(entries: ConfigEntry[], stored: (key: string) => 
 
 const kb = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Why a set_config call that returned normally did not take effect. The module's write() returns
+ * normally when the policy gate denies a call and writes the denial to the action log, so a call
+ * that resolves proves nothing. The log row for our request id says what happened.
+ */
+async function whyNotStored(client: Client, key: string, requestId: string, waitedMs: number): Promise<string> {
+  try {
+    await subscribe(client.conn, [`SELECT * FROM action_log WHERE request_id = '${requestId}'`]);
+  } catch {
+    // fall through: say what we know
+  }
+  const row = [...client.conn.db.actionLog.iter()].find((l) => l.requestId === requestId && l.outcome !== 'applied');
+  if (row) return `set_config was ${row.outcome} for ${key}: ${row.summary} (policy: ${row.policy})`;
+  return `${key} did not show in norn_config within ${waitedMs} ms of the call, and the action log has no refusal for request ${requestId}`;
+}
+
 /**
  * Stores what differs, or warns when there is no config file. Needs the connection to have
- * subscribed to norn_config. Throws if the module refuses a pair; the worker then does not start,
- * because the configuration it was told to run on is not the one stored.
+ * subscribed to norn_config. After each call it waits (up to `timeoutMs`) for the value to show in
+ * norn_config, and throws if it does not, with the policy gate's reason when the log has one. The
+ * worker then does not start: the configuration it was told to run on is not the one stored.
  */
 export async function applyStartupConfig(
   client: Client,
   startup: Exclude<StartupConfig, { kind: 'invalid' }>,
-  log: (msg: string) => void
+  log: (msg: string) => void,
+  { timeoutMs = 5000 }: { timeoutMs?: number } = {}
 ): Promise<{ stored: string[] }> {
   const rows = client.conn.db.nornConfig;
   const stored = (key: string) => rows.key.find(key)?.value;
@@ -84,12 +104,18 @@ export async function applyStartupConfig(
   const todo = changedEntries(startup.entries, stored);
   const before = new Map(todo.map((e) => [e.key, stored(e.key)])); // the cache may catch up with our own writes
   for (const e of todo) {
+    const requestId = `startup-config-${newRequestId()}`;
     try {
-      await withRetry(() => client.R.setConfig({ key: e.key, value: e.value }), { idempotent: true, label: `set_config ${e.key}` });
+      await withRetry(() => client.R.setConfig({ key: e.key, value: e.value, meta: { requestId } }), { idempotent: true, label: `set_config ${e.key}` });
     } catch (err) {
       throw new Error(`the module refused ${e.key} from ${startup.file}: ${err instanceof Error ? err.message : String(err)}`);
     }
+    const t0 = Date.now();
+    while (stored(e.key) !== e.value && Date.now() - t0 < timeoutMs) await sleep(20);
+    if (stored(e.key) !== e.value) throw new Error(`${await whyNotStored(client, e.key, requestId, timeoutMs)}; from ${startup.file}`);
   }
+  const unmatched = startup.entries.filter((e) => stored(e.key) !== e.value);
+  if (unmatched.length) throw new Error(`norn_config does not hold ${unmatched.map((e) => e.key).join(', ')} from ${startup.file}`);
   const what = `company config ${startup.config.company.name} (${startup.hash}, ${kb(startup.bytes)}) from ${startup.file}`;
   if (todo.length === 0) log(`${what}: already stored, nothing to change`);
   else {

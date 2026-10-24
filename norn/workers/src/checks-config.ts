@@ -14,9 +14,10 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Timestamp } from 'spacetimedb';
 import { COMPANY_CONFIG_KEY, canonicalJson, configHash, loadConfigFile } from '../../config/src/index.ts';
-import { COMPANY_CONFIG_ENV } from './config.ts';
-import { DB, connect, subscribe } from './connect.ts';
+import { COMPANY_CONFIG_ENV, applyStartupConfig, loadStartupConfig } from './config.ts';
+import { DB, connect, subscribe, type Client } from './connect.ts';
 import { TABLES, kit, recorder, rejects } from './testkit.ts';
 
 if (!process.env.NORN_DB || DB === 'norn') {
@@ -181,6 +182,24 @@ try {
   // G. leave the scratch database on v1 again (deep_review_limit back to 2)
   await startWorker('g', files.v1, /company config .*(stored|already stored)/);
   check('a start with the earlier file puts the earlier config and deep_review_limit 2 back', await holds(() => storedConfig() === t1 && knob('deep_review_limit') === '2', 5000));
+
+  // H. a call the policy gate denies resolves normally; start-up must not report it as stored
+  const scoped = await connect({ kind: 'agent', name: `cfgcheck-scoped-${stamp}`, origin: 'norn', spawnedBy: 'Norn' }, { persistToken: false, quiet: true });
+  try {
+    await subscribe(scoped.conn, ['SELECT * FROM norn_config']);
+    await scoped.R.grantScope({ jobId: `cfgcheck-${stamp}`, anyEcr: false, prIds: [], maxLevel: 0, expiresAt: Timestamp.fromDate(new Date(Date.now() + 3_600_000)) });
+    const h0 = lastLogId();
+    const startup = await loadStartupConfig({ [COMPANY_CONFIG_ENV]: files.v2 });
+    if (startup.kind !== 'loaded') throw new Error('the v2 fixture should load');
+    const lines: string[] = [];
+    const outcome = await applyStartupConfig(scoped as unknown as Client, startup, (m) => lines.push(m), { timeoutMs: 2000 }).then(() => null, (e: Error) => e);
+    await settle();
+    const denial = logs((l) => l.id > h0 && l.reducer === 'set_config')[0];
+    check("a worker whose set_config the policy gate denies (job scope) fails start-up with the gate's reason and logs no success", outcome !== null && /set_config was denied for company_config: .*job cfgcheck-/.test(outcome.message) && lines.length === 0, outcome?.message ?? `no error; log: ${lines.join(' | ')}`);
+    check('...the action log holds the denial, and nothing was stored', denial?.outcome === 'denied' && storedConfig() === t1, `${denial?.outcome}: ${denial?.summary}`);
+  } finally {
+    scoped.close();
+  }
 } finally {
   O.close();
   rmSync(dir, { recursive: true, force: true });

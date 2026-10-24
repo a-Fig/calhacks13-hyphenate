@@ -20,7 +20,10 @@ connects to anything.
   line, and exits with code 1. Nothing has been written to the database.
 - **Valid.** Once connected, the worker sends the pairs below through `set_config`, but only the
   ones that differ from what the database already holds. Starting again with the same file stores
-  nothing.
+  nothing. A call that returns is not proof that it took effect, because the policy gate can deny it
+  and the module then returns normally. So the worker waits (5 s) for each value to show in
+  `norn_config`; if it does not, the worker exits with code 1 and gives the reason from the action log
+  row of that request, such as the job scope that denied `set_config`.
 - **Unset or blank.** The worker warns and keeps the company config already stored (or, if there
   is none, the module's built-in defaults). It does not refuse to start.
 

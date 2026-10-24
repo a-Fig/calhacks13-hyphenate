@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { COMPANY_CONFIG_KEY, canonicalJson, configEntries, configHash, loadConfigFile, type CompanyConfig } from '../../config/src/index.ts';
 import { COMPANY_CONFIG_MAX_BYTES, checkCompanyConfig, utf8Length } from '../../module/src/company-config.ts';
-import { COMPANY_CONFIG_ENV, changedEntries, loadStartupConfig, refusalLines, type StartupConfig } from '../src/config.ts';
+import { COMPANY_CONFIG_ENV, applyStartupConfig, changedEntries, loadStartupConfig, refusalLines, type StartupConfig } from '../src/config.ts';
+import type { Client } from '../src/connect.ts';
 
 const BOWMAN = join(import.meta.dirname, '..', '..', '..', 'bowman', 'norn-config', 'bowman.config.ts');
 const dir = mkdtempSync(join(tmpdir(), 'norn-startup-'));
@@ -189,5 +190,67 @@ describe('what the module checks before it stores company_config', () => {
 
   it('counts UTF-8 bytes the way the encoder does', () => {
     for (const s of ['', 'abc', 'é', '€', '😀', 'a😀€é']) assert.equal(utf8Length(s), Buffer.byteLength(s), s);
+  });
+});
+
+// A stand-in for the connection: the module's write() returns normally when the policy gate denies a
+// call and writes the denial to the action log, so setConfig resolves whether or not the value was
+// stored. `behave` decides what the call does to the cache and the log.
+describe('applyStartupConfig confirms what was stored', () => {
+  type Row = { requestId: string; outcome: string; summary: string; policy: string };
+  function fake(behave: (args: { key: string; value: string; meta?: { requestId?: string } }, cache: Map<string, string>, log: Row[]) => void, initial: Record<string, string> = {}) {
+    const cache = new Map(Object.entries(initial));
+    const rows: Row[] = [];
+    const calls: string[] = [];
+    const conn = {
+      db: { nornConfig: { key: { find: (k: string) => (cache.has(k) ? { value: cache.get(k) } : undefined) } }, actionLog: { iter: () => rows } },
+      subscriptionBuilder() {
+        const b = { onApplied: (cb: () => void) => ((b as any).applied = cb, b), onError: () => b, subscribe: () => (setTimeout(() => (b as any).applied(), 0), { unsubscribe() {} }) };
+        return b;
+      },
+    };
+    const R = { setConfig: async (a: any) => (calls.push(a.key), behave(a, cache, rows)) };
+    return { client: { conn, R } as unknown as Client, cache, rows, calls };
+  }
+  const loadedBowman = async () => {
+    const c = await loadStartupConfig({ [COMPANY_CONFIG_ENV]: BOWMAN });
+    assert.equal(c.kind, 'loaded');
+    return c as Extract<StartupConfig, { kind: 'loaded' }>;
+  };
+  const stores = (a: { key: string; value: string }, cache: Map<string, string>) => void cache.set(a.key, a.value);
+
+  it('reports success only once the values are in norn_config', async () => {
+    const f = fake(stores);
+    const lines: string[] = [];
+    const r = await applyStartupConfig(f.client, await loadedBowman(), (m) => lines.push(m), { timeoutMs: 200 });
+    assert.deepEqual(r.stored, [COMPANY_CONFIG_KEY, 'deep_review_mode', 'deep_review_limit']);
+    assert.match(lines.join(' | '), /: stored company_config none -> /);
+  });
+
+  it("fails with the log's reason when the policy gate denied a call that resolved normally", async () => {
+    const f = fake((a, _cache, rows) => {
+      rows.push({ requestId: a.meta!.requestId!, outcome: 'denied', summary: 'set_config refused: set_config is not open to an agent working under job j-1', policy: 'deny: job scope' });
+    });
+    const lines: string[] = [];
+    await assert.rejects(
+      applyStartupConfig(f.client, await loadedBowman(), (m) => lines.push(m), { timeoutMs: 100 }),
+      (e: Error) => /set_config was denied for company_config: set_config refused: set_config is not open to an agent working under job j-1 \(policy: deny: job scope\)/.test(e.message)
+    );
+    assert.deepEqual(f.calls, [COMPANY_CONFIG_KEY], 'stops at the first pair that did not take');
+    assert.deepEqual(lines, [], 'no success is logged');
+  });
+
+  it('fails when the value never shows and the log has no refusal', async () => {
+    const f = fake(() => {});
+    await assert.rejects(
+      applyStartupConfig(f.client, await loadedBowman(), () => {}, { timeoutMs: 100 }),
+      (e: Error) => /company_config did not show in norn_config within 100 ms .* no refusal for request startup-config-/.test(e.message)
+    );
+  });
+
+  it('accepts a value that shows up a little after the call returns', async () => {
+    const f = fake((a, cache) => void setTimeout(() => cache.set(a.key, a.value), 60));
+    const r = await applyStartupConfig(f.client, await loadedBowman(), () => {}, { timeoutMs: 1000 });
+    assert.equal(r.stored.length, 3);
   });
 });
