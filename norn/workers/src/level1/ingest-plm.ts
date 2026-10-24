@@ -191,7 +191,8 @@ export const retryDue = (retry: RetryQueue, read: (name: string) => Promise<Inge
  * watcher, which starts from the newest stamp. Each is only recorded (`recordEco`, as `recordEcoOnly`), never ingested, and an
  * ECR Norn never opened is refused by the module and skipped. One failure does not stop the others.
  */
-export async function recoverEcos(names: string[], read: (name: string) => Promise<IngestItem>, recordEco: (item: IngestItem) => Promise<void>, lock: EcrLock, log: (m: string) => void): Promise<void> {
+export async function recoverEcos(names: string[], read: (name: string) => Promise<IngestItem>, recordEco: (item: IngestItem) => Promise<void>, lock: EcrLock, log: (m: string) => void): Promise<string[]> {
+  const failed: string[] = [];
   for (const name of names) {
     try {
       await lock(name, async () => {
@@ -199,9 +200,12 @@ export async function recoverEcos(names: string[], read: (name: string) => Promi
         if (item.eco) await recordEco(item);
       });
     } catch (e) {
-      log(`could not check ${name}'s change order at start-up: ${(e as Error).message}`);
+      failed.push(name);
+      log(`could not check ${name}'s change order: ${(e as Error).message}; trying again`);
     }
   }
+  // The watcher will not offer these again (their stamps are older than its floor), so the caller retries them.
+  return failed;
 }
 
 /** What the watcher does with one changed ECR: a decided one only records its ECO release, any other is reported to ingest_ecr. */
@@ -241,7 +245,14 @@ export async function runPlmIngest(R: Client['R'], log: (m: string) => void, dep
   await takeIn(take.map(e => e.name), read, report, log, retry, Date.now, lock);
   const recordEco = (item: IngestItem) => recordEcoOnly(R, item, sent, log);
   const decided = all.filter(e => wanted(o, e) && !startupWanted(o, e)).map(e => e.name);
-  await recoverEcos(decided, read, recordEco, lock, log);
+  let unrecovered = await recoverEcos(decided, read, recordEco, lock, log);
+  let recovering = false;
+  const recovery = setInterval(() => {
+    if (recovering) return;
+    if (!unrecovered.length) return clearInterval(recovery);
+    recovering = true;
+    recoverEcos(unrecovered, read, recordEco, lock, log).then(left => (unrecovered = left)).finally(() => (recovering = false));
+  }, o.intervalMs);
   let retrying = false;
   setInterval(() => {
     if (retrying || retry.names.length === 0) return;

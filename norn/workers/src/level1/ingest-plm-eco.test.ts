@@ -89,7 +89,8 @@ test('at start-up, an ECO linked while the process was down is recorded, and one
   const logs: string[] = [];
   const items: Record<string, any> = { 'ECR-1': { plmEcrNumber: 'ECR-1', eco: 'ECO-1' }, 'ECR-3': { plmEcrNumber: 'ECR-3' }, 'ECR-4': { plmEcrNumber: 'ECR-4', eco: 'ECO-4' } };
   const read = async (name: string) => { if (name === 'ECR-2') throw new Error('PLM 500'); return items[name]; };
-  await recoverEcos(['ECR-1', 'ECR-2', 'ECR-3', 'ECR-4'], read, async (item) => { calls.push(`${item.plmEcrNumber}:${item.eco}`); }, ecrLock(), (m) => logs.push(m));
+  const failed = await recoverEcos(['ECR-1', 'ECR-2', 'ECR-3', 'ECR-4'], read, async (item) => { calls.push(`${item.plmEcrNumber}:${item.eco}`); }, ecrLock(), (m) => logs.push(m));
   assert.deepEqual(calls, ['ECR-1:ECO-1', 'ECR-4:ECO-4'], 'only ECRs with an ECO, and past the one that failed');
   assert.ok(logs.some((l) => l.includes('ECR-2') && l.includes('PLM 500')), logs.join(' | '));
+  assert.deepEqual(failed, ['ECR-2'], 'the failed one is handed back to be tried again');
 });
