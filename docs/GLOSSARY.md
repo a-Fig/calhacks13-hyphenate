@@ -61,6 +61,18 @@ Detail on how these fit together, and who does what, is in `CHANGE-CONTROL.md`.
   - **ECR**: a change is requested.
   - **ECO**: the change is approved and released. Releasing the ECO notifies downstream teams;
     Bowman issues no separate change notice (ECN).
+- **CMII and Teamcenter equivalents.** Bowman keeps the classic, more widely known terms (Tyler,
+  2026-10-24). CMII and Teamcenter call the same objects:
+  - Change Request (ECR);
+  - Change Review Board (CCB);
+  - Change Notice (ECO).
+
+  Bowman follows CMII's process all the same: closed-loop change, effectivity on the release, and a
+  fast track for small changes. Avoid "ECN": CMII and classic usage give it opposite meanings.
+  Sources: `research/change-terminology.md`.
+- **Fast track.** Approval of a small, low-risk ECR without convening the full CCB. CMII puts it at
+  75-85% of changes. Our agent can approve these, or recommend approval, depending on how Bowman
+  configures it (#22).
 - **PLM / ERP / MRP.**
   - Product lifecycle management holds the design and the BOM.
   - Enterprise resource planning holds finance, purchasing and inventory.
