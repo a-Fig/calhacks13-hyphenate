@@ -86,3 +86,8 @@ export const initials = (name: string) =>
 
 /** The number the cost page adds up: the point estimate, or the median when there is none. */
 export const pointOf = (f: { point?: number; p50: number }) => f.point ?? f.p50;
+
+/** Said wherever cost numbers are shown that belong to the previous revision of an ECR. */
+export function staleNote(state: 'rechecking' | 'failed'): string {
+  return state === 'failed' ? 'From the previous revision; the re-check failed.' : 'From the previous revision; Norn is checking the changed ECR again.';
+}

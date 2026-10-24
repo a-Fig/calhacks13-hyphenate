@@ -6,7 +6,7 @@ import type { CostBlock, CostRow, Figure, ImpactAssessment, RiskLevel } from '..
 import { CheckStateIcon, MockTag, SavedRun } from '../ui/Bits.tsx';
 import { SCurveChart, TornadoChart } from '../ui/Charts.tsx';
 import { Legend, Mark, Num } from '../ui/Evidence.tsx';
-import { range as rangeText } from '../ui/fmt.ts';
+import { range as rangeText, staleNote } from '../ui/fmt.ts';
 import { evidenceCounts } from '../ui/trace.ts';
 import { Link, navigate } from '../router.tsx';
 
@@ -78,6 +78,11 @@ function CostCheck({ a }: { a: ImpactAssessment }) {
   const need = a.cost.needsEstimate;
   return (
     <>
+      {a.ecr.staleCost && (
+        <Flash variant="warning" className="nx-flash">
+          <b>{staleNote(a.ecr.staleCost)}</b> The cost page below is the previous revision&rsquo;s.
+        </Flash>
+      )}
       {need.length > 0 && (
         <Flash variant="warning" className="nx-flash">
           <b>{need.length} lines need an estimate.</b> The originator left them blank, so they count as $0 until someone estimates them:{' '}

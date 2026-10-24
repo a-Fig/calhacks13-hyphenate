@@ -5,6 +5,7 @@ import {
 import { Avatar, Label, Spinner, StateLabel } from '@primer/react';
 import type { Check, EcrSummary, ReportLevel } from '../assessment/types.ts';
 import { avatarSrc, type AvatarKind } from './avatars.ts';
+import { staleNote } from './fmt.ts';
 
 type Status = EcrSummary['status'];
 
@@ -58,6 +59,13 @@ export function MockTag({ on = true, title = 'Mock: not produced by a check yet'
     <span title={title} className="nx-mock">
       <Label variant="attention" size="small">Mock</Label>
     </span>
+  );
+}
+
+/** Says the cost numbers beside it are the previous revision's. */
+export function StaleNote({ state }: { state: 'rechecking' | 'failed' }) {
+  return (
+    <span className="nx-flag"><AlertFillIcon size={12} className="nx-fg-attention" /> {staleNote(state)}</span>
   );
 }
 
