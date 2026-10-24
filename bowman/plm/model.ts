@@ -292,9 +292,10 @@ const ncr: DocTypeDef = {
   autoname: 'NCR-.####',
   fields: finish([
     sec('Nonconformance'),
+    f('Data', 'title', 'Title', { read_only: 1, in_list_view: 1, bold: 1, depends_on: 'eval:!doc.__islocal', description: 'Set from the NCR number and part name.' }),
     f('Link', 'part', 'Part', { options: 'Part', reqd: 1, in_list_view: 1, in_standard_filter: 1 }),
-    f('Data', 'part_name', 'Part name', { fetch_from: 'part.part_name', read_only: 1, in_list_view: 1 }),
-    f('Data', 'part_revision', 'Rev', { in_list_view: 1 }),
+    f('Data', 'part_name', 'Part name', { fetch_from: 'part.part_name', read_only: 1 }),
+    f('Data', 'part_revision', 'Rev'),
     f('Data', 'location_found', 'Where found', { in_list_view: 1 }),
     col(),
     f('Select', 'status', 'Status', { options: opts(['Open', 'Closed to ECR', 'Closed']), default: 'Open', reqd: 1, in_list_view: 1, in_standard_filter: 1 }),
@@ -316,7 +317,7 @@ const ncr: DocTypeDef = {
     ...[ROLES.chair, ROLES.viewer, ROLES.norn].map((role) => ({ role, ...R })),
     sysman,
   ],
-  props: { module: MODULE, track_changes: 1, sort_field: 'modified', sort_order: 'DESC', search_fields: 'part,part_name,location_found' },
+  props: { module: MODULE, track_changes: 1, sort_field: 'modified', sort_order: 'DESC', search_fields: 'part,part_name,location_found', title_field: 'title', show_title_field_in_link: 1 },
   links: [{ link_doctype: 'ECR', link_fieldname: 'originating_ncr', group: 'Changes' }],
 };
 

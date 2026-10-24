@@ -174,6 +174,7 @@ async function scripts() {
   const server: [string, string, string, string][] = [
     ['ECR: Norn writes only the impact assessment', 'ECR', 'Before Validate', 'server-scripts/ecr-guard.py'],
     ['ECR: cost page totals', 'ECR', 'Before Save', 'server-scripts/ecr-totals.py'],
+    ['NCR: title from number and part', 'NCR', 'Before Save', 'server-scripts/ncr-title.py'],
     ['Engineering BOM: component count', 'Engineering BOM', 'Before Save', 'server-scripts/bom-count.py'],
   ];
   for (const [name, dt, event, file] of server) {
@@ -186,6 +187,19 @@ async function scripts() {
   ];
   for (const [name, dt, file] of client) {
     await ensure('Client Script', name, { dt, view: 'Form', enabled: 1, script: read(file) }, true);
+  }
+  for (const [dt, file] of [['ECR', 'client-scripts/list-ecr.js'], ['NCR', 'client-scripts/list-ncr.js']]) {
+    await ensure('Client Script', `${dt} list`, { dt, view: 'List', enabled: 1, script: read(file) }, true);
+  }
+  for (const gone of ['ECO list']) { // an earlier version applied the ID prefix to lists that already lead with the ID
+    if (await plm.exists('Client Script', gone)) await plm.del(`/api/resource/Client Script/${enc(gone)}`);
+  }
+}
+
+/** Existing NCRs get their title the first time setup runs after the script exists. */
+async function backfillNcrTitles() {
+  for (const n of await plm.list('NCR', { fields: ['name', 'title', 'description'] })) {
+    if (!n.title) await plm.put(`/api/resource/NCR/${enc(n.name)}`, { description: n.description });
   }
 }
 
@@ -315,6 +329,7 @@ async function main() {
   log('2. Roles'); await roles();
   log('3. DocTypes'); await doctypes();
   log('4. Scripts'); await scripts();
+  await backfillNcrTitles();
   log('5. Integration users'); await integrationUsers();
   ensureSecret('PLM_USER_PASSWORD');
   log('6. Webhooks'); await webhooks();
