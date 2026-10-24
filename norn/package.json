@@ -3,18 +3,30 @@
   "private": true,
   "version": "0.0.0",
   "description": "Norn: forecast the production impact of an engineering change. Skeleton + SpacetimeDB spike.",
-  "workspaces": ["module", "bindings", "workers", "web"],
-  "engines": { "node": ">=22.12" },
+  "workspaces": [
+    "module",
+    "bindings",
+    "workers",
+    "web"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
-    "db:start": "spacetime start",
-    "db:publish": "spacetime publish norn --module-path module --server local --yes",
-    "db:reset": "spacetime publish norn --module-path module --server local --delete-data=always --yes",
-    "db:generate": "spacetime generate --lang typescript --module-path module --out-dir bindings/src --yes",
+    "db:start": "spacetime start --listen-addr 127.0.0.1:3000",
+    "db:publish": "npm run typecheck -w @norn/module --silent && spacetime publish norn --module-path module --server local --yes",
+    "db:reset": "npm run typecheck -w @norn/module --silent && spacetime publish norn --module-path module --server local --delete-data=always --yes",
+    "db:generate": "npm run typecheck -w @norn/module --silent && spacetime generate --lang typescript --module-path module --out-dir bindings/src --yes",
     "db:logs": "spacetime logs norn --server local -f",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "build": "npm run build -w @norn/module && npm run build -w @norn/web",
     "worker": "npm run start -w @norn/workers",
     "seed": "npm run seed -w @norn/workers",
-    "web": "npm run dev -w @norn/web"
+    "web": "npm run dev -w @norn/web",
+    "check:module": "npm run check:module -w @norn/workers",
+    "spike:errors": "npm run spike:errors -w @norn/workers",
+    "spike:crash": "npm run spike:crash -w @norn/workers",
+    "spike:browsers": "node web/spike/two-browsers.mjs",
+    "spike:streaming": "node web/spike/streaming.mjs"
   }
 }

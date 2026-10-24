@@ -22,4 +22,5 @@ export default __t.row({
   p90: __t.f64().name("p_90"),
   detailJson: __t.string().name("detail_json"),
   createdAt: __t.timestamp().name("created_at"),
+  mock: __t.bool(),
 });

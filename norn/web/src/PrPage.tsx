@@ -164,7 +164,7 @@ function StageRow(props: {
         {res.map(r => (
           <div key={String(r.id)} data-testid={`result-${r.key}`}>
             {r.label}: {num(r.p10, 2)} / <b>{num(r.p50, 2)}</b> / {num(r.p90, 2)} {r.unit}
-            {r.detailJson.includes('"mock":true') && <span className="chip mock" style={{ marginLeft: 6 }}>mock</span>}
+            {r.mock && <span className="chip mock" style={{ marginLeft: 6 }}>mock</span>}
           </div>
         ))}
         {latest?.status === 'running' && prog && <ProgressView p={prog} />}

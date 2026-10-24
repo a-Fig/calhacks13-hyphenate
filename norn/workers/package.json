@@ -6,7 +6,10 @@
   "scripts": {
     "start": "tsx src/worker.ts",
     "seed": "tsx src/seed.ts",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "check:module": "tsx src/checks.ts",
+    "spike:errors": "tsx src/spike/s1-errors.ts",
+    "spike:crash": "tsx src/spike/s4-crash.ts"
   },
   "dependencies": {
     "@norn/bindings": "*",

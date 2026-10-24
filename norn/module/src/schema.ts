@@ -135,6 +135,8 @@ const checkResult = table(
     p90: t.f64(),
     detailJson: t.string(),
     createdAt: t.timestamp(),
+    // Added after first publish (spike 5): appended last with a default, so existing rows migrate.
+    mock: t.bool().default(true),
   }
 );
 

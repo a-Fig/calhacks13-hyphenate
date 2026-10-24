@@ -68,6 +68,7 @@ export const CheckResult = __t.object("CheckResult", {
   p90: __t.f64(),
   detailJson: __t.string(),
   createdAt: __t.timestamp(),
+  mock: __t.bool(),
 });
 export type CheckResult = __Infer<typeof CheckResult>;
 

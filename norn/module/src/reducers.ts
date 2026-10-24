@@ -483,6 +483,7 @@ export const completeCheck = write(
         p90: r.p90,
         detailJson: r.detailJson,
         createdAt: ctx.timestamp,
+        mock: true, // no worker computes anything real yet
       });
     }
     ctx.db.checkRun.id.update({ ...run, status: 'done', leaseExpiresAt: undefined, finishedAt: ctx.timestamp, note: '' });
