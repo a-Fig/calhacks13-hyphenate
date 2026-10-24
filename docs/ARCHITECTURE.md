@@ -61,8 +61,8 @@ What this buys us:
 
 - **Effectivity.** A merged ECO does not change every unit. Arena's ECO template carries a material effectivity date and an inventory disposition per affected item, and PLM guidance stresses handling in-flight stock and work in progress. So `main` is closer to a timeline than a single state, and "when does the merged change take effect" is an output of our timeline stage (§5), not metadata. See §7.
 - **Hidden coupling.** Two ECRs can merge cleanly and still interact physically (a weight change alters range, which alters battery sizing). We can detect shared-entity conflicts; we cannot detect physics. Interaction flags are best-effort.
-- **Vocabulary.** Organizations use ECR, ECN and ECO inconsistently (sources disagree whether ECN and ECO are the same thing). The mapping "ECR = branch, ECO = merged PR" needs confirming against how Archer actually names states.
-- **We mirror, not replace.** We don't know Archer's PLM. The system reads ECRs and baseline data; it does not become the system of record.
+- **Vocabulary.** Settled for Bowman: NCR → ECR → ECO, with no separate ECN. `GLOSSARY.md` maps each Git term to its business term, and anything a judge or user sees uses the business term.
+- **We mirror, not replace.** The system reads ECRs and baseline data from Bowman's PLM and ERP (#4); it does not become the system of record.
 - **Prior art.** The idea already exists in PLM: Onshape markets branch-and-merge as ECO-style change isolation, and PLM systems keep "redlined" pending BOMs. We are not inventing the concept, we are attaching a production-cost-and-risk forecast to it.
 
 ### What we don't build
@@ -287,12 +287,11 @@ Ordered by dependency, not time. The line after step 7 is the minimum credible d
 
 ## 14. Open questions
 
-- What does a real ECR/ECO look like at Archer: structured form, PDF, PLM export? S0 is only as good as our assumptions here.
-- What are their actual state names, and how do ECR, ECN and ECO map to PR states?
+- What does an ECR look like at Bowman: structured form, PDF, PLM export? S0 is only as good as this definition (#6).
 - Is "production" cost the full aircraft or per subsystem? This sets BOM depth.
 - Who confirms S0 output in practice: the filing engineer, or finance?
 - How does finance want ranges shown (p10/p50/p90, probability of exceeding a threshold, scenario table)?
-- Does Archer already track cross-ECR dependencies, or will we have to infer them?
+- Does Bowman track cross-ECR dependencies, or do we infer them?
 - Effectivity: per date, per unit, or per serial range?
 
 ## Sources for §2
