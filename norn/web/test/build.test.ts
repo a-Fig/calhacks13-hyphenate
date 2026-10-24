@@ -68,6 +68,11 @@ test('a statement finds its run by when the results were written, not by finishe
   const t = out.traces[out.statement!.numbers[0].traceId!];
   assert.ok(t, 'the statement drills into run B');
   assert.match(t.value!.text, new RegExp(Math.round(net(b).p50).toLocaleString('en-US')));
+  // The evidence itself is run B's, not A's or C's.
+  const inputsOf = (x: { inputs: { traceId?: string }[] }) => JSON.stringify(x.inputs.map(i => ({ ...i, traceId: undefined })));
+  const fromA = inputsOf(fromChecks(a).traces.net_total_year_one), fromB = inputsOf(fromChecks(b).traces.net_total_year_one);
+  assert.notEqual(fromA, fromB);
+  assert.equal(inputsOf(t), fromB);
 });
 
 test('a statement whose run is gone has numbers but no drill-through', () => {
