@@ -76,7 +76,7 @@ export const CONFIG_DEFAULTS: Record<string, string> = {
   // Part of every input hash: bump it when worker logic changes so old results go stale. It names
   // the checks library's version (CHECKS_CODE_VERSION in norn/checks), so a new library re-checks
   // every open ECR; workers warn when the two disagree.
-  code_version: 'checks-0.2.0',
+  code_version: 'checks-0.3.0',
   seed: 'norn-seed-1',
 };
 
@@ -169,6 +169,11 @@ export type StageInputs = {
   erpBaselineSource?: string; // code stages: where that baseline came from ('erp', or 'file' for a test baseline)
   erpBaselineAsOf?: string; // code stages: the date that baseline is as of
   assumptions?: { id: string; key: string; rev: number }[]; // code stages: the assumptions that feed it
+  // s4_supply: the other open ECRs' current change requests, which it compares this one with
+  // (qualification slots and bundle terms at a shared supplier). pr is the ECR's id, overlay its
+  // change request digest. A peer filed, edited, closed or reopened changes this and re-runs s4.
+  // assumptions: the peer's own recorded assumptions that s4 applies to the peer (what a peer's decision lag is assumed to be changes the comparison).
+  peers?: { pr: string; revision: number; overlay: string; assumptions: { id: string; key: string; rev: number }[] }[];
   upstream?: Record<string, string>; // stage -> its hash, for the stages this one reads
   // s2: the cost measure the company's approval rule asks for (its configuration's approval.costMeasure).
   // The cost check computes it exactly per draw; naming it here makes a change of measure re-run the check.
@@ -210,7 +215,35 @@ export function currentBaseline(ctx: Ctx) {
   return undefined;
 }
 
-export function stageInfos(ctx: Ctx, pr: Pick<Pr, 'id' | 'baseVersion' | 'title' | 'description'>): Record<string, StageInfo> {
+/**
+ * The other open ECRs' current change requests, as s4 reads them. Empty for an ECR with no change
+ * request of its own (its s4 is mock and reads no peer). The module cannot tell which of them share
+ * a supplier (that needs the baseline), so every open ECR with a change request is named, and the
+ * worker works out which ones matter.
+ */
+export function peerSnapshot(ctx: Ctx, prId: bigint): NonNullable<StageInputs['peers']> {
+  if (!currentRevision(ctx, prId)) return [];
+  const out: NonNullable<StageInputs['peers']> = [];
+  for (const other of ctx.db.pullRequest.iter()) {
+    if (other.id === prId || !OPEN_PR.includes(other.status as PrStatus)) continue;
+    const rev = currentRevision(ctx, other.id);
+    if (rev) {
+      const assumptions = [...ctx.db.assumption.prId.filter(other.id)]
+        .filter(a => a.current && (a.affects.length === 0 || a.affects.includes('s4_supply')))
+        .map(a => ({ id: String(a.id), key: a.key, rev: a.rev }))
+        .sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
+      out.push({ pr: String(other.id), revision: rev.seq, overlay: rev.digest, assumptions });
+    }
+  }
+  return out.sort((a, b) => (BigInt(a.pr) < BigInt(b.pr) ? -1 : 1));
+}
+
+/**
+ * What each stage reads. `withPeers: false` leaves the s4 peer list out. The approval digest uses
+ * that: another ECR being filed re-runs this ECR's s4 but is not a change to this ECR's own inputs,
+ * so it does not bump the revision or withdraw an approval.
+ */
+export function stageInfos(ctx: Ctx, pr: Pick<Pr, 'id' | 'baseVersion' | 'title' | 'description'>, withPeers = true): Record<string, StageInfo> {
   const out: Record<string, StageInfo> = {};
   const assumptions = effectiveAssumptions(ctx, pr.id);
   const rev = currentRevision(ctx, pr.id);
@@ -245,6 +278,7 @@ export function stageInfos(ctx: Ctx, pr: Pick<Pr, 'id' | 'baseVersion' | 'title'
         .filter(a => a.affects.length === 0 || a.affects.includes(stage))
         .map(a => ({ id: String(a.id), key: a.key, rev: a.rev }))
         .sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
+      if (stage === 's4_supply' && withPeers) inputs.peers = peerSnapshot(ctx, pr.id);
     }
     if (def.deps.length) inputs.upstream = Object.fromEntries(def.deps.map(d => [d, out[d]!.hash]));
     out[stage] = { hash: fnv1a64(JSON.stringify(inputs)), inputs };
@@ -258,6 +292,11 @@ export function inputHash(ctx: Ctx, pr: Pick<Pr, 'id' | 'baseVersion' | 'title' 
 
 export function digestOf(infos: Record<string, StageInfo>): string {
   return fnv1a64(JSON.stringify(STAGE_ORDER.map(s => infos[s]!.hash)));
+}
+
+/** The digest of what this ECR's own inputs are: its revision and approval follow it, not the peer list. */
+export function approvalDigest(ctx: Ctx, pr: Pick<Pr, 'id' | 'baseVersion' | 'title' | 'description'>): string {
+  return digestOf(stageInfos(ctx, pr, false));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -575,7 +614,7 @@ export function reconcile(ctx: Ctx, prId: bigint): string {
   }
 
   const infos = stageInfos(ctx, pr);
-  const digest = digestOf(infos);
+  const digest = approvalDigest(ctx, pr);
   if (digest !== pr.inputsDigest) {
     let why: string | null = null; // why an approval is withdrawn; null when there is none or it stands
     if (pr.status === 'approved') why = APPROVAL_HOOKS.onInputsChanged ? APPROVAL_HOOKS.onInputsChanged(ctx, pr) : 'its inputs changed';
@@ -639,10 +678,12 @@ export function enqueueDeepOnOpen(ctx: Ctx, prId: bigint): number {
 
 // Reconcile every open ECR (the baseline moved, or a config knob changed) and write one action-log
 // row for each ECR that changed, so a reader filtering by ECR sees why its state moved.
-export function reconcileAllOpen(ctx: Ctx, call: Call, cause: string): number {
+// `except` is an ECR the caller has just reconciled itself: when its change request or status moved,
+// the others' s4 (which compares them with it) is what needs re-running.
+export function reconcileAllOpen(ctx: Ctx, call: Call, cause: string, except?: bigint): number {
   let n = 0;
   for (const pr of [...ctx.db.pullRequest.iter()]) {
-    if (!OPEN_PR.includes(pr.status as PrStatus)) continue;
+    if (pr.id === except || !OPEN_PR.includes(pr.status as PrStatus)) continue;
     const outcome = reconcile(ctx, pr.id);
     n++;
     if (outcome !== 'no change') call.log({ prId: pr.id, entity: `pull_request:${pr.id}`, summary: `${cause}: ${outcome}` });

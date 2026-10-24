@@ -3,8 +3,8 @@
 Processes that do Norn's work outside the database, through its reducers. Written 2026-10-24.
 
 - **The worker** (`src/worker.ts`) claims queued check runs and stores their results.
-  - s1 (BOM delta) and s2 (cost) run Norn's impact checks (`../checks`) on ECRs that have a change
-    request from the PLM.
+  - s1 (BOM delta), s2 (cost), s3 (timeline) and s4 (supply) run Norn's impact checks
+    (`../checks`) on ECRs that have a change request from the PLM.
   - Every other stage, and every ECR with no change request, is mock compute. Its results say
     `mock: true`.
 - **The ingest loop** (`src/ingest.ts`) reports the ECRs a change-request source has to Norn, and the
@@ -44,17 +44,29 @@ NORN_DB=norn-gate-1 npm run check:gate                # end to end on a scratch 
      ones, through the module's `reconcile`.
    - The worker computes on exactly what the run names. If the ERP has moved on in the meantime, the
      worker records the new baseline, which makes the run stale, and drops it.
-4. **Results.** s1 stores `bomDeltaRows`, and s2 stores `costCheckRows`. Both go into `check_result`
-   unchanged, with `mock: false`.
+4. **Results.** s1 stores `bomDeltaRows`, s2 `costCheckRows`, s3 `timelineRows` and s4
+   `supplyCheckRows`. All go into `check_result` unchanged, with `mock: false`.
    - That includes the `detail` row (unit `json`), which holds every input the traces name.
      `get_impact` returns them.
    - An assumption the library can't take is reported in an `assumption_errors` row, not dropped.
    - The trace names where the baseline and the change request came from (`ERPNext baseline 2c02958e,
      as of 2026-10-24`, or `file baseline … (not the ERP)`). The run's inputs carry the same:
      `erpBaselineSource`, `erpBaselineAsOf` and `revisionSource`.
-5. **Workers that can't serve a run.** A worker with no baseline source leaves s1 and s2 runs it
+5. **Workers that can't serve a run.** A worker with no baseline source leaves s1 to s4 runs it
    has no baseline for to a worker that has one, instead of failing them.
-6. **Code version.** `code_version` (default `checks-0.2.0`) is part of every hash. Set it to the
+   **Peers (s4).** s4 also reads the other open ECRs' change requests, to show what two changes to
+   one supplier do to each other. The run's inputs name them (each open ECR's id, revision number
+   and digest), and the worker reads exactly those revisions, so the same inputs always give the
+   same rows. Filing, editing, closing or reopening another ECR changes the list and re-runs s4 on
+   every other open ECR; the module cannot tell which share a supplier, so all are named and the
+   check decides. This does not change the ECR's own revision or withdraw an approval: the peer list
+   is left out of the digest an approval stands on. A named revision the worker doesn't have, or has
+   with another digest, drops the run (stale). The `detail` row lists the peers it compared with.
+   Each named peer also carries its own assumptions that s4 applies (a decision lag recorded on it,
+   say), by id and revision. The worker reads them with the ECR's own, the ECR's own winning a key
+   they share, so an assumption recorded on one ECR re-runs s4 on every other open ECR. A peer it
+   cannot read is skipped and flagged, not fatal.
+6. **Code version.** `code_version` (default `checks-0.3.0`) is part of every hash. Set it to the
    checks library's `CHECKS_CODE_VERSION` when the library changes. The worker warns when the two
    disagree.
 

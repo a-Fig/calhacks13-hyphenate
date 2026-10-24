@@ -28,8 +28,8 @@ const bowman: CompanyConfig = loaded.config;
 const text = canonicalJson(bowman);
 const HASH = 'test-hash';
 
-// Bowman's configuration without the slip limit, because the timeline check is still a stand-in and no
-// real slip is ever known: with it the fast track recommends on every ECR.
+// Bowman's configuration without the slip limit, so that the cost limit alone decides in the cases below;
+// the slip limit has its own test.
 const noSlipLimit: CompanyConfig = structuredClone(bowman);
 for (const a of noSlipLimit.autonomy.actions) if (a.action === 'approve_fast_track_ecr') delete a.limits!.maxP90SlipDays;
 
@@ -141,9 +141,11 @@ describe('the cost, from stored results', () => {
     assert.equal(costMeasureKey(12, false), rowKey(12, false));
     assert.equal(costMeasureKey(6, true), rowKey(6, true));
   });
-  it('reads a slip only from a real timeline row', () => {
-    assert.equal(slipFromRows([row('cut_in_slip_days', 1, 2, 9, {}, true)]), undefined);
-    assert.equal(slipFromRows([row('cut_in_slip_days', 1, 2, 9)]), 9);
+  it('reads a slip only from a real timeline row: p90 weeks late, in days, never negative', () => {
+    assert.equal(slipFromRows([row('late_weeks', 1, 2, 3, {}, true)]), undefined);
+    assert.equal(slipFromRows([row('late_weeks', 0, 1, 3)]), 21);
+    assert.equal(slipFromRows([row('late_weeks', -5, -3, -1)]), 0);
+    assert.equal(slipFromRows([row('cut_in_weeks', 1, 2, 3)]), undefined);
     assert.equal(slipFromRows([]), undefined);
   });
 });
@@ -172,6 +174,14 @@ describe('the decision', () => {
     const v = judge(bowman, HASH, { action: 'approve_fast_track_ecr', actor: agent, facts: factsFor('ECR-0423', 622), request: request(bowman) });
     assert.equal(v.effect, 'downgrade');
     assert.ok(v.detail.limits!.some((l) => l.limit === 'maxP90SlipDays' && !l.held && l.actual === null));
+  });
+  it("applies Bowman's 14-day slip limit once a real slip is known", () => {
+    const facts = (slip: number) => ({ ...factsFor('ECR-0423', 622), slipP90Days: slip });
+    const within = judge(bowman, HASH, { action: 'approve_fast_track_ecr', actor: agent, facts: facts(7), request: request(bowman) });
+    const past = judge(bowman, HASH, { action: 'approve_fast_track_ecr', actor: agent, facts: facts(21), request: request(bowman) });
+    assert.equal(within.effect, 'allow', within.reason);
+    assert.equal(past.effect, 'downgrade');
+    assert.ok(past.detail.limits!.some((l) => l.limit === 'maxP90SlipDays' && !l.held && l.actual === 21));
   });
   it('holds an approval drawn for the second check', () => {
     const v = judge(noSlipLimit, HASH, { action: 'approve_fast_track_ecr', actor: agent, facts: factsFor(drawn, 622), request: request(noSlipLimit) });

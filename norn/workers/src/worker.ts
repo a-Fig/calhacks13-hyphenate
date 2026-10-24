@@ -43,7 +43,7 @@ const baselines = new BaselineStore(await baselineSourceFromEnv(), r =>
 );
 const HANDLERS: Record<string, (ctx: RunCtx) => Promise<Result[]>> = { ...MOCK_HANDLERS, ...impactHandlers(conn, baselines) };
 log(
-  `connected as ${identity.toHexString().slice(0, 12)}; stages ${handled.join(',')}; s1 and s2 are Norn's impact checks on ECRs with a change request, ` +
+  `connected as ${identity.toHexString().slice(0, 12)}; stages ${handled.join(',')}; s1 to s4 are Norn's impact checks on ECRs with a change request, ` +
     `baseline from ${baselines.source?.describe ?? 'nowhere (no source configured: those runs will fail)'}; everything else is MOCK compute`
 );
 
@@ -65,7 +65,7 @@ await applyStartupConfig(client, startupConfig, log).catch(e => {
   client.close();
   process.exit(1);
 });
-const configured = conn.db.nornConfig.key.find('code_version')?.value ?? 'checks-0.2.0';
+const configured = conn.db.nornConfig.key.find('code_version')?.value ?? 'checks-0.3.0';
 if (configured !== CHECKS_CODE_VERSION)
   log(`WARNING: norn_config code_version is '${configured}' but the checks library is '${CHECKS_CODE_VERSION}': results of the old library still count as current. Set code_version to '${CHECKS_CODE_VERSION}'.`);
 

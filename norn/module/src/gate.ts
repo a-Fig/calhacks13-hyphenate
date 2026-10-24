@@ -254,7 +254,12 @@ export function settleApproval(ctx: Ctx, prId: bigint): string {
   if (!pr || pr.status !== 'approved') return '';
   const a = standingApproval(ctx, prId);
   if (!a || a.tierIndex < 0) return '';
-  if (codeStagesNotDone(ctx, pr).length > 0) return '';
+  if (codeStagesNotDone(ctx, pr).length > 0) {
+    // Some check is being repeated (the baseline moved, or another ECR changed what s4 compares): the
+    // approval waits for it, and cannot be released until it has finished.
+    if (!a.pendingRecheck) ctx.db.approval.id.update({ ...a, pendingRecheck: true });
+    return '';
+  }
   const loaded = companyConfig(ctx);
   let reason: string | null = null;
   if (loaded.state !== 'ok') {

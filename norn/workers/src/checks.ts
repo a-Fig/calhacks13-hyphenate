@@ -221,6 +221,43 @@ await holds(() => [...db.agentEvent.iter()].filter(e => e.jobId === job).length 
 const got = [...db.agentEvent.iter()].filter(e => e.jobId === job).sort((a, b) => a.seq - b.seq);
 check('agent events are keyed by (job, seq): out-of-order batches are stored once each, a resent batch adds nothing', got.map(e => e.seq).join(',') === '0,1,2,3' && got.every(e => e.eventKey === `${job}#${e.seq}` && e.prId === E1.id && e.checkRunId === target.id && e.actor === 'agent:norn/level1/ECR-0417' && e.spawnedBy === 'norn' && e.sender.isEqual(A.identity)), got.map(e => e.eventKey).join(' '));
 
+// ---- s4 reads the other open ECRs: it names them, and re-runs when one changes -------------------------
+const crOf = (id: string, note = '') => JSON.stringify({ id, program: 'vesper', filedOn: '2026-10-20', itemChanges: [], bomChanges: [], supplierQuotes: [], effectivity: { production: { basis: 'tbd', from: '' }, interchangeable: true }, inventoryProposal: [], costPage: { production: [], retrofit: [], logisticsSupport: [], other: [] }, note });
+const plmA = `CHK-PEER-A-${stamp}`;
+const plmB = `CHK-PEER-B-${stamp}`;
+const ingest = (plm: string, note = '') => R.ingestEcr({ plmEcrNumber: plm, title: `check: peers ${plm}`, description: 'peer check', changeRequestJson: crOf(plm, note), source: 'check', sourceRef: note || 'first' });
+const peersOf = (id: bigint) => (JSON.parse(current(id, 's4_supply')!.inputsJson).peers ?? []) as { pr: string; revision: number; overlay: string }[];
+await ingest(plmA);
+const PA = await until(() => [...db.pullRequest.iter()].find(x => x.plmEcrNumber === plmA), 5000, 'the first peer ECR');
+created.push(PA.id);
+await approve(PA.id);
+const s4A = current(PA.id, 's4_supply')!;
+const revA = pr(PA.id).revision;
+check('s4 names the other open ECRs it reads, none yet', Array.isArray(JSON.parse(s4A.inputsJson).peers) && !peersOf(PA.id).some(n => n.pr === String(PA.id)), JSON.stringify(peersOf(PA.id)));
+await ingest(plmB);
+const PB = await until(() => [...db.pullRequest.iter()].find(x => x.plmEcrNumber === plmB), 5000, 'the second peer ECR');
+created.push(PB.id);
+check('filing a second ECR re-runs the s4 of the first ECR, which now names the second', await holds(() => current(PA.id, 's4_supply')!.id !== s4A.id && run(s4A.id).status === 'stale' && peersOf(PA.id).some(n => n.pr === String(PB.id) && n.revision === 1)), `${JSON.stringify(peersOf(PA.id))}, old s4 ${run(s4A.id).status}`);
+check('...and the first ECR revision and approval stay as they were: another ECR is not a change to its inputs', pr(PA.id).revision === revA && pr(PA.id).status === 'approved', `rev ${revA} -> ${pr(PA.id).revision}, ${pr(PA.id).status}`);
+check('...while stages that do not read the peers (s1, s2, s3) are left alone', ['s1_bom_delta', 's2_cost', 's3_timeline'].every(st => run(current(PA.id, st)!.id).status !== 'stale'), ['s1_bom_delta', 's2_cost', 's3_timeline'].map(st => run(current(PA.id, st)!.id).status).join(','));
+const s4A2 = current(PA.id, 's4_supply')!;
+await ingest(plmB, 'second report');
+check('a new revision of the second ECR re-runs the s4 of the first ECR on the revised change request', await holds(() => current(PA.id, 's4_supply')!.id !== s4A2.id && peersOf(PA.id).some(n => n.pr === String(PB.id) && n.revision === 2)), JSON.stringify(peersOf(PA.id)));
+const s4A3 = current(PA.id, 's4_supply')!;
+await R.setPrStatus({ prId: PB.id, status: 'closed' });
+check('closing the second ECR drops it from the peers of the first ECR', await holds(() => current(PA.id, 's4_supply')!.id !== s4A3.id && !peersOf(PA.id).some(n => n.pr === String(PB.id))), JSON.stringify(peersOf(PA.id)));
+const s4A4 = current(PA.id, 's4_supply')!;
+await R.setPrStatus({ prId: PB.id, status: 'draft' });
+check('reopening it adds it back', await holds(() => current(PA.id, 's4_supply')!.id !== s4A4.id && peersOf(PA.id).some(n => n.pr === String(PB.id))), JSON.stringify(peersOf(PA.id)));
+const s4A5 = current(PA.id, 's4_supply')!;
+const revA5 = pr(PA.id).revision;
+await R.recordAssumption({ prId: PB.id, key: `decision:${plmB}`, distJson: '{"kind":"fixed","value":60}', source: 'given', rationale: 'check: the board is assumed to take 60 weeks on the second ECR', affects: ['s4_supply'], expectedRev: 0 });
+const assumedB = await until(() => [...db.assumption.iter()].find(a => a.prId === PB.id && a.key === `decision:${plmB}` && a.current), 3000, 'the assumption on the second ECR');
+const namedAssumptions = (id: bigint) => (JSON.parse(current(id, 's4_supply')!.inputsJson).peers ?? []).find((n: { pr: string }) => n.pr === String(PB.id))?.assumptions ?? [];
+check('an assumption recorded on the second ECR re-runs the s4 of the first ECR, which names it', await holds(() => current(PA.id, 's4_supply')!.id !== s4A5.id && run(s4A5.id).status === 'stale' && namedAssumptions(PA.id).some((a: { id: string; rev: number }) => a.id === String(assumedB.id) && a.rev === 1)), `${JSON.stringify(namedAssumptions(PA.id))}, old s4 ${run(s4A5.id).status}`);
+check('...and the first ECR revision and approval stay as they were', pr(PA.id).revision === revA5 && pr(PA.id).status === 'approved', `rev ${revA5} -> ${pr(PA.id).revision}, ${pr(PA.id).status}`);
+check('...while s1, s2 and s3 of the first ECR do not run again', ['s1_bom_delta', 's2_cost', 's3_timeline'].every(st => run(current(PA.id, st)!.id).status !== 'stale'));
+
 // ---- impact statements: the run they were written from, and the publication lease (#80) --------------------
 await subscribe(A.conn, ['SELECT * FROM impact_statement', 'SELECT * FROM publication_claim']);
 const L1 = await connect({ kind: 'agent', name: `check-l1-${stamp}`, origin: 'norn', spawnedBy: 'Norn' }, { persistToken: false, quiet: true });

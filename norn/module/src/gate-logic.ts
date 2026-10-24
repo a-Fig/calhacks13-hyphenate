@@ -205,13 +205,14 @@ export function costFromRows(rows: readonly ResultRow[], config: CompanyConfig):
 }
 
 /**
- * The p90 slip of the cut-in in days from the timeline check's real rows, or undefined. The timeline
- * check is still a stand-in (its rows are mock), so nothing is read today and every limit on slip
- * counts as not held. The row to read is `cut_in_slip_days` (its p90) once the check computes it.
+ * The p90 slip of the cut-in, in days, from the timeline check's real rows, or undefined. It is the
+ * check's `late_weeks` row (weeks after the stated effectivity; negative is early) at p90, times 7,
+ * and never below zero. An ECR with no stated effectivity has no such row, so its slip is unknown
+ * and a limit on slip counts as not held. Stand-in (mock) rows are never read.
  */
 export function slipFromRows(rows: readonly ResultRow[]): number | undefined {
-  const r = rows.find((x) => !x.mock && x.key === 'cut_in_slip_days');
-  return r && isNum(r.p90) ? r.p90 : undefined;
+  const r = rows.find((x) => !x.mock && x.key === 'late_weeks');
+  return r && isNum(r.p90) ? Math.max(0, r.p90 * 7) : undefined;
 }
 
 // ---------------------------------------------------------------------------------------------
