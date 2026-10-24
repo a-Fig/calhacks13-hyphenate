@@ -30,6 +30,12 @@ export const LEAD: Record<string, Range3> = {
 };
 export type LeadClass = keyof typeof LEAD;
 
+/** Months to qualify an alternate source, by lead-time class. Invented. */
+export const REQUAL_MONTHS: Record<string, number> = {
+  cells: 12, magnets: 14, prepreg: 6, avionics: 18, tier1: 9, machined: 3, powersemi: 9, electronics: 6, windings: 6,
+  props: 8, actuators: 10, thermal: 5, harness: 4, interior: 6, gear: 12, hardware: 1, bearings: 4, rawsmall: 3, turbogen: 30,
+};
+
 /** Forward price range as multipliers on today's price (p10, p90) over the next 12 months. */
 export const PRICE_VOL: Record<string, [number, number]> = {
   stable: [0.98, 1.04],

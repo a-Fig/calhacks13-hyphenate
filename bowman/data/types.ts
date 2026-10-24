@@ -220,8 +220,10 @@ export interface Sourcing {
   moq: number;
   /** False for a quote on an item no released BOM uses yet (proposed by an open ECR). */
   qualified: boolean;
-  /** Only one qualified source for this item. */
+  /** Only one qualified source for this item. Normal for aerospace part numbers: severity is `requalMonths`. */
   soleSource: boolean;
+  /** Months to qualify an alternate source (first article, test, approval). The loss-severity signal for single-sourced items. */
+  requalMonths: number;
   capacityPerYear?: number;
   priceValidUntil: DateStr;
   prov: Provenance;
@@ -484,7 +486,7 @@ export interface Scenario {
   id: string;
   title: string;
   ecrs: string[];
-  kind: 'worked_example' | 'big_change' | 'fast_track' | 'conflict' | 'shared_supplier';
+  kind: 'worked_example' | 'big_change' | 'fast_track' | 'conflict' | 'shared_supplier' | 'background';
   /** What a correct run should find, in plain language. */
   expect: string[];
   /** Reference arithmetic by the dataset author. Indicative, not a number Norn must match to the cent. */

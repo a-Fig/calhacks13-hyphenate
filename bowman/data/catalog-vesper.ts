@@ -1,6 +1,6 @@
 import { buy, make } from './catalog-core.ts';
 import type { Row } from './catalog-core.ts';
-import { PRACTICE, src } from './prov.ts';
+import { ARCHER, PRACTICE, src } from './prov.ts';
 
 // Vesper V4 catalog. Part numbers are BW-<family>-<sequence>. Families:
 //   1xxx airframe   2xxx landing gear   3xxx motors and propulsion units   4xxx propellers
@@ -9,6 +9,17 @@ import { PRACTICE, src } from './prov.ts';
 // Prices are today's contract prices in USD per unit of measure. Quantities are in the BOM rows.
 // The cost-group share of the rolled-up standard cost is tuned in check.ts to the suggested basis
 // (avionics 20, motors/inverters/propellers 22, battery 15, airframe 20, actuators/thermal 10, other 13).
+
+const TILT = src(`${ARCHER} §1`, 'Midnight: 12 motors, 12-tilt-6; six forward motors tilt, six aft are fixed lift (FAA final airworthiness criteria, 2024-11192).');
+const FWD_PROP = src(`${ARCHER} §1`, 'Forward motors drive 5-blade variable-pitch propellers (FAA 2024-11192).');
+const AFT_PROP = src(`${ARCHER} §1`, 'FAA text describes 2-bladed aft propellers; Archer later chose four (Q4 2025 letter).');
+const PACKS = src(`${ARCHER} §1`, 'Six packs, about 140 kWh, cylindrical cells. Press-level figure (aggregator), not an Archer disclosure.');
+const FCC = src(`${ARCHER} §3`, 'Safran UCAP flight control computer, four per Archer airframe (2023-06-21).');
+const DECK = src(`${ARCHER} §3`, 'Garmin G3000 integrated flight deck (2022-11-15).');
+const FUSE = src(`${ARCHER} §3`, 'FACC supplies key fuselage and wing elements (Q2 2022 letter).');
+const ACT = src(`${ARCHER} §3`, 'Honeywell supplies actuators, climate and thermal management (Q2 2022 letter).');
+const PREG = src(`${ARCHER} §3`, 'Hexcel carbon fiber prepreg (letter of intent, April 2022).');
+const TOP = src(`${ARCHER} §1`, 'Pilot + 4, MTOW 6,500 lb, 12-tilt-6, composite structure, fixed tricycle gear.');
 
 const AF = 'airframe' as const;
 const PT = 'powertrain' as const;
@@ -23,14 +34,14 @@ export const vesper: Row[] = [
     ['BW-1000-000', 1], ['BW-2000-000', 1], ['BW-3000-000', 1], ['BW-3500-000', 1], ['BW-6000-000', 1],
     ['BW-7000-000', 1], ['BW-8000-000', 1], ['BW-8200-000', 1], ['BW-9100-000', 1], ['BW-9300-100', 1],
     ['BW-9400-000', 1], ['BW-9600-000', 1],
-  ], { kind: 'aircraft', safety: true }),
+  ], { kind: 'aircraft', safety: true, prov: TOP }),
 
   // ------------------------------------------------------------ 1000 airframe
   make('BW-1000-000', 'Airframe structure', AF, 'Assemblies', 'WC-STRUCT', 460, [
     ['BW-1110-100', 1], ['BW-1120-100', 1], ['BW-1130-100', 1], ['BW-1140-100', 1], ['BW-1150-100', 1], ['BW-1160-100', 2],
     ['BW-1200-000', 1], ['BW-1300-000', 1], ['BW-1410-000', 6], ['BW-1420-000', 2], ['BW-1500-100', 1],
   ], { safety: true }),
-  buy('BW-1110-100', 'Fuselage shell, forward, carbon/epoxy', AF, 'Composite structure', 'SUP-TARN', 73_500, 'tier1', 1, { safety: true, vol: 'stable' }),
+  buy('BW-1110-100', 'Fuselage shell, forward, carbon/epoxy', AF, 'Composite structure', 'SUP-TARN', 73_500, 'tier1', 1, { safety: true, vol: 'stable', prov: FUSE }),
   buy('BW-1120-100', 'Fuselage shell, aft, carbon/epoxy', AF, 'Composite structure', 'SUP-TARN', 59_800, 'tier1', 1, { safety: true, vol: 'stable' }),
   buy('BW-1130-100', 'Cabin floor panel assembly', AF, 'Composite structure', 'SUP-TARN', 17_400, 'tier1', 1, { safety: true }),
   buy('BW-1140-100', 'Bulkhead set, five composite bulkheads', AF, 'Composite structure', 'SUP-TARN', 23_600, 'tier1', 1, { safety: true }),
@@ -63,7 +74,7 @@ export const vesper: Row[] = [
   ], { safety: true }),
   buy('BW-1421-100', 'Aft motor mount fitting', AF, 'Machined parts', 'SUP-HALDEN', 1_600, 'machined', 3, { safety: true }),
   buy('BW-1500-100', 'Aerodynamic fairing and seal kit', AF, 'Composite structure', 'SUP-TARN', 21_500, 'tier1', 1),
-  buy('BW-1910-100', 'Carbon/epoxy prepreg', AF, 'Raw material', 'SUP-CARDINAL', 92, 'prepreg', 200, { uom: 'kg', kind: 'material', vol: 'volatile' }),
+  buy('BW-1910-100', 'Carbon/epoxy prepreg', AF, 'Raw material', 'SUP-CARDINAL', 92, 'prepreg', 200, { uom: 'kg', kind: 'material', vol: 'volatile', prov: PREG }),
   buy('BW-1920-100', 'Honeycomb core', AF, 'Raw material', 'SUP-CARDINAL', 205, 'prepreg', 20, { uom: 'm2', kind: 'material' }),
   buy('BW-1930-100', 'Film adhesive', AF, 'Raw material', 'SUP-CARDINAL', 31, 'rawsmall', 20, { uom: 'm2', kind: 'material' }),
   buy('BW-1940-100', 'Layup and bagging consumables kit', AF, 'Raw material', 'SUP-CARDINAL', 940, 'rawsmall', 5, { kind: 'material' }),
@@ -81,7 +92,7 @@ export const vesper: Row[] = [
   make('BW-3000-000', 'Forward propulsion system', PT, 'Assemblies', 'WC-SYS', 30, [['BW-3010-000', 6]], { safety: true }),
   make('BW-3010-000', 'Forward propulsor unit (motor, propeller, controller)', PT, 'Assemblies', 'WC-SYS', 8, [
     ['BW-3100-000', 1], ['BW-4100-000', 1], ['BW-5100-000', 1],
-  ], { safety: true }),
+  ], { safety: true, prov: TILT }),
   make('BW-3100-000', 'Forward motor assembly', PT, 'Assemblies', 'WC-MOTOR', 22, [
     ['BW-3110-100', 1], ['BW-3120-000', 1], ['BW-3130-100', 1], ['BW-3140-100', 1], ['BW-3150-100', 2],
     ['BW-3160-100', 1], ['BW-3170-100', 1], ['BW-3180-100', 1], ['BW-3190-100', 1],
@@ -103,7 +114,7 @@ export const vesper: Row[] = [
   make('BW-3500-000', 'Aft propulsion system', PT, 'Assemblies', 'WC-SYS', 24, [['BW-3510-000', 6]], { safety: true }),
   make('BW-3510-000', 'Aft propulsor unit (motor, propeller, controller)', PT, 'Assemblies', 'WC-SYS', 6, [
     ['BW-3200-000', 1], ['BW-4200-000', 1], ['BW-5200-000', 1],
-  ], { safety: true }),
+  ], { safety: true, prov: TILT }),
   make('BW-3200-000', 'Aft motor assembly', PT, 'Assemblies', 'WC-MOTOR', 16, [
     ['BW-3210-100', 1], ['BW-3220-000', 1], ['BW-3230-100', 1], ['BW-3240-100', 1], ['BW-3150-100', 2],
     ['BW-3260-100', 1], ['BW-3190-100', 1],
@@ -119,7 +130,7 @@ export const vesper: Row[] = [
   // ------------------------------------------------------------ 4000 propellers
   make('BW-4100-000', 'Forward propeller assembly, 5-blade variable pitch', PT, 'Propeller', 'WC-MOTOR', 6, [
     ['BW-4110-100', 1], ['BW-4120-100', 5], ['BW-4130-100', 1], ['BW-4140-100', 1], ['BW-4150-100', 1],
-  ], { safety: true }),
+  ], { safety: true, prov: FWD_PROP }),
   buy('BW-4110-100', 'Propeller hub, 5-blade variable pitch', PT, 'Propeller', 'SUP-HALVORSEN', 6_670, 'props', 1, { safety: true }),
   buy('BW-4120-100', 'Propeller blade, forward, carbon', PT, 'Propeller', 'SUP-HALVORSEN', 1_540, 'props', 5, { safety: true }),
   buy('BW-4130-100', 'Pitch change actuator', PT, 'Propeller', 'SUP-HALVORSEN', 3_950, 'props', 1, { safety: true }),
@@ -127,7 +138,7 @@ export const vesper: Row[] = [
   buy('BW-4150-100', 'Balance weights and hardware (forward propeller)', PT, 'Hardware and consumables', 'SUP-COBALT', 260, 'hardware', 50),
   make('BW-4200-000', 'Aft propeller assembly, 2-blade fixed pitch', PT, 'Propeller', 'WC-MOTOR', 4, [
     ['BW-4210-100', 1], ['BW-4220-100', 2], ['BW-4230-100', 2], ['BW-4240-100', 1], ['BW-4250-100', 1],
-  ], { safety: true }),
+  ], { safety: true, prov: AFT_PROP }),
   buy('BW-4210-100', 'Propeller hub, 2-blade fixed pitch', PT, 'Propeller', 'SUP-HALVORSEN', 2_500, 'props', 1, { safety: true }),
   buy('BW-4220-100', 'Propeller blade, aft 2-blade, carbon', PT, 'Propeller', 'SUP-HALVORSEN', 1_330, 'props', 4, { safety: true }),
   buy('BW-4230-100', 'Blade damper (aft)', PT, 'Propeller', 'SUP-HALVORSEN', 560, 'props', 4, { safety: true }),
@@ -174,7 +185,7 @@ export const vesper: Row[] = [
   buy('BW-5270-100', 'Controller enclosure (aft)', PT, 'Machined parts', 'SUP-HALDEN', 1_040, 'machined', 6),
 
   // ------------------------------------------------------------ 6000 battery system (6 packs, ~140 kWh, cylindrical cells)
-  make('BW-6000-000', 'Battery system (six packs)', BT, 'Assemblies', 'WC-PACK', 12, [['BW-6100-000', 6]], { safety: true }),
+  make('BW-6000-000', 'Battery system (six packs)', BT, 'Assemblies', 'WC-PACK', 12, [['BW-6100-000', 6]], { safety: true, prov: PACKS }),
   make('BW-6100-000', 'Battery pack, 800 V, about 24 kWh', BT, 'Assemblies', 'WC-PACK', 40, [
     ['BW-6120-000', 6], ['BW-6130-100', 1], ['BW-6140-100', 1], ['BW-6150-100', 1], ['BW-6160-100', 1], ['BW-6170-100', 1], ['BW-6180-100', 1], ['BW-6190-100', 1],
   ], { safety: true }),
@@ -201,10 +212,10 @@ export const vesper: Row[] = [
     ['BW-7300-100', 3], ['BW-7310-100', 2], ['BW-7320-100', 2], ['BW-7330-100', 1], ['BW-7340-100', 1], ['BW-7360-100', 1],
     ['BW-7400-100', 1], ['BW-7410-100', 2], ['BW-7430-100', 1],
   ], { safety: true }),
-  buy('BW-7110-100', 'Integrated flight deck display, 10-inch touchscreen', AV, 'Avionics', 'SUP-ALTUS', 33_000, 'avionics', 1, { safety: true, vol: 'stable', rev: 'B' }),
+  buy('BW-7110-100', 'Integrated flight deck display, 10-inch touchscreen', AV, 'Avionics', 'SUP-ALTUS', 33_000, 'avionics', 1, { safety: true, vol: 'stable', rev: 'B', prov: DECK }),
   buy('BW-7120-100', 'Flight deck touch controller', AV, 'Avionics', 'SUP-ALTUS', 9_900, 'avionics', 1, { vol: 'stable' }),
   buy('BW-7130-100', 'Integrated avionics unit', AV, 'Avionics', 'SUP-ALTUS', 19_000, 'avionics', 1, { safety: true, vol: 'stable' }),
-  buy('BW-7200-100', 'Flight control computer', AV, 'Avionics', 'SUP-VEYRON', 43_300, 'avionics', 1, { safety: true, vol: 'stable' }),
+  buy('BW-7200-100', 'Flight control computer', AV, 'Avionics', 'SUP-VEYRON', 43_300, 'avionics', 1, { safety: true, vol: 'stable', prov: FCC }),
   buy('BW-7210-100', 'Vehicle management computer', AV, 'Avionics', 'SUP-VEYRON', 49_000, 'avionics', 1, { safety: true, vol: 'stable' }),
   buy('BW-7220-100', 'Pilot inceptor, sidestick', AV, 'Avionics', 'SUP-VEYRON', 15_000, 'avionics', 1, { safety: true, vol: 'stable' }),
   buy('BW-7300-100', 'Air data and attitude reference unit', AV, 'Avionics', 'SUP-ALTUS', 12_200, 'avionics', 1, { safety: true, vol: 'stable' }),
@@ -221,7 +232,7 @@ export const vesper: Row[] = [
   make('BW-8000-000', 'Actuation system', AT, 'Assemblies', 'WC-SYS', 36, [
     ['BW-8110-100', 6], ['BW-8120-100', 4], ['BW-8130-100', 4], ['BW-8140-100', 2],
   ], { safety: true }),
-  buy('BW-8110-100', 'Tilt actuator, dual-redundant electromechanical', AT, 'Actuation', 'SUP-HOLLIS', 19_400, 'actuators', 1, { safety: true, rev: 'B' }),
+  buy('BW-8110-100', 'Tilt actuator, dual-redundant electromechanical', AT, 'Actuation', 'SUP-HOLLIS', 19_400, 'actuators', 1, { safety: true, rev: 'B', prov: ACT }),
   buy('BW-8120-100', 'Flaperon actuator, electromechanical', AT, 'Actuation', 'SUP-HOLLIS', 9_200, 'actuators', 1, { safety: true }),
   buy('BW-8130-100', 'Ruddervator actuator, electromechanical', AT, 'Actuation', 'SUP-HOLLIS', 9_700, 'actuators', 1, { safety: true }),
   buy('BW-8140-100', 'Actuator interface electronics', AT, 'Actuation', 'SUP-HOLLIS', 3_400, 'actuators', 2, { safety: true }),
@@ -259,7 +270,7 @@ export const vesper: Row[] = [
   buy('BW-9440-030', 'Avionics bay closeout panel, internal, light grey', OT, 'Interior', 'SUP-STRATUS', 41.5, 'interior', 60, {
     alt: { supplier: 'SUP-TARN', priceFactor: 1.12, share: 0.1 },
   }),
-  buy('BW-9450-100', 'Cabin lighting set', OT, 'Interior', 'SUP-STRATUS', 3_500, 'interior', 1),
+  buy('BW-9450-100', 'Cabin lighting set (reading and emergency egress lighting)', OT, 'Interior', 'SUP-STRATUS', 3_500, 'interior', 1, { safety: true }),
   buy('BW-9490-100', 'Safety equipment kit', OT, 'Interior', 'SUP-COBALT', 3_300, 'hardware', 1, { safety: true }),
   make('BW-9600-000', 'Fasteners, sealants and finish kit', OT, 'Assemblies', undefined, 0, [
     ['BW-9610-100', 1], ['BW-9620-100', 1], ['BW-9630-100', 1],

@@ -85,6 +85,34 @@ export const demoScenarios: Scenario[] = [
     reference: { vesperQualificationUsd: 96000, meridianQualificationUsd: 142000, secondQualificationDiscount: 0.4, rawMaterialPriceBreak: 0.06 },
     prov: inv('Planted shared-supplier interaction.'),
   },
+  {
+    id: 'B1', title: 'Lighting set filed as Class II (ECR-0406)', ecrs: ['ECR-0406'], kind: 'background',
+    expect: [
+      'Not eligible for fast track despite the Class II filing: the lighting set includes the emergency egress lighting (flight-safety item) and the connector changes from 6-pin to 8-pin, an interface change.',
+      'Reclassify to Class I; saving is only $210 per aircraft, about $5,000 a year at 24 aircraft.',
+    ],
+    reference: { savingPerAircraftUsd: 210 },
+    prov: inv('Background trap: a change that looks like ECR-0423 but is not.'),
+  },
+  {
+    id: 'B2', title: 'Prepreg resin system change (ECR-0407)', ecrs: ['ECR-0407'], kind: 'background',
+    expect: [
+      'The originator\'s FAA-minor proposal is doubtful: a new resin system in primary composite structure needs new material allowables, so likely FAA major and 6 to 12 months of qualification across wing, tail and booms.',
+      'Saving is -$2,096 per aircraft (524 kg at -$4.00), about $50k a year at 24 aircraft and $1.4M a year at 650; the qualification cost and the delay are not on the cost page.',
+      'Meridian is unaffected: its structure is bought from Tarn, not laid up in-house.',
+    ],
+    reference: { savingPerAircraftUsd: 2096, savingYear2027Usd: 2096 * 24, savingAtRateUsd: 2096 * 650 },
+    prov: inv('Background trap: a small unit saving with a large hidden qualification effort.'),
+  },
+  {
+    id: 'B3', title: 'Remove the second DC-DC converter (ECR-0410)', ecrs: ['ECR-0410'], kind: 'background',
+    expect: [
+      'A pure saving on the cost page ($5,150 per aircraft, $3.3M a year at 650) but it removes redundancy on the 28 V flight-essential bus: system-safety change, FAA major, never fast-track.',
+      'A single converter failure leaves only the backup batteries. Norn should flag the safety effect as a judgment, not net it into the saving.',
+    ],
+    reference: { savingPerAircraftUsd: 5150, savingAtRateUsd: 5150 * 650 },
+    prov: inv('Background trap: cost reduction that cuts redundancy.'),
+  },
 ];
 
 export const scenarioProv = INV;

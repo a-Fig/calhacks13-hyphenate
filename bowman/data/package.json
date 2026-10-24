@@ -1,0 +1,6 @@
+{
+  "name": "bowman-data",
+  "private": true,
+  "type": "module",
+  "description": "Fictional Bowman Aviation dataset for Norn. Plain TypeScript, no dependencies; run with Node 24 (node check.ts)."
+}

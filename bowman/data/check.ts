@@ -5,6 +5,8 @@
 
 import { bowman as d } from './index.ts';
 import type { CostGroup, Ecr, Item, ItemCode, Provenance } from './types.ts';
+import { existsSync, readFileSync } from 'node:fs';
+import { JSON_PATH, render } from './export.ts';
 
 const failures: string[] = [];
 const warnings: string[] = [];
@@ -317,6 +319,7 @@ for (const e of d.ecrs) {
     ok(itemBy.has(b.parent) && itemBy.has(b.child), `${e.id} BOM change unknown item`);
     if (b.op === 'remove') ok(bomQty(b.parent, b.child) === b.qtyFrom, `${e.id}: ${b.parent} has ${bomQty(b.parent, b.child)} of ${b.child}, ECR removes ${b.qtyFrom}`);
     if (b.op === 'add') ok(bomQty(b.parent, b.child) === undefined, `${e.id}: ${b.child} already under ${b.parent}`);
+    if (b.op === 'set_qty') ok(bomQty(b.parent, b.child) === b.qtyFrom, `${e.id}: ${b.parent} has ${bomQty(b.parent, b.child)} of ${b.child}, ECR changes ${b.qtyFrom}`);
   }
   for (const q of e.supplierQuotes) {
     ok(supplierBy.has(q.supplier) && itemBy.has(q.item), `${e.id} quote ${q.id} unknown supplier or item`);
@@ -395,7 +398,17 @@ function itemFieldSet(e: Ecr) {
   ok(e1.program === 'vesper' && e2.program === 'meridian', 'interaction pair should span both programs');
   ok(d.supplierConstraints.some((c) => c.supplier === 'SUP-ORRIN' && c.kind === 'qualification_slot' && c.items.includes('BW-3120-340') && c.items.includes('BW-M512-340')), 'Orrin qualification-slot constraint missing');
 }
-ok(d.demoScenarios.length === 5, 'expected five demo scenarios');
+// Background traps: look cheap or trivial, are not
+{
+  const e6 = ecrBy.get('ECR-0406')!;
+  ok(e6.companyClass === 'II' && itemBy.get('BW-9450-100')!.safetyCritical, 'ECR-0406 trap: filed Class II on a safety-critical item');
+  ok(e6.itemChanges[0].changes.some((c) => c.field === 'connector_pins'), 'ECR-0406 trap: connector change missing');
+  const e10 = ecrBy.get('ECR-0410')!;
+  ok(e10.bomChanges[0].op === 'set_qty' && bomQty('BW-9100-000', 'BW-9130-100') === e10.bomChanges[0].qtyFrom, 'ECR-0410 quantity does not match the BOM');
+  ok(itemBy.get('BW-1910-100')!.programs.join() === 'vesper', 'prepreg should feed Vesper only');
+}
+ok(d.demoScenarios.filter((s) => s.kind !== 'background').length === 5, 'expected five planted demo scenarios');
+ok(d.demoScenarios.filter((s) => s.kind === 'background').length === 3, 'expected three background scenarios');
 for (const sc of d.demoScenarios) for (const id of sc.ecrs) ok(ecrBy.has(id), `scenario ${sc.id} unknown ECR ${id}`);
 
 // ------------------------------------------------------------------ provenance
@@ -417,6 +430,15 @@ const provRows: [string, string][] = [
   ['NCRs', provCount('ncrs', d.ncrs)], ['ECRs', provCount('ecrs', d.ecrs)], ['stock', provCount('stock', d.stock)], ['POs', provCount('purchaseOrders', d.purchaseOrders)],
 ];
 for (const k of ['volumePlan', 'builtAircraft', 'standardCostHistory', 'bom', 'purchaseOrders', 'stock']) ok(d.sectionProvenance[k], `no section provenance for ${k}`);
+
+// ------------------------------------------------------------------ exported JSON is current
+
+if (existsSync(JSON_PATH)) {
+  const onDisk = readFileSync(JSON_PATH, 'utf8').split('\r\n').join('\n');
+  ok(onDisk === render(), 'bowman.json is out of date: run node bowman/data/export.ts');
+} else {
+  warn(false, 'bowman.json not found: run node bowman/data/export.ts');
+}
 
 // ------------------------------------------------------------------ summary
 

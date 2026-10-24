@@ -78,6 +78,78 @@ const FULL_ROUTE: Ecr['routedTo'] = ['cost_engineer', 'buyer', 'production_plann
 // ---------------------------------------------------------------- ECRs
 
 export const ecrs: Ecr[] = [
+  // ---------------------------------------------------------------- background backlog (planted traps, see scenarios.ts B1-B3)
+  {
+    id: 'ECR-0406', rev: 'A',
+    title: 'Cabin lighting set: LED strip v2',
+    status: 'submitted', program: 'vesper', originator: 'EMP-07', filedOn: '2026-10-02', neededBy: '2026-10-30',
+    priority: 'routine', justificationCode: 'R', companyClass: 'II', faaClass: 'minor',
+    faaRationale: 'Lighting only. Minor.',
+    description:
+      'Stratus has a v2 LED strip for the cabin lighting set, same footprint, better lumen per watt, and cheaper: $3,290 against $3,500. They qualified it on their own rig. ' +
+      'Their datasheet shows the connector goes from 6-pin to 8-pin, they include an adapter lead in the set so our harness does not change. Class II, nothing to it, can we just release it.',
+    need: 'Cost reduction of $210 per aircraft, and the v1 strip goes end of life next year.',
+    consequencesIfDisapproved: 'Pay more, and a forced change when v1 goes end of life.',
+    alternativesConsidered: 'None.',
+    testAndQualification: 'Supplier rig qualification only.',
+    itemChanges: [
+      { item: 'BW-9450-100', op: 'revise', fromRev: 'A', toRev: 'B', changes: [{ field: 'led_strip', from: 'v1', to: 'v2' }, { field: 'connector_pins', from: 6, to: 8 }, { field: 'unit_price_usd', from: 3500, to: 3290 }] },
+    ],
+    bomChanges: [],
+    supplierQuotes: [{ id: 'Q-STR-26-0771', supplier: 'SUP-STRATUS', item: 'BW-9450-100', receivedOn: '2026-09-28', lines: [{ description: 'Lighting set, LED v2 with adapter lead', unitPrice: 3290 }], leadTimeWeeks: 16 }],
+    effectivity: { production: { basis: 'lot', from: 'next order', note: 'Next order.' }, interchangeable: true },
+    inventoryProposal: [],
+    costPage: { production: [line('Lighting set unit cost', 'supplier_quote', { unitCost: -210, quantity: 1 })], retrofit: [], logisticsSupport: [], other: [] },
+    routedTo: ['cm_analyst'], clarity: 'terse',
+    prov: inv('Planted trap: filed as Class II, but the set includes the emergency egress lighting (a flight-safety item) and changes the connector, an interface change. Not eligible for fast track.'),
+  },
+  {
+    id: 'ECR-0407', rev: 'A',
+    title: 'Carbon prepreg: move to Cardinal\'s new resin system',
+    status: 'submitted', program: 'vesper', originator: 'EMP-08', filedOn: '2026-10-03', neededBy: '2026-12-10',
+    priority: 'routine', justificationCode: 'R', companyClass: 'I', faaClass: 'minor',
+    faaRationale: 'Proposed minor by the originator: same carbon fiber, same resin family, same cure cycle. Certification lead has not reviewed.',
+    description:
+      'Cardinal has a new epoxy resin system for the same carbon fiber prepreg, qualified to the same cure cycle (the prepreg we buy as BW-1910-100). $88.00 per kg against $92.00, -4.3%. We use about 524 kg per aircraft in the wing boxes, V-tail, tilt pylons and aft booms (layup items BW-1210-000, BW-1310-000, BW-1410-000, BW-1420-000). ' +
+      'Cardinal says the properties are equal or better and the lead time is the same. At 650 aircraft per year this is about $1.4M a year.',
+    need: 'Cost reduction. Prepreg is the largest raw material line, and Cardinal passes on the saving only if we move to the new system before their 2027 price agreement.',
+    consequencesIfDisapproved: 'Stay on the current resin at $92.00, with a possible price rise at the 2027 renewal.',
+    alternativesConsidered: 'Negotiate a volume discount on the current system.',
+    testAndQualification: 'Cardinal data package; coupon tests. Not estimated.',
+    itemChanges: [
+      { item: 'BW-1910-100', op: 'revise', fromRev: 'A', toRev: 'B', changes: [{ field: 'resin_system', from: 'current epoxy', to: 'new epoxy (Cardinal CE-24)' }, { field: 'unit_price_usd', from: 92, to: 88 }] },
+    ],
+    bomChanges: [],
+    supplierQuotes: [{ id: 'Q-CAR-26-0412', supplier: 'SUP-CARDINAL', item: 'BW-1910-100', receivedOn: '2026-09-30', validUntil: '2027-06-30', lines: [{ description: 'Prepreg, new resin system, per kg, 5,000 kg minimum', unitPrice: 88, qty: 5000 }], leadTimeWeeks: 16 }],
+    effectivity: { production: { basis: 'date', from: '2027-04-01', note: 'Next material lot after approval.' }, interchangeable: true },
+    inventoryProposal: [{ item: 'BW-1910-100', location: 'stores', disposition: 'use_until_depleted', note: 'Freezer stock has a shelf life; do not mix systems in one part.' }],
+    costPage: { production: [line('Prepreg unit cost', 'supplier_quote', { unitCost: -2096, quantity: 1, note: '524 kg per aircraft at -$4.00 per kg.' })], retrofit: [], logisticsSupport: [], other: [] },
+    routedTo: ['cost_engineer', 'buyer', 'production_planner'], clarity: 'typical',
+    prov: inv('Planted trap: a small unit saving that needs new material allowables for primary composite structure. Likely FAA major and a large qualification effort the originator left out.'),
+  },
+  {
+    id: 'ECR-0410', rev: 'A',
+    title: 'Drop the second DC-DC converter',
+    status: 'submitted', program: 'vesper', originator: 'EMP-08', filedOn: '2026-10-07', neededBy: '2026-11-12',
+    priority: 'routine', justificationCode: 'R', companyClass: 'I', faaClass: 'minor',
+    faaRationale: 'Proposed minor by the originator: removes a part, adds none, nothing changes in the envelope.',
+    description:
+      'We carry two 5 kW HV to 28 V DC-DC converters (BW-9130-100) in the power distribution system. Measured 28 V load is 1.1 kW average and 3.2 kW peak, so one converter covers it. ' +
+      'Remove one converter from BW-9100-000: quantity 2 to 1. Saves $5,150 of material per aircraft, plus a mounting tray and one harness leg that is not yet drawn out in the BOM. The 28 V backup batteries stay.',
+    need: 'Cost reduction: the second converter is one of the larger items in the electrical system, and the measured load does not seem to need it. Over 650 aircraft per year this is $3.3M a year.',
+    consequencesIfDisapproved: 'No saving.',
+    alternativesConsidered: 'Keep both and downgrade each to 3 kW: saves about $900 per converter.',
+    testAndQualification: 'Load test on the bench rig, one day.',
+    itemChanges: [],
+    bomChanges: [{ op: 'set_qty', parent: 'BW-9100-000', child: 'BW-9130-100', qtyFrom: 2, qtyTo: 1 }],
+    supplierQuotes: [],
+    effectivity: { production: { basis: 'serial', from: '13', note: 'S/N 013 and subsequent.' }, interchangeable: true },
+    inventoryProposal: [{ item: 'BW-9130-100', location: 'stores', disposition: 'use_until_depleted' }],
+    costPage: { production: [line('Converter material removed', 'engineer_estimate', { unitCost: -5150, quantity: 1 })], retrofit: [], logisticsSupport: [], other: [] },
+    routedTo: ['cost_engineer', 'production_planner'], clarity: 'typical',
+    prov: inv('Planted trap: removes redundancy on the 28 V flight-essential bus. A system-safety change, FAA major, never fast-track, even though the cost page looks like a pure saving.'),
+  },
+
   // ---------------------------------------------------------------- scenario 1: the worked example
   {
     id: 'ECR-0417', rev: 'A',

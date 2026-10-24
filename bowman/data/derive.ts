@@ -1,7 +1,7 @@
 import type {
   BomLine, Item, ItemCode, PurchaseOrder, PurchaseOrderLine, RateFactor, RevEntry, Sourcing, StockRow, SupplierId,
 } from './types.ts';
-import { LEAD, PRICE_VOL } from './catalog-core.ts';
+import { LEAD, PRICE_VOL, REQUAL_MONTHS } from './catalog-core.ts';
 import type { BuyRow, Row } from './catalog-core.ts';
 import { vesper } from './catalog-vesper.ts';
 import { meridian } from './catalog-meridian.ts';
@@ -82,7 +82,10 @@ for (const c of supplierConstraints) {
 }
 
 function sourcingProv(r: BuyRow) {
-  if (r.prov.basis === 'sourced') return r.prov;
+  if (r.prov.basis === 'sourced') {
+    if (r.code === 'BW-5120-210') return r.prov;
+    return { ...r.prov, note: `${r.prov.note ?? ''} Supplier pairing from the source; price and lead time invented.`.trim() };
+  }
   if (LEAD_FROM_SUGGESTED_BASIS.has(r.lead)) {
     return src(`${ARCHER} "Suggested basis for Bowman", lead-time table`, 'Lead-time range follows the table (itself a proposal marked invented there). Price invented.');
   }
@@ -104,6 +107,7 @@ for (const r of rows) {
     moq,
     qualified: !proposed,
     soleSource: !r.alt,
+    requalMonths: r.code === 'BW-5120-210' ? 4 : REQUAL_MONTHS[r.lead],
     ...(capacityByItem.has(r.code) ? { capacityPerYear: capacityByItem.get(r.code) } : {}),
     priceValidUntil: proposed ? '2026-12-31' : '2027-06-30',
     prov: sourcingProv(r),
