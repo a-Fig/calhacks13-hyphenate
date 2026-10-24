@@ -1,0 +1,15 @@
+{
+  "name": "bowman-plm",
+  "private": true,
+  "type": "module",
+  "description": "Bowman's PLM (a Frappe site): setup, seed and verify scripts. Node 24 runs the .ts files directly.",
+  "scripts": {
+    "setup": "node setup.ts",
+    "seed": "node seed.ts",
+    "verify": "node verify.ts",
+    "screenshots": "node screenshots.ts"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.50.0"
+  }
+}
