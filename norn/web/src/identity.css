@@ -1,0 +1,85 @@
+/* Norn's drawing-room identity, on Primer's layout and interaction components. */
+.nx {
+  --fgColor-accent: #14675f;
+  --bgColor-accent-muted: #eaf4f1;
+  --borderColor-accent-emphasis: #14675f;
+  --control-checked-bgColor-rest: #14675f;
+  --underlineNav-borderColor-active: #ad482c;
+  --norn-copper: #ad482c;
+  --norn-ink: #213d39;
+}
+
+.nx-masthead { background: #f8f7f3; border-top: 3px solid var(--norn-copper); border-bottom: 1px solid #dedfd8; }
+.nx-masthead-inner { display: flex; align-items: center; gap: 24px; min-height: 76px; }
+.nx .nx-brand { display: inline-flex; align-items: center; gap: 9px; color: var(--norn-ink); font-size: 31px; font-weight: 750; letter-spacing: -1.5px; text-decoration: none; }
+.nx-brand img { display: block; }
+.nx-brand-dot { color: var(--norn-copper); }
+.nx-workspace-nav { align-self: stretch; display: flex; margin-left: 20px; }
+.nx-workspace-nav a { display: flex; align-items: center; gap: 8px; border-bottom: 2px solid var(--norn-copper); padding: 0 4px; font-weight: 600; }
+.nx .nx-workspace-nav a:hover { text-decoration: none; background: #eef0e9; }
+.nx-tenant { color: #57635d; font-size: 13px; font-weight: 600; }
+.nx-skip { position: absolute; left: 16px; top: -60px; padding: 8px 16px; z-index: 100; background: white; border: 2px solid var(--fgColor-accent); }
+.nx-skip:focus { top: 8px; }
+
+.nx-request-number { display: inline-flex; align-items: stretch; white-space: nowrap; font-family: var(--fontStack-monospace); border: 1px solid #b4c4bb; border-radius: 3px; font-size: 12px; line-height: 22px; color: var(--norn-ink); background: #f7faf7; vertical-align: middle; }
+.nx-request-number > span { padding: 0 5px; border-right: 1px solid #b4c4bb; font-size: 10px; letter-spacing: .05em; }
+.nx-request-number b { padding: 0 7px; font-weight: 600; }
+.nx-drawing-head { display: flex; align-items: center; gap: 8px; color: var(--fgColor-muted); font-size: 12px; padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--borderColor-muted); }
+.nx-drawing-head .nx-request-number { margin-left: 12px; }
+.nx-state-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 20px; background: #e6f3ef; color: #17534b; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.nx-state-badge.small { padding: 2px 8px; font-size: 12px; }
+.nx-status-draft { background: #eff1f3; color: #59636e; }
+.nx-status-rejected { background: #ffebe9; color: #a40e26; }
+.nx-status-approved, .nx-status-eco-released { background: #f0ebff; color: #6639ba; }
+.nx-state-badge svg { color: inherit; }
+
+.nx-list { padding-top: 32px; }
+.nx-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.nx .nx-list-title { font-size: 28px; font-weight: 600; color: var(--norn-ink); letter-spacing: -.6px; margin-bottom: 4px; }
+.nx-row-sub .nx-request-number { line-height: 17px; font-size: 11px; margin-right: 6px; }
+.nx-row-program { display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; color: var(--norn-ink); }
+.nx-pr-head { padding-top: 20px; background: linear-gradient(180deg, #fafbf8 0%, white 100%); }
+.nx-check-emblem { display: inline-flex; flex: none; padding: 9px; background: #eaf4f1; border: 1px solid #c9ded6; border-radius: 6px; color: var(--norn-ink); }
+.nx .nx-revs-day { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 400; color: var(--fgColor-muted); margin: 0 0 12px; }
+.nx-revs > section { border-left: 2px solid #d3dfd8; padding: 0 0 8px 24px; }
+.nx-revs-day > svg { margin-left: -35px; background: white; color: var(--norn-ink); }
+.nx-rev-id { display: inline-flex; align-items: center; gap: 6px; color: var(--norn-ink); border: 1px solid #b4c4bb; border-radius: 3px; padding: 4px 8px; white-space: nowrap; background: #f7faf7; }
+
+/* Screen audit: narrow layouts retain the same cards, tabs and content instead of clipping. */
+@media (max-width: 767px) {
+  .nx-container { padding-left: 16px; padding-right: 16px; }
+  .nx-masthead-inner { gap: 12px; flex-wrap: wrap; padding-top: 12px; }
+  .nx-workspace-nav { order: 4; width: 100%; margin: 0; min-height: 42px; }
+  .nx-tenant { margin-left: auto; font-size: 12px; }
+  .nx-masthead-inner > .nx-sp { display: none; }
+  .nx-list-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .nx .nx-list-title { font-size: 26px; }
+  .nx-box-head { flex-wrap: wrap; gap: 12px; padding: 12px; }
+  .nx-filters { flex-wrap: wrap; width: 100%; }
+  .nx-row { flex-wrap: wrap; padding: 12px; }
+  .nx-row-main { min-width: 0; flex: 1; }
+  .nx-row-title { flex-wrap: wrap; }
+  .nx-row-right { padding-left: 32px; width: 100%; justify-content: flex-end; }
+  .nx-row-sub { line-height: 1.9; }
+  .nx-row-sub .nx-flag { white-space: normal; }
+  .nx-drawing-head { gap: 5px; flex-wrap: wrap; }
+  .nx-drawing-head .nx-request-number { margin-left: 4px; }
+  .nx-pr-head h1 { font-size: 24px; overflow-wrap: anywhere; }
+  .nx-checks { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .nx-check-pane .nx-box, .nx-diff { overflow-x: auto; }
+  .nx-cost { min-width: 620px; }
+  .nx-checks-list { min-width: 0; }
+  .nx-t-body { margin-left: 24px; }
+  .nx-av-col { left: -4px; }
+  .nx-av-col img { width: 24px; height: 24px; }
+  .nx-comment-head { flex-wrap: wrap; padding: 8px 12px; }
+  .nx-comment-body { padding: 12px; overflow-x: auto; }
+  .nx-bot-table { min-width: 520px; }
+  .nx-merge, .nx-erp { margin-left: 0; }
+  .nx-merge-foot { flex-wrap: wrap; }
+  .nx-merge-head { padding: 12px; gap: 8px; }
+  .nx-merge-text, .nx-pending-card > div { overflow-wrap: anywhere; min-width: 0; }
+  .nx-erp-head, .nx-erp-line-head { flex-wrap: wrap; }
+  .nx-pending-card > svg { flex: none; }
+  .nx-rev-list li { align-items: flex-start; flex-direction: column; }
+}

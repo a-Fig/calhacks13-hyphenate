@@ -57,24 +57,6 @@ body { margin: 0; }
 .nx-mark.claim { text-decoration: none; }
 .nx-mark.claim:hover, .nx-mark.claim.open { text-decoration: underline; text-decoration-color: var(--c); }
 
-/* ---------- GitHub's global header ---------- */
-.nx-gh {
-  display: flex; align-items: center; gap: 16px; height: 64px; padding: 0 32px;
-  background: var(--bgColor-emphasis); color: var(--fgColor-onEmphasis);
-}
-.nx .nx-gh-logo { display: inline-flex; color: var(--fgColor-onEmphasis); }
-.nx-gh-logo:hover { text-decoration: none; }
-.nx-gh-crumbs { display: flex; align-items: center; gap: 6px; font-size: 14px; }
-.nx .nx-gh-crumbs a { color: var(--fgColor-onEmphasis); }
-.nx-gh-crumbs span { color: #9198a1; }
-.nx .nx-gh-link { color: #9198a1; font-size: 13px; }
-
-/* ---------- the repository title row ---------- */
-.nx-repoband { background: var(--bgColor-muted); border-bottom: 1px solid var(--borderColor-default); padding-top: 16px; }
-.nx-repo { display: flex; align-items: center; gap: 8px; font-size: 16px; margin-bottom: 12px; }
-.nx-repo-owner { color: var(--fgColor-accent) !important; }
-.nx-repo-name { font-weight: 600; }
-
 /* ---------- boxes ---------- */
 .nx-box {
   background: var(--bgColor-default); border: 1px solid var(--borderColor-default); border-radius: 6px; margin-bottom: 16px; overflow: hidden;
@@ -126,7 +108,6 @@ body { margin: 0; }
 /* ---------- the ECR header ---------- */
 .nx-pr-head { padding-top: 16px; border-bottom: 1px solid var(--borderColor-default); }
 .nx-pr-head h1, .nx-pr-head [class*="Title"] { font-weight: 400 !important; }
-.nx-num-muted { color: var(--fgColor-muted); font-weight: 300; }
 .nx-pr-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--fgColor-muted); font-size: 14px; }
 .nx-pr-sub b { color: var(--fgColor-default); font-weight: 600; }
 .nx-chip-code {
