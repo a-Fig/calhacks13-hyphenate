@@ -256,4 +256,4 @@ export interface Flag {
   ref?: string;
 }
 
-export const CHECKS_CODE_VERSION = 'checks-0.1.0';
+export const CHECKS_CODE_VERSION = 'checks-0.2.0';

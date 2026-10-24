@@ -166,7 +166,8 @@ test('ECR-0423: the fast-track saving of $11.40 an aircraft, in parentheses, wit
   assert.ok(y2027.recurring.point < 0 && y2027.recurring.point >= -k.savingYear2027Usd, `2027 saving ${y2027.recurring.point}: at most 24 aircraft, fewer while grey stock is used up`);
   assert.equal(r.effectivity[0].basis, 'use_up');
   assert.equal(r.effectivity[0].source, 'default');
-  assert.match(renderCostPage(r), /\(11\.40\)/);
+  assert.ok(Math.abs(per.p50 - per.point) < 0.05, `p50 ${per.p50} is the stated saving give or take sampling`);
+  assert.ok(renderCostPage(r).includes(formatUsd(per.p50)), 'the cost page shows the p50');
 });
 
 test('an agent\'s estimate replaces a default by id, and the trace says so (#32 hook included)', () => {
@@ -189,7 +190,7 @@ test('an agent\'s estimate replaces a default by id, and the trace says so (#32 
 });
 
 test('an effectivity set by a person replaces the ECR\'s and moves the recurring split', () => {
-  const r = costCheck(bowman, ecr('ECR-0417'), { seed: SEED, assumptions: [{ id: 'effectivity:ECR-0417:vesper', source: 'given', value: 15, rationale: 'Planner: Rev C reaches the line at S/N 015' }] });
+  const r = costCheck(bowman, ecr('ECR-0417'), { seed: SEED, assumptions: [{ id: 'effectivity:ECR-0417:vesper', source: 'given', value: 15, rationale: 'Planner: Rev C reaches the line at S/N 015', replacesGiven: true }] });
   assert.equal(r.effectivity[0].cutInSerial, 15);
   assert.equal(r.effectivity[0].basis, 'override');
   const units = (x: CostCheckResult) => x.blocks.production.find((y) => y.id === 'recurring:vesper')!.quantity!;
@@ -306,4 +307,64 @@ test('a budgetary quote widens its rows and its new prices', () => {
 test('undecided units on order are priced as cancelled, not scrapped', () => {
   const r = costCheck(bowman, ecr('ECR-0419'), { seed: SEED, draws: 2000 });
   assert.match(r.flags.find((f) => f.kind === 'disposition_tbd' && f.message.includes('on order'))!.message, /cancelling them would cost about/);
+});
+
+test('an assumption replaces the cut-in the ECR states only with replacesGiven; one with a distribution is flagged as needing a value', () => {
+  const stated = r417.effectivity[0].cutInSerial;
+  const r = costCheck(bowman, ecr('ECR-0417'), {
+    seed: SEED, draws: 2000,
+    assumptions: [{ id: 'effectivity:ECR-0417:vesper', source: 'agent_estimated', value: 15, rationale: 'the agent thinks S/N 015' }],
+  });
+  assert.equal(r.effectivity[0].cutInSerial, stated, 'the ECR\'s cut-in stands');
+  assert.match(r.flags.find((f) => f.kind === 'assumption_not_applied' && f.ref === 'effectivity:ECR-0417:vesper')!.message, /replacesGiven/);
+  const d = costCheck(bowman, ecr('ECR-0423'), {
+    seed: SEED, draws: 2000,
+    assumptions: [{ id: 'effectivity:ECR-0423:vesper', source: 'agent_estimated', dist: point(30), rationale: 'a distribution where a serial is needed' }],
+  });
+  assert.equal(d.effectivity[0].basis, 'use_up');
+  assert.match(d.flags.find((f) => f.kind === 'unused_assumption' && f.ref === 'effectivity:ECR-0423:vesper')!.message, /takes a value/);
+});
+
+test('a blank scrap row with no disposition proposed is an ordinary blank row, on its own id', () => {
+  const scrap = rowId('ECR-0417', 'production', 'Scrap and write-off of Rev B inventory');
+  const e = ecr('ECR-0417');
+  e.inventoryProposal = [];
+  const r = costCheck(bowman, e, { seed: SEED, draws: 2000 });
+  assert.equal(row(r, scrap).needsEstimate, true);
+  assert.ok(r.flags.some((f) => f.kind === 'needs_estimate' && f.ref === scrap));
+  const est = costCheck(bowman, e, { seed: SEED, draws: 2000, assumptions: [{ id: scrap, source: 'agent_estimated', dist: point(5_000), rationale: 'the buyer\'s estimate' }] });
+  assert.equal(row(est, scrap).total.point, 5_000);
+  assert.ok(!est.flags.some((f) => f.kind === 'unused_assumption'));
+});
+
+test('the computed premium is skipped only for a supplier-quote production row of the same amount', () => {
+  const e = ecr('ECR-0417');
+  e.costPage.other.push({ label: 'Contingency', oneTime: 462.5, basis: 'engineer_estimate' });
+  e.costPage.production.push({ label: 'Programme allowance', oneTime: 462.5, basis: 'engineer_estimate' });
+  const r = costCheck(bowman, e, { seed: SEED, draws: 2000 });
+  assert.ok(rows(r).some((x) => x.id === PREMIUM), 'an unrelated row of the same amount doesn\'t hide the premium');
+});
+
+test('a run that misses the convergence tolerance doubles its draws until it converges', () => {
+  // Seeds w28 and w29 need 20,000 and 40,000 draws for ECR-0409, whose budgetary quote makes its change wide.
+  for (const [seed, draws] of [['w28', 20_000], ['w29', 40_000], [SEED, 10_000]] as const) {
+    const r = costCheck(bowman, ecr('ECR-0409'), { seed });
+    assert.equal(r.draws, draws, seed);
+    assert.ok(r.convergence.converged, seed);
+    assert.ok(!r.flags.some((f) => f.kind === 'not_converged'), seed);
+  }
+  const capped = costCheck(bowman, ecr('ECR-0409'), { seed: 'w29', maxDraws: 10_000 });
+  assert.equal(capped.draws, 10_000);
+  assert.equal(capped.convergence.converged, false);
+  assert.match(capped.flags.find((f) => f.kind === 'not_converged')!.message, /maxDraws/);
+});
+
+test('price ranges of parts the change does not touch are one input, and the stored detail stays small', () => {
+  const prices = r417.inputs.filter((i) => i.id.startsWith('price:')).map((i) => i.id);
+  assert.deepEqual(prices, ['price:BW-5120-210'], 'only the part the change touches');
+  const bulk = r417.inputs.find((i) => i.id === 'baseline:price-ranges')!;
+  assert.equal(bulk.source, 'given');
+  assert.ok(r417.unitCost[0].base.trace.uses.some((u) => u.id === 'baseline:price-ranges'));
+  const detail = costCheckRows(r417).find((x) => x.unit === 'json')!;
+  assert.ok(detail.detailJson.length < 40_000, `detail row ${detail.detailJson.length} bytes`);
 });

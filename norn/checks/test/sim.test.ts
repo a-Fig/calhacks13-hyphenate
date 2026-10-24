@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { lognormal, lognormalFromQuantiles, pert, point, quantileOf, triangular } from '../src/dist.ts';
+import { invNorm, normals } from '../src/random.ts';
 import { drawAll, evaluate, pairedDelta, quantileSorted, summarize } from '../src/sim.ts';
 
 const close = (a: number, b: number, tol: number, what: string) => assert.ok(Math.abs(a - b) <= tol, `${what}: ${a} vs ${b} (tol ${tol})`);
@@ -89,4 +90,13 @@ test('a paired delta is the percentiles of the per-draw difference, not the diff
 test('a fixed input takes no draws', () => {
   const d = drawAll([{ id: 'p', dist: point(18.64), groups: ['supplier:S'] }], 's', 5);
   assert.deepEqual([...d.values.get('p')!], [18.64, 18.64, 18.64, 18.64, 18.64]);
+});
+
+test('each input\'s draws are Latin hypercube sampled: one in each of n equal-probability strata', () => {
+  const n = 1000;
+  const z = [...normals('s', 'price:X', n)].sort((a, b) => a - b);
+  for (let k = 1; k < n - 1; k++) {
+    assert.ok(z[k] >= invNorm(k / n) - 1e-9 && z[k] <= invNorm((k + 1) / n) + 1e-9, `draw ${k} is in stratum ${k}`);
+  }
+  assert.notDeepEqual([...normals('s', 'price:X', 50)], [...normals('s', 'price:X', 50)].sort((a, b) => a - b), 'in a shuffled order, not sorted');
 });

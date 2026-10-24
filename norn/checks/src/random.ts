@@ -82,10 +82,23 @@ export function normCdf(z: number): number {
   return z >= 0 ? 0.5 * (1 + y) : 0.5 * (1 - y);
 }
 
-/** n standard normal draws from one named stream. */
+/**
+ * n standard normal draws from one named stream, Latin hypercube sampled: one draw in each of n
+ * equal-probability strata, in a random order from the same stream (GAO-20-195G recommends it,
+ * docs/IN-PRACTICE.md §5). Each input's percentiles then settle with far fewer draws than plain
+ * Monte Carlo, and draws stay a function of the seed and the input's id only.
+ */
 export function normals(seed: string, name: string, n: number): Float64Array {
   const u = stream(seed, name);
+  const order = new Uint32Array(n);
+  for (let i = 0; i < n; i++) order[i] = i;
+  for (let i = n - 1; i > 0; i--) {
+    const j = Math.floor(u() * (i + 1));
+    const t = order[i];
+    order[i] = order[j];
+    order[j] = t;
+  }
   const out = new Float64Array(n);
-  for (let i = 0; i < n; i++) out[i] = invNorm(u());
+  for (let i = 0; i < n; i++) out[i] = invNorm((order[i] + u()) / n);
   return out;
 }

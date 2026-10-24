@@ -36,14 +36,18 @@ Both results are plain JSON. `bomDeltaRows` and `costCheckRows` turn them into r
 
 ## Ranges
 
-- About 10,000 Monte Carlo draws; every number has p10, p50 and p90, a mean, and a point estimate
-  (every input at its stated value).
+- 10,000 Monte Carlo draws, Latin hypercube sampled (one draw in each of 10,000 equal-probability
+  strata of every input). Every number has p10, p50 and p90, a mean, and a point estimate (every
+  input at its stated value).
 - Costs and prices are lognormal through their stated p10, p50 and p90: quantiles, not bounds.
   Bounded shares (scrap recovery, cancellation charge) are PERT.
 - Inputs in one group (same supplier, shared internal labour) correlate 0.3; inputs in no common
   group are independent.
 - Convergence: P80 and P90 of the headline numbers are recomputed on a second seed and must agree
-  within 1%.
+  within 1%. A run that misses doubles its draws, up to 40,000 (`maxDraws`), and `draws` in the
+  result says how many it used. ECR-0409, whose budgetary quote makes its change wide, needs 20,000
+  or 40,000 on about one seed in six; every other dataset ECR converges at 10,000 on every seed
+  tried. A run that still misses at the cap is flagged `not_converged`.
 
 ## Paired draws and the seed rule
 
@@ -75,7 +79,12 @@ Every number carries `trace: { formula, uses: [{ id, source }], evidence: 'compu
 id is in the result's `inputs`, with its source (`given`, `default` or `agent_estimated`), its
 value or distribution, where it came from and why. The supplier quote's lines are `given` inputs.
 A cost-page row the originator left blank (`not_provided`) becomes a `default` assumption of $0,
-flagged `needsEstimate`; a blank scrap row is filled by the disposition line instead.
+flagged `needsEstimate`. A blank scrap row is filled by the disposition line instead, when the ECR
+proposes a disposition; otherwise it is an ordinary blank row.
+
+The price ranges of parts the change doesn't touch are drawn one by one, since they set the unit
+cost at base and head, but they are listed as one input, `baseline:price-ranges`, because they
+cancel in every change. That keeps ECR-0417's stored detail near 23 KB rather than 116 KB.
 
 An assumption recorded on the ECR replaces a default by id
 (`options.assumptions: [{ id, source: 'agent_estimated', dist, rationale }]`). That is how an
@@ -116,6 +125,8 @@ shows it.
   - when stock is proposed for use-up, the cut-in comes after that stock is used up;
   - otherwise, the filing date plus the longest quoted lead time.
 
-  Every other program the item is in takes the change on every unit not yet built.
+  Every other program the item is in takes the change on every unit not yet built. An assumption
+  `effectivity:<ecr>:<program>` with a serial or a month replaces a default cut-in, and replaces a
+  stated one only with `replacesGiven: true`.
 - **Year-one window.** It runs 12 months from the cut-in on the ECR's own program.
 - **At today's prices.** Recurring cost doesn't apply the dataset's at-rate price factors.

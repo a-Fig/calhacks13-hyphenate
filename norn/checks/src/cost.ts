@@ -175,7 +175,10 @@ export interface CostCheckResult {
 export interface CostCheckOptions {
   /** The run's seed. Use the deployment's configured seed, never a hash of the head's inputs (README). */
   seed: string;
+  /** Draws to start with (10,000). A run that misses the convergence tolerance doubles them, up to maxDraws. */
   draws?: number;
+  /** The most draws a run may double up to: 4 × draws unless set. Set it to draws to turn doubling off. */
+  maxDraws?: number;
   /** Length of the year-one window, in months from the cut-in. */
   windowMonths?: number;
   correlation?: number;
@@ -235,7 +238,8 @@ interface RowDraft {
 
 /** Run S2 on one ECR. Pure and deterministic in (baseline, ecr, options). */
 export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostCheckOptions): CostCheckResult {
-  const n = options.draws ?? 10_000;
+  const n0 = options.draws ?? 10_000;
+  const maxDraws = Math.max(n0, options.maxDraws ?? 4 * n0);
   const windowMonths = options.windowMonths ?? 12;
   const rho = options.correlation ?? 0.3;
   const tol = options.convergenceTolerance ?? 0.01;
@@ -297,10 +301,16 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const rate = new Map(baseline.workCenters.map((w) => [w.id, w.laborRatePerHour]));
   const sourcingOf = (code: ItemCode) => baseline.sourcing.find((x) => x.item === code && x.primary) ?? baseline.sourcing.find((x) => x.item === code);
   const itemCodes = new Set([...s.base.keys(), ...s.head.keys()]);
+  // Items whose quantity or price the change moves. Every other item's price index is drawn (for the
+  // unit cost at base and head) but listed as one input, so a result doesn't carry 200 of them.
+  const affectedCodes = new Set(baseline.programs.flatMap((p) => changedRows(s, p.id).map((r) => r.item)));
+  const bulk = new Set<string>();
+  const BULK_ID = 'baseline:price-ranges';
 
   const priceVar = (code: ItemCode): string => {
     const id = `price:${code}`;
     if (vars.has(id)) return id;
+    if (!affectedCodes.has(code)) bulk.add(id);
     const src = sourcingOf(code);
     const supplier = src?.supplier ?? s.head.get(code)?.supplier ?? s.base.get(code)?.supplier;
     const groups = supplier ? [`supplier:${supplier}`] : [];
@@ -430,7 +440,13 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     const id = `effectivity:${ecr.id}:${p.id}`;
     const firstUnbuilt = lastBuiltSerial(baseline.builtAircraft, p.id) + 1;
     const beyond = (sm.at(-1)?.last ?? firstUnbuilt - 1) + 1;
-    const ov = overrides.get(id);
+    let ov = overrides.get(id);
+    const stated = p.id === ecr.program && ((ecr.effectivity.production.basis === 'serial' && Number.isFinite(Number(ecr.effectivity.production.from))) || (ecr.effectivity.production.basis === 'date' && /^\d{4}-\d{2}/.test(ecr.effectivity.production.from)));
+    if (ov?.value !== undefined && stated && !ov.replacesGiven) {
+      usedOverrides.add(id);
+      flags.push({ kind: 'assumption_not_applied', severity: 'warn', ref: id, message: `An assumption for ${id} would replace the cut-in the ECR states. Recorded but not applied: set replacesGiven to replace it (the timeline check does).` });
+      ov = undefined;
+    }
     let e: Omit<EffectivityResult, 'cutInMonth'>;
     if (ov?.value !== undefined) {
       usedOverrides.add(id);
@@ -507,7 +523,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   // The originator's cost page.
   let engineerRecurring = 0;
   const engineerRecurringRefs: string[] = [];
-  const blankScrapRows: string[] = [];
+  const blankScrapRows: { id: string; label: string; ref: string; rowInput: string; note?: string }[] = [];
   const affectedBuyHeadPrice = new Map<ItemCode, number>();
   for (const p of programs) for (const r of changedRows(s, p.id)) if (r.makeBuy === 'buy' && r.priceHead !== null) affectedBuyHeadPrice.set(r.item, r.priceHead);
   const quoteSupplier = [...new Set(ecr.supplierQuotes.map((q) => q.supplier))];
@@ -525,8 +541,9 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
       const rowInput = `row:${ecr.id}:${block}:${key}`;
       input({ id: rowInput, label: row.label, source: 'given', ref, value: row.basis, ...(row.note ? { rationale: row.note } : {}) });
       if (row.basis === 'not_provided') {
-        if (block === 'production' && SCRAP_ROW.test(row.label)) {
-          blankScrapRows.push(row.label);
+        if (block === 'production' && SCRAP_ROW.test(row.label) && ecr.inventoryProposal.length > 0) {
+          // Filled by the inventory disposition line, which is computed from the proposal below.
+          blankScrapRows.push({ id, label: row.label, ref, rowInput, ...(row.note ? { note: row.note } : {}) });
           noVariable.set(id, `"${row.label}" is filled by the inventory disposition line; record a recovery share (recovery:<item>) instead`);
           return;
         }
@@ -645,7 +662,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
       if (steady === undefined || l.unitPrice === undefined || !l.qty || l.oneTime !== undefined) return;
       if (l.unitPrice <= steady + 0.005) return;
       const premium = (l.unitPrice - steady) * l.qty;
-      const listed = COST_BLOCKS.flatMap((b) => ecr.costPage[b]).find((x) => x.oneTime !== undefined && near(x.oneTime, premium));
+      const listed = ecr.costPage.production.find((x) => x.basis === 'supplier_quote' && x.oneTime !== undefined && near(x.oneTime, premium));
       if (listed) {
         flags.push({ kind: 'read_from_quote', severity: 'info', ref: `supplier quote ${q.id} line ${li + 1}`, message: `The first-lot premium on quote ${q.id} (${r2(premium)}) is already on the cost page as "${listed.label}", so it is not added again.` });
         return;
@@ -738,16 +755,18 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
       oneTime: sum(...parts.map((x) => x.expr)), unit: null, quantity: null,
       formula: 'Σ locations: scrap = qty × standard cost × (1 − recovery share); cancel = qty × price × cancellation share; use up = 0',
       uses: [...LOCATIONS.map((l) => `stock:${code}:${l}`), 'baseline:items', `row:${ecr.id}:inventory`],
-      note: blankScrapRows.length ? `Fills the blank cost-page row "${blankScrapRows.join('", "')}".` : undefined,
+      note: blankScrapRows.length ? `Fills the blank cost-page row "${blankScrapRows.map((b) => b.label).join('", "')}".` : undefined,
     });
   }
   if (ecr.inventoryProposal.length) input({ id: `row:${ecr.id}:inventory`, label: `${ecr.id} inventory proposal`, source: 'given', ref: `${ecr.id} inventoryProposal` });
   if (blankScrapRows.length && inventory.length === 0) {
-    for (const label of blankScrapRows) {
-      const id = `cost:${ecr.id}:scrap`;
-      const v = variable({ id, label, dist: point(0), source: 'default', needsEstimate: true, rationale: 'Left blank, and the ECR proposes no disposition to compute it from. Counted as $0 until estimated.' });
-      rows.push({ id, block: 'production', label, recurring: false, basis: reg.get(v)!.source, oneTime: [{ coef: 1, vars: [v] }], unit: null, quantity: null, formula: 'blank on the cost page: $0, to be estimated', uses: [v], needsEstimate: true });
-      flags.push({ kind: 'needs_estimate', severity: 'warn', message: `"${label}" was left blank and no disposition is proposed.`, ref: id });
+    // The proposal named items with no stock row, so there is no line to fill these: blank rows after all.
+    for (const b of blankScrapRows) {
+      noVariable.delete(b.id);
+      const v = variable({ id: b.id, label: b.label, dist: point(0), source: 'default', ref: b.ref, needsEstimate: true, rationale: 'Left blank, and no disposition could be computed. Counted as $0 until estimated.' });
+      const rec = reg.get(v)!;
+      if (rec.needsEstimate) flags.push({ kind: 'needs_estimate', severity: 'warn', message: `"${b.label}" was left blank and no disposition could be computed.`, ref: b.id });
+      rows.push({ id: b.id, block: 'production', label: b.label, recurring: false, basis: rec.source, oneTime: [{ coef: 1, vars: [v] }], unit: null, quantity: null, formula: rec.needsEstimate ? 'blank on the cost page: $0, to be estimated' : 'estimate recorded for a blank cost-page row', uses: [b.rowInput, v], ...(rec.needsEstimate ? { needsEstimate: true } : {}), ref: b.ref, note: b.note });
     }
   }
   for (const p of programs) {
@@ -815,8 +834,14 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   }
 
   // ---------------------------------------------------------------- simulate
+  if (bulk.size) {
+    input({
+      id: BULK_ID, label: `Price ranges of the ${bulk.size} parts the change does not touch`, source: 'given', ref: 'sourcing, next 12 months',
+      rationale: 'Each part\'s price index is lognormal through its sourcing p10, p50 and p90, drawn as price:<item> and correlated 0.3 within its supplier. They move the unit cost at base and head equally, so they cancel in every change.',
+    });
+  }
   const varList = [...vars.values()];
-  const runOnce = (seed: string) => {
+  const runOnce = (seed: string, n: number) => {
     const d = drawAll(varList, seed, n, rho);
     const out = new Map<string, Summary>();
     const arrays = new Map<string, Float64Array>();
@@ -827,16 +852,35 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     }
     return { d, out, arrays };
   };
-  const run1 = runOnce(options.seed);
+  // Convergence of P80 and P90 across two seeds (docs/IN-PRACTICE.md §8, recommendation 8). A run
+  // that misses the tolerance doubles its draws, up to maxDraws, and the result says how many it used.
   const seed2 = `${options.seed}:convergence`;
-  const run2 = runOnce(seed2);
+  const convKeys = ['oneTimeTotal', 'recurringWindow', 'windowTotal', 'recurringPlan', ...programs.map((p) => `unitCost:${p.id}/delta`)];
+  const compare = (a1: Map<string, Summary>, a2: Map<string, Summary>) => convKeys.map((key) => {
+    const a = a1.get(key)!;
+    const b = a2.get(key)!;
+    const scaleOf = Math.max(Math.abs(a.p50), a.p90 - a.p10, 1e-9);
+    const rel = Math.max(Math.abs(a.p80 - b.p80), Math.abs(a.p90 - b.p90)) / scaleOf;
+    return { key, p80: [r2(a.p80), r2(b.p80)] as [number, number], p90: [r2(a.p90), r2(b.p90)] as [number, number], relDiff: Math.round(rel * 1e6) / 1e6 };
+  });
+  let n = n0;
+  let run1 = runOnce(options.seed, n);
+  let metrics = compare(run1.out, runOnce(seed2, n).out);
+  while (!metrics.every((m) => m.relDiff <= tol) && n * 2 <= maxDraws) {
+    n *= 2;
+    run1 = runOnce(options.seed, n);
+    metrics = compare(run1.out, runOnce(seed2, n).out);
+  }
+  const converged = metrics.every((m) => m.relDiff <= tol);
+  if (!converged) flags.push({ kind: 'not_converged', severity: 'warn', message: `P80/P90 moved by more than ${tol * 100}% between seeds at ${n.toLocaleString('en-US')} draws, the most allowed; raise maxDraws.` });
 
   const pointOfVar = (id: string) => pointOf(vars.get(id)!.dist);
   const trace = (p: Pending): Trace => {
     const ids = [...new Set([...p.uses, ...varsOf(p.expr)])];
-    const missing = ids.filter((id) => !reg.has(id));
+    const named = [...new Set(ids.map((id) => (bulk.has(id) ? BULK_ID : id)))];
+    const missing = named.filter((id) => !reg.has(id));
     if (missing.length) throw new Error(`trace of ${p.key} names ids that are not inputs: ${missing.join(', ')}`);
-    const uses: TraceUse[] = ids.map((id) => ({ id, source: reg.get(id)!.source }));
+    const uses: TraceUse[] = named.map((id) => ({ id, source: reg.get(id)!.source }));
     return { formula: p.formula, uses, evidence: 'computation' };
   };
   const money = (key: string, sumOverride?: Summary): Money => {
@@ -885,17 +929,6 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   }
   drivers.sort((a, b) => b.swing - a.swing);
 
-  // Convergence of P80 and P90 across two seeds (docs/IN-PRACTICE.md §8, recommendation 8).
-  const convKeys = ['oneTimeTotal', 'recurringWindow', 'windowTotal', 'recurringPlan', ...programs.map((p) => `unitCost:${p.id}/delta`)];
-  const metrics = convKeys.map((key) => {
-    const a = run1.out.get(key)!;
-    const b = run2.out.get(key)!;
-    const scaleOf = Math.max(Math.abs(a.p50), a.p90 - a.p10, 1e-9);
-    const rel = Math.max(Math.abs(a.p80 - b.p80), Math.abs(a.p90 - b.p90)) / scaleOf;
-    return { key, p80: [r2(a.p80), r2(b.p80)] as [number, number], p90: [r2(a.p90), r2(b.p90)] as [number, number], relDiff: Math.round(rel * 1e6) / 1e6 };
-  });
-  const converged = metrics.every((m) => m.relDiff <= tol);
-  if (!converged) flags.push({ kind: 'not_converged', severity: 'warn', message: `P80/P90 moved by more than ${tol * 100}% between seeds; raise the number of draws.` });
 
   const periods = programs.flatMap((p) =>
     [...counts.get(p.id)!.byYear].sort().map(([year, units]) => ({ period: year, program: p.id, units, recurring: money(`period:${p.id}:${year}`) })),
@@ -905,7 +938,9 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   for (const a of options.assumptions ?? []) {
     if (usedOverrides.has(a.id)) continue;
     const why = noVariable.get(a.id)
-      ?? (vars.has(a.id) && !a.dist ? 'it has no distribution, and this input needs one' : 'no input of this check has that id');
+      ?? (vars.has(a.id) ? 'it has no distribution, and this input needs one'
+        : reg.has(a.id) ? 'this input takes a value (a serial number or a month), not a distribution'
+          : 'no input of this check has that id');
     flags.push({ kind: 'unused_assumption', severity: 'warn', ref: a.id, message: `Assumption ${a.id} was not applied: ${why}.` });
   }
 
@@ -945,7 +980,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     convergence: { seeds: [options.seed, seed2], tolerance: tol, converged, metrics },
     bomDelta: { ok: s.conflicts.length === 0, conflicts: s.conflicts.length },
     flags,
-    inputs: [...reg.values()].sort((a, b) => a.id.localeCompare(b.id)),
+    inputs: [...reg.values()].filter((x) => !bulk.has(x.id)).sort((a, b) => a.id.localeCompare(b.id)),
   };
 }
 
