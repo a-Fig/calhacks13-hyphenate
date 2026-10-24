@@ -23,6 +23,7 @@ NORN_DB=norn-pipe npm run check:pipeline             # end to end on a scratch d
 NORN_DB=norn-pipe npm run check:package              # the ERP change package on a released ECO, with a planner of its own instead of ERPNext
 npm run test:workers                                 # offline tests of the start-up config and of the module's company_config checks
 NORN_DB=norn-cfg npm run check:config                # end to end on a scratch database you named: start-up config stored once, a re-run stores nothing, a malformed file stops the worker
+NORN_DB=norn-gate-1 npm run check:gate                # end to end on a scratch database: the company gate, the fast track, and approvals across a re-check (starts two workers of its own)
 ```
 
 ## How an ECR gets its numbers
