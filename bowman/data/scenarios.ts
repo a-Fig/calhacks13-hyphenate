@@ -13,6 +13,7 @@ const scrapQty = bracket.stores + bracket.wip + bracket.supplierFinished + brack
 const scrapCost = scrapQty * OLD - scrapQty * SALVAGE;
 const cancelCost = bracket.onOrder * OLD * 0.1;
 const oneTimeNre = 6800 + 4200 + 2600 + 15370 + 18500;
+const FIRST_LOT = 239.5; // Halden's price for the first lot of 25
 const retrofitParts = 120 * NEW;
 const retrofitLabor = 10 * 12 * 110;
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -38,6 +39,9 @@ export const demoScenarios: Scenario[] = [
       scrapNetOfSalvageUsd: r2(scrapCost),
       cancellationChargeUsd: r2(cancelCost),
       oneTimeTotalUsd: r2(oneTimeNre + retrofitParts + retrofitLabor + scrapCost + cancelCost),
+      // Booked as purchase price variance, so not in oneTimeTotalUsd. An assessment may show it as its
+      // own one-time row ("first-lot price premium"); its total is then oneTimeTotalUsd plus this.
+      firstLotPremiumUsd: r2(25 * (FIRST_LOT - NEW)),
     },
     prov: src(`${PRACTICE} §1`, 'Worked example, with retrofit scope and inventory adjusted to the dataset (10 built aircraft instead of 4).'),
   },
