@@ -52,7 +52,7 @@ Folders are created as code lands.
   build the ERP change package on a released ECO (#72). Norn never writes to the ERP (#71). Its API
   user is read-only (`bowman/erp/`).
 - **Agents:** MCP, with each agent's identity, the person it acts for, and what spawned it.
-- **Configuration:** one company config file, validated against Norn's config schema at start-up.
+- **Configuration:** one company config file, named by `NORN_COMPANY_CONFIG`, validated against Norn's config schema when the worker starts and stored through `set_config` (`config/README.md`).
 
 ## Stack
 
