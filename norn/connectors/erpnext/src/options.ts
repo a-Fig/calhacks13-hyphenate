@@ -34,10 +34,28 @@ export interface CustomFieldNames {
     allocation?: string;
   };
   bom?: {
-    /** Name of the change order that released this BOM version (history reads only). */
+    /** Name of the change order that released this BOM version. History reads, and the write-back's tag. */
     changeOrder?: string;
-    /** Date the version was released (history reads only). Default: its creation date. */
+    /** Date the version was released. History reads, and the write-back stamps it. Default: its creation date. */
     releasedOn?: string;
+    /** Link to the Norn decision that caused the version. Write-back only; a BOM has no free-text field to fall back on. */
+    decision?: string;
+  };
+  /** Write-back: tags on the Item Price rows Norn writes. */
+  itemPrice?: {
+    /** Change order that wrote the row. Required to write: it is how Norn finds its own earlier rows. */
+    changeOrder?: string;
+    /** Link to the Norn decision (the row's `note` also says it in words). */
+    decision?: string;
+  };
+  /** Write-back: tags on the Journal Entries Norn writes. */
+  journalEntry?: {
+    /** Change order that caused the entry. Required to write. */
+    changeOrder?: string;
+    /** Which of the release's entries this is (its `key`). Required to write: with the change order it makes a retry find the entry. */
+    entry?: string;
+    /** Link to the Norn decision (`user_remark` also says it in words). */
+    decision?: string;
   };
   purchaseOrder?: {
     /** The company's own PO number, when ERPNext's differs (history reads only). */
@@ -49,6 +67,17 @@ export interface CustomFieldNames {
 export interface Fallback {
   volumePlan?: VolumeRow[];
   builtAircraft?: BuiltUnit[];
+}
+
+/** What the write-back needs beyond the read settings. */
+export interface WriteSettings {
+  /**
+   * ERPNext account for each role a release's journal lines name (for example scrapExpense, inventoryReserve,
+   * accruedLiability). The roles are the company's to define; the connector only looks them up.
+   */
+  accounts: Record<string, string>;
+  /** Cost center for the profit-and-loss rows. Default: ERPNext fills the company's default. */
+  costCenter?: string;
 }
 
 export interface ErpnextSettings {
@@ -67,6 +96,8 @@ export interface ErpnextSettings {
   /** Serial No to the integer serial the checks use. Default: the trailing digits of the serial number. */
   serialNumber?: (serialNo: string) => number | undefined;
   customFields?: CustomFieldNames;
+  /** Only needed to write an ECO release back (write.ts). */
+  write?: WriteSettings;
   /**
    * Master Production Schedule to read the volume plan from. Default: the company's most recently
    * modified one.

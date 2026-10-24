@@ -1,5 +1,5 @@
-// A small read-only ERPNext REST client: token auth, list reads in one request each.
-// Never logs or throws headers, keys or secrets.
+// A small ERPNext REST client: token auth, list reads in one request each, and the POST and PUT the
+// ECO write-back (write.ts) uses. Never logs or throws headers, keys or secrets.
 
 import type { ErpnextConnection } from './options.ts';
 
@@ -37,11 +37,27 @@ export class ErpnextClient {
     this.#timeout = c.timeoutMs ?? 30_000;
   }
 
-  async get<T>(path: string, query: Record<string, unknown> = {}): Promise<T> {
+  get<T>(path: string, query: Record<string, unknown> = {}): Promise<T> {
+    return this.request<T>('GET', path, query);
+  }
+
+  /** Creates or calls a method. `body` is JSON. */
+  post<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>('POST', path, {}, body);
+  }
+
+  /** Updates a document with the fields in `body`. */
+  put<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>('PUT', path, {}, body);
+  }
+
+  async request<T>(method: 'GET' | 'POST' | 'PUT', path: string, query: Record<string, unknown> = {}, payload?: unknown): Promise<T> {
     const url = new URL(this.#base + path);
     for (const [k, v] of Object.entries(query)) if (v !== undefined) url.searchParams.set(k, typeof v === 'string' ? v : JSON.stringify(v));
     this.requests++;
-    const r = await fetch(url, { headers: { Authorization: this.#auth, Accept: 'application/json' }, signal: AbortSignal.timeout(this.#timeout) });
+    const headers: Record<string, string> = { Authorization: this.#auth, Accept: 'application/json' };
+    if (payload !== undefined) headers['Content-Type'] = 'application/json';
+    const r = await fetch(url, { method, headers, body: payload === undefined ? undefined : JSON.stringify(payload), signal: AbortSignal.timeout(this.#timeout) });
     const text = await r.text();
     let body: any;
     try { body = JSON.parse(text); } catch { body = undefined; }
@@ -50,6 +66,7 @@ export class ErpnextClient {
       // Frappe puts the human message in _server_messages, a JSON string of JSON strings.
       let msg = '';
       try { msg = JSON.parse(body._server_messages).map((m: string) => JSON.parse(m).message).join(' | ').replace(/<[^>]+>/g, ''); } catch { /* no message */ }
+      if (!msg && typeof body?.exception === 'string') msg = body.exception.split(': ').slice(1).join(': ');
       throw new ErpnextError(r.status, decodeURIComponent(url.pathname), [kind, msg].filter(Boolean).join(' - '));
     }
     return body as T;
