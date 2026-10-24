@@ -207,12 +207,23 @@ export function costFromRows(rows: readonly ResultRow[], config: CompanyConfig):
 /**
  * The p90 slip of the cut-in, in days, from the timeline check's real rows, or undefined. It is the
  * check's `late_weeks` row (weeks after the stated effectivity; negative is early) at p90, times 7,
- * and never below zero. An ECR with no stated effectivity has no such row, so its slip is unknown
- * and a limit on slip counts as not held. Stand-in (mock) rows are never read.
+ * and never below zero. Stand-in (mock) rows are never read.
+ *
+ * An ECR that states no production effectivity by serial or date (a lot-based "after the old stock is
+ * used up") has no deadline to slip against: when the check placed its cut-in and says exactly that
+ * (`no_stated_effectivity`, and no lateness), the slip is 0. Anything else without a `late_weeks` row,
+ * such as a cut-in that cannot be placed in the plan, or no timeline run at all, is unknown, and a
+ * limit on slip counts as not held.
  */
 export function slipFromRows(rows: readonly ResultRow[]): number | undefined {
   const r = rows.find((x) => !x.mock && x.key === 'late_weeks');
-  return r && isNum(r.p90) ? Math.max(0, r.p90 * 7) : undefined;
+  if (r) return isNum(r.p90) ? Math.max(0, r.p90 * 7) : undefined;
+  const detailRow = rows.find((x) => !x.mock && x.key === 'detail');
+  const d = detailRow && detailOf(detailRow);
+  const placed = rows.some((x) => !x.mock && x.key === 'cut_in_date' && isNum(x.p90));
+  const flags: { kind?: unknown }[] = Array.isArray(d?.flags) ? d!.flags : [];
+  const kinds = new Set(flags.map((f) => f?.kind));
+  return placed && d && d.late === null && kinds.has('no_stated_effectivity') && !kinds.has('stock_beyond_plan') ? 0 : undefined;
 }
 
 // ---------------------------------------------------------------------------------------------

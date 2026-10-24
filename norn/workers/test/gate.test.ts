@@ -147,6 +147,12 @@ describe('the cost, from stored results', () => {
     assert.equal(slipFromRows([row('late_weeks', -5, -3, -1)]), 0);
     assert.equal(slipFromRows([row('cut_in_weeks', 1, 2, 3)]), undefined);
     assert.equal(slipFromRows([]), undefined);
+    // No stated effectivity, cut-in placed: no deadline to slip against.
+    const none = { late: null, flags: [{ kind: 'no_stated_effectivity' }] };
+    assert.equal(slipFromRows([row('cut_in_date', 1, 2, 3), row('detail', 0, 0, 0, none)]), 0);
+    assert.equal(slipFromRows([row('detail', 0, 0, 0, none)]), undefined, 'a cut-in the check could not place is not a zero slip');
+    assert.equal(slipFromRows([row('cut_in_date', 1, 2, 3), row('detail', 0, 0, 0, { late: null, flags: [] })]), undefined, 'only the check saying there is no deadline counts');
+    assert.equal(slipFromRows([row('cut_in_date', 1, 2, 3, {}, true), row('detail', 0, 0, 0, none, true)]), undefined, 'mock rows are never read');
   });
 });
 
