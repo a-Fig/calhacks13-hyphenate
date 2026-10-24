@@ -7,7 +7,7 @@
 import type { PlmSettings } from '../../norn/connectors/plm/src/index.ts';
 
 export const plm: PlmSettings = {
-  // The Norn Integration user (bowman/plm/NOTES.md). The poller skips what this login last changed.
+  // The Norn Integration user (bowman/plm/NOTES.md). The poller does not tell Norn's writes from a person's by this login; it compares what an assessment is made from.
   nornUser: 'norn@bowman-aviation.example',
   // The PLM spells its pick lists for the people who read them; the right-hand values are the dataset's
   // (bowman/data/types.ts), which the checks library reads.
@@ -25,6 +25,7 @@ export const plm: PlmSettings = {
     'Use until depleted': 'use_until_depleted', 'Mandatory install': 'mandatory_install', Rework: 'rework', Scrap: 'scrap', Cancel: 'cancel', TBD: 'tbd',
   },
   costBasis: { 'Supplier quote': 'supplier_quote', 'Engineer estimate': 'engineer_estimate', 'Not provided': 'not_provided' },
+  firmness: { Firm: 'firm', Budgetary: 'budgetary' },
   // The functions the CM analyst routes an ECR to, as the dataset's seats.
   reviewFunctions: {
     'CM analyst': 'cm_analyst', 'Cost engineer': 'cost_engineer', Buyer: 'buyer', 'Production planner': 'production_planner',

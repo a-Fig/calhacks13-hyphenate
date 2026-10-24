@@ -3,22 +3,28 @@
 //
 // It keeps a high-water mark, the newest `modified` stamp it has delivered, and asks only for what is
 // newer. It reads the PLM's own stamps, never the local clock, so clock drift between the machines does
-// not matter. A change made by Norn's own login is skipped (Norn does not need to hear about its own
-// impact assessment), but the mark still moves past it.
+// not matter.
+//
+// Whether to deliver is decided by what the request contains, not by who saved it last. For each changed
+// request the poller reads it, fingerprints what an assessment is made from (`inputsHash`: everything but
+// Norn's own impact fields and the stamps), and delivers only when that differs from the last one it
+// delivered for that request. Norn's own write changes only the impact fields, so it is not delivered and
+// cannot start a loop; a person's edit changes the fingerprint, so it is delivered even when Norn's write
+// landed on top of it before the next pass. The mark moves past everything either way.
 //
 // Delivery is at least once: if `onChange` throws, the change is offered again on the next pass, up to
 // `maxAttempts` times, and then given up on so that it cannot hold back the ones after it. Each
 // pass also looks a few seconds behind the mark, because a change saved just before another can commit
 // just after it; changes it has already delivered are remembered and not delivered twice.
 //
-// Known gap: if a person edits a request and Norn writes its impact assessment before the next pass,
-// the pass sees only Norn's later stamp and skips the person's edit. Norn writes seconds after it reads,
-// so this needs a person to edit within that window; the webhook path does not have the gap.
+// The fingerprints are kept in memory. After a restart a request with none is delivered once, even if the
+// newest change on it is Norn's own write: that costs one repeated assessment, never a missed one.
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { DOCTYPE } from './schema.ts';
 import { PlmClient } from './client.ts';
-import { listEcrs } from './read.ts';
+import { listEcrs, readChangeRequest } from './read.ts';
+import { inputsHash } from './map.ts';
 import type { EcrListing } from './read.ts';
 import type { PlmOptions } from './options.ts';
 
@@ -68,6 +74,8 @@ export class EcrWatcher {
   #mark?: string;
   #seen = new Map<string, string>();
   #failures = new Map<string, number>();
+  /** The fingerprint of each request's assessment inputs as last delivered (or given up on). */
+  #inputs = new Map<string, string>();
   #maxAttempts: number;
   #timer?: ReturnType<typeof setTimeout>;
   #running = false;
@@ -120,19 +128,22 @@ export class EcrWatcher {
     for (const row of rows) {
       const key = `${row.name}|${row.modified}`;
       if (!this.#seen.has(key)) {
-        if (row.modifiedBy !== this.#opts.nornUser) {
-          try {
+        let hash: string | undefined;
+        try {
+          hash = inputsHash(await readChangeRequest(this.#opts, row.name));
+          if (this.#inputs.get(row.name) !== hash) {
             await this.#onChange(row);
             delivered.push(row);
-          } catch (e) {
-            this.#onError(e);
-            const tries = (this.#failures.get(key) ?? 0) + 1;
-            this.#failures.set(key, tries);
-            if (tries < this.#maxAttempts) break; // not remembered and the mark stays behind it: offered again next pass
-            this.#onError(new Error(`giving up on ${row.name} (modified ${row.modified}) after ${tries} failed deliveries`));
           }
-          this.#failures.delete(key);
+        } catch (e) {
+          this.#onError(e);
+          const tries = (this.#failures.get(key) ?? 0) + 1;
+          this.#failures.set(key, tries);
+          if (tries < this.#maxAttempts) break; // not remembered and the mark stays behind it: offered again next pass
+          this.#onError(new Error(`giving up on ${row.name} (modified ${row.modified}) after ${tries} failed deliveries`));
         }
+        this.#failures.delete(key);
+        if (hash !== undefined) this.#inputs.set(row.name, hash);
         this.#seen.set(key, row.modified);
       }
       if (row.modified > this.#mark!) this.#mark = row.modified;
@@ -174,9 +185,10 @@ export class EcrWatcher {
 }
 
 /**
- * Watch the change requests: `onChange` is called for each one that someone other than Norn created or
- * changed, oldest first. Returns the running watcher; `await w.ready()` to know the starting mark is set,
- * `w.highWater()` for the mark to keep, `await w.stop()` to end it.
+ * Watch the change requests: `onChange` is called for each one whose assessment inputs are new or changed
+ * (a person's edit, not Norn's own impact write), oldest first. Returns the running watcher;
+ * `await w.ready()` to know the starting mark is set, `w.highWater()` for the mark to keep,
+ * `await w.stop()` to end it.
  */
 export function watchEcrs(opts: PlmOptions, onChange: EcrChangeHandler, w: WatchOptions = {}): EcrWatcher {
   return new EcrWatcher(opts, onChange, w).start();

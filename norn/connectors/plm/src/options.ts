@@ -12,7 +12,7 @@ export type CompanyClass = 'I' | 'II';
 export type FaaClass = 'minor' | 'major';
 
 export interface PlmSettings {
-  /** The integration user's login. Change requests it last modified are its own writes, which the poller skips. */
+  /** The integration user's login. Change requests it last modified carry its own writes (`modifiedBy`); the poller does not rely on it to tell them from a person's edit. */
   nornUser: string;
   /** PLM program label to the checks' program id. */
   programs: Record<string, ProgramId>;
@@ -29,6 +29,8 @@ export interface PlmSettings {
   dispositions: Record<string, Disposition>;
   /** Who stands behind a cost-page number. */
   costBasis: Record<string, CostBasis>;
+  /** A supplier quote's firmness, as the form's pick list spells it. Optional: a PLM without the field leaves it unset and the checks read the quote's note. */
+  firmness?: Record<string, 'firm' | 'budgetary'>;
   /** Review function the CM analyst routed the request to, to the company's own id. Default: the PLM's label. */
   reviewFunctions?: Record<string, string>;
   /**
@@ -36,6 +38,12 @@ export interface PlmSettings {
    * supplier by its ERP name, so this is the ERP's name for it. Default: the PLM's name as is.
    */
   supplier?: Record<string, SupplierId> | ((plmName: string) => SupplierId);
+  /**
+   * Characteristics, besides the checks' unit price and labour hours, whose redlines are read as numbers
+   * ("34.60" becomes 34.6; text that is not a number is refused). Any other characteristic is carried as the
+   * PLM stores it, which the checks only carry through to the head item's spec.
+   */
+  numericFields?: string[];
   webhook?: {
     /** Header that names the event. The body names it too; when both are present they must agree. */
     eventHeader?: string;

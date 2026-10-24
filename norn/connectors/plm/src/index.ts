@@ -2,7 +2,7 @@
 //
 //   readChangeRequest(opts, 'ECR-0417')      -> { change, record, modified }
 //   listEcrs(opts, { since })                -> the ECRs modified after `since`
-//   watchEcrs(opts, onChange, { intervalMs })  a poller with a high-water mark, skipping Norn's own writes
+//   watchEcrs(opts, onChange, { intervalMs })  a poller with a high-water mark, reporting a change only when what an assessment is made from changed
 //   verifyWebhook / createWebhookHandler       the PLM's signed webhooks
 //   writeImpact(opts, 'ECR-0417', fields)    -> the seven impact fields, nothing else
 //   postComment(opts, 'ECR-0417', html)
@@ -18,7 +18,7 @@ export type { ImpactFields } from './write.ts';
 export type { ImpactField, PlmDoc } from './schema.ts';
 export { PlmError } from './client.ts';
 export { connectionFromEnv, loadEnvFile, webhookSecretFromEnv } from './env.ts';
-export { PlmMappingError, mapEcr, parseFieldValue } from './map.ts';
+export { PlmMappingError, inputsHash, mapEcr, parseFieldValue, parseNumericValue } from './map.ts';
 export { listEcrs, readChangeRequest } from './read.ts';
 export { EcrWatcher, shiftStamp, watchEcrs } from './watch.ts';
 export { SIGNATURE_HEADER, createWebhookHandler, verifyWebhook } from './webhook.ts';
