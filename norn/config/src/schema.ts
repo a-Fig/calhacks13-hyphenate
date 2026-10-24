@@ -25,6 +25,13 @@ export const SCHEMA_VERSION = 1;
  * follow a decision. Each needs an approved ECR before it can be taken at all, whatever its autonomy
  * level: approved by the body of its tier, or approved on the fast track. A level and its limits say
  * how much of the work an agent does once that holds. They never stand in for the approval.
+ *
+ * Norn never writes to the ERP, not even a draft (#71). `write_bom`, `update_standard_cost`,
+ * `draft_journal_entry` and `post_journal_entry` (ERP_ACTIONS) are what a person enters or posts in the
+ * ERP, and Norn only recommends them: its recommendation is a line of the ERP change package on the
+ * released ECO (#72), which goes to the role whose `can` holds the action. A rule for one of them sets
+ * the level `recommend` and no `limits`, `otherwise` or `carriesOutApproval`. `release_eco` is a PLM
+ * action, so none of this applies to it.
  */
 export const ACTIONS = {
   file_ecr: 'File an ECR, or revise a draft',
@@ -35,21 +42,23 @@ export const ACTIONS = {
   approve_fast_track_ecr: 'Approve an ECR on the fast track, without convening a board',
   approve_ecr_at_tier: 'Decide an ECR as the chair of the approval body for its cost tier',
   release_eco: 'Release the ECO for an approved ECR',
-  write_bom: 'Write the new bill of materials into the ERP',
-  update_standard_cost: 'Update a standard cost in the ERP',
-  draft_journal_entry: 'Draft a journal entry in the ERP, such as scrap or revaluation',
-  post_journal_entry: 'Post a drafted journal entry to the ledger',
+  write_bom: 'Enter the new bill of materials in the ERP, from the change package',
+  update_standard_cost: 'Enter a new standard cost in the ERP, from the change package',
+  draft_journal_entry: 'Enter a journal entry in the ERP, such as scrap or revaluation, from the change package',
+  post_journal_entry: 'Post an entered journal entry to the ledger',
 } as const;
 export type ActionId = keyof typeof ACTIONS;
 export const ACTION_IDS = Object.keys(ACTIONS) as ActionId[];
 
+/** The actions that change the ERP, which Norn never does (#71). They can only be recommended. See ACTIONS. */
+export const ERP_ACTIONS: readonly ActionId[] = ['write_bom', 'update_standard_cost', 'draft_journal_entry', 'post_journal_entry'];
+
 /**
- * The follow-on actions (see ACTIONS) that carry out the decision of an approval body, and so can hold
- * their level past their cost limits while that decision still covers the change. Only these can be
- * set to `carriesOutApproval`. Posting a journal entry is deliberately not here: the ledger keeps its
- * human step whatever was approved.
+ * The actions that carry out the decision of an approval body, and so can hold their level past their
+ * cost limits while that decision still covers the change. Only these can be set to
+ * `carriesOutApproval`. Releasing an ECO is a PLM action, not an ERP one, which is why it is the only one.
  */
-export const FOLLOWS_APPROVAL: readonly ActionId[] = ['release_eco', 'update_standard_cost'];
+export const FOLLOWS_APPROVAL: readonly ActionId[] = ['release_eco'];
 
 /**
  * What an agent may do with an action (#24). Ordered from most to least autonomous.
@@ -424,8 +433,9 @@ const actionRule = obj({
    */
   otherwise: opt(oneOf(LEVEL_IDS)),
   /**
-   * Carrying out a decision that has already been made. Only for the actions in FOLLOWS_APPROVAL, and
-   * only with `limits`. When an approval body has approved the ECR and still covers the change, Norn
+   * Carrying out a decision that has already been made. Only for the actions in FOLLOWS_APPROVAL,
+   * which is `release_eco`: releasing an ECO is a PLM action, not an ERP one (#71). It is also only
+   * with `limits`. When an approval body has approved the ECR and still covers the change, Norn
    * may take the action at `level` whatever the `limits` say: the body's decision carried the
    * authority and this action only carries it out.
    *

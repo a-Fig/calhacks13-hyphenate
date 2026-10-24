@@ -9,6 +9,7 @@ import type { Issue } from './kit.ts';
 import { describe, didYouMean } from './kit.ts';
 import {
   ACTION_IDS,
+  ERP_ACTIONS,
   EVIDENCE_CLASS_IDS,
   FOLLOWS_APPROVAL,
   LEVEL_RANK,
@@ -214,24 +215,36 @@ export const rules: Rule[] = [
         const path = `autonomy.actions[${i}]`;
         const levels = [rule.level, ...(rule.otherwise ? [rule.otherwise] : [])];
         const acts = rule.level === 'approve' || rule.level === 'approve_sampled';
+        // Norn never writes to the ERP, so these can only be recommended, to the person who enters them (#71, #72).
+        // The refusals here replace the checks on limits, fallbacks and carrying out an approval below, which would only repeat them.
+        const erp = ERP_ACTIONS.includes(rule.action);
+        if (erp) {
+          const because = `Norn never writes to the ERP (#71), so ${rule.action} can only be recommended, in the ERP change package for a person to enter (#72)`;
+          if (rule.level !== 'recommend') {
+            issues.push({ path: `${path}.level`, message: `expected "recommend", because ${because}, got ${JSON.stringify(rule.level)}` });
+          }
+          for (const key of ['limits', 'otherwise', 'carriesOutApproval'] as const) {
+            if (rule[key] !== undefined) issues.push({ path: `${path}.${key}`, message: `expected no ${key}, because ${because}, got ${JSON.stringify(rule[key])}` });
+          }
+        }
         // A limit left undefined is not a limit: it would be dropped when the config is stored, and the stored copy refused.
-        if (rule.limits && Object.values(rule.limits).every((v) => v === undefined)) {
+        if (!erp && rule.limits && Object.values(rule.limits).every((v) => v === undefined)) {
           issues.push({ path: `${path}.limits`, message: 'expected at least one limit, got none' });
         }
-        if (rule.limits && !acts) {
+        if (!erp && rule.limits && !acts) {
           issues.push({ path: `${path}.limits`, message: `expected no limits, because level ${JSON.stringify(rule.level)} does not let the agent act and limits only bound a level that does` });
         }
-        if (rule.carriesOutApproval !== undefined) {
+        if (!erp && rule.carriesOutApproval !== undefined) {
           if (!FOLLOWS_APPROVAL.includes(rule.action)) {
-            issues.push({ path: `${path}.carriesOutApproval`, message: `expected nothing, because only ${FOLLOWS_APPROVAL.join(' and ')} carry out an approval and ${rule.action} does not, got ${rule.carriesOutApproval}` });
+            issues.push({ path: `${path}.carriesOutApproval`, message: `expected nothing, because only ${FOLLOWS_APPROVAL.join(' and ')} can carry out an approval and ${rule.action} cannot, got ${rule.carriesOutApproval}` });
           } else if (!rule.limits) {
             issues.push({ path: `${path}.carriesOutApproval`, message: 'expected limits to be set, because carrying out an approval only waives limits, got no limits' });
           }
         }
-        if (rule.otherwise && !rule.limits) {
+        if (!erp && rule.otherwise && !rule.limits) {
           issues.push({ path: `${path}.otherwise`, message: 'expected limits to be set, because otherwise only applies once a limit is passed, got no limits' });
         }
-        if (rule.otherwise && LEVEL_RANK[rule.otherwise] >= LEVEL_RANK[rule.level]) {
+        if (!erp && rule.otherwise && LEVEL_RANK[rule.otherwise] >= LEVEL_RANK[rule.level]) {
           issues.push({ path: `${path}.otherwise`, message: `expected a level less autonomous than ${JSON.stringify(rule.level)}, because a fallback that is not lower takes no authority away once a limit is passed, got ${JSON.stringify(rule.otherwise)}` });
         }
         if (levels.includes('approve_sampled') && rule.sampleRate === undefined) {

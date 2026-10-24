@@ -103,31 +103,35 @@ describe("where Bowman's ECRs fall at Bowman's rates and Bowman's sample seed", 
     assert.notEqual(config.autonomy.sampleSeed, FORECAST_SEED);
   });
 
-  // Every draw for the four demo ECRs, at norn-sample-1 and Bowman's rates. A draw under its rate is
-  // sampled. Pinned so that a change to the seed, the rates or the algorithm shows up here, and so that
-  // the demo script can say what will happen to each ECR before anyone runs it.
+  // Every draw for the four demo ECRs at norn-sample-1 and Bowman's rates, for the two actions that are
+  // sampled. A draw under its rate is sampled. Pinned so that a change to the seed, the rates or the
+  // algorithm shows up here, and so that the demo script can say what will happen to each ECR before
+  // anyone runs it. The ERP actions are not here: they are recommend-only (#71), so nothing is drawn.
   const DRAWS: Array<{ ecr: string; action: string; rate: number; value: number; sampled: boolean }> = [
     { ecr: 'ECR-0423', action: 'set_company_class', rate: 0.25, value: 0.8392148073762655, sampled: false },
     { ecr: 'ECR-0423', action: 'approve_fast_track_ecr', rate: 0.2, value: 0.5386328629683703, sampled: false },
-    { ecr: 'ECR-0423', action: 'write_bom', rate: 0.5, value: 0.9623411938082427, sampled: false },
-    { ecr: 'ECR-0423', action: 'update_standard_cost', rate: 0.5, value: 0.31381385400891304, sampled: true },
     { ecr: 'ECR-0417', action: 'set_company_class', rate: 0.25, value: 0.6571187830995768, sampled: false },
     { ecr: 'ECR-0417', action: 'approve_fast_track_ecr', rate: 0.2, value: 0.28841888601891696, sampled: false },
-    { ecr: 'ECR-0417', action: 'write_bom', rate: 0.5, value: 0.7476300676353276, sampled: false },
-    { ecr: 'ECR-0417', action: 'update_standard_cost', rate: 0.5, value: 0.9285441692918539, sampled: false },
     { ecr: 'ECR-0409', action: 'set_company_class', rate: 0.25, value: 0.18520728405565023, sampled: true },
     { ecr: 'ECR-0409', action: 'approve_fast_track_ecr', rate: 0.2, value: 0.4529122475069016, sampled: false },
-    { ecr: 'ECR-0409', action: 'write_bom', rate: 0.5, value: 0.38650443963706493, sampled: true },
-    { ecr: 'ECR-0409', action: 'update_standard_cost', rate: 0.5, value: 0.39665764407254755, sampled: true },
     { ecr: 'ECR-0415', action: 'set_company_class', rate: 0.25, value: 0.16507800621911883, sampled: true },
     { ecr: 'ECR-0415', action: 'approve_fast_track_ecr', rate: 0.2, value: 0.2095401156693697, sampled: false },
-    { ecr: 'ECR-0415', action: 'write_bom', rate: 0.5, value: 0.11187711684033275, sampled: true },
-    { ecr: 'ECR-0415', action: 'update_standard_cost', rate: 0.5, value: 0.5671887306962162, sampled: false },
   ];
+  const SAMPLED_ACTIONS = ['set_company_class', 'approve_fast_track_ecr'];
 
-  it("uses the rates the draws below are pinned at", () => {
+  it('samples exactly the two actions the draws below are pinned for, at their rates', () => {
+    const sampledRules = config.autonomy.actions.filter((a) => a.level === 'approve_sampled' || a.otherwise === 'approve_sampled');
+    assert.deepEqual(sampledRules.map((a) => a.action).sort(), [...SAMPLED_ACTIONS].sort());
     for (const { action, rate } of DRAWS) {
       assert.equal(config.autonomy.actions.find((a) => a.action === action)!.sampleRate, rate, action);
+    }
+  });
+
+  it('draws nothing for the ERP actions, which are recommend-only', () => {
+    for (const action of ['write_bom', 'update_standard_cost', 'draft_journal_entry', 'post_journal_entry']) {
+      const rule = config.autonomy.actions.find((a) => a.action === action)!;
+      assert.equal(rule.level, 'recommend', action);
+      assert.equal(rule.sampleRate, undefined, action);
     }
   });
 
@@ -138,24 +142,21 @@ describe("where Bowman's ECRs fall at Bowman's rates and Bowman's sample seed", 
     });
   }
 
-  it('ECR-0423 goes straight through the fast track and the BOM write, but its standard cost update waits for the blind check', () => {
-    // If the demo shows the colour change's cost update landing in ERPNext, that is after the blind recompute.
-    const waits = ['set_company_class', 'approve_fast_track_ecr', 'write_bom', 'update_standard_cost'].filter((a) => sampled('ECR-0423', a));
-    assert.deepEqual(waits, ['update_standard_cost']);
+  const waitsOn = (ecr: string): string[] => SAMPLED_ACTIONS.filter((a) => sampled(ecr, a));
+
+  it('ECR-0423 is sampled for nothing, so its fast track and class call go straight through', () => {
+    assert.deepEqual(waitsOn('ECR-0423'), []);
   });
 
   it('ECR-0417 is sampled for nothing', () => {
-    const waits = ['set_company_class', 'approve_fast_track_ecr', 'write_bom', 'update_standard_cost'].filter((a) => sampled('ECR-0417', a));
-    assert.deepEqual(waits, []);
+    assert.deepEqual(waitsOn('ECR-0417'), []);
   });
 
-  it('ECR-0409 is sampled for the class call, the BOM write and the cost update, but not the fast track', () => {
-    const waits = ['set_company_class', 'approve_fast_track_ecr', 'write_bom', 'update_standard_cost'].filter((a) => sampled('ECR-0409', a));
-    assert.deepEqual(waits, ['set_company_class', 'write_bom', 'update_standard_cost']);
+  it('ECR-0409 is sampled for the class call, but not the fast track', () => {
+    assert.deepEqual(waitsOn('ECR-0409'), ['set_company_class']);
   });
 
-  it('ECR-0415 is sampled for the class call and the BOM write, and misses the fast-track sample by 0.0095', () => {
-    const waits = ['set_company_class', 'approve_fast_track_ecr', 'write_bom', 'update_standard_cost'].filter((a) => sampled('ECR-0415', a));
-    assert.deepEqual(waits, ['set_company_class', 'write_bom']);
+  it('ECR-0415 is sampled for the class call, and misses the fast-track sample by 0.0095', () => {
+    assert.deepEqual(waitsOn('ECR-0415'), ['set_company_class']);
   });
 });

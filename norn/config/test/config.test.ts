@@ -10,7 +10,7 @@ import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { company } from '../../../bowman/data/company.ts';
 import { run } from '../src/cli.ts';
-import { COMPANY_CONFIG_KEY, canonicalJson, configEntries, formatIssue, loadConfigFile, validateConfig, type CompanyConfig } from '../src/index.ts';
+import { COMPANY_CONFIG_KEY, ERP_ACTIONS, canonicalJson, configEntries, formatIssue, loadConfigFile, validateConfig, type CompanyConfig } from '../src/index.ts';
 
 const BOWMAN = fileURLToPath(new URL('../../../bowman/norn-config/bowman.config.ts', import.meta.url));
 const SRC = fileURLToPath(new URL('../src/', import.meta.url));
@@ -124,7 +124,7 @@ describe("what Bowman's file takes from the dataset and how it says so", () => {
   it('measures cost one way, for the tiers and for every limit, and does not let savings offset spend', () => {
     assert.deepEqual({ ...good.approval.costMeasure, prov: undefined }, { percentile: 'p90', horizonMonths: 12, savingsOffset: false, prov: undefined });
     const limited = good.autonomy.actions.filter((a) => a.limits?.maxCost !== undefined);
-    assert.ok(limited.length >= 3);
+    assert.deepEqual(limited.map((a) => a.action), ['approve_fast_track_ecr', 'release_eco']);
     assert.ok(!JSON.stringify(good).includes('maxP90Cost'), 'no second definition of cost is left');
   });
 
@@ -135,13 +135,23 @@ describe("what Bowman's file takes from the dataset and how it says so", () => {
     assert.match(classII!.meaning, /less than the materiality thresholds/);
   });
 
-  it('carries out an approval on release_eco and update_standard_cost, and keeps the ledger human', () => {
-    const rule = (action: string) => good.autonomy.actions[ruleIndex(action)]!;
-    assert.equal(rule('release_eco').carriesOutApproval, true);
-    assert.equal(rule('update_standard_cost').carriesOutApproval, true);
-    for (const action of ['write_bom', 'draft_journal_entry', 'post_journal_entry']) assert.equal(rule(action).carriesOutApproval, undefined, action);
-    assert.equal(rule('draft_journal_entry').level, 'approve');
-    assert.equal(rule('post_journal_entry').level, 'recommend');
+  it('carries out an approval on release_eco only, a PLM action', () => {
+    const withIt = good.autonomy.actions.filter((a) => a.carriesOutApproval !== undefined).map((a) => a.action);
+    assert.deepEqual(withIt, ['release_eco']);
+    assert.equal(good.autonomy.actions[ruleIndex('release_eco')]!.carriesOutApproval, true);
+  });
+
+  it('only recommends the four actions that would change the ERP, and says who receives each (#71, #72)', () => {
+    assert.deepEqual([...ERP_ACTIONS].sort(), ['draft_journal_entry', 'post_journal_entry', 'update_standard_cost', 'write_bom']);
+    for (const action of ERP_ACTIONS) {
+      const rule = good.autonomy.actions[ruleIndex(action)]!;
+      assert.equal(rule.level, 'recommend', action);
+      for (const key of ['limits', 'otherwise', 'carriesOutApproval', 'sampleRate', 'escalateOn', 'escalateTo'] as const) assert.equal(rule[key], undefined, action + '.' + key);
+    }
+    const holders = (action: string) => good.roles.filter((r) => r.can.includes(action as any)).map((r) => r.id);
+    assert.deepEqual(holders('write_bom'), ['manufacturing_engineer']);
+    for (const action of ['update_standard_cost', 'draft_journal_entry', 'post_journal_entry']) assert.deepEqual(holders(action), ['cost_accountant'], action);
+    for (const role of ['manufacturing_engineer', 'cost_accountant']) assert.ok(good.people.some((p) => p.role === role), role + ' has a person');
   });
 
   it('reads the fast-track approvers, the board chair and the committee\'s reach from the data', () => {
@@ -205,7 +215,7 @@ describe("what Bowman's file takes from the dataset and how it says so", () => {
 
 describe('defaults the loader fills in', () => {
   it('gives a fallback level of recommend where limits are set and the file says nothing', () => {
-    const at = ruleIndex('update_standard_cost');
+    const at = ruleIndex('release_eco');
     const copy = structuredClone(good) as any;
     delete copy.autonomy.actions[at].otherwise;
     const result = validateConfig(copy);
@@ -318,32 +328,32 @@ describe('a malformed file is rejected with the path of the bad field', () => {
   });
 
   it('a sampled level with no sample rate', () => {
-    const at = (c: any) => c.autonomy.actions.findIndex((a: any) => a.action === 'write_bom');
+    const at = (c: any) => c.autonomy.actions.findIndex((a: any) => a.action === 'set_company_class');
     const found = problems((c) => delete c.autonomy.actions[at(c)].sampleRate);
     assert.equal(found.length, 1);
     assert.ok(found[0]!.includes('.sampleRate: expected a sample rate'));
   });
 
   it('limits on a level that does not let the agent act', () => {
-    const at = ruleIndex('update_standard_cost');
+    const at = ruleIndex('release_eco');
     const found = problems((c) => (c.autonomy.actions[at].level = 'recommend'));
     assert.ok(found.some((p) => p.startsWith('autonomy.actions[' + at + '].limits: expected no limits')), found.join('\n'));
   });
 
   it('a fallback level more autonomous than the level it falls back from', () => {
-    const at = ruleIndex('update_standard_cost'); // approve_sampled, otherwise recommend
+    const at = ruleIndex('approve_fast_track_ecr'); // approve_sampled, otherwise recommend
     assertOne((c) => (c.autonomy.actions[at].otherwise = 'approve'), 'autonomy.actions[' + at + '].otherwise', 'expected a level less autonomous than "approve_sampled"');
   });
 
   it('a fallback level equal to the level it falls back from, which limits nothing', () => {
-    const at = ruleIndex('update_standard_cost'); // approve_sampled, otherwise recommend
+    const at = ruleIndex('approve_fast_track_ecr'); // approve_sampled, otherwise recommend
     assertOne((c) => (c.autonomy.actions[at].otherwise = 'approve_sampled'), 'autonomy.actions[' + at + '].otherwise', 'expected a level less autonomous than "approve_sampled"');
     const approving = ruleIndex('release_eco'); // approve, otherwise recommend
     assertOne((c) => (c.autonomy.actions[approving].otherwise = 'approve'), 'autonomy.actions[' + approving + '].otherwise', 'expected a level less autonomous than "approve"');
   });
 
   it('a fallback level with no limits to pass', () => {
-    const at = ruleIndex('write_bom'); // approve_sampled, no limits
+    const at = ruleIndex('set_company_class'); // approve_sampled, no limits
     assertOne((c) => (c.autonomy.actions[at].otherwise = 'recommend'), 'autonomy.actions[' + at + '].otherwise', 'expected limits to be set');
   });
 
@@ -405,21 +415,81 @@ describe('a malformed file is rejected with the path of the bad field', () => {
     assert.ok(found.every((p) => p.includes('"cm_analyst", which nobody in people holds')));
   });
 
-  it('carrying out an approval on an action that is not release_eco or update_standard_cost', () => {
-    for (const action of ['approve_ecr_at_tier', 'approve_fast_track_ecr', 'set_company_class', 'file_ecr', 'write_bom', 'draft_journal_entry']) {
+  it('carrying out an approval on an action that is not release_eco', () => {
+    for (const action of ['approve_ecr_at_tier', 'approve_fast_track_ecr', 'set_company_class', 'file_ecr']) {
       const at = ruleIndex(action);
-      assertOne((c) => (c.autonomy.actions[at].carriesOutApproval = true), 'autonomy.actions[' + at + '].carriesOutApproval', 'expected nothing, because only release_eco and update_standard_cost carry out an approval and ' + action + ' does not');
+      assertOne((c) => (c.autonomy.actions[at].carriesOutApproval = true), 'autonomy.actions[' + at + '].carriesOutApproval', 'expected nothing, because only release_eco can carry out an approval and ' + action + ' cannot');
     }
-    // The ledger keeps its human step: a posting rule that acts within a limit may not be waived past it.
-    const post = ruleIndex('post_journal_entry');
-    assertOne(
-      (c) => (c.autonomy.actions[post] = { action: 'post_journal_entry', level: 'approve', limits: { maxCost: 1 }, carriesOutApproval: true, why: 'x' }),
-      'autonomy.actions[' + post + '].carriesOutApproval',
-      'expected nothing, because only release_eco and update_standard_cost carry out an approval and post_journal_entry does not'
-    );
     // Even false is refused: the field does not belong on these actions at all.
     const at = ruleIndex('approve_ecr_at_tier');
     assertOne((c) => (c.autonomy.actions[at].carriesOutApproval = false), 'autonomy.actions[' + at + '].carriesOutApproval', 'expected nothing');
+  });
+
+  describe('the actions that would change the ERP can only be recommended (#71)', () => {
+    const ERP = ['write_bom', 'update_standard_cost', 'draft_journal_entry', 'post_journal_entry'];
+    const cite = 'because Norn never writes to the ERP (#71)';
+
+    it('refuses any level but recommend', () => {
+      for (const action of ERP) {
+        const at = ruleIndex(action);
+        for (const level of ['approve', 'escalate']) {
+          // Escalating needs somewhere to go, which is not what is being tested.
+          assertOne((c) => ((c.autonomy.actions[at].level = level), level === 'escalate' && (c.autonomy.actions[at].escalateTo = action === 'write_bom' ? 'manufacturing_engineer' : 'cost_accountant')), 'autonomy.actions[' + at + '].level', 'expected "recommend", ' + cite);
+        }
+        assertOne((c) => ((c.autonomy.actions[at].level = 'approve_sampled'), (c.autonomy.actions[at].sampleRate = 0.5)), 'autonomy.actions[' + at + '].level', 'expected "recommend", ' + cite + ', so ' + action);
+      }
+    });
+
+    it('refuses limits, once and not twice', () => {
+      for (const action of ERP) {
+        const at = ruleIndex(action);
+        assertOne((c) => (c.autonomy.actions[at].limits = { maxCost: 25_000 }), 'autonomy.actions[' + at + '].limits', 'expected no limits, ' + cite);
+        // Empty limits are refused for being limits at all, not also for being empty.
+        assertOne((c) => (c.autonomy.actions[at].limits = {}), 'autonomy.actions[' + at + '].limits', 'expected no limits, ' + cite);
+      }
+    });
+
+    it('refuses a fallback level, once and not twice', () => {
+      for (const action of ERP) {
+        const at = ruleIndex(action);
+        assertOne((c) => (c.autonomy.actions[at].otherwise = 'recommend'), 'autonomy.actions[' + at + '].otherwise', 'expected no otherwise, ' + cite);
+      }
+    });
+
+    it('refuses carrying out an approval, true or false', () => {
+      for (const action of ERP) {
+        const at = ruleIndex(action);
+        for (const value of [true, false]) {
+          assertOne((c) => (c.autonomy.actions[at].carriesOutApproval = value), 'autonomy.actions[' + at + '].carriesOutApproval', 'expected no carriesOutApproval, ' + cite);
+        }
+      }
+    });
+
+    it('refuses the rule Bowman had before the decision, at every field that gives Norn the ERP', () => {
+      const at = ruleIndex('update_standard_cost');
+      const found = problems((c) => {
+        c.autonomy.actions[at] = { action: 'update_standard_cost', level: 'approve_sampled', sampleRate: 0.5, limits: { maxCost: 150_000 }, otherwise: 'recommend', carriesOutApproval: true, why: 'x' };
+      });
+      assert.deepEqual(
+        found.map((p) => p.split(': ')[0]).sort(),
+        ['level', 'limits', 'otherwise', 'carriesOutApproval'].map((k) => 'autonomy.actions[' + at + '].' + k).sort(),
+        found.join('\n')
+      );
+      assert.ok(found.every((p) => p.includes('(#71)') && p.includes('(#72)')), found.join('\n'));
+    });
+
+    it('needs a role to receive each recommendation, and a person in it', () => {
+      for (const [action, role] of [['write_bom', 'manufacturing_engineer'], ['update_standard_cost', 'cost_accountant'], ['draft_journal_entry', 'cost_accountant']] as const) {
+        const at = ruleIndex(action);
+        assertOne(
+          (c) => c.roles.forEach((r: any) => (r.can = r.can.filter((a: string) => a !== action))),
+          'autonomy.actions[' + at + '].level',
+          'expected a role that can ' + action
+        );
+        const found = problems((c) => (c.people = c.people.filter((p: any) => p.role !== role)));
+        assert.ok(found.some((p) => p.startsWith('autonomy.actions[' + at + '].level: expected a person in a role that can ' + action + ', because the agent recommends it, got none (nobody in people holds "' + role + '")')), found.join('\n'));
+      }
+    });
   });
 
   it('carrying out an approval with no limits to waive', () => {
@@ -454,7 +524,7 @@ describe('a malformed file is rejected with the path of the bad field', () => {
   });
 
   it('a sample rate out of range', () => {
-    const at = (c: any) => c.autonomy.actions.findIndex((a: any) => a.action === 'write_bom');
+    const at = (c: any) => c.autonomy.actions.findIndex((a: any) => a.action === 'set_company_class');
     const found = problems((c) => (c.autonomy.actions[at(c)].sampleRate = 1.5));
     assert.equal(found.length, 1);
     assert.ok(found[0]!.includes('.sampleRate: expected a number above 0 and up to 1, got 1.5'));
@@ -509,10 +579,9 @@ describe('a malformed file is rejected with the path of the bad field', () => {
   });
 
   it('a recommendation whose only possible recipient is nobody', () => {
-    const post = ruleIndex('post_journal_entry');
-    const cost = ruleIndex('update_standard_cost'); // recommends past its limit
+    const paths = ['update_standard_cost', 'draft_journal_entry', 'post_journal_entry'].map((a) => 'autonomy.actions[' + ruleIndex(a) + '].level');
     const found = problems((c) => (c.people = c.people.filter((p: any) => p.role !== 'cost_accountant')));
-    assert.deepEqual(found.map((p) => p.split(': ')[0]).sort(), ['autonomy.actions[' + post + '].level', 'autonomy.actions[' + cost + '].otherwise'].sort(), found.join('\n'));
+    assert.deepEqual(found.map((p) => p.split(': ')[0]).sort(), paths.sort(), found.join('\n'));
     assert.ok(found.every((p) => p.includes('expected a person in a role that can ') && p.includes('nobody in people holds "cost_accountant"')), found.join('\n'));
   });
 
@@ -523,16 +592,22 @@ describe('a malformed file is rejected with the path of the bad field', () => {
       'autonomy.actions[' + release + '].otherwise',
       'once a limit is passed'
     );
-    const cost = ruleIndex('update_standard_cost');
+    assert.ok(
+      problems((c) => {
+        delete c.autonomy.actions[release].otherwise; // the loader fills in 'recommend'
+        c.roles.forEach((r: any) => (r.can = r.can.filter((a: string) => a !== 'release_eco')));
+      }).some((p) => p.startsWith('autonomy.actions[' + release + '].limits: expected a role that can release_eco')),
+      'the filled-in fallback has no recipient role'
+    );
     const found = problems((c) => {
-      delete c.autonomy.actions[cost].otherwise; // the loader fills in 'recommend'
-      c.people = c.people.filter((p: any) => p.role !== 'cost_accountant');
+      delete c.autonomy.actions[release].otherwise;
+      c.people = c.people.filter((p: any) => p.role !== 'cm_analyst' && p.role !== 'ccb_chair');
     });
-    assert.ok(found.some((p) => p.startsWith('autonomy.actions[' + cost + '].limits: expected a person in a role that can update_standard_cost')), found.join('\n'));
+    assert.ok(found.some((p) => p.startsWith('autonomy.actions[' + release + '].limits: expected a person in a role that can release_eco')), found.join('\n'));
   });
 
   it('limits that are all undefined are not limits', () => {
-    const at = ruleIndex('write_bom');
+    const at = ruleIndex('approve_fast_track_ecr');
     assertOne((c) => (c.autonomy.actions[at].limits = { maxCost: undefined }), 'autonomy.actions[' + at + '].limits', 'expected at least one limit, got none');
     assertOne((c) => (c.autonomy.actions[at].limits = {}), 'autonomy.actions[' + at + '].limits', 'expected at least one limit, got none');
     // Waiving limits that do not exist is the case that mattered: it must not pass either.
@@ -770,7 +845,7 @@ describe('the output for set_config', () => {
     const copy = structuredClone(good) as any;
     const fast = copy.autonomy.actions[ruleIndex('approve_fast_track_ecr')];
     fast.limits.maxP90SlipDays = undefined;
-    copy.autonomy.actions[ruleIndex('write_bom')].escalateTo = undefined;
+    copy.autonomy.actions[ruleIndex('post_impact_statement')].escalateTo = undefined;
     const first = validateConfig(copy);
     assert.ok(first.ok, first.ok ? '' : first.issues.map(formatIssue).join('\n'));
     const second = validateConfig(JSON.parse(canonicalJson(first.config)));

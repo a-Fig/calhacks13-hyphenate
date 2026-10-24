@@ -120,7 +120,7 @@ const PERMISSIONS = inv('Which seat may do which gated action is invented for Bo
 
 const roleRows: Omit<CompanyConfig['roles'][number], 'prov'>[] = [
   { id: 'design_engineer', label: 'Design engineer', can: ['file_ecr', 'approve_fast_track_ecr'] },
-  { id: 'cm_analyst', label: 'Configuration management analyst', can: ['review_ecr', 'set_company_class', 'post_impact_statement', 'approve_fast_track_ecr', 'release_eco', 'write_bom'] },
+  { id: 'cm_analyst', label: 'Configuration management analyst', can: ['review_ecr', 'set_company_class', 'post_impact_statement', 'approve_fast_track_ecr', 'release_eco'] },
   { id: 'ccb_chair', label: 'CCB chair (program manager)', can: ['file_ecr', 'review_ecr', 'approve_ecr_at_tier', 'release_eco'] },
   { id: 'engineering_director', label: 'Director of engineering', can: ['review_ecr', 'approve_ecr_at_tier'] },
   { id: 'cost_engineer', label: 'Product cost engineer', can: ['file_ecr', 'review_ecr', 'post_impact_statement'] },
@@ -129,7 +129,7 @@ const roleRows: Omit<CompanyConfig['roles'][number], 'prov'>[] = [
   { id: 'cost_accountant', label: 'Cost accountant', can: ['review_ecr', 'post_impact_statement', 'update_standard_cost', 'draft_journal_entry', 'post_journal_entry'] },
   { id: 'quality', label: 'Quality engineer', can: ['file_ecr', 'review_ecr'] },
   { id: 'certification', label: 'Chief engineer and certification lead', can: ['review_ecr', 'set_regulatory_class'] },
-  { id: 'manufacturing_engineer', label: 'Manufacturing engineer', can: ['review_ecr'] },
+  { id: 'manufacturing_engineer', label: 'Manufacturing engineer', can: ['review_ecr', 'write_bom'] },
   { id: 'program_manager', label: 'Program manager', can: ['file_ecr', 'review_ecr'] },
   { id: 'operations_vp', label: 'VP operations and supply chain', can: ['review_ecr'] },
   { id: 'cfo', label: 'Chief financial officer', can: ['review_ecr', 'approve_ecr_at_tier'] },
@@ -400,9 +400,11 @@ const config = {
   // certification and open on routine work; widen a rule when forecast-versus-actual results and
   // override rates support it. Every maxCost below is measured by approval.costMeasure.
   //
-  // approve_sampled: a second agent recomputes blind, and the sample is drawn from the ECR id, the
-  // action and sampleSeed. recommend: the roles that hold the action receive it. The never-fast-track
+  // approve_sampled: a second agent recomputes blind, and the sample is drawn from the ECR's PLM number,
+  // the action and sampleSeed. recommend: the roles that hold the action receive it. The never-fast-track
   // rules above are checked first, so they win over the escalation triggers on approve_fast_track_ecr.
+  // Norn never writes to the ERP (#71), so the four ERP actions can only be recommended: each is a line
+  // of the ERP change package on the released ECO (#72), for the role that holds it to enter.
   autonomy: {
     actingFor: 'stricter',
     // Bowman's own seed, apart from the forecast `seed` in the state layer, so re-seeding forecasts
@@ -459,40 +461,32 @@ const config = {
         level: 'approve',
         limits: { maxCost: 25_000 },
         otherwise: 'recommend',
-        // Proposed, for Tyler to confirm: once a body has approved the ECR, releasing is carrying out its
-        // decision, so Norn releases whatever the change costs, for as long as that body's tier still
-        // covers the change at today's cost. If a re-quote lifts it past the tier, the limits apply again.
+        // Proposed, for Tyler to confirm: once a body has approved the ECR, releasing the ECO in the PLM is
+        // carrying out its decision, so Norn releases whatever the change costs, for as long as that body's
+        // tier still covers the change at today's cost. If a re-quote lifts it past the tier, the limits
+        // apply again.
         carriesOutApproval: true,
         why: 'Releasing carries out an approval that already had authority. While the body that approved the ECR still covers the change at today\'s cost, Norn releases at any cost. If the ECR was approved another way, as on the fast track, or a re-quote has lifted the cost past that body\'s tier, it releases within 25,000 and the CM analyst does above.',
       },
       {
         action: 'write_bom',
-        level: 'approve_sampled',
-        sampleRate: 0.5,
-        why: 'A mechanical copy of a released ECO\'s redlines. A blind recompute of the BOM difference on half of them catches a bad mapping.',
+        level: 'recommend',
+        why: 'The ERP change package lists the BOM lines to change. The manufacturing engineer enters them in the ERP; Norn never writes there (#71).',
       },
       {
         action: 'update_standard_cost',
-        level: 'approve_sampled',
-        sampleRate: 0.5,
-        limits: { maxCost: 150_000 },
-        otherwise: 'recommend',
-        // Proposed, for Tyler to confirm: as with release_eco, an approved change's cost update is
-        // carrying out the decision, for as long as the approving body's tier still covers today's cost.
-        // The ledger keeps its human step below: Norn drafts the journal entry and the cost accountant
-        // posts it.
-        carriesOutApproval: true,
-        why: 'Standard cost drives the books. While the body that approved the ECR still covers the change at today\'s cost, Norn updates the cost at any size and half get a blind recompute. If the ECR was approved another way, as on the fast track, or a re-quote has lifted the cost past that body\'s tier, it updates within 150,000 and the cost accountant decides above.',
+        level: 'recommend',
+        why: 'Standard cost drives the books. The package gives each item\'s new standard cost and its trace, and the cost accountant enters it (#71, #72).',
       },
       {
         action: 'draft_journal_entry',
-        level: 'approve',
-        why: 'A draft moves no balance, and the cost accountant sees every draft before it posts.',
+        level: 'recommend',
+        why: 'The package lists the journal entry lines: the scrap write-off, the purchase price variance on the first lot and the cancellation charge. The cost accountant enters them, because Norn saves no drafts in the ERP (#71).',
       },
       {
         action: 'post_journal_entry',
         level: 'recommend',
-        why: 'Posting touches the ledger. The cost accountant posts, with Norn\'s draft and the decision behind it ready.',
+        why: 'Posting touches the ledger. The cost accountant posts, with the decision and the package behind it ready.',
       },
     ],
     prov: inv('Starting point for Bowman, set by the principle in #24. Every limit and sample rate here is invented.'),
