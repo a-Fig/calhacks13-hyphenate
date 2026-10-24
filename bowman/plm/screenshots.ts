@@ -1,6 +1,6 @@
 // Screenshots of the PLM as a person sees it, with the installed Edge, through the SSH tunnel.
 //
-//   ENV_FILE=<repo>/.env node bowman/plm/screenshots.ts <label> [user-email]
+//   ENV_FILE=<repo>/.env node bowman/plm/screenshots.ts <label> [user-email] [--extra]
 //
 // Writes bowman/plm/screenshots/<label>-*.png. Logs in as the CCB chair unless a user is given.
 // Browses http://localhost:<port> rather than 127.0.0.1 so the session cookie does not collide with
@@ -46,6 +46,16 @@ const tabTo = (name: string) => async () => {
   await page.waitForTimeout(800);
 };
 
+const extra = process.argv.includes('--extra');
+if (extra) {
+  // Screens added with released_eco, supplier quote firmness and the EBOM label.
+  await shot('ecr-0319-released-eco', '/desk/ecr/ECR-0319');
+  await shot('ecr-0409-quotes', '/desk/ecr/ECR-0409', tabTo('Affected items'), true);
+  await shot('ebom-list', '/desk/engineering-bom');
+  await shot('home', '/desk/bowman-plm');
+  await browser.close();
+  process.exit(0);
+}
 await shot('home', '/desk');
 await shot('ecr-list', '/desk/ecr');
 await shot('ecr-0417-request', '/desk/ecr/ECR-0417');
