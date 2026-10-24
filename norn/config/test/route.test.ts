@@ -20,15 +20,27 @@ import {
   routeEcr,
   type Actor,
   type CompanyConfig,
+  type CostCheckHeadline,
   type CostForecast,
   type EcrFacts,
+  type ExactCostMeasure,
 } from '../src/index.ts';
 
 const BOWMAN = fileURLToPath(new URL('../../../bowman/norn-config/bowman.config.ts', import.meta.url));
 const NORN: Actor = { kind: 'agent' };
 
 let config: CompanyConfig;
+/** What the real cost check gives: ranges of signed totals. Norn routes on these and never acts on them. */
 const forecasts = new Map<string, CostForecast>();
+/**
+ * The same forecasts with an exact measure added. The check does not emit one yet, so these are test inputs. For the
+ * demo ECRs every cost component has one sign, so in each draw the size is the window total's own size, and its
+ * p50 and p90 are the p50 and p90 of that size: the range's own percentiles, on the side of zero it lies on.
+ */
+const exactForecasts = new Map<string, CostForecast>();
+
+/** The exact measure Bowman's configuration asks for: p90, 12 months, savings not offset. */
+const exactMeasure = (p50: number, p90: number, over: Partial<ExactCostMeasure> = {}): ExactCostMeasure => ({ source: 'exact', horizonMonths: 12, savingsOffset: false, p50, p90, ...over });
 const DEMO = ['ECR-0423', 'ECR-0417', 'ECR-0409', 'ECR-0406'];
 
 before(async () => {
@@ -37,7 +49,10 @@ before(async () => {
   config = loaded.config;
   for (const id of DEMO) {
     const ecr = bowman.ecrs.find((e) => e.id === id)!;
-    forecasts.set(id, costForecastFromCheck(costCheck(bowman, ecr, { seed: 'norn-seed-1' })));
+    const f = costForecastFromCheck(costCheck(bowman, ecr, { seed: 'norn-seed-1' }));
+    forecasts.set(id, f);
+    const t = f.windowTotal;
+    exactForecasts.set(id, { ...f, measured: exactMeasure(Math.abs(t.p50), Math.max(Math.abs(t.p10), Math.abs(t.p90))) });
   }
 });
 
@@ -52,7 +67,7 @@ const NO_BLOCKS = { safety_part: false, interchangeability_or_interface: false, 
  *   fixtures and programming, which is tooling.
  * - ECR-0406 is the dataset's trap: Class II filed on a safety item.
  */
-function factsFor(id: string): EcrFacts {
+function factsFor(id: string, exact = true): EcrFacts {
   const ecr = bowman.ecrs.find((e) => e.id === id)!;
   const answers: Record<string, boolean> =
     id === 'ECR-0423'
@@ -64,7 +79,7 @@ function factsFor(id: string): EcrFacts {
           : { ...NO_BLOCKS };
   return {
     ecrId: id,
-    cost: forecasts.get(id),
+    cost: (exact ? exactForecasts : forecasts).get(id),
     classes: { company: ecr.companyClass, regulatory: ecr.faaClass },
     answers,
     // The timeline check does not exist yet. A colour change on a lot already quoted at the same lead time slips nothing.
@@ -78,7 +93,7 @@ const personWith = (roleId: string) => config.people.find((p) => p.role === role
 
 /** A fast-track-eligible set of facts for any ECR id, at the given cost. */
 function eligible(ecrId: string, size: number, more: Partial<EcrFacts> = {}): EcrFacts {
-  return { ...factsFor('ECR-0423'), ecrId, cost: { windowMonths: 12, oneTime: { p10: 0, p50: 0, p90: 0 }, recurringWindow: { p10: 0, p50: 0, p90: 0 }, windowTotal: { p10: 0, p50: 0, p90: 0 }, measured: { p50: size, p90: size } }, ...more };
+  return { ...factsFor('ECR-0423'), ecrId, cost: { windowMonths: 12, oneTime: { p10: 0, p50: 0, p90: 0 }, recurringWindow: { p10: 0, p50: 0, p90: 0 }, windowTotal: { p10: 0, p50: 0, p90: 0 }, measured: exactMeasure(size, size) }, ...more };
 }
 
 describe('the real cost facts for the demo ECRs', () => {
@@ -96,7 +111,7 @@ describe('routing the demo ECRs', () => {
     const route = routeEcr(config, factsFor('ECR-0423'));
     assert.equal(route.classes.company.value, 'II');
     assert.equal(route.classes.regulatory.value, 'minor');
-    assert.equal(route.cost.basis, 'estimated');
+    assert.equal(route.cost.basis, 'measured');
     assert.ok(route.cost.size! > 500 && route.cost.size! < 700, String(route.cost.size));
     assert.equal(route.tier.tierId, 'technical_review');
     assert.equal(route.tier.bodyId, 'trc');
@@ -216,7 +231,7 @@ describe('the cost measure', () => {
   });
 
   it('prefers the exact figure from the checks when they give one', () => {
-    const f: CostForecast = { ...forecast(range(10, 10, 10)), measured: { p50: 400_000, p90: 900_000 } };
+    const f: CostForecast = { ...forecast(range(10, 10, 10)), measured: exactMeasure(400_000, 900_000) };
     const m = measureCost(config, f);
     assert.equal(m.size, 900_000);
     assert.equal(m.basis, 'measured');
@@ -469,6 +484,9 @@ describe('releasing an ECO carries out an approval while the approving body stil
 });
 
 describe('sampling', () => {
+  // Norn acts only on an exact cost measure, so each call here carries one, whatever the action's own limits.
+  const exactAt = (ecrId: string): EcrFacts => ({ ecrId, cost: eligible(ecrId, 600).cost });
+
   // The draws pinned in sample.test.ts, now through the decision. A draw under the rate holds the action for the blind check.
   const CLASS_CALLS: Array<[string, number, boolean]> = [
     ['ECR-0423', 0.8392148073762655, false],
@@ -485,7 +503,7 @@ describe('sampling', () => {
 
   for (const [ecr, value, sampled] of CLASS_CALLS) {
     it(`${ecr} set_company_class: ${value.toFixed(4)} against 0.25, so ${sampled ? 'it waits for the second check' : 'the agent acts'}`, () => {
-      const d = decideAction(config, { action: 'set_company_class', actor: NORN, facts: { ecrId: ecr } });
+      const d = decideAction(config, { action: 'set_company_class', actor: NORN, facts: exactAt(ecr) });
       assert.equal(d.outcome, 'approve_sampled');
       assert.equal(d.sample!.value, value);
       assert.equal(d.sample!.rate, 0.25);
@@ -512,7 +530,7 @@ describe('sampling', () => {
 
   it('without a PLM number nothing is drawn: the agent recommends, and says it waits for the number', () => {
     for (const ecrId of ['NORN-12', '', 'ECR-17']) {
-      const d = decideAction(config, { action: 'set_company_class', actor: NORN, facts: { ecrId } });
+      const d = decideAction(config, { action: 'set_company_class', actor: NORN, facts: exactAt(ecrId) });
       assert.equal(d.outcome, 'recommend', ecrId);
       assert.equal(d.waitsForPlmNumber, true);
       assert.equal(d.sample, undefined);
@@ -522,14 +540,14 @@ describe('sampling', () => {
   });
 
   it('an action that does not sample does not need the number', () => {
-    assert.equal(decideAction(config, { action: 'post_impact_statement', actor: NORN, facts: { ecrId: 'NORN-12' } }).outcome, 'approve');
+    assert.equal(decideAction(config, { action: 'post_impact_statement', actor: NORN, facts: exactAt('NORN-12') }).outcome, 'approve');
   });
 
   it('a company\'s own sample seed decides the draw', () => {
     const other = structuredClone(config);
     other.autonomy.sampleSeed = 'a-different-seed';
-    const a = decideAction(config, { action: 'set_company_class', actor: NORN, facts: { ecrId: 'ECR-0423' } });
-    const b = decideAction(other, { action: 'set_company_class', actor: NORN, facts: { ecrId: 'ECR-0423' } });
+    const a = decideAction(config, { action: 'set_company_class', actor: NORN, facts: exactAt('ECR-0423') });
+    const b = decideAction(other, { action: 'set_company_class', actor: NORN, facts: exactAt('ECR-0423') });
     assert.notEqual(a.sample!.value, b.sample!.value);
   });
 });
@@ -586,7 +604,8 @@ describe('when the facts cannot show an action is within its limits, it does not
     const d = fastTrack(withCost(small));
     assert.equal(d.actsNow, false);
     assert.equal(d.outcome, 'recommend');
-    assert.match(flat(d), /cannot be shown to be within/);
+    assert.match(flat(d), /Norn acts only on an exact measure/);
+    assert.match(flat(d), /only a lower bound/);
   });
 
   it('a spend with no saving in any draw is exact from its own range', () => {
@@ -627,12 +646,17 @@ describe('when the facts cannot show an action is within its limits, it does not
     assert.match(flat(fresh), /3,000,000 USD against a limit of 25,000 USD/);
   });
 
-  it('an exact figure for another horizon is refused, like an estimate would be', () => {
+  it('an exact figure is refused unless it is the configured measure over the configured horizon', () => {
     const f = eligible('ECR-0423', 600);
-    const sixMonths: CostForecast = { ...f.cost!, windowMonths: 6, measured: { p50: 600, p90: 600 } };
-    const route = routeEcr(config, { ...f, cost: sixMonths });
-    assert.equal(route.cost.basis, 'unmeasured');
-    assert.equal(fastTrack({ ...f, cost: sixMonths }).actsNow, false);
+    const refused = (cost: CostForecast) => {
+      assert.equal(routeEcr(config, { ...f, cost }).cost.basis, 'unmeasured');
+      assert.equal(fastTrack({ ...f, cost }).actsNow, false);
+    };
+    refused({ ...f.cost!, measured: exactMeasure(600, 600, { horizonMonths: 6 }) });
+    refused({ ...f.cost!, windowMonths: 6 });
+    refused({ ...f.cost!, measured: exactMeasure(600, 600, { savingsOffset: true }) });
+    refused({ ...f.cost!, measured: { ...exactMeasure(600, 600), source: 'estimate' } as unknown as ExactCostMeasure });
+    refused({ ...f.cost!, measured: exactMeasure(-1, -1) });
     assert.equal(fastTrack(f).actsNow, true);
   });
 
@@ -643,5 +667,98 @@ describe('when the facts cannot show an action is within its limits, it does not
       assert.match(flat(d), /not-a-body/);
     }
     assert.equal(decideAction(config, { action: 'release_eco', actor: NORN, facts: { ...factsFor('ECR-0423'), approvedBy: 'ccb' } }).outcome, 'approve');
+  });
+});
+
+// Regression tests for the second review. No estimate from summary quantiles authorizes anything: Norn acts only on
+// the exact measure, computed per draw by the checks.
+describe('Norn acts only on an exact cost measure', () => {
+  const r3 = (n: number) => ({ p10: n, p50: n, p90: n });
+  const NORN_: Actor = { kind: 'agent' };
+  const fastTrack = (facts: EcrFacts) => decideAction(config, { action: 'approve_fast_track_ecr', actor: NORN_, facts });
+  const MEASURE_REASON = /Norn acts only on an exact measure/;
+
+  it('ECR-0423 on the fast track: an exact measure within the limit acts, the check\'s estimate recommends', () => {
+    const exact = fastTrack(factsFor('ECR-0423'));
+    assert.equal(exact.outcome, 'approve_sampled');
+    assert.equal(exact.actsNow, true);
+    const estimate = fastTrack(factsFor('ECR-0423', false));
+    assert.equal(routeEcr(config, factsFor('ECR-0423', false)).cost.basis, 'estimated');
+    assert.equal(estimate.outcome, 'recommend');
+    assert.equal(estimate.actsNow, false);
+    assert.match(flat(estimate), MEASURE_REASON);
+    assert.match(flat(estimate), /estimated from the assessment's ranges/);
+  });
+
+  it('with only the check\'s estimates, every action Norn would take is a recommendation', () => {
+    const approved = { approvedBy: 'trc' };
+    for (const id of ['ECR-0423', 'ECR-0417', 'ECR-0409', 'ECR-0406']) {
+      for (const action of ACTION_IDS) {
+        const d = decideAction(config, { action, actor: NORN_, facts: { ...factsFor(id, false), ...approved } });
+        assert.equal(d.actsNow, false, `${id} ${action}: ${d.outcome}`);
+      }
+    }
+  });
+
+  it('a row of +200,000 one-time and -190,000 unit cost nets to 10,000 inside the check, and is not a 10,000 spend', () => {
+    const row = { id: 'r1', oneTime: r3(200_000), extended: r3(-190_000) };
+    const netted: CostCheckHeadline = {
+      window: { months: 12 },
+      headline: { oneTimeTotal: r3(10_000), recurringWindow: r3(0), windowTotal: r3(10_000) },
+      blocks: { production: [row] },
+    };
+    const forecast = costForecastFromCheck(netted);
+    assert.equal(forecast.gross, undefined);
+    assert.equal(routeEcr(config, { ...factsFor('ECR-0423'), cost: forecast }).cost.basis, 'unmeasured');
+    const d = decideAction(config, { action: 'release_eco', actor: NORN_, facts: { ...factsFor('ECR-0423'), cost: forecast, approvedBy: 'fast_track' } });
+    assert.equal(d.actsNow, false);
+    assert.equal(d.outcome, 'recommend');
+    assert.match(flat(d), /unmeasured/);
+    // Rows that all share a sign in both components do give a gross figure.
+    const pure = costForecastFromCheck({ ...netted, blocks: { production: [{ id: 'r1', oneTime: r3(200_000), extended: r3(50_000) }] } });
+    assert.ok(pure.gross);
+    assert.equal(pure.gross.saving.p90, 0);
+  });
+
+  it('stock dispositions are read as components of their row, not through the row total', () => {
+    const f = costForecastFromCheck({
+      window: { months: 12 },
+      headline: { oneTimeTotal: r3(10_000), recurringWindow: r3(0), windowTotal: r3(10_000) },
+      blocks: { production: [{ id: 'stock', oneTime: r3(10_000), extended: null }] },
+      inventory: [{ rowId: 'stock', rows: [{ cost: r3(200_000) }, { cost: r3(-190_000) }] }],
+    });
+    assert.equal(f.gross, undefined);
+  });
+
+  it('unknown tails: 9% uniform[-100000,-90000] and 91% uniform[0,27000] is not a 24,033 change that may act', () => {
+    // p10, p50 and p90 are about 297, 12,165 and 24,033, but the true p90 of |x| is 26,703, over the 25,000 limit.
+    const q = { p10: 297, p50: 12_165, p90: 24_033 };
+    const cost: CostForecast = { windowMonths: 12, oneTime: q, recurringWindow: r3(0), windowTotal: q, gross: { spend: q, saving: r3(0) } };
+    const offset = structuredClone(config);
+    offset.approval.costMeasure.savingsOffset = true;
+    for (const c of [config, offset]) {
+      const d = decideAction(c, { action: 'approve_fast_track_ecr', actor: NORN_, facts: { ...factsFor('ECR-0423'), cost } });
+      assert.equal(d.actsNow, false);
+      assert.equal(d.outcome, 'recommend');
+      assert.match(flat(d), MEASURE_REASON);
+    }
+  });
+
+  it('a lower bound does not authorize a chair: spend and saving both at a p90 of 100,000 can be 200,000 as the larger of the two', () => {
+    // 82% (100k, 100k), 9% (200k, 100k), 9% (100k, 200k): both gross p90s are 100k, the p90 of the larger is 200k.
+    const cost: CostForecast = { windowMonths: 12, oneTime: r3(0), recurringWindow: r3(0), windowTotal: r3(0), gross: { spend: r3(100_000), saving: r3(100_000) } };
+    const facts: EcrFacts = { ...factsFor('ECR-0417'), cost };
+    const route = routeEcr(config, facts);
+    assert.equal(route.cost.basis, 'lower_bound');
+    assert.equal(route.tier.bodyId, 'trc');
+    const d = decideAction(config, { action: 'approve_ecr_at_tier', actor: { kind: 'person', id: personWith('engineering_director').id }, facts });
+    assert.equal(d.actsNow, false);
+    assert.equal(d.outcome, 'recommend');
+    assert.match(flat(d), MEASURE_REASON);
+    assert.deepEqual(d.recipients, ['engineering_director']);
+    // With the exact measure at 100,000 the same director approves; at 200,000 the tier is the CCB and they may not.
+    const at = (size: number) => decideAction(config, { action: 'approve_ecr_at_tier', actor: { kind: 'person', id: personWith('engineering_director').id }, facts: eligible('ECR-0417', size) });
+    assert.equal(at(100_000).actsNow, true);
+    assert.equal(at(200_000).outcome, 'deny');
   });
 });

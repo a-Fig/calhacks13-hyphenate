@@ -83,7 +83,7 @@ route kept from an earlier cost cannot be reused. It never throws on a bad id or
 | Fact | Where it comes from | If missing |
 |---|---|---|
 | `ecrId` | the PLM number, such as ECR-0417 | required |
-| `cost` | `costForecastFromCheck(costCheck(...))`, or your own `CostForecast` with `gross` or `measured` | the cost is unmeasured |
+| `cost` | `costForecastFromCheck(costCheck(...))` (an estimate, enough to route), plus `measured` (the exact measure, needed to act) | the cost is unmeasured |
 | `slipP90Days` | the timeline check (not built yet) | a `maxP90SlipDays` limit is not met |
 | `reportLevel` | the level of the report the decision rests on | a `minReportLevel` limit is not met |
 | `classes` | set on the ECR, or proposed by the classifier | the axis's `whenUnsure` class |
@@ -100,8 +100,10 @@ route kept from an earlier cost cannot be reused. It never throws on a bad id or
 2. The action must be available. `approve_fast_track_ecr` needs a fast-track eligible ECR, for anyone, and otherwise is
    denied with `reroute`: the same actor's decision on `approve_ecr_at_tier`, to the body of the cost tier. `release_eco`
    and the four ERP actions need an approved ECR (`approvedBy`).
-3. A person acting as themselves is approved, since roles carry no limits.
-4. An agent gets the company's rule for the action. A detected `escalateOn` trigger escalates. Otherwise `limits` are
+3. A person acting as themselves is approved, since roles carry no limits. The exception is `approve_ecr_at_tier`: a
+   body's tier is shown to cover the change only by the exact cost measure, so without it the outcome is `recommend`.
+4. An agent gets the company's rule for the action. A detected `escalateOn` trigger escalates. A rule that would
+   `approve` or `approve_sampled` becomes `recommend` unless the cost is the exact measure. Otherwise `limits` are
    checked, and a failed one drops the level to `otherwise`. `carriesOutApproval` waives the limits when the approving
    body's tier is the tier of today's cost or above. Then the level applies: `approve_sampled` draws with `isSampled`.
 
@@ -109,22 +111,28 @@ The four ERP actions are `recommend` in the configuration, so they are always a 
 
 ## Design calls
 
-- **The cost measure cannot be worked out exactly from ranges, so an estimate is refused when it could mislead.** The
-  configuration defines the measure per draw of the forecast. `costCheck` gives p10, p50 and p90 of signed totals, not
-  the draws, and no gross spend or gross saving. The rule is: when the facts cannot show an action is within its limits,
-  the agent does not act. It recommends or escalates and says why. Concretely:
-  - `cost.measured` (the p50 and p90 of the measure per draw) is exact and wins. The checks do not give it yet.
-  - With `savingsOffset` false (Bowman), the size is the larger of the gross spend and the gross saving. Net totals
-    cannot give that (+200,000 of tooling and a 190,000 credit net to 10,000), so with net totals only the cost is
-    unmeasured. `cost.gross` carries the two. `costForecastFromCheck` fills it in when every cost row has the same
-    sign, which holds for all four demo ECRs. With both a spend and a saving the larger of the two is only a lower bound
-    (`basis: 'lower_bound'`): it routes the change and never lets an agent act on it.
-  - With `savingsOffset` true, the size is the larger end of the net range at p90 only when p10 and p90 are on the
-    same side of zero. A range across zero is unmeasured, because the p90 of the absolute value can exceed both ends.
-    Even on one side, the figure assumes the tails beyond p10 and p90 stay on that side. It is an estimate, labelled
-    `estimated`. It is not guaranteed to be an over-statement.
-  - To measure every ECR, the checks would need to expose either the measure per draw (`measured`, with its window), or
-    the gross spend and gross saving per draw over the window.
+- **Norn acts only on an exact cost measure.** The configuration defines the measure per draw of the forecast.
+  `costCheck` gives p10, p50 and p90 of signed totals, not the draws. A quantile of the parts does not give the quantile
+  of the whole: spend and saving that both have a p90 of 100,000 can have a larger-of p90 of 200,000, and a forecast
+  with p10, p50 and p90 of 297, 12,165 and 24,033 can have a p90 of 26,703 in size. So any outcome of `approve` or
+  `approve_sampled`, and any `actsNow`, needs `cost.measured`, computed per draw by the checks. That covers every
+  action, including a person's `approve_ecr_at_tier`. It is stricter than some actions need: `post_impact_statement`
+  and `set_company_class` have no cost limit, and are held back too.
+  - **Until the checks emit `measured`, Norn recommends everything and acts on nothing.** That is the reason for the
+    follow-up that makes `costCheck` produce it.
+  - **`measured` is an `ExactCostMeasure`:** `source: 'exact'`, `horizonMonths`, `savingsOffset`, `p50` and `p90`. It
+    counts only if the first three match the configuration and the forecast's `windowMonths` is the horizon. In each
+    draw, over the first `horizonMonths` months from the cut-in, take every cost component (each row's one-time column,
+    each row's unit cost times quantity, each stock disposition) separately, never netted into a row total. The spend is
+    the sum of the positive ones, the saving the sum of the size of the negative ones. The size is the larger of the two
+    when `savingsOffset` is false, and |spend - saving| when it is true. `p50` and `p90` are those percentiles of the
+    size across the draws.
+  - **Estimates still route**, so a card can show a tier and a body, and `measureCost` labels each one: `estimated`,
+    `lower_bound` or `unmeasured`. With `savingsOffset` false the size needs `cost.gross` (net totals cannot give it:
+    +200,000 of tooling and a 190,000 credit net to 10,000). `costForecastFromCheck` sets `gross` only when every cost
+    component, read separately and not through a row total, has one sign. With `savingsOffset` true a range across
+    zero is unmeasured at p90. An estimate can be too low whichever side of zero it falls on, because the tails beyond
+    p10 and p90 are not known. The decision for an estimate says so: "Norn acts only on an exact measure".
 - **The horizon must match**, for `measured` too. A forecast over a different number of months than `horizonMonths` is
   not used, so the cost is unmeasured.
 - **Unmeasured cost goes to the top tier** and fails every `maxCost` limit.
