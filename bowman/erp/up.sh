@@ -62,7 +62,7 @@ case "$cmd" in
       printf 'ERPNEXT_ADMIN_PASSWORD=%s\nBOWMAN_ERP_DB_ROOT_PASSWORD=%s\n' \"\$admin\" \"\$db\" > .env.new
       mv .env.new .env"
     rssh "$REMOTE_PATH; cd $REMOTE_DIR && docker compose -p $PROJECT up -d --quiet-pull"
-    echo "Waiting for the site (first start installs ERPNext, about 3-8 minutes)..."
+    echo "Waiting for the site (first run: image pulls then ERPNext install, 15-30 minutes; restarts take under a minute)..."
     for _ in $(seq 1 120); do
       # Ready = the one-shot create-site container exited 0 (site exists, ERPNext installed)
       # and the web tier answers a ping.
