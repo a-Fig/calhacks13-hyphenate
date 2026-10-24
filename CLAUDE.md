@@ -21,12 +21,12 @@ workflow decisions here.
 
 ## Words that mean two things
 
-- **Branch, PR, merge, `main`, checks.** The product borrows Git's model
-  (`docs/ARCHITECTURE.md` §2). There, an ECR is a branch, its review is a PR, an ECO is a merge,
-  and the forecast stages are checks. In this repo's workflow they mean git. Say "product PR" or
-  "repo PR" when it's ambiguous.
-- **Agent.** Either the product's agents (ECR extraction, assumption proposals, card narration) or
-  a coding agent working on this repo.
+`docs/GLOSSARY.md` defines our terms, and maps the product's Git metaphor onto the business terms.
+- **Git words are for building.** The product borrows branch, PR, merge, `main` and checks for its
+  own design. In this repo's workflow, those words mean git. Say "product PR" or "repo PR" when
+  it's ambiguous.
+- **Business words are for anything a judge or user sees.** The UI, demo, video, Devpost and pitch
+  say NCR, ECR, ECO and impact assessment, never branch or merge (Tyler, 2026-10-24).
 
 ## Workflow
 
