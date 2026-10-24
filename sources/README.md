@@ -26,3 +26,15 @@ Original source material, copied verbatim. Fetched 2026-10-23 (PT). Every `.md` 
 | [linkedin-about.md](hyphenate/linkedin-about.md) | LinkedIn company page, About section |
 | [site/](hyphenate/site/) | hyphenate.ai: home, about, platform, product and role pages, case studies, guide, press page, trust center, [blog](hyphenate/site/blog/index.md), [careers](hyphenate/site/careers/index.md) |
 | [press/](hyphenate/press/) | Seed round (TechCrunch, GlobeNewswire, Foundation Capital, CFO Dive, AlleyWatch) and rename (GlobeNewswire, TNW) |
+
+## ecp/
+
+The US defense Engineering Change Proposal, Bowman's model for an ECR and its impact assessment (#6). These are public-domain US government works, fetched 2026-10-24. [ecp/README.md](ecp/README.md) gives each file's source and says whether it's verbatim or summarised.
+
+| File | Source |
+|---|---|
+| [ecp-fields.md](ecp/ecp-fields.md) | DD Form 1692 (REV 01/2018), blocks 1-59, with labels and instructions verbatim |
+| [mil-hdbk-61a-section-6-2.md](ecp/mil-hdbk-61a-section-6-2.md) | MIL-HDBK-61A section 6.2 and Tables 6-2 to 6-7 |
+| [mil-hdbk-61a-appendix-b.md](ecp/mil-hdbk-61a-appendix-b.md) | MIL-HDBK-61A Appendix B, the ECP cost template |
+| [mil-hdbk-61a-appendix-d.md](ecp/mil-hdbk-61a-appendix-d.md) | MIL-HDBK-61A Appendix D, the ECP management guide |
+| [di-sess-80639d.md](ecp/di-sess-80639d.md) | DI-SESS-80639D, the ECP data item description |
