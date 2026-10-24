@@ -163,6 +163,9 @@ Tyler, whether Ankit can also approve is open.
   applied by hand is written down.
 - *(proposed)* The deployed demo instance is never a test instance. Wiping its data, republishing
   its schema or rotating its keys needs Tyler's OK.
+- Everything a person sees is visual, pretty and easy for a human to understand, not an agent.
+  This is non-negotiable (Tyler, 2026-10-24, #50). Copy designs and practices that already work
+  everywhere we can, and invent only where it counts.
 - Demo screens summarise rather than enumerate. Use few words on buttons, and no UI text explaining
   what the app just did (2026-10-18).
 
