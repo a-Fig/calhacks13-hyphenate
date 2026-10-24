@@ -383,7 +383,8 @@ function evaluateTests(
   return lists.flatMap(([list, tests]) =>
     tests.map((t): TestResult => {
       if (t.whenClass) return { id: t.id, text: t.text, list, holds: classes[t.whenClass.axis].value === t.whenClass.value, basis: 'class' };
-      const answer = answers[t.id];
+      // Only the answer's own boolean counts: an id such as `constructor` would otherwise read an inherited property.
+      const answer = Object.hasOwn(answers, t.id) && typeof answers[t.id] === 'boolean' ? answers[t.id] : undefined;
       return answer === undefined ? { id: t.id, text: t.text, list, holds: null, basis: 'unanswered' } : { id: t.id, text: t.text, list, holds: answer, basis: 'answered' };
     })
   );

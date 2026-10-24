@@ -186,6 +186,17 @@ describe('classes and unanswered tests', () => {
     assert.match(fastTrack.why, /Not yet answered/);
   });
 
+  it('counts only an answer of its own, never an inherited property such as constructor', () => {
+    const c = structuredClone(config);
+    const t = c.approval.neverFastTrack.find((x) => x.id === 'safety_part')!;
+    t.id = 'constructor';
+    const facts = factsFor('ECR-0423');
+    delete facts.answers!.safety_part;
+    const { fastTrack } = routeEcr(c, facts);
+    assert.equal(fastTrack.eligible, false);
+    assert.deepEqual(fastTrack.unanswered.map((x) => x.id), ['constructor']);
+  });
+
   it('needs one of the kinds of change, and says when none was answered yes', () => {
     const facts = factsFor('ECR-0423');
     facts.answers!.authorized_equivalent = false;
