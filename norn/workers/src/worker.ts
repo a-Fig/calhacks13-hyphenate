@@ -249,7 +249,7 @@ if (baselines.source?.erp) {
     ...GUARD_KEYS.map(k => `SELECT * FROM check_result WHERE key = '${k}'`),
   ]);
   const planner = erpPlanner(connection, settings);
-  const opts = { webUrl: process.env.NORN_WEB_URL ?? 'http://localhost:5173', timeZone: settings.timeZone };
+  const opts = { webUrl: process.env.NORN_WEB_URL ?? 'http://localhost:5173', timeZone: settings.timeZone, recheckMs: Number(process.env.NORN_PACKAGE_RECHECK_MS ?? 60_000) };
   let busy = false;
   const said = new Set<string>();
   const packages = async () => {

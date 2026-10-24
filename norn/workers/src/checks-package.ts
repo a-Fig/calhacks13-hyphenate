@@ -68,17 +68,25 @@ const store = new BaselineStore(
 // Released ECOs an earlier run on this database left are re-checked too; this check follows its own.
 const handed: EcoRelease[] = [];
 let enteredNow = 0;
+let failNext = false;
 const planner: Planner = async release => {
+  if (failNext && release.ecr === e417.id) {
+    failNext = false;
+    throw new Error('check: the ERP read failed');
+  }
   if (release.ecr === e417.id) handed.push(release);
   const lines = release.items.length + (release.bomChanges?.length ?? 0) + (release.journals?.length ?? 0);
   return { packageJson: JSON.stringify({ check: true, eco: release.eco, lines, entered: enteredNow }), lines, entered: enteredNow, conflicts: 0, problems: [] };
 };
-const opts = { webUrl: 'https://norn.example.com/', timeZone: 'America/Los_Angeles' };
+const opts = { webUrl: 'https://norn.example.com/', timeZone: 'America/Los_Angeles', recheckMs: 3_600_000 };
 const quiet = () => {};
 const pkgLogs = (prId: bigint) => logs(l => l.entity === `erp_package:${prId}` && l.outcome === 'applied');
 
 try {
-  await ingestOnce(R, stubSource(ecrDir), new Map(), quiet);
+  // One `sent` map for the whole run, as the ingest loop keeps it: the ECO number arriving later on an
+  // unchanged ECR must still be recorded.
+  const sent = new Map<string, string>();
+  await ingestOnce(R, stubSource(ecrDir), sent, quiet);
   const pr = await until(() => [...db.pullRequest.iter()].find(p => p.plmEcrNumber === e417.id), 5000, `${e417.id} to be filed`);
   for (const stage of ['s1_bom_delta', 's2_cost', 's3_timeline', 's4_supply'])
     await until(() => current(pr.id, stage)?.status === 'done' && current(pr.id, stage), 90000, `${stage} on ${e417.id} to finish`);
@@ -91,7 +99,6 @@ try {
   await R.setPrStatus({ prId: pr.id, status: 'approved' });
   // The PLM releases the ECO: the feed now carries its number, and ingest records it.
   writeFileSync(join(ecrDir, `${e417.id}.json`), JSON.stringify({ ...e417, eco: ECO }));
-  const sent = new Map<string, string>();
   await ingestOnce(R, stubSource(ecrDir), sent, quiet);
   await until(() => db.ecoRelease.prId.find(pr.id), 5000, 'the change order number');
   const revs = [...db.ecrRevision.iter()].filter(r => r.prId === pr.id).length;
@@ -121,6 +128,16 @@ try {
   const logsBefore = pkgLogs(pr.id).length;
   const again = await packageOnce(A.conn, R, store, planner, opts, quiet);
   check('on the same ERP read the job leaves the package alone', handed.length === 1 && pkgLogs(pr.id).length === logsBefore, JSON.stringify(again));
+  check('the package names the first-lot premium as a variance booked at receipt', notes.notes.some(n => /First-lot price premium.*462\.50.*received and invoiced/.test(n)), notes.notes.join(' | '));
+
+  // ---- the same ERP baseline, but time to check again: an entered journal is not in the baseline ----
+  enteredNow = 1;
+  const recheck = await packageOnce(A.conn, R, store, planner, { ...opts, recheckMs: 0 }, quiet);
+  const rowR = await until(() => (db.erpPackage.prId.find(pr.id)?.entered === 1 && db.erpPackage.prId.find(pr.id)) || undefined, 5000, 'the re-checked package');
+  check('a package is checked again on a timer, since entering it may not change the baseline hash', recheck.built >= 1 && handed.length === 2 && rowR.erpBaseline === hashOf(baseline), `${JSON.stringify(recheck)} ${rowR.entered}/${rowR.lines}`);
+  failNext = true;
+  const failed = await packageOnce(A.conn, R, store, planner, { ...opts, recheckMs: 0 }, quiet);
+  check('a failed ERP read for one ECO is reported and does not stop the job', failed.skipped.some(s => s.includes(e417.id) && s.includes('the ERP read failed')) && db.erpPackage.prId.find(pr.id)?.entered === 1, JSON.stringify(failed.skipped));
 
   // ---- a new ERP read: a person has entered two lines ------------------------------------------------
   erpNow = structuredClone(baseline);
@@ -129,8 +146,8 @@ try {
   await store.refresh(quiet);
   const third = await packageOnce(A.conn, R, store, planner, opts, quiet);
   const row2 = await until(() => (db.erpPackage.prId.find(pr.id)?.entered === 2 && db.erpPackage.prId.find(pr.id)) || undefined, 5000, 'the updated package');
-  check('a new ERP read checks the package again: entered lines show, on the old assessment', third.built >= 1 && handed.length === 2 && row2.erpBaseline === hashOf(erpNow) && row2.s2RunId === s2.id && pkgLogs(pr.id).length === logsBefore + 1, `${JSON.stringify(third)} ${row2.entered}/${row2.lines}`);
-  check('the release is the same on the new read: the amounts come from the assessment, not from the ERP now', handed[1]!.journals!.length === 3 && JSON.stringify(handed[0]) === JSON.stringify(handed[1]), '');
+  check('a new ERP read checks the package again: entered lines show, on the old assessment', third.built >= 1 && handed.length === 3 && row2.erpBaseline === hashOf(erpNow) && row2.s2RunId === s2.id && pkgLogs(pr.id).length === logsBefore + 2, `${JSON.stringify(third)} ${row2.entered}/${row2.lines}`);
+  check('the release is the same on the new read: the amounts come from the assessment, not from the ERP now', handed[2]!.journals!.length === 3 && JSON.stringify(handed[0]) === JSON.stringify(handed[2]), '');
   const summary = pkgLogs(pr.id).at(-1)?.summary ?? '';
   check('the log says how much of the package is entered', summary.includes(`ERP change package for ${ECO}: 2 of 4 line(s) entered`), summary);
 } catch (e) {

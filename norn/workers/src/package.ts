@@ -40,6 +40,12 @@ export type PackageOptions = {
   webUrl: string;
   /** The company's time zone, for the release day. */
   timeZone?: string;
+  /**
+   * How often a package is checked against the ERP again even when the baseline hash has not moved.
+   * The baseline leaves out what a person enters for a package (journal entries, the ECO tags, a
+   * standard cost dated in the future), so its hash alone cannot tell that a line was entered.
+   */
+  recheckMs: number;
 };
 
 /** The stored rows an assessment computed again is compared on: its totals. A worker subscribes to just these. */
@@ -92,18 +98,21 @@ export async function packageOnce(conn: DbConnection, R: Client['R'], baselines:
       continue;
     }
     const prev = conn.db.erpPackage.prId.find(pr.id);
-    if (prev && prev.s2RunId === s2.id && prev.erpBaseline === base.hash) continue; // checked on this ERP read already
-    const a = await assessmentOf(conn, baselines, s2.id, log);
-    if (typeof a === 'string') {
-      out.skipped.push(`${pr.plmEcrNumber}: ${a}`);
+    const checkedAgo = prev ? Date.now() - Number(prev.updatedAt.microsSinceUnixEpoch / 1000n) : Infinity;
+    if (prev && prev.s2RunId === s2.id && prev.erpBaseline === base.hash && checkedAgo < opts.recheckMs) continue; // checked recently on this ERP read
+    // One ECO's failure must not hold up the others.
+    let built;
+    try {
+      built = await buildOne(pr, eco, s2.id);
+    } catch (e) {
+      out.skipped.push(`${pr.plmEcrNumber}: ${(e as Error).message}`);
       continue;
     }
-    const { release, notes } = releaseOf(a.cr, a.result, {
-      eco: eco.ecoNumber,
-      decision: { id: `${pr.plmEcrNumber} (assessment run ${s2.id})`, url: `${opts.webUrl.replace(/\/+$/, '')}/ecr/${encodeURIComponent(pr.plmEcrNumber)}` },
-      releasedOn: dayIn(eco.recordedAt.microsSinceUnixEpoch, opts.timeZone),
-    });
-    const planned = await planner(release);
+    if (typeof built === 'string') {
+      out.skipped.push(`${pr.plmEcrNumber}: ${built}`);
+      continue;
+    }
+    const { release, notes, planned } = built;
     // A read that finds what the last one found keeps the stored package, so no log row is added
     // for it; erp_package.updatedAt says when it was last checked.
     if (prev && prev.s2RunId === s2.id && withoutReadAt(prev.packageJson) === withoutReadAt(planned.packageJson)) planned.packageJson = prev.packageJson;
@@ -126,4 +135,20 @@ export async function packageOnce(conn: DbConnection, R: Client['R'], baselines:
     } else out.unchanged++;
   }
   return out;
+
+  async function buildOne(pr: { plmEcrNumber: string }, eco: { ecoNumber: string; recordedAt: { microsSinceUnixEpoch: bigint } }, s2Id: bigint) {
+    const a = await assessmentOf(conn, baselines, s2Id, log);
+    if (typeof a === 'string') return a;
+    const { release, notes } = releaseOf(a.cr, a.result, {
+      eco: eco.ecoNumber,
+      decision: { id: `${pr.plmEcrNumber} (assessment run ${s2Id})`, url: `${opts.webUrl.replace(/\/+$/, '')}/ecr/${encodeURIComponent(pr.plmEcrNumber)}` },
+      releasedOn: dayIn(eco.recordedAt.microsSinceUnixEpoch, opts.timeZone),
+    });
+    // A release that changes nothing the ERP holds has an empty package: nothing to ask the ERP.
+    const empty = !release.items.length && !release.bomChanges?.length && !release.journals?.length;
+    const planned: PlannedPackage = empty
+      ? { packageJson: JSON.stringify({ version: 1, release, lines: [], counts: { total: 0, entered: 0, toEnter: 0, conflict: 0 }, effects: [], warnings: [], problems: [] }), lines: 0, entered: 0, conflicts: 0, problems: [] }
+      : await planner(release);
+    return { release, notes, planned };
+  }
 }

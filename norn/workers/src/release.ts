@@ -99,6 +99,15 @@ export function releaseOf(cr: ChangeRequest, result: CostCheckResult, ctx: Relea
       }
     }
   }
+  // A first-lot price premium is a purchase price variance: it arises when the first lot is received
+  // and invoiced above the new standard cost, not at release, so the package states it rather than
+  // asking for an entry now.
+  for (const row of Object.values(result.blocks).flat()) {
+    if (!/premium|first[- ]lot|PPV/i.test(row.label)) continue;
+    const amount = r2(row.total.point);
+    if (nonZero(amount)) notes.push(`${row.label}: ${money(amount)}. It is a purchase price variance on the first lot, booked when that lot is received and invoiced, not at release.`);
+  }
+
   const journals: EcoJournal[] = [];
   if (onHand.length) journals.push({ key: 'scrap-on-hand', title: 'Write down the old stock on hand to scrap value', lines: onHand });
   if (supplier.length) journals.push({ key: 'supplier-finished', title: 'Accrue the loss on old units finished at the supplier', lines: supplier });

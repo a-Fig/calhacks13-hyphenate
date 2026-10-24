@@ -69,9 +69,7 @@ export async function ingestOnce(R: Client['R'], source: IngestSource, sent: Map
     const key = canonicalJson([it.title, it.description, changeRequestJson]);
     if (sent.get(it.plmEcrNumber) === key) {
       out.unchanged++;
-      continue;
-    }
-    try {
+    } else try {
       await withRetry(
         () => R.ingestEcr({ plmEcrNumber: it.plmEcrNumber, title: it.title, description: it.description, changeRequestJson, source: source.name, sourceRef: it.sourceRef }),
         { idempotent: true, label: `ingest_ecr ${it.plmEcrNumber}` }
