@@ -1,13 +1,15 @@
 // The view-model for Norn's ECR screens.
 //
-// Screens read only these types. Mock data (./mock) builds them today; live results from the checks
-// library (#41: ECP-shaped rows with p10/p50/p90 and a per-number trace) get adapted into them in
-// ./adapter.ts. Nothing under src/screens knows where an ImpactAssessment came from.
+// Screens read only these types. Live results come from the checks library (norn/checks, S1 and S2,
+// stored as CheckResultRow[] in check_result) and are adapted into them by fromChecks() in
+// ./adapter.ts. The parts the checks do not produce yet (the timeline range, supply risk, the
+// change class and approval route, the recommendation, the agent timeline) are narrative: mock
+// fixtures, optional here, and named in `ImpactAssessment.mock` so the screens can label each one.
 
 /** How a number or claim is known (docs/GLOSSARY.md, "How Norn marks evidence"). */
 export type Evidence = 'fact' | 'assumption' | 'computation' | 'judgment';
 
-/** Where an assumption came from (norn/ARCHITECTURE.md section 5). */
+/** Where an assumption came from: the checks' `Source`. */
 export type Origin = 'given' | 'default' | 'agent_estimated';
 
 /** `date` figures hold milliseconds since the epoch. */
@@ -23,26 +25,33 @@ export interface Figure {
   /** Absent when the number is exact (a quote, a count). */
   p10?: number;
   p90?: number;
+  /** Every input at its stated value. Adds up across rows exactly; the table shows it. */
+  point?: number;
+  /** Adds up across rows exactly, too. */
+  mean?: number;
   evidence: Evidence;
 }
 
-export type CostBlock = 'production' | 'retrofit' | 'logistics' | 'other';
+/** Same names as the checks' `CostBlock`. */
+export type CostBlock = 'production' | 'retrofit' | 'logisticsSupport' | 'other';
 
 /** One line of the ECP cost page (MIL-HDBK-61A App. B). Savings are negative. */
 export interface CostRow {
   id: string;
   block: CostBlock;
   label: string;
-  /** One-time (non-recurring) amount. */
-  oneTime?: Figure;
-  /** Per-unit cost and how many units. Recurring, or priced per unit. */
+  /** From the row, not guessed: production cost per unit built after the cut-in. Decides the column. */
+  recurring: boolean;
+  /** Per-unit amount and units: per part built for a recurring row, per kit or unit otherwise. */
   unitCost?: Figure;
   quantity?: number;
-  /** Year-1 total of the line. */
+  /** The line's total over the window. */
   total: Figure;
   note?: string;
-  /** Norn has not costed this line yet (Level 1). Shown as such, and left out of the totals. */
-  notAssessed?: boolean;
+  /** Left blank on the ECR and counted as $0 until someone estimates it. */
+  needsEstimate?: boolean;
+  /** Who stated it: a supplier quote, an engineer's estimate, an agent's estimate, a default. */
+  basis?: string;
 }
 
 export interface BlockSubtotal {
@@ -64,50 +73,80 @@ export type LikelihoodWord =
 
 export interface Likelihood {
   word: LikelihoodWord;
-  /** The event, e.g. "cut-in by 15 Mar 2027". */
+  /** The event, e.g. "under $450k". */
   event: string;
   probability: number;
 }
 
 export interface Headline {
-  /** Cost change per aircraft, recurring. */
-  unitCost: Figure;
-  unitCostNote: string;
-  /** Net cost of the first year: one-time plus recurring. */
+  /** Cost change per unit built, per program the change reaches. */
+  unitCost: { program: string; figure: Figure; note?: string }[];
+  /** Net cost of the window: one-time plus recurring. */
   year1: Figure;
-  year1Likelihood: Likelihood;
-  cutIn: Figure;
-  cutInNote: string;
-  cutInLikelihood: Likelihood;
-  supply: {
-    id: string;
-    level: RiskLevel;
-    evidence: Evidence;
+  /** From the quantiles the checks give, fitted. Absent when there is no range. */
+  year1Likelihood?: Likelihood;
+}
+
+export interface CostSection {
+  rows: CostRow[];
+  subtotals: BlockSubtotal[];
+  net: Figure;
+  oneTime: Figure;
+  recurring: Figure;
+  /** The checks' year-one window: months from the cut-in, e.g. "Nov 2026 to Oct 2027". */
+  window: { from: string | null; months: number; label: string };
+  /** Lines counted as $0 until estimated. */
+  needsEstimate: { label: string; rowId: string }[];
+  /** How it was produced, for the footer: draws, seed, code version. */
+  run: { draws: number; seed: string; codeVersion: string; correlation: number };
+}
+
+/** Where the change reaches the line. The checks give one fixed month; a range needs the timeline check (S3). */
+export interface CutIn {
+  program: string;
+  /** 'YYYY-MM', from the ECR's stated effectivity or a default. */
+  month: string;
+  serial: number;
+  source: Origin;
+  rationale: string;
+  /** Norn's agent's own range, once it has made one. Not a check result. */
+  estimate?: {
+    figure: Figure;
     note: string;
-    likelihood: Likelihood;
+    likelihood?: Likelihood;
   };
 }
 
+export interface Supply {
+  id: string;
+  level: RiskLevel;
+  evidence: Evidence;
+  note: string;
+  likelihood?: Likelihood;
+}
+
 export interface SCurve {
-  /** Cumulative probability of the year-1 total: x = USD, y = 0..1. */
-  points: { x: number; y: number }[];
-  pointEstimate: { x: number; y: number };
   p10: number;
   p50: number;
   p90: number;
-  draws: number;
+  point: number;
+  mean: number;
+  /** Cumulative probability points, when there are more than the three quantiles. Otherwise the chart fits a curve. */
+  points?: { x: number; y: number }[];
 }
 
 export interface Driver {
   id: string;
   label: string;
+  kind: 'input' | 'decision';
   evidence: Evidence;
-  /** The input as shown at its p10 and p90, e.g. "13 wk" and "20 wk". */
-  lowLabel: string;
-  highLabel: string;
-  /** Year-1 total with the input at its p10 and at its p90, the others at their p50. */
+  /** Window total with the input at its P10, or the first alternative of a decision. */
   low: number;
+  /** Window total with the input at its P90, or the second alternative. */
   high: number;
+  /** The input as shown at its P10 and P90, or the alternatives' names. */
+  lowLabel?: string;
+  highLabel?: string;
 }
 
 export interface Scenario {
@@ -171,7 +210,7 @@ export interface ActivityEvent {
   actorKind: ActorKind;
   /** Whom the actor acted for: "Jeff's agent, for Jeff". Absent when it acted on its own account. */
   onBehalfOf?: string;
-  /** What spawned it: "Norn, automatically". */
+  /** What spawned it: "Norn, for Jeff Hargrove". */
   spawnedBy?: string;
   kind?: EventKind;
   text: string;
@@ -195,7 +234,7 @@ export interface TraceInput {
   label: string;
   display: string;
   evidence: Evidence;
-  /** Another trace, so the drawer can drill into it. */
+  /** Another trace, so the panel can drill into it. */
   traceId?: string;
 }
 
@@ -206,58 +245,33 @@ export interface TraceAssumption {
   source: string;
 }
 
-/** The "why" behind one number. */
+/**
+ * The "why" behind one number. The checks give a formula and the inputs it used with their sources;
+ * the rest is optional and shown when present.
+ */
 export interface Trace {
   id: string;
   title: string;
   evidence: Evidence;
   summary: string;
-  /** The number as the drawer shows it, for traces that are not one of the assessment's figures. */
+  /** The number as the panel shows it, for traces that are not one of the assessment's figures. */
   value?: { text: string; range?: string };
-  sources: TraceSource[];
+  sources?: TraceSource[];
   inputs: TraceInput[];
   assumptions: TraceAssumption[];
   formula?: { expression: string; worked?: string };
-  producedBy: { check: string; actor: string; onBehalfOf: string; at: string; note?: string };
+  producedBy?: { check: string; actor: string; onBehalfOf?: string; at?: string; note?: string };
 }
 
-export interface EcrSummary {
-  id: string;
-  title: string;
-  program: 'Vesper' | 'Meridian';
-  partNumber?: string;
-  companyClass: 'I' | 'II';
-  faa: 'major' | 'minor';
-  priority: 'Routine' | 'Urgent' | 'Emergency';
-  status: 'Draft' | 'Submitted' | 'In review' | 'Approved' | 'ECO released' | 'Rejected';
-  /** Reviewers and how far they got, for the list's avatars and the "Review required" text. */
-  reviewers?: { name: string; state: 'approved' | 'pending' }[];
-  /** Status of the impact checks, for the list's check icon. */
-  checks?: 'passed' | 'attention' | 'running';
-  comments?: number;
-  /** What the ECR changes, for the subline: "BW-5120-210 from Rev B to Rev C". */
-  change?: string;
-  /** Year-1 cost change with its range; negative is a saving. Absent until Norn has run. */
-  cost?: { p10: number; p50: number; p90: number };
-  level?: ReportLevel;
-  lastActivity: string;
-  lastActivityBy: string;
-  originator: string;
-  filedOn: string;
-  /** One short flag the backlog list can show, e.g. "Conflicts with ECR-0415". */
-  flag?: string;
-  hasAssessment: boolean;
-}
-
-/** One impact check (the stages S1 to S4 and the classification), as GitHub's Checks tab lists them. */
+/** One impact check, as GitHub's Checks tab lists it. */
 export interface Check {
   id: 'bom' | 'cost' | 'timeline' | 'supply' | 'class';
   name: string;
-  state: 'passed' | 'attention' | 'running' | 'skipped';
-  /** One line for the checks list and the approval box. */
+  /** `pending`: the check does not exist yet or has not run. */
+  state: 'passed' | 'attention' | 'running' | 'pending' | 'skipped';
   summary: string;
-  took: string;
-  by: string;
+  took?: string;
+  by?: string;
 }
 
 /** One line of a diff. */
@@ -300,19 +314,71 @@ export interface Meeting {
   date: string;
 }
 
+/**
+ * What Norn hands a person when an ECO is released: the lines to enter in the ERP. Norn never writes
+ * to the ERP; a person does, and ticks each line off.
+ */
+export interface ErpPackage {
+  system: string;
+  lines: {
+    kind: 'MBOM' | 'Standard cost' | 'Journal entry';
+    title: string;
+    /** Diff-style lines: what the ERP has, what it should have. */
+    diff: DiffLine[];
+    status: 'To enter in ERPNext' | 'Entered';
+  }[];
+}
+
+/** Parts of an assessment that are mock fixtures today, so the screens can label each one. */
+export type MockSection =
+  | 'narrative' // the ECR text, the timeline of events, the approvals
+  | 'class'
+  | 'route'
+  | 'recommendation'
+  | 'supply'
+  | 'cutInEstimate'
+  | 'agentEstimates'
+  | 'erp';
+
+export interface EcrSummary {
+  id: string;
+  title: string;
+  program: 'Vesper' | 'Meridian';
+  partNumber?: string;
+  companyClass: 'I' | 'II';
+  faa: 'major' | 'minor';
+  priority: 'Routine' | 'Urgent' | 'Emergency';
+  status: 'Draft' | 'Submitted' | 'In review' | 'Approved' | 'ECO released' | 'Rejected';
+  /** Reviewers and how far they got, for the list's avatars and the "Review required" text. */
+  reviewers?: { name: string; state: 'approved' | 'pending' }[];
+  /** Status of the impact checks, for the list's check icon. */
+  checks?: 'passed' | 'attention' | 'running';
+  comments?: number;
+  /** What the ECR changes, for the subline: "BW-5120-210 from Rev B to Rev C". */
+  change?: string;
+  /** Net cost of the checks' year-one window with its range; negative is a saving. Absent until the checks have run. */
+  cost?: { p10: number; p50: number; p90: number; point?: number; from?: string | null };
+  level?: ReportLevel;
+  lastActivity: string;
+  lastActivityBy: string;
+  originator: string;
+  filedOn: string;
+  /** One short flag the backlog list can show, e.g. "Conflicts with ECR-0415". */
+  flag?: string;
+  hasAssessment: boolean;
+}
+
 /** The impact assessment a CFO or CCB member reads. */
 export interface ImpactAssessment {
   ecr: EcrSummary;
   level: ReportLevel;
   headline: Headline;
-  cost: {
-    rows: CostRow[];
-    subtotals: BlockSubtotal[];
-    net: Figure;
-    /** What "year 1" means, e.g. "2027". */
-    yearLabel: string;
-  };
-  sCurve: SCurve;
+  cost: CostSection;
+  cutIn: CutIn;
+  /** Absent until the supply check (S4) exists. */
+  supply?: Supply;
+  /** Absent when there is no range to draw. */
+  sCurve?: SCurve;
   drivers: Driver[];
   scenarios: Scenario[];
   changeClass: ChangeClass;
@@ -327,5 +393,7 @@ export interface ImpactAssessment {
   revisions: Revision[];
   linked: LinkedRecord[];
   meeting: Meeting;
+  erpPackage?: ErpPackage;
+  mock: MockSection[];
   traces: Record<string, Trace>;
 }

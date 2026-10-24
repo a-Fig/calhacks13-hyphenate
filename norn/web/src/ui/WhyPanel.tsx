@@ -32,8 +32,11 @@ export function WhyPanel({
   if (!t) return null;
 
   const f = figs.get(id);
-  const value = f ? figText(f, 'full', id === 'x.unitPerAc') : t.value?.text ?? '';
-  const rg = f ? rangeText(f, 'full') : t.value?.range ?? '';
+  // The point estimate is the number the cost page adds up; the median and the range come with it.
+  const value = f ? figText(f, 'full', id.startsWith('unit_cost_delta'), 'point') : t.value?.text ?? '';
+  const rg = f
+    ? [f.point !== undefined && f.point !== f.p50 ? `Median ${figText(f, 'full', false, 'p50')}` : '', rangeText(f, 'full') && `P10 to P90 ${rangeText(f, 'full')}`].filter(Boolean).join(' · ')
+    : t.value?.range ?? '';
   const prev = stack.length > 1 ? a.traces[stack[stack.length - 2]] : undefined;
 
   return (
@@ -63,7 +66,7 @@ export function WhyPanel({
       <div className="nx-why" data-testid="why-panel" ref={body}>
         <div className={`nx-why-value nx-ev-${t.evidence}`}>
           <div className="v num">{value}</div>
-          {rg && <div className="r num">{f ? `${rg}, P10 to P90` : rg}</div>}
+          {rg && <div className="r num">{rg}</div>}
         </div>
         <p className="nx-why-sum">{t.summary}</p>
 
@@ -115,7 +118,7 @@ export function WhyPanel({
           </>
         )}
 
-        {t.sources.length > 0 && (
+        {t.sources && t.sources.length > 0 && (
           <>
             <h3 className="nx-why-h">Sources</h3>
             <ActionList variant="full">
@@ -130,15 +133,21 @@ export function WhyPanel({
           </>
         )}
 
-        <h3 className="nx-why-h">Made by</h3>
-        <div className="nx-by">
-          <Person name={t.producedBy.actor} kind="norn" size={24} />
-          <div>
-            <b>{t.producedBy.actor}</b>, {t.producedBy.check}
-            <div className="nx-fg-muted nx-small">{t.producedBy.onBehalfOf} &middot; {ago(t.producedBy.at)}</div>
-            {t.producedBy.note && <div className="nx-fg-muted nx-small">{t.producedBy.note}</div>}
-          </div>
-        </div>
+        {t.producedBy && (
+          <>
+            <h3 className="nx-why-h">Made by</h3>
+            <div className="nx-by">
+              <Person name={t.producedBy.actor} kind="norn" size={24} />
+              <div>
+                <b>{t.producedBy.actor}</b>, {t.producedBy.check}
+                {(t.producedBy.onBehalfOf || t.producedBy.at) && (
+                  <div className="nx-fg-muted nx-small">{[t.producedBy.onBehalfOf, t.producedBy.at && ago(t.producedBy.at)].filter(Boolean).join(' · ')}</div>
+                )}
+                {t.producedBy.note && <div className="nx-fg-muted nx-small">{t.producedBy.note}</div>}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </Dialog>
   );

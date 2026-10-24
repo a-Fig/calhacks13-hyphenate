@@ -3,7 +3,7 @@ import {
   AlertFillIcon, CheckCircleFillIcon, CheckIcon, CommentIcon, DotFillIcon, GitPullRequestIcon, SearchIcon,
 } from '@primer/octicons-react';
 import { ActionList, ActionMenu, AvatarStack, Label, TextInput } from '@primer/react';
-import { source } from '../assessment/source.ts';
+import { useEcrList } from '../assessment/source.ts';
 import type { EcrSummary } from '../assessment/types.ts';
 import { isOpen, LevelLabel, Person, StateIcon } from '../ui/Bits.tsx';
 import { ago, usdK } from '../ui/fmt.ts';
@@ -47,7 +47,8 @@ const LEVELS = ['Level 1', 'Level 2', 'Level 3'];
 const APPROVALS = ['Review required', 'Approved'];
 
 export function EcrList() {
-  const all = source.listEcrs();
+  const { data: loaded } = useEcrList();
+  const all = useMemo(() => loaded ?? [], [loaded]);
   const [query, setQuery] = useState('is:open');
   const [who, setWho] = useState<Pick1>(null);
   const [program, setProgram] = useState<Pick1>(null);
@@ -173,8 +174,8 @@ export function EcrList() {
                   <span className="nx-row-comments">
                     {(e.comments ?? 0) > 0 && (<><CommentIcon size={16} /> {e.comments}</>)}
                   </span>
-                  <span className="nx-row-cost num" title="Year-1 cost impact, 2027">
-                    {e.cost ? usdK(e.cost.p50, { plus: true }) : ''}
+                  <span className="nx-row-cost num" title="Net cost of the first 12 months, point estimate">
+                    {e.cost ? usdK(e.cost.point ?? e.cost.p50, { plus: true }) : ''}
                   </span>
                 </div>
               </li>

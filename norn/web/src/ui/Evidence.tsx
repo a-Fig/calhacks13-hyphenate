@@ -50,11 +50,11 @@ export function Mark({ ev, id, children, className = '', claim = false }: { ev: 
   );
 }
 
-/** A Figure's median, as a Mark. */
-export function Num({ f, kind = 'full', plus = false, className }: { f: Figure; kind?: 'full' | 'short'; plus?: boolean; className?: string }) {
+/** A Figure's point estimate (or median, with `use`), as a Mark. */
+export function Num({ f, kind = 'full', plus = false, use = 'point', className }: { f: Figure; kind?: 'full' | 'short'; plus?: boolean; use?: 'p50' | 'point'; className?: string }) {
   return (
     <Mark ev={f.evidence} id={f.id} className={`num ${className ?? ''}`}>
-      {figText(f, kind, plus)}
+      {figText(f, kind, plus, use)}
     </Mark>
   );
 }

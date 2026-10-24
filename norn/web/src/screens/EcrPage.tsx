@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { ChecklistIcon, CommentDiscussionIcon, FileDiffIcon, GitCommitIcon } from '@primer/octicons-react';
-import { Label, PageHeader, UnderlineNav } from '@primer/react';
-import { source } from '../assessment/source.ts';
+import { PageHeader, UnderlineNav } from '@primer/react';
+import { useAssessment } from '../assessment/source.ts';
+import type { ImpactAssessment } from '../assessment/types.ts';
 import { StateBadge, LevelLabel } from '../ui/Bits.tsx';
 import { WhyContext } from '../ui/Evidence.tsx';
 import { WhyPanel } from '../ui/WhyPanel.tsx';
@@ -16,14 +17,14 @@ import { RepoHeader } from './Shell.tsx';
 export type Tab = 'conversation' | 'impact' | 'changes' | 'revisions';
 
 export function EcrPage({ id, tab, check }: { id: string; tab: Tab; check?: string }) {
-  const a = source.getAssessment(id);
-  const summary = source.getSummary(id);
-  if (!summary) return <div className="nx-container"><p>No ECR {id}.</p></div>;
-  if (!a) return <SummaryOnly id={id} />;
+  const { assessment: a, summary, loading } = useAssessment(id);
+  if (loading) return <div className="nx-container nx-tabbody"><p className="nx-fg-muted">Loading</p></div>;
+  if (!summary) return <div className="nx-container nx-tabbody"><p>No ECR {id}.</p></div>;
+  if (!a) return <SummaryOnly e={summary} />;
   return <AssessmentView key={id} a={a} tab={tab} check={check} />;
 }
 
-function AssessmentView({ a, tab, check }: { a: NonNullable<ReturnType<typeof source.getAssessment>>; tab: Tab; check?: string }) {
+function AssessmentView({ a, tab, check }: { a: ImpactAssessment; tab: Tab; check?: string }) {
   const [stack, setStack] = useState<string[]>([]);
   const open = useCallback((id: string) => setStack(s => (s[s.length - 1] === id ? s : [...s, id])), []);
   const ctx = useMemo(() => ({ open, current: stack[stack.length - 1] ?? null }), [open, stack]);
@@ -45,9 +46,6 @@ function AssessmentView({ a, tab, check }: { a: NonNullable<ReturnType<typeof so
               <PageHeader.Title>
                 {e.title} <span className="nx-num-muted">{e.id}</span>
               </PageHeader.Title>
-              <PageHeader.TrailingVisual>
-                <Label variant="attention">Mock data</Label>
-              </PageHeader.TrailingVisual>
             </PageHeader.TitleArea>
             <PageHeader.Description>
               <div className="nx-pr-sub">
@@ -94,8 +92,7 @@ function AssessmentView({ a, tab, check }: { a: NonNullable<ReturnType<typeof so
 }
 
 /** An ECR without a full page: what the list knows. */
-function SummaryOnly({ id }: { id: string }) {
-  const e = source.getSummary(id)!;
+function SummaryOnly({ e }: { e: NonNullable<ReturnType<typeof useAssessment>['summary']> }) {
   return (
     <>
       <RepoHeader />
@@ -106,7 +103,6 @@ function SummaryOnly({ id }: { id: string }) {
               <PageHeader.Title>
                 {e.title} <span className="nx-num-muted">{e.id}</span>
               </PageHeader.Title>
-              <PageHeader.TrailingVisual><Label variant="attention">Mock data</Label></PageHeader.TrailingVisual>
             </PageHeader.TitleArea>
             <PageHeader.Description>
               <div className="nx-pr-sub">
@@ -119,7 +115,7 @@ function SummaryOnly({ id }: { id: string }) {
         </div>
       </div>
       <main className="nx-container nx-tabbody">
-        <p className="nx-fg-muted">Mock: ECR-0417, ECR-0409 and ECR-0423 have a full page.</p>
+        <p className="nx-fg-muted">Only ECR-0417, ECR-0409 and ECR-0423 have a full page in this mock.</p>
       </main>
     </>
   );

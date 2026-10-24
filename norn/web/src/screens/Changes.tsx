@@ -1,7 +1,7 @@
 import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Label } from '@primer/react';
 import { useState } from 'react';
-import type { ChangedItem, ImpactAssessment } from '../assessment/types.ts';
+import type { ChangedItem, DiffLine, ImpactAssessment } from '../assessment/types.ts';
 
 function stat(item: ChangedItem) {
   return {
@@ -26,7 +26,6 @@ export function Changes({ a }: { a: ImpactAssessment }) {
 function Block({ item }: { item: ChangedItem }) {
   const [open, setOpen] = useState(true);
   const s = stat(item);
-  let n1 = 0, n2 = 0;
   return (
     <section className="nx-diff">
       <header className="nx-diff-head">
@@ -42,9 +41,19 @@ function Block({ item }: { item: ChangedItem }) {
         {item.impact && <Label variant="secondary">{item.impact}</Label>}
       </header>
       {open && (
+        <DiffTable lines={item.lines} />
+      )}
+    </section>
+  );
+}
+
+/** A block of diff lines, with GitHub's two line-number columns and red and green rows. */
+export function DiffTable({ lines }: { lines: DiffLine[] }) {
+  let n1 = 0, n2 = 0;
+  return (
         <table className="nx-diff-table">
           <tbody>
-            {item.lines.map((l, i) => {
+            {lines.map((l, i) => {
               if (l.kind !== 'add') n1++;
               if (l.kind !== 'del') n2++;
               return (
@@ -61,7 +70,5 @@ function Block({ item }: { item: ChangedItem }) {
             })}
           </tbody>
         </table>
-      )}
-    </section>
   );
 }

@@ -1,5 +1,5 @@
 import {
-  AlertFillIcon, CheckCircleFillIcon, DotFillIcon, GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon,
+  AlertFillIcon, CheckCircleFillIcon, CircleIcon, DotFillIcon, GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon,
   GitPullRequestIcon, SkipIcon, XCircleFillIcon,
 } from '@primer/octicons-react';
 import { Avatar, Label, Spinner, StateLabel } from '@primer/react';
@@ -41,12 +41,32 @@ export function CheckStateIcon({ state, size = 16 }: { state: Check['state']; si
   if (state === 'passed') return <CheckCircleFillIcon size={size} className="nx-fg-success" />;
   if (state === 'attention') return <AlertFillIcon size={size} className="nx-fg-attention" />;
   if (state === 'skipped') return <SkipIcon size={size} className="nx-fg-muted" />;
+  if (state === 'pending') return <CircleIcon size={size} className="nx-fg-muted" />;
   if (state === 'running') return <Spinner size="small" />;
   return <DotFillIcon size={size} className="nx-fg-attention" />;
 }
 
 export function Person({ name, kind = 'person', size = 20 }: { name: string; kind?: AvatarKind; size?: number }) {
   return <Avatar src={avatarSrc(name, kind)} alt={name} size={size} square={kind === 'norn'} />;
+}
+
+/** Marks one section of a page as a mock fixture, so a live section can drop it later. */
+export function MockTag({ on = true, title = 'Mock: not produced by a check yet' }: { on?: boolean; title?: string }) {
+  if (!on) return null;
+  return (
+    <span title={title} className="nx-mock">
+      <Label variant="attention" size="small">Mock</Label>
+    </span>
+  );
+}
+
+/** Marks the cost section: the real checks' output on Bowman's dataset, saved, not live. */
+export function SavedRun() {
+  return (
+    <span title="Norn's checks run on Bowman's dataset and saved as a fixture; not a live run" className="nx-mock">
+      <Label variant="accent" size="small">Saved run</Label>
+    </span>
+  );
 }
 
 export function XFail() {

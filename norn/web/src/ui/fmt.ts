@@ -17,8 +17,10 @@ export function usd(n: number, opts: { cents?: boolean; plus?: boolean } = {}): 
 export function usdK(n: number, opts: { plus?: boolean } = {}): string {
   const a = Math.abs(n);
   let s: string;
-  if (a >= 1e6) s = '$' + (a / 1e6).toFixed(a >= 1e7 ? 0 : 2).replace(/\.?0+$/, '') + 'M';
-  else if (a >= 1e4) s = '$' + Math.round(a / 1e3) + 'k';
+  if (a >= 1e6) {
+    const m = (a / 1e6).toFixed(a >= 1e7 ? 0 : 2);
+    s = '$' + (m.includes('.') ? m.replace(/\.?0+$/, '') : m) + 'M';
+  } else if (a >= 1e4) s = '$' + Math.round(a / 1e3) + 'k';
   else if (a >= 1e3) s = '$' + (a / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
   else s = '$' + Math.round(a);
   if (n < 0) return `(${s})`;
@@ -57,13 +59,15 @@ export function dateTime(iso: string): string {
   return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
 }
 
-export function fig(f: Figure, kind: 'full' | 'short' = 'full', plus = false): string {
-  return unitText(f.unit, f.p50, kind, plus);
+/** `use` picks the number: the median, or the point estimate, which adds up across rows. */
+export function fig(f: Figure, kind: 'full' | 'short' = 'full', plus = false, use: 'p50' | 'point' = 'p50'): string {
+  return unitText(f.unit, use === 'point' ? f.point ?? f.p50 : f.p50, kind, plus);
 }
 
 export function unitText(unit: Unit, v: number, kind: 'full' | 'short' = 'full', plus = false): string {
   switch (unit) {
-    case 'usd': return kind === 'short' ? usdK(v, { plus }) : usd(v, { plus, cents: Math.abs(v) < 1000 && v % 1 !== 0 });
+    // Cents below $1,000 and whole dollars above, as the checks format money (norn/checks/src/format.ts).
+    case 'usd': return kind === 'short' ? usdK(v, { plus }) : usd(v, { plus, cents: Math.abs(v) < 1000 && Math.round(v * 100) !== 0 });
     case 'date': return kind === 'short' ? dateShort(v) : dateLong(v);
     case 'weeks': return `${nf0.format(v)} wk`;
     case 'percent': return `${nf0.format(v * 100)}%`;
@@ -79,3 +83,6 @@ export function range(f: Figure, kind: 'full' | 'short' = 'short'): string {
 
 export const initials = (name: string) =>
   name.replace(/[^A-Za-z ]/g, '').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+
+/** The number the cost page adds up: the point estimate, or the median when there is none. */
+export const pointOf = (f: { point?: number; p50: number }) => f.point ?? f.p50;

@@ -8,9 +8,9 @@ export function figureIndex(a: ImpactAssessment): Map<string, Figure> {
     m.set(r.total.id, r.total);
   }
   for (const s of a.cost.subtotals) m.set(s.total.id, s.total);
-  m.set(a.cost.net.id, a.cost.net);
-  m.set(a.headline.unitCost.id, a.headline.unitCost);
-  m.set(a.headline.cutIn.id, a.headline.cutIn);
+  a.headline.unitCost.forEach(u => m.set(u.figure.id, u.figure));
+  for (const f of [a.cost.net, a.cost.oneTime, a.cost.recurring]) m.set(f.id, f);
+  if (a.cutIn.estimate) m.set(a.cutIn.estimate.figure.id, a.cutIn.estimate.figure);
   return m;
 }
 
@@ -19,16 +19,16 @@ export function evidenceCounts(a: ImpactAssessment): Record<Evidence, number> {
   const c: Record<Evidence, number> = { fact: 0, assumption: 0, computation: 0, judgment: 0 };
   const add = (f?: Figure) => f && c[f.evidence]++;
   for (const r of a.cost.rows) {
-    if (r.notAssessed) continue;
-    add(r.oneTime);
+    add(r.total);
     add(r.unitCost);
-    if (!r.oneTime) add(r.total);
   }
   a.cost.subtotals.forEach(s => add(s.total));
-  [a.cost.net, a.headline.unitCost, a.headline.cutIn].forEach(add);
-  c[a.headline.supply.evidence]++;
+  add(a.cost.net);
+  a.headline.unitCost.forEach(u => add(u.figure));
+  if (a.cutIn.estimate) add(a.cutIn.estimate.figure);
+  if (a.supply) c[a.supply.evidence]++;
   c[a.changeClass.evidence]++;
   a.recommendation.reasons.forEach(r => c[r.evidence]++);
-  a.drivers.forEach(d => c[d.evidence]++);
+  a.drivers.slice(0, 4).forEach(d => c[d.evidence]++);
   return c;
 }

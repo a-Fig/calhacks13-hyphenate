@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { Driver, SCurve } from '../assessment/types.ts';
-import { likelihoodWord } from '../assessment/engine.ts';
+import { fitQuantiles, likelihoodWord } from '../assessment/fit.ts';
 import { Glyph, EV, useWhy } from './Evidence.tsx';
 import { usdK } from './fmt.ts';
 
@@ -15,26 +15,37 @@ function niceTicks(lo: number, hi: number, want = 6): number[] {
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
-/** Cumulative probability of the year-1 total. A single series: the title names it, so no legend. */
+/**
+ * Cumulative probability of the window total. The checks give P10, P50 and P90, not the draws, so the
+ * curve is fitted through those three (marked on it) unless the assessment carries its own points.
+ * A single series: the title names it, so no legend.
+ */
 export function SCurveChart({ data }: { data: SCurve }) {
   const ref = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
 
+  const pts = useMemo(() => {
+    if (data.points) return data.points;
+    const f = fitQuantiles(data.p10, data.p50, data.p90);
+    return Array.from({ length: 99 }, (_, i) => ({ x: f.quantile((i + 1) / 100), y: (i + 1) / 100 }));
+  }, [data]);
+  const fit = useMemo(() => fitQuantiles(data.p10, data.p50, data.p90), [data]);
+
   const W = 760, H = 300, L = 46, R = 22, T = 30, B = 40;
-  const pts = data.points;
-  const xmin = pts[0].x - (pts[pts.length - 1].x - pts[0].x) * 0.06;
-  const xmax = pts[pts.length - 1].x + (pts[pts.length - 1].x - pts[0].x) * 0.06;
+  const span = pts[pts.length - 1].x - pts[0].x;
+  const xmin = pts[0].x - span * 0.06;
+  const xmax = pts[pts.length - 1].x + span * 0.06;
   const ticks = niceTicks(xmin, xmax, 6);
   const sx = (v: number) => L + ((v - xmin) / (xmax - xmin)) * (W - L - R);
   const sy = (p: number) => T + (1 - p) * (H - T - B);
   const curve = pts.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`).join('');
   const area = `${curve}L${sx(pts[pts.length - 1].x)} ${sy(0)}L${sx(pts[0].x)} ${sy(0)}Z`;
-  const at = (p: number) => pts.find(q => Math.abs(q.y - p) < 1e-9)!;
   const marks = [
     { p: 0.1, label: 'P10', v: data.p10 },
     { p: 0.5, label: 'P50', v: data.p50 },
     { p: 0.9, label: 'P90', v: data.p90 },
   ];
+  const pe = { x: data.point, y: fit.cdf(data.point) };
 
   const move = (e: React.PointerEvent<SVGSVGElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -46,14 +57,13 @@ export function SCurveChart({ data }: { data: SCurve }) {
     setHover(best);
   };
 
-  const hp = hover;
   const box = ref.current?.getBoundingClientRect();
-  const tipLeft = hp && box ? (sx(hp.x) / W) * box.width : 0;
-  const tipTop = hp && box ? (sy(hp.y) / H) * (box.width * (H / W)) - 12 : 0;
+  const tipLeft = hover && box ? (sx(hover.x) / W) * box.width : 0;
+  const tipTop = hover && box ? (sy(hover.y) / H) * (box.width * (H / W)) - 12 : 0;
 
   return (
     <div className="nx-chart" ref={ref}>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Cumulative probability of the year-1 cost" onPointerMove={move} onPointerLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Cumulative probability of the first-12-months cost" onPointerMove={move} onPointerLeave={() => setHover(null)}>
         {[0, 0.25, 0.5, 0.75, 1].map(p => (
           <g key={p}>
             <line className="grid" x1={L} x2={W - R} y1={sy(p)} y2={sy(p)} />
@@ -68,49 +78,51 @@ export function SCurveChart({ data }: { data: SCurve }) {
         <path d={area} fill="var(--ev-computation)" opacity="0.10" />
         <path d={curve} fill="none" stroke="var(--ev-computation)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
 
-        {marks.map(m => {
-          const p = at(m.p);
-          return (
-            <g key={m.label}>
-              <line x1={sx(m.v)} x2={sx(m.v)} y1={sy(m.p)} y2={sy(0)} stroke="var(--ev-computation)" strokeWidth="1" opacity="0.35" />
-              <circle cx={sx(p.x)} cy={sy(p.y)} r="5" fill="var(--ev-computation)" stroke="#fff" strokeWidth="2" />
-              <text x={sx(p.x) - 11} y={sy(p.y) - 4} textAnchor="end" className="ink halo">
-                {m.label} <tspan className="ink2" fontWeight="500">{usdK(m.v)}</tspan>
-              </text>
-            </g>
-          );
-        })}
+        {marks.map(m => (
+          <g key={m.label}>
+            <line x1={sx(m.v)} x2={sx(m.v)} y1={sy(m.p)} y2={sy(0)} stroke="var(--ev-computation)" strokeWidth="1" opacity="0.35" />
+            <circle cx={sx(m.v)} cy={sy(m.p)} r="5" fill="var(--ev-computation)" stroke="var(--bgColor-default)" strokeWidth="2" />
+            <text x={sx(m.v) - 11} y={sy(m.p) - 4} textAnchor="end" className="ink halo">
+              {m.label} <tspan className="ink2" fontWeight="500">{usdK(m.v)}</tspan>
+            </text>
+          </g>
+        ))}
 
-        {/* The deterministic point estimate: a diamond, like the one GAO marks on its S-curves. */}
-        <g transform={`translate(${sx(data.pointEstimate.x)} ${sy(data.pointEstimate.y)})`}>
-          <path d="M0 -6 6 0 0 6 -6 0Z" fill="#fff" stroke="var(--fgColor-default)" strokeWidth="1.8" />
+        {/* The point estimate (every input at its stated value): a diamond, as GAO marks it. */}
+        <g transform={`translate(${sx(pe.x)} ${sy(pe.y)})`}>
+          <path d="M0 -6 6 0 0 6 -6 0Z" fill="var(--bgColor-default)" stroke="var(--fgColor-default)" strokeWidth="1.8" />
         </g>
-        <text x={sx(data.pointEstimate.x) + 12} y={sy(data.pointEstimate.y) + 20} className="ink2 halo">
-          Point estimate {usdK(data.pointEstimate.x)} sits at {Math.round(data.pointEstimate.y * 100)}%
+        <text x={sx(pe.x) + 12} y={sy(pe.y) + 20} className="ink2 halo">
+          Point estimate {usdK(pe.x)} sits at {Math.round(pe.y * 100)}%
         </text>
 
-        {hp && (
+        {hover && (
           <g pointerEvents="none">
-            <line x1={sx(hp.x)} x2={sx(hp.x)} y1={T} y2={sy(0)} stroke="var(--fgColor-default)" strokeWidth="1" opacity="0.25" />
-            <circle cx={sx(hp.x)} cy={sy(hp.y)} r="5" fill="#fff" stroke="var(--ev-computation)" strokeWidth="2.5" />
+            <line x1={sx(hover.x)} x2={sx(hover.x)} y1={T} y2={sy(0)} stroke="var(--fgColor-default)" strokeWidth="1" opacity="0.25" />
+            <circle cx={sx(hover.x)} cy={sy(hover.y)} r="5" fill="var(--bgColor-default)" stroke="var(--ev-computation)" strokeWidth="2.5" />
           </g>
         )}
       </svg>
-      {hp && (
+      {hover && (
         <div className="nx-tip" style={{ left: tipLeft, top: tipTop }}>
-          <b>{cap(likelihoodWord(hp.y))}</b>, {Math.round(hp.y * 100)}%
-          <small>the cost is {usdK(hp.x)} or less</small>
+          <b>{cap(likelihoodWord(hover.y))}</b>, {Math.round(hover.y * 100)}%
+          <small>the cost is {usdK(hover.x)} or less</small>
         </div>
       )}
+      {!data.points && <div className="nx-chart-note">A curve fitted through P10, P50 and P90.</div>}
     </div>
   );
 }
 
-/** The top drivers. Each input moved alone to its p10 and p90; bars are coloured by how the input is known. */
+/**
+ * The top drivers. Each input alone at its P10 and P90 (a decision: each alternative), the rest at
+ * their stated value; the bar runs between the two totals and each end says which input value made
+ * it. Bars are coloured by how the input is known.
+ */
 export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: number }) {
   const why = useWhy();
   const [hover, setHover] = useState<string | null>(null);
-  const rowH = 52, W = 760, L = 214, R = 56, T = 34, B = 34;
+  const rowH = 52, W = 760, L = 214, R = 70, T = 34, B = 34;
   const H = T + drivers.length * rowH + B;
   const all = drivers.flatMap(d => [d.low, d.high]).concat(base);
   const lo = Math.min(...all), hi = Math.max(...all);
@@ -131,7 +143,7 @@ export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: numbe
 
   return (
     <div className="nx-chart">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Top drivers of the year-1 cost">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Top drivers of the first-12-months cost">
         {ticks.map(t => (
           <g key={t}>
             <line className="grid" x1={sx(t)} x2={sx(t)} y1={T - 6} y2={H - B} />
@@ -142,9 +154,10 @@ export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: numbe
 
         {drivers.map((d, i) => {
           const y = T + i * rowH + (rowH - th) / 2;
-          const leftVal = Math.min(d.low, d.high), rightVal = Math.max(d.low, d.high);
-          const leftLab = d.low <= d.high ? d.lowLabel : d.highLabel;
-          const rightLab = d.low <= d.high ? d.highLabel : d.lowLabel;
+          // Each end keeps its input: the P10 end and the P90 end, wherever they fall.
+          const lowIsLeft = d.low <= d.high;
+          const leftVal = lowIsLeft ? d.low : d.high, rightVal = lowIsLeft ? d.high : d.low;
+          const leftLab = lowIsLeft ? d.lowLabel : d.highLabel, rightLab = lowIsLeft ? d.highLabel : d.lowLabel;
           const color = `var(--ev-${d.evidence})`;
           const swing = rightVal - leftVal;
           return (
@@ -159,23 +172,19 @@ export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: numbe
               onPointerEnter={() => setHover(d.id)}
               onPointerLeave={() => setHover(null)}
             >
-              <rect x={0} y={y - (rowH - th) / 2} width={W} height={rowH} fill={hover === d.id ? 'rgba(0,0,0,0.025)' : 'transparent'} />
+              <rect x={0} y={y - (rowH - th) / 2} width={W} height={rowH} fill={hover === d.id ? 'var(--bgColor-muted)' : 'transparent'} />
               <foreignObject x={0} y={y - 6} width={L - 14} height={34}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, fontSize: 13.5, lineHeight: 1.2, color: 'var(--fgColor-default)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, fontSize: 13, lineHeight: 1.2, color: 'var(--fgColor-default)' }}>
                   <Glyph ev={d.evidence} />
-                  <span>{d.label}</span>
+                  <span>{d.label.length > 44 ? d.label.slice(0, 43) + '…' : d.label}</span>
                 </div>
               </foreignObject>
               {leftVal < base && <path className="bar" d={seg(bx, sx(leftVal), y)} fill={color} />}
               {rightVal > base && <path className="bar" d={seg(bx, sx(rightVal), y)} fill={color} />}
-              {leftVal < base && (
-                <text x={sx(leftVal) - 7} y={y + 15} textAnchor="end" className="ink2">{leftLab}</text>
-              )}
-              {rightVal > base && (
-                <text x={sx(rightVal) + 7} y={y + 15} textAnchor="start" className="ink2">{rightLab}</text>
-              )}
+              {leftVal < base && leftLab && <text x={sx(leftVal) - 7} y={y + 15} textAnchor="end" className="ink2">{leftLab}</text>}
+              {rightVal > base && rightLab && <text x={sx(rightVal) + 7} y={y + 15} textAnchor="start" className="ink2">{rightLab}</text>}
               {hover === d.id && (
-                <text x={W - R + 52} y={y + 15} textAnchor="end" className="ink">{usdK(swing)} swing</text>
+                <text x={W - R + 66} y={y + 15} textAnchor="end" className="ink">{usdK(swing)} swing</text>
               )}
               <title>{`${d.label}: ${EV[d.evidence].label}. ${usdK(leftVal)} to ${usdK(rightVal)}`}</title>
             </g>

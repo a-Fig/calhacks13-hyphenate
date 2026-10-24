@@ -51,7 +51,7 @@ await shot('ecr-revisions');
 
 // The "why" panel on the hold cost, the line most worth questioning.
 await open('/ecr/ECR-0417/impact/cost', '.nx-checks');
-const hold = page.locator('tr', { hasText: 'Hold on S/N 011' }).locator('.nx-mark').first();
+const hold = page.locator('tr', { hasText: 'Delay cost of holding' }).locator('.nx-mark').first();
 await hold.scrollIntoViewIfNeeded();
 await hold.click();
 await page.waitForSelector('[data-testid="why-panel"]');
@@ -117,7 +117,7 @@ if (process.argv.includes('--gif')) {
   await g.waitForSelector('.nx-checks');
   await g.waitForTimeout(400);
   await frame(1800);
-  const hold = g.locator('tr', { hasText: 'Hold on S/N 011' }).locator('.nx-mark').first();
+  const hold = g.locator('tr', { hasText: 'Delay cost of holding' }).locator('.nx-mark').first();
   await hold.scrollIntoViewIfNeeded();
   await g.waitForTimeout(250);
   await frame(900);
@@ -127,7 +127,7 @@ if (process.argv.includes('--gif')) {
   await g.waitForSelector('[data-testid="why-panel"]');
   await g.waitForTimeout(500);
   await frame(2800);
-  const input = g.locator('[data-testid="why-panel"] li', { hasText: 'Cost of capital' }).first();
+  const input = g.locator('[data-testid="why-panel"] li:not(.nx-noact)', { hasText: '$147,000' }).first();
   await glide(input);
   await frame(500);
   await input.click();

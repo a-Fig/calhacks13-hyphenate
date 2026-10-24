@@ -1,13 +1,15 @@
 import { useState, type ReactNode } from 'react';
 import {
-  AlertFillIcon, CheckCircleFillIcon, CheckIcon, ChecklistIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, CommentIcon,
+  AlertFillIcon, CheckCircleFillIcon, CheckIcon, ChecklistIcon, CircleIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, CommentIcon,
   DotFillIcon, EyeIcon, FileDiffIcon, GitMergeIcon, GraphIcon, NoteIcon, PackageIcon, SearchIcon, ShieldCheckIcon, TagIcon,
 } from '@primer/octicons-react';
-import { AvatarStack, Button, Label, PageLayout, ProgressBar, Timeline } from '@primer/react';
-import type { ActivityEvent, EventKind, ImpactAssessment, RiskLevel, StepState } from '../assessment/types.ts';
-import { CheckStateIcon, LevelLabel, Person } from '../ui/Bits.tsx';
+import { AvatarStack, Button, Checkbox, Label, PageLayout, ProgressBar, Timeline } from '@primer/react';
+import type { ActivityEvent, ErpPackage, EventKind, ImpactAssessment, RiskLevel, StepState } from '../assessment/types.ts';
+import { monthLabel } from '../assessment/adapter.ts';
+import { DiffTable } from './Changes.tsx';
+import { CheckStateIcon, LevelLabel, MockTag, Person, SavedRun } from '../ui/Bits.tsx';
 import { Glyph, Mark, Num } from '../ui/Evidence.tsx';
-import { ago, dateTime, dayLabel, range as rangeText } from '../ui/fmt.ts';
+import { ago, dateTime, dayLabel, dateShort, range as rangeText, usdK } from '../ui/fmt.ts';
 import { Link } from '../router.tsx';
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
@@ -28,6 +30,7 @@ export function Conversation({ a }: { a: ImpactAssessment }) {
             {rest.map(e => <EventItem key={e.id} e={e} />)}
           </Timeline>
           <MergeBox a={a} />
+          {a.erpPackage && <ErpCard pkg={a.erpPackage} mock={a.mock.includes('erp')} />}
         </div>
       </PageLayout.Content>
       <PageLayout.Pane position="end" width="small" padding="none">
@@ -86,35 +89,61 @@ function BotComment({ a }: { a: ImpactAssessment }) {
       <div className="nx-av-col"><Person name="Norn" kind="norn" size={40} /></div>
       <Timeline.Body className="nx-t-body">
         <CommentBox name="norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? ''} edited right={<LevelLabel level={a.level} long />}>
-          <h3 className="nx-h3">Impact assessment</h3>
+          <h3 className="nx-h3">Impact assessment <SavedRun /></h3>
           <table className="nx-bot-table">
             <thead>
-              <tr><th /><th>Median</th><th>P10 &ndash; P90</th><th>Likelihood</th></tr>
+              <tr><th /><th>Point estimate</th><th>P10 &ndash; P90</th><th>Likelihood</th></tr>
             </thead>
             <tbody>
+              {h.unitCost.map(u => (
+                <tr key={u.figure.id}>
+                  <td>Unit cost, per {u.program} unit built</td>
+                  <td className="num"><Num f={u.figure} plus /></td>
+                  <td className="num nx-fg-muted">{rangeText(u.figure, 'full')}</td>
+                  <td className="nx-fg-muted">&ndash;</td>
+                </tr>
+              ))}
               <tr>
-                <td>Unit cost, per aircraft</td>
-                <td className="num"><Num f={h.unitCost} plus /></td>
-                <td className="num nx-fg-muted">{rangeText(h.unitCost, 'short')}</td>
-                <td className="nx-fg-muted">&ndash;</td>
-              </tr>
-              <tr>
-                <td>Year-1 total, {a.cost.yearLabel}</td>
+                <td>Net cost, first 12 months<div className="nx-fg-muted nx-small">{a.cost.window.label}</div></td>
                 <td className="num"><Num f={h.year1} kind="short" plus /></td>
                 <td className="num nx-fg-muted">{rangeText(h.year1, 'short')}</td>
-                <td><Mark ev="computation" id={h.year1.id}><b>{cap(h.year1Likelihood.word)}</b> {h.year1Likelihood.event}</Mark></td>
+                <td>
+                  {h.year1Likelihood
+                    ? <Mark ev="computation" id={h.year1.id}><b>{cap(h.year1Likelihood.word)}</b> {h.year1Likelihood.event}</Mark>
+                    : a.cost.needsEstimate.length > 0
+                      ? <span className="nx-fg-muted"><AlertFillIcon size={12} className="nx-fg-attention" /> {a.cost.needsEstimate.length} lines need an estimate</span>
+                      : <Pending />}
+                </td>
               </tr>
               <tr>
-                <td>Cut-in</td>
-                <td className="num"><Num f={h.cutIn} /></td>
-                <td className="num nx-fg-muted">{rangeText(h.cutIn, 'short')}</td>
-                <td><Mark ev="computation" id={h.cutIn.id}><b>{cap(h.cutInLikelihood.word)}</b> {h.cutInLikelihood.event}</Mark></td>
+                <td>Cut-in, {a.cutIn.program}{a.cutIn.estimate ? ', as filed' : ''}</td>
+                <td className="num"><Mark ev={a.cutIn.source === 'given' ? 'fact' : 'assumption'} id="cutin">{monthLabel(a.cutIn.month)}</Mark></td>
+                <td className="nx-fg-muted">S/N {a.cutIn.serial}{a.cutIn.source === 'default' ? ', a default' : ''}</td>
+                <td>{a.cutIn.estimate ? <span className="nx-fg-muted">Range: see below</span> : <Pending />}</td>
               </tr>
+              {a.cutIn.estimate && (
+                <tr>
+                  <td>Rev C reaches the line <MockTag on={a.mock.includes('cutInEstimate')} /></td>
+                  <td className="num"><Num f={a.cutIn.estimate.figure} use="p50" /></td>
+                  <td className="num nx-fg-muted">{rangeText(a.cutIn.estimate.figure, 'short')}</td>
+                  <td>
+                    {a.cutIn.estimate.likelihood && (
+                      <Mark ev="assumption" id={a.cutIn.estimate.figure.id}><b>{cap(a.cutIn.estimate.likelihood.word)}</b> {a.cutIn.estimate.likelihood.event}</Mark>
+                    )}
+                  </td>
+                </tr>
+              )}
               <tr>
-                <td>Supply risk</td>
-                <td><Mark ev={h.supply.evidence} id={h.supply.id}><Label variant={RISK[h.supply.level]}>{cap(h.supply.level)}</Label></Mark></td>
-                <td className="nx-fg-muted" colSpan={1}>{h.supply.note}</td>
-                <td><Mark ev="computation" id="supply"><b>{cap(h.supply.likelihood.word)}</b> {h.supply.likelihood.event}</Mark></td>
+                <td>Supply risk {a.supply && <MockTag on={a.mock.includes('supply')} />}</td>
+                {a.supply ? (
+                  <>
+                    <td><Mark ev={a.supply.evidence} id={a.supply.id}><Label variant={RISK[a.supply.level]}>{cap(a.supply.level)}</Label></Mark></td>
+                    <td className="nx-fg-muted">{a.supply.note}</td>
+                    <td>{a.supply.likelihood && <Mark ev="computation" id={a.supply.id}><b>{cap(a.supply.likelihood.word)}</b> {a.supply.likelihood.event}</Mark>}</td>
+                  </>
+                ) : (
+                  <td colSpan={3}><Pending /></td>
+                )}
               </tr>
             </tbody>
           </table>
@@ -122,6 +151,7 @@ function BotComment({ a }: { a: ImpactAssessment }) {
           <h4 className="nx-h4">
             {a.recommendation.verdict === 'wait' ? <ClockIcon size={16} className="nx-fg-attention" /> : <ShieldCheckIcon size={16} className="nx-fg-success" />}{' '}
             <Mark ev="judgment" id={a.recommendation.traceId}>{a.recommendation.headline}</Mark>
+            <MockTag on={a.mock.includes('recommendation')} />
           </h4>
           <ul className="nx-reasons">
             {a.recommendation.reasons.map((r, i) => (
@@ -136,10 +166,10 @@ function BotComment({ a }: { a: ImpactAssessment }) {
             <>
               <h4 className="nx-h4">What moves it most</h4>
               <ol className="nx-drivers">
-                {a.drivers.map(d => (
+                {a.drivers.slice(0, 4).map(d => (
                   <li key={d.id}>
                     <Glyph ev={d.evidence} /> <Mark ev={d.evidence} id={d.id} claim>{d.label}</Mark>
-                    <span className="nx-fg-muted"> &middot; {d.lowLabel} to {d.highLabel} moves the year-1 total by </span>
+                    <span className="nx-fg-muted"> {d.lowLabel && d.highLabel ? `· ${d.lowLabel} to ${d.highLabel} ` : '· '}moves the net cost by </span>
                     <b className="num">{swing(d.low, d.high)}</b>
                   </li>
                 ))}
@@ -154,6 +184,10 @@ function BotComment({ a }: { a: ImpactAssessment }) {
       </Timeline.Body>
     </Timeline.Item>
   );
+}
+
+function Pending() {
+  return <span className="nx-fg-muted"><CircleIcon size={12} /> Not assessed yet</span>;
 }
 
 function swing(lo: number, hi: number) {
@@ -277,7 +311,7 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
 
       <MergeRow
         icon={waiting ? <ClockIcon size={24} className="nx-fg-attention" /> : <ShieldCheckIcon size={24} className="nx-fg-success" />}
-        title={<Mark ev="judgment" id={a.recommendation.traceId}>{a.recommendation.headline}</Mark>}
+        title={<><Mark ev="judgment" id={a.recommendation.traceId}>{a.recommendation.headline}</Mark> <MockTag on={a.mock.includes('recommendation')} /></>}
         sub={a.recommendation.reasons[0]?.text}
       />
 
@@ -312,7 +346,7 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
   return (
     <aside className="nx-side">
       <section>
-        <h3>Approvers</h3>
+        <h3>Approvers <MockTag on={a.mock.includes('route')} /></h3>
         <ul className="nx-side-list">
           {steps.map((s, i) => (
             <li key={i}>
@@ -372,5 +406,38 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
         </AvatarStack>
       </section>
     </aside>
+  );
+}
+
+/**
+ * What Norn hands over when an ECO is released: the lines to enter in the ERP, laid out like the files
+ * of a diff. A person enters them in ERPNext and ticks each off; nothing here writes to the ERP.
+ */
+function ErpCard({ pkg, mock }: { pkg: ErpPackage; mock: boolean }) {
+  const [entered, setEntered] = useState<Record<number, boolean>>({});
+  const n = pkg.lines.filter((_, i) => entered[i]).length;
+  return (
+    <section className="nx-erp" aria-label="ERP change package">
+      <header className="nx-erp-head">
+        <PackageIcon size={16} />
+        <b>ERP change package</b>
+        <MockTag on={mock} />
+        <span className="nx-fg-muted">Lines for a person to enter in {pkg.system}</span>
+        <span className="nx-sp" />
+        <Label variant={n === pkg.lines.length ? 'success' : 'secondary'}>{n} of {pkg.lines.length} entered</Label>
+      </header>
+      {pkg.lines.map((l, i) => (
+        <div className="nx-erp-line" key={i}>
+          <div className="nx-erp-line-head">
+            <Checkbox checked={!!entered[i]} onChange={e => setEntered(x => ({ ...x, [i]: e.target.checked }))} aria-label={`Mark "${l.title}" as entered in ${pkg.system}`} />
+            <Label variant="secondary">{l.kind}</Label>
+            <b>{l.title}</b>
+            <span className="nx-sp" />
+            <Label variant={entered[i] ? 'success' : 'attention'}>{entered[i] ? 'Entered' : l.status}</Label>
+          </div>
+          <DiffTable lines={l.diff} />
+        </div>
+      ))}
+    </section>
   );
 }

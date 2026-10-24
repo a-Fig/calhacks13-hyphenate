@@ -309,3 +309,20 @@ button.nx-merge-head:hover { background: var(--bgColor-muted); }
 .nx-trail { display: inline-flex; align-items: center; gap: 4px; color: var(--fgColor-default); }
 .nx-noact { cursor: default; }
 .nx-by { display: flex; gap: 12px; align-items: flex-start; }
+
+/* ---------- parts that are mock, saved or not assessed yet ---------- */
+.nx-mock { margin-left: 6px; display: inline-flex; vertical-align: middle; }
+.nx-flash { margin-bottom: 16px; }
+.nx-pending-card {
+  display: flex; align-items: flex-start; gap: 12px; padding: 16px; border: 1px dashed var(--borderColor-default);
+  border-radius: 6px; background: var(--bgColor-muted); margin-bottom: 16px;
+}
+.nx-chart-note { padding: 0 0 4px 30px; font-size: 12px; color: var(--fgColor-muted); }
+
+/* ---------- the ERP change package ---------- */
+.nx-erp { margin: 16px 0 0 56px; border: 1px solid var(--borderColor-default); border-radius: 6px; background: var(--bgColor-default); overflow: hidden; }
+.nx-erp-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: var(--bgColor-muted); border-bottom: 1px solid var(--borderColor-default); }
+.nx-erp-line { border-top: 1px solid var(--borderColor-default); }
+.nx-erp-line:first-of-type { border-top: 0; }
+.nx-erp-line-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bgColor-muted); border-bottom: 1px solid var(--borderColor-muted); }
+.nx-pr-sub .nx-mock { margin-left: 0; }
