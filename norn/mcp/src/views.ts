@@ -1,6 +1,6 @@
 // What the read tools return: JSON-friendly views over the mirror. Nothing here writes.
-import type { Assumption, CheckResult, CheckRun, ImpactStatement, Part, PullRequest } from '@norn/bindings/types';
-import type { Timestamp } from 'spacetimedb';
+import type { ActionLog, Assumption, CheckResult, CheckRun, ImpactStatement, Part, PullRequest } from '@norn/bindings/types';
+import type { Identity, Timestamp } from 'spacetimedb';
 import type { Norn } from './norn.ts';
 
 const iso = (t: Timestamp) => t.toDate().toISOString();
@@ -19,6 +19,29 @@ function json(s: string): unknown {
 function bounded(s: string, max: number): unknown {
   if (s.length <= max) return json(s);
   return { truncated: true, chars: s.length, start: s.slice(0, max), howToSeeAll: 'pass key to get_impact to get this trace in full' };
+}
+
+/**
+ * Who did a thing, as it was recorded when it was done: the action_log row that created it
+ * (entity `comment:7`, `impact_statement:3`, ...). A principal's name and on-behalf-of can change
+ * later (a new job may take the same actor name), so history must not read them from the live row.
+ */
+export type Who = { name: string; onBehalfOf: string | null; origin: string; spawnedBy: string | null };
+
+export function provenanceIndex(norn: Norn, prId: bigint): Map<string, ActionLog> {
+  const byEntity = new Map<string, ActionLog>();
+  for (const a of norn.db.actionLog.prId.filter(prId)) {
+    if (a.outcome !== 'applied') continue;
+    const seen = byEntity.get(a.entity);
+    if (!seen || a.id < seen.id) byEntity.set(a.entity, a); // the first row names the creator
+  }
+  return byEntity;
+}
+
+export function whoOf(norn: Norn, prov: Map<string, ActionLog>, entity: string, fallback: Identity): Who {
+  const row = prov.get(entity);
+  if (row) return { name: row.actorName, onBehalfOf: row.onBehalfOf ?? null, origin: row.actorOrigin, spawnedBy: row.spawnedBy };
+  return { ...norn.nameOf(fallback), spawnedBy: null };
 }
 
 /** The four classes (docs/GLOSSARY.md). An assumption's source maps onto them as shown. */
@@ -47,7 +70,8 @@ export function effectiveAssumptions(norn: Norn, prId: bigint): (Assumption & { 
   return [...byKey.values()].sort((x, y) => (x.key < y.key ? -1 : 1));
 }
 
-export function assumptionView(norn: Norn, a: Assumption & { scope?: string; overridesBaseline?: boolean }) {
+export function assumptionView(norn: Norn, a: Assumption & { scope?: string; overridesBaseline?: boolean }, prov?: Map<string, ActionLog>) {
+  const who = whoOf(norn, prov ?? provenanceIndex(norn, a.prId), `assumption:${a.id}`, a.createdBy);
   return {
     key: a.key,
     value: json(a.distJson),
@@ -58,7 +82,8 @@ export function assumptionView(norn: Norn, a: Assumption & { scope?: string; ove
     scope: a.scope ?? (a.prId === 0n ? 'baseline' : 'ecr'),
     overridesBaseline: a.overridesBaseline ?? false,
     affectsStages: a.affects.length ? a.affects : 'all',
-    setBy: norn.nameOf(a.createdBy).name,
+    setBy: who.name,
+    setFor: who.onBehalfOf,
     at: iso(a.createdAt),
   };
 }
@@ -104,9 +129,22 @@ function resultView(r: CheckResult, traceChars: number, onlyKey?: string) {
   };
 }
 
+type RunInputs = {
+  assumptions?: { id: string; key: string; rev: number }[];
+  baseVersion?: number;
+  codeVersion?: string;
+  seed?: string;
+  upstream?: Record<string, string>;
+  revision?: number;
+  revisionSource?: string;
+  erpBaseline?: string;
+  erpBaselineSource?: string;
+  erpBaselineAsOf?: string;
+};
+
 function runView(norn: Norn, run: CheckRun) {
-  const inputs = json(run.inputsJson) as { assumptions?: { id: string; key: string; rev: number }[] } | null;
-  const used = (inputs?.assumptions ?? []).map(x => {
+  const inp = json(run.inputsJson) as RunInputs | null;
+  const used = (inp?.assumptions ?? []).map(x => {
     const a = norn.db.assumption.id.find(BigInt(x.id));
     return { key: x.key, revision: x.rev, source: a?.source ?? 'unknown', value: a ? json(a.distJson) : null };
   });
@@ -117,7 +155,19 @@ function runView(norn: Norn, run: CheckRun) {
     finishedAt: run.finishedAt ? iso(run.finishedAt) : null,
     note: run.note || undefined,
     inputHash: run.inputHash,
-    readOf: { baseVersion: (inputs as any)?.baseVersion, codeVersion: (inputs as any)?.codeVersion, seed: (inputs as any)?.seed, upstream: (inputs as any)?.upstream },
+    readOf: {
+      baseVersion: inp?.baseVersion,
+      codeVersion: inp?.codeVersion,
+      seed: inp?.seed,
+      upstream: inp?.upstream,
+      // Where the change request and the production baseline came from. 'plm' and 'erp' are the real
+      // systems; 'stub' and 'file' are stand-ins for tests and demos and must not be passed off as live.
+      changeRequest: inp?.revisionSource ? { source: inp.revisionSource, revision: inp.revision } : { source: 'none: the ECR has no change request yet' },
+      erpBaseline: inp?.erpBaseline,
+      erpBaselineSource: inp?.erpBaselineSource,
+      erpBaselineAsOf: inp?.erpBaselineAsOf,
+      revisionSource: inp?.revisionSource,
+    },
     assumptionsUsed: used,
   };
 }
@@ -186,11 +236,11 @@ export function affectedParts(norn: Norn, pr: PullRequest) {
 // ECRs, statements, history
 // ---------------------------------------------------------------------------------------------
 
-export function statementView(norn: Norn, s: ImpactStatement, pr: PullRequest) {
+export function statementView(norn: Norn, s: ImpactStatement, pr: PullRequest, prov: Map<string, ActionLog>) {
   return {
     id: num(s.id),
     level: s.level,
-    postedBy: norn.nameOf(s.author),
+    postedBy: whoOf(norn, prov, `impact_statement:${s.id}`, s.author),
     postedAt: iso(s.createdAt),
     writtenAtRevision: s.prRevision,
     current: s.prRevision === pr.revision,
@@ -211,7 +261,8 @@ export function latestStatements(norn: Norn, pr: PullRequest) {
     const seen = byLevel.get(s.level);
     if (!seen || s.id > seen.id) byLevel.set(s.level, s);
   }
-  return [...byLevel.values()].sort((a, b) => a.level - b.level).map(s => statementView(norn, s, pr));
+  const prov = provenanceIndex(norn, pr.id);
+  return [...byLevel.values()].sort((a, b) => a.level - b.level).map(s => statementView(norn, s, pr, prov));
 }
 
 export function ecrSummary(norn: Norn, pr: PullRequest) {
@@ -237,7 +288,7 @@ export function ecrView(norn: Norn, pr: PullRequest) {
     revision: pr.revision,
     baseVersion: pr.baseVersion,
     mergedVersion: pr.mergedVersion ?? null,
-    filedBy: norn.nameOf(pr.createdBy).name,
+    filedBy: whoOf(norn, provenanceIndex(norn, pr.id), `pull_request:${pr.id}`, pr.createdBy).name,
     createdAt: iso(pr.createdAt),
     updatedAt: iso(pr.updatedAt),
     affectedParts: affectedParts(norn, pr),
@@ -251,9 +302,10 @@ export function historyOf(norn: Norn, pr: PullRequest, limit: number) {
   type Item = { at: string; ms: number; [k: string]: unknown };
   const items: Item[] = [];
   const stamp = (t: Timestamp) => ({ at: iso(t), ms: Number(t.microsSinceUnixEpoch / 1000n) });
+  const prov = provenanceIndex(norn, pr.id);
   for (const c of norn.db.comment.prId.filter(pr.id)) {
-    const who = norn.nameOf(c.author);
-    items.push({ ...stamp(c.createdAt), type: 'comment', id: num(c.id), by: who.name, onBehalfOf: who.onBehalfOf, anchor: c.anchor || undefined, body: c.body });
+    const who = whoOf(norn, prov, `comment:${c.id}`, c.author);
+    items.push({ ...stamp(c.createdAt), type: 'comment', id: num(c.id), by: who.name, onBehalfOf: who.onBehalfOf, spawnedBy: who.spawnedBy, anchor: c.anchor || undefined, body: c.body });
   }
   for (const a of norn.db.actionLog.prId.filter(pr.id)) {
     const applied = a.outcome === 'applied';

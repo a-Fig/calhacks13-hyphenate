@@ -7,10 +7,10 @@ what Bowman does, not how other companies differ (Tyler, 2026-10-24).
 
 ## Two vocabularies
 
-We design the product with a Git metaphor (`ARCHITECTURE.md` §2), but the people we sell to speak
+We design the product with a Git metaphor (`norn/ARCHITECTURE.md` §2), but the people we sell to speak
 engineering-change and accounting language. So there are two vocabularies, and each has its place:
 
-- **Git terms** are for building: code, `ARCHITECTURE.md`, issues, PRs and team chat.
+- **Git terms** are for building: code, `norn/ARCHITECTURE.md`, issues, PRs and team chat.
 - **Business terms** go in everything a judge, user or finance person sees: the UI, the demo, the
   video, Devpost and the pitch (Tyler, 2026-10-24). Nobody outside the team should hear "branch"
   or "merge".
@@ -77,7 +77,8 @@ Detail on how these fit together, and who does what, is in `CHANGE-CONTROL.md`.
   - Product lifecycle management holds the design and the BOM.
   - Enterprise resource planning holds finance, purchasing and inventory.
   - Material requirements planning schedules parts against production.
-  - Bowman runs exactly one of each. Which ones is #4.
+  - Bowman runs one of each: its PLM (`bowman/plm/`, standing in for Teamcenter) and ERPNext
+    (`bowman/erp/`, standing in for SAP), which also does MRP and holds the ledger.
 - **Major / minor change.** The FAA's split for changes to a type-certificated design (14 CFR
   21.93). A major change can mean new testing and approval, which is often the largest schedule
   risk for aircraft.
@@ -99,7 +100,7 @@ Detail on how these fit together, and who does what, is in `CHANGE-CONTROL.md`.
 - **p10 / p50 / p90.** The 10th, 50th and 90th percentiles of a forecast: a low case, a middle case
   and a high case.
 - **Paired simulation.** Old and new routes run on the same random draws, so their difference isn't
-  noise (`ARCHITECTURE.md` §5).
+  noise (`norn/ARCHITECTURE.md` §5).
 - **Assumption source.** Each assumption is `given` (a stated fact), `default` (a category
   default) or `agent_estimated` (proposed by an agent, with a rationale).
 
@@ -142,12 +143,16 @@ The audit trail (#25) is described in `research/trust-patterns-human.md`.
 
 ## Overloaded words
 
-- **Agent.** Either the product's agents (ECR extraction, assumption proposals, the narration of the
-  impact statement) or a coding agent working on this repo.
+- **Agent.** One of three things:
+  - Norn's own agents (extraction, research, review, the narration of the impact statement);
+  - a person's own agent connected to Norn, acting on their behalf (#34);
+  - a coding agent working on this repo.
 - **Norn.** Our product's name (Tyler, 2026-10-24). The Norns of Norse myth know the past, the
   present and the future. Norn reads a company's history to forecast what a change will do.
   Orrery was second. The candidates are in `research/naming.md`.
-- **Bowman.** Our fictional, Archer-like electric-aircraft maker (#3).
+- **Bowman.** Our fictional, Archer-like electric-aircraft maker (`bowman/README.md`).
+- **Level 1, 2, 3.** How far Norn's report on an ECR has got: Level 1 is the provisional impact
+  screen, Level 3 is Norn's final verdict after adversarial review (#26). Not the CCB's cost tiers.
 
 The accounting basics (double-entry, general ledger, journal entry and so on) are already defined in
 `hyphenate-track.md`, under "Key concepts".

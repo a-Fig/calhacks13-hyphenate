@@ -15,6 +15,7 @@ export default __t.row({
   jobId: __t.string().name("job_id"),
   anyEcr: __t.bool().name("any_ecr"),
   prIds: __t.array(__t.u64()).name("pr_ids"),
+  maxLevel: __t.u8().name("max_level"),
   expiresAt: __t.timestamp().name("expires_at"),
   grantedAt: __t.timestamp().name("granted_at"),
 });

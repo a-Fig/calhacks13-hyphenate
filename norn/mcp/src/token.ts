@@ -51,7 +51,11 @@ export class TokenError extends Error {
 }
 
 const b64 = (b: Buffer | string) => Buffer.from(b).toString('base64url');
-const NAME = /^[\x21-\x7e]{1,64}$/; // printable ASCII, no spaces; the module caps names at 64
+// Names (actor, job id, role, person, ECR number): up to 64 of these characters, nothing else. The module caps names at 64.
+const NAME = /^[A-Za-z0-9:_./@+-]{1,64}$/;
+const B64URL = /^[A-Za-z0-9_-]+$/;
+const B64URL_SIG = /^[A-Za-z0-9_-]{43}$/; // 32 bytes, no padding
+const CLAIM_FIELDS = new Set(['v', 'kind', 'jobId', 'role', 'actor', 'onBehalfOf', 'spawnedBy', 'ecrs', 'iat', 'exp']);
 
 function sign(key: string, signingInput: string): Buffer {
   return createHmac('sha256', key).update(signingInput).digest();
@@ -69,14 +73,15 @@ export function parseClaims(raw: unknown): Claims {
   };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return bad('not an object');
   const c = raw as Record<string, unknown>;
+  for (const k of Object.keys(c)) if (!CLAIM_FIELDS.has(k)) bad(`unknown field '${k.slice(0, 20)}'`);
   if (c.v !== 1) bad('unknown version');
   if (c.kind !== 'job' && c.kind !== 'person_agent') bad('kind must be job or person_agent');
   for (const f of ['jobId', 'role', 'actor', 'spawnedBy'] as const) {
-    if (typeof c[f] !== 'string' || !NAME.test(c[f] as string)) bad(`${f} must be 1 to 64 printable characters without spaces`);
+    if (typeof c[f] !== 'string' || !NAME.test(c[f] as string)) bad(`${f} must be 1 to 64 letters, digits or : _ . / @ + -`);
   }
   if (c.onBehalfOf !== null && (typeof c.onBehalfOf !== 'string' || !NAME.test(c.onBehalfOf))) bad('onBehalfOf must be a name or null');
   if (c.kind === 'person_agent' && c.onBehalfOf === null) bad('a person_agent token must name the person it acts for');
-  if (!Array.isArray(c.ecrs) || c.ecrs.length > 50 || c.ecrs.some(e => typeof e !== 'string' || !NAME.test(e))) bad('ecrs must be a list of at most 50 ECR numbers');
+  if (!Array.isArray(c.ecrs) || c.ecrs.length > 50 || c.ecrs.some(e => typeof e !== 'string' || (e !== '*' && !NAME.test(e)))) bad('ecrs must be a list of at most 50 ECR numbers');
   const ecrs = c.ecrs as string[];
   if (ecrs.includes('*') && (c.kind !== 'person_agent' || ecrs.length !== 1)) bad("'*' (any ECR) is only for a person_agent token, and only on its own");
   if (!Number.isInteger(c.iat) || !Number.isInteger(c.exp)) bad('iat and exp must be whole seconds');
@@ -112,9 +117,11 @@ export function signToken(claims: NewClaims & { ttlSeconds: number }, key: strin
 export function verifyToken(token: string, key: string | undefined, nowMs = Date.now()): Claims {
   const k = requireKey(key);
   const parts = token.split('.');
-  if (parts.length !== 3 || parts[0] !== TOKEN_PREFIX || !parts[1] || !parts[2]) throw new TokenError('malformed', 'not a Norn token');
-  const given = Buffer.from(parts[2], 'base64url');
-  const want = sign(k, `${parts[0]}.${parts[1]}`);
+  // Strict shape first: base64url without padding or stray characters, so there is exactly one
+  // string for a given signature and a lenient decoder cannot make an edited token verify.
+  if (parts.length !== 3 || parts[0] !== TOKEN_PREFIX || !B64URL.test(parts[1] ?? '') || !B64URL_SIG.test(parts[2] ?? '')) throw new TokenError('malformed', 'not a Norn token');
+  const given = Buffer.from(parts[2]!);
+  const want = Buffer.from(b64(sign(k, `${parts[0]}.${parts[1]}`)));
   if (given.length !== want.length || !timingSafeEqual(given, want)) throw new TokenError('bad_signature', 'the token was not signed with this server\'s key');
   let raw: unknown;
   try {

@@ -7,13 +7,14 @@
 // The agent then connects with the file's contents as a bearer token (the output says how). It acts
 // in Norn as `agent:<person>/<label>`, as an outside agent for `person:<person>`, and may write only
 // to the ECRs named here. Nothing can revoke a token before it expires except changing the key.
-import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { chmodSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { nornMcpUrl } from '../src/client.ts';
 import { loadSigningKey } from '../src/env.ts';
+import { securePrivateDir } from '../src/fsutil.ts';
 import { MAX_TTL_SECONDS, signToken } from '../src/token.ts';
 
 const { values } = parseArgs({
@@ -44,7 +45,9 @@ const actor = `agent:${person}/${values.label}`;
 const token = signToken(
   {
     kind: 'person_agent',
-    jobId: `pat-${randomBytes(4).toString('hex')}`,
+    // Stable for a person and label: minting again gives the same job id, so the new token refreshes
+    // the agent's grant instead of being refused as a second job for the same actor.
+    jobId: `pat-${createHash('sha256').update(`${person}|${values.label}`).digest('hex').slice(0, 8)}`,
     role: 'person-agent',
     actor,
     onBehalfOf: `person:${person}`,
@@ -57,13 +60,14 @@ const token = signToken(
 
 const here = dirname(fileURLToPath(import.meta.url));
 const file = values.out ?? join(here, '..', '.state', 'person-tokens', `${actor.replace(/[^a-z0-9_-]/gi, '_')}.token`);
-mkdirSync(dirname(file), { recursive: true });
+securePrivateDir(dirname(file));
 writeFileSync(file, token, { mode: 0o600 });
 try {
   chmodSync(file, 0o600);
 } catch {}
 
 console.log(`Wrote a token for ${actor} (acting for person:${person}) to ${file}`);
+console.log("Minting again for the same person and label replaces this token and keeps the agent's grant; a wider ECR list than a live grant allows needs the old token to expire first, or a new --label.");
 console.log(`It may write to ${values['all-ecrs'] ? 'any ECR' : values.ecr!.join(', ')} and expires in ${hours} hour(s). Reads are open.`);
 console.log('Connect Claude Code with:');
 console.log(`  claude mcp add --transport http norn ${nornMcpUrl()} --header "Authorization: Bearer $(cat '${file}')"`);

@@ -38,6 +38,7 @@ import {
   insertRun,
   logAction,
   missingDeps,
+  Refusal,
   plusMs,
   reconcile,
   reconcileAllOpen,
@@ -421,21 +422,22 @@ export const addComment = write(
 
 export const grantScope = write(
   'grant_scope',
-  { jobId: t.string(), anyEcr: t.bool(), prIds: t.array(t.u64()), expiresAt: t.timestamp() },
+  { jobId: t.string(), anyEcr: t.bool(), prIds: t.array(t.u64()), maxLevel: t.u8(), expiresAt: t.timestamp() },
   (ctx, a) => {
     const jobId = nonEmpty(a.jobId, 'jobId', 64);
     if (a.prIds.length > 50) throw new SenderError('a grant names at most 50 ECRs');
+    if (a.maxLevel > 3) throw new SenderError('maxLevel is 0 (no statements) to 3');
     const labels = a.prIds.map(id => getPr(ctx, id).plmEcrNumber);
     const ahead = a.expiresAt.microsSinceUnixEpoch - ctx.timestamp.microsSinceUnixEpoch;
     if (ahead <= 0n) throw new SenderError('expiresAt is already past');
     if (ahead > 24n * 3600n * 1_000_000n) throw new SenderError('a grant lasts at most 24 hours');
-    const row = { identity: ctx.sender, jobId, anyEcr: a.anyEcr, prIds: [...new Set(a.prIds)], expiresAt: a.expiresAt, grantedAt: ctx.timestamp };
+    const row = { identity: ctx.sender, jobId, anyEcr: a.anyEcr, prIds: [...new Set(a.prIds)], maxLevel: a.maxLevel, expiresAt: a.expiresAt, grantedAt: ctx.timestamp };
     if (ctx.db.actorScope.identity.find(ctx.sender)) ctx.db.actorScope.identity.update(row);
     else ctx.db.actorScope.insert(row);
     return {
       entity: `actor_scope:${ctx.sender.toHexString().slice(0, 8)}`,
-      summary: `granted job ${jobId} write scope: ${a.anyEcr ? 'any ECR' : labels.join(', ') || 'no ECR'}, until ${a.expiresAt.toISOString()}`,
-      detail: { jobId, anyEcr: a.anyEcr, prIds: a.prIds },
+      summary: `granted job ${jobId} write scope: ${a.anyEcr ? 'any ECR' : labels.join(', ') || 'no ECR'}, statements up to Level ${a.maxLevel}, until ${a.expiresAt.toISOString()}`,
+      detail: { jobId, anyEcr: a.anyEcr, prIds: a.prIds, maxLevel: a.maxLevel },
     };
   }
 );
@@ -462,22 +464,29 @@ export const postImpactStatement = write(
     claims: t.array(StatementClaim),
   },
   (ctx, a) => {
+    const required = (v: string, what: string, max: number) => {
+      try {
+        return nonEmpty(v, what, max);
+      } catch (e) {
+        throw new Refusal((e as Error).message);
+      }
+    };
     const pr = getPr(ctx, a.prId);
-    if (!OPEN_PR.includes(pr.status as PrStatus)) throw new SenderError(`ECR ${pr.id} is ${pr.status}; its statement is frozen`);
-    if (a.level < 1 || a.level > 3) throw new SenderError('level must be 1, 2 or 3');
-    const changeClass = nonEmpty(a.changeClass, 'changeClass', 80);
-    const route = nonEmpty(a.route, 'route', 200);
-    const headline = nonEmpty(a.headline, 'headline', 600);
-    if (a.numbers.length < 1 || a.numbers.length > 12) throw new SenderError('a statement has 1 to 12 headline numbers');
-    if (a.drivers.length > 8) throw new SenderError('a statement has at most 8 drivers');
-    if (a.claims.length > 12) throw new SenderError('a statement has at most 12 claims');
-    if (a.assumptions.length > 20) throw new SenderError('a statement lists at most 20 assumptions');
+    if (!OPEN_PR.includes(pr.status as PrStatus)) throw new Refusal(`${pr.plmEcrNumber} is ${pr.status}; its statement is frozen`);
+    if (a.level < 1 || a.level > 3) throw new Refusal('level must be 1, 2 or 3');
+    const changeClass = required(a.changeClass, 'changeClass', 80);
+    const route = required(a.route, 'route', 200);
+    const headline = required(a.headline, 'headline', 600);
+    if (a.numbers.length < 1 || a.numbers.length > 12) throw new Refusal('a statement has 1 to 12 headline numbers');
+    if (a.drivers.length > 8) throw new Refusal('a statement has at most 8 drivers');
+    if (a.claims.length > 12) throw new Refusal('a statement has at most 12 claims');
+    if (a.assumptions.length > 20) throw new Refusal('a statement lists at most 20 assumptions');
     const evidence = (e: string, what: string) => {
-      if (!EVIDENCE.includes(e)) throw new SenderError(`${what}: evidence must be one of ${EVIDENCE.join(', ')}`);
+      if (!EVIDENCE.includes(e)) throw new Refusal(`${what}: evidence must be one of ${EVIDENCE.join(', ')}`);
     };
 
     // The newest result per key among runs that are still current ('done'; a stale run's are not).
-    const current = new Map<string, { id: bigint; p10: number; p50: number; p90: number }>();
+    const current = new Map<string, { id: bigint; label: string; unit: string; p10: number; p50: number; p90: number }>();
     for (const r of ctx.db.checkResult.prId.filter(pr.id)) {
       if (ctx.db.checkRun.id.find(r.checkRunId)?.status !== 'done') continue;
       const seen = current.get(r.key);
@@ -485,30 +494,32 @@ export const postImpactStatement = write(
     }
     for (const n of a.numbers) {
       const what = `number '${n.key}'`;
-      nonEmpty(n.key, `${what} key`, 80);
-      nonEmpty(n.label, `${what} label`, 200);
-      if (n.unit.length > 24) throw new SenderError(`${what}: unit is too long (max 24 characters)`);
+      required(n.key, `${what} key`, 80);
+      required(n.label, `${what} label`, 200);
+      if (n.unit.length > 24) throw new Refusal(`${what}: unit is too long (max 24 characters)`);
       if (![n.p10, n.p50, n.p90].every(Number.isFinite) || !(n.p10 <= n.p50 && n.p50 <= n.p90))
-        throw new SenderError(`${what}: need finite p10 <= p50 <= p90`);
+        throw new Refusal(`${what}: need finite p10 <= p50 <= p90`);
       evidence(n.evidence, what);
       if (n.evidence === 'computation') {
         const r = current.get(n.resultKey);
-        if (!r) throw new SenderError(`${what} is marked computation, but ECR ${pr.id} has no current check result '${n.resultKey}'`);
+        if (!r) throw new Refusal(`${what} is marked computation, but ${pr.plmEcrNumber} has no current check result '${n.resultKey}'`);
+        if (n.label !== r.label || n.unit !== r.unit)
+          throw new Refusal(`${what} is marked computation, so it keeps the label and unit of check result '${n.resultKey}' ('${r.label}', '${r.unit}'), not '${n.label}', '${n.unit}'`);
         if (r.p10 !== n.p10 || r.p50 !== n.p50 || r.p90 !== n.p90)
-          throw new SenderError(`${what} is marked computation but differs from check result '${n.resultKey}' (${r.p10} / ${r.p50} / ${r.p90}); quote it exactly or mark it judgment`);
+          throw new Refusal(`${what} is marked computation but differs from check result '${n.resultKey}' (${r.p10} / ${r.p50} / ${r.p90}); quote it exactly or mark it judgment`);
       }
     }
     for (const c of [...a.drivers, ...a.claims]) {
-      nonEmpty(c.text, 'a driver or claim text', 600);
+      required(c.text, 'a driver or claim text', 600);
       evidence(c.evidence, 'a driver or claim');
     }
     const seen = new Map(effectiveAssumptions(ctx, pr.id).map(x => [x.key, x]));
     for (const x of a.assumptions) {
       const known = seen.get(x.key);
-      if (!known) throw new SenderError(`assumption '${x.key}' is not one this ECR sees`);
+      if (!known) throw new Refusal(`assumption '${x.key}' is not one this ECR sees`);
       if (known.source !== x.source)
-        throw new SenderError(`assumption '${x.key}' is ${known.source}, not ${x.source}; a statement may not relabel an assumption's source`);
-      if (x.note.length > 400) throw new SenderError(`assumption '${x.key}': note is too long (max 400 characters)`);
+        throw new Refusal(`assumption '${x.key}' is ${known.source}, not ${x.source}; a statement may not relabel an assumption's source`);
+      if (x.note.length > 400) throw new Refusal(`assumption '${x.key}': note is too long (max 400 characters)`);
     }
 
     const row = ctx.db.impactStatement.insert({
@@ -572,20 +583,20 @@ export const recordAssumption = write(
   },
   (ctx, a, call) => {
     if (a.prId !== 0n) {
-      const status = getPr(ctx, a.prId).status as PrStatus;
-      if (!OPEN_PR.includes(status)) throw new SenderError(`ECR ${a.prId} is ${status}; its assumptions are frozen`);
+      const pr = getPr(ctx, a.prId);
+      if (!OPEN_PR.includes(pr.status as PrStatus)) throw new Refusal(`${pr.plmEcrNumber} is ${pr.status}; its assumptions are frozen`);
     }
     const key = nonEmpty(a.key, 'key', 80);
     parseJson(a.distJson, 'distJson');
-    if (a.distJson.length > 4000) throw new SenderError('distJson is too long (max 4000 characters)');
-    if (!(SOURCES as readonly string[]).includes(a.source)) throw new SenderError(`source must be one of ${SOURCES.join(', ')}`);
+    if (a.distJson.length > 4000) throw new Refusal('distJson is too long (max 4000 characters)');
+    if (!(SOURCES as readonly string[]).includes(a.source)) throw new Refusal(`source must be one of ${SOURCES.join(', ')}`);
     for (const s of a.affects) stageDef(s);
 
     let cur: ReturnType<typeof ctx.db.assumption.id.find> | undefined;
     for (const r of ctx.db.assumption.prId.filter(a.prId)) if (r.key === key && r.current) cur = r;
     const curRev = cur?.rev ?? 0;
     if (a.expectedRev !== curRev)
-      throw new SenderError(`'${key}' is at revision ${curRev}, not ${a.expectedRev}: someone else edited it; reload and retry`);
+      throw new Refusal(`'${key}' is at revision ${curRev}, not ${a.expectedRev}: someone else edited it; reload and retry`);
     if (
       cur &&
       cur.distJson === a.distJson &&
