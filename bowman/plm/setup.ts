@@ -67,7 +67,7 @@ function doctypeDoc(def: DocTypeDef, fields: Field[], withLinks: boolean): Field
     module: MODULE,
     custom: 1,
     istable: def.istable ? 1 : 0,
-    allow_rename: 0, // renaming only needs write, which Norn holds on the ECR
+    allow_rename: 0, // renaming only needs write, which Norn holds on the ECR; a forced rename ignores this, hence the Before Rename script
 
     editable_grid: def.istable ? 1 : 0,
     ...(autoname ? { autoname, naming_rule } : {}),
@@ -177,8 +177,10 @@ async function scripts() {
     ['ECR: Norn writes only the impact assessment', 'ECR', 'Before Validate', 'server-scripts/ecr-guard.py'],
     ['ECR: cost page totals', 'ECR', 'Before Save', 'server-scripts/ecr-totals.py'],
     ['NCR: title from number and part', 'NCR', 'Before Save', 'server-scripts/ncr-title.py'],
-    ['ECR: no discard', 'ECR', 'Before Discard', 'server-scripts/no-discard.py'],
-    ['ECO: no discard', 'ECO', 'Before Discard', 'server-scripts/no-discard.py'],
+    ...['Part', 'Engineering BOM', 'NCR', 'ECR', 'ECO'].flatMap((dt): [string, string, string, string][] => [
+      [`${dt}: no discard`, dt, 'Before Discard', 'server-scripts/no-discard-or-rename.py'],
+      [`${dt}: no rename`, dt, 'Before Rename', 'server-scripts/no-discard-or-rename.py'],
+    ]),
     ['Norn: no files on change records', 'File', 'Before Insert', 'server-scripts/norn-no-attachments.py'],
     ['Norn: no assignments on change records', 'ToDo', 'Before Insert', 'server-scripts/norn-no-assignments.py'],
     ['Norn: comments carry Norn as author', 'Comment', 'Before Insert', 'server-scripts/norn-comment-author.py'],

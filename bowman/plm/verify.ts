@@ -279,6 +279,30 @@ async function main() {
     log('  probe ECR and ECO deleted; naming series restored (next ECR-0424, ECO-0319)');
   }
 
+  log('11. A forced rename is refused (throwaway ECR and NCR made as Administrator, removed afterwards)');
+  // Document.rename(force=True) ignores allow_rename and skips Before Validate; the release bot holds write on ECR, a CM analyst on NCR.
+  const hdrs = (await admin.get('/api/resource/Webhook/ecr.approved')).body.data.webhook_headers as { key: string; value: string }[];
+  const bot = new Plm(base, { token: hdrs.find((h) => h.key === 'Authorization')!.value.replace(/^token /, '') });
+  const r11 = (await admin.post('/api/resource/ECR', { doctype: 'ECR', title: 'Rename probe ECR (deleted after the test)', program: 'Vesper V4', priority: 'Routine', justification_code: 'D', company_class: 'Class I', faa_class: 'Minor', description: 'probe', need: 'probe' })).body.data;
+  const n11 = (await admin.post('/api/resource/NCR', { doctype: 'NCR', part: 'BW-5120-210', status: 'Open', description: 'rename probe (deleted after the test)' })).body.data;
+  const forceRename = (who: Plm, dt: string, doc: any, to: string) =>
+    who.post('/api/method/run_doc_method', { docs: JSON.stringify(doc), method: 'rename', args: JSON.stringify({ name: to, force: true }) }, { allow: true });
+  try {
+    const botTry = await forceRename(bot, 'ECR', (await bot.get(`/api/resource/ECR/${r11.name}`)).body.data, 'ECR-9999');
+    const danaTry = await forceRename(dana, 'NCR', (await dana.get(`/api/resource/NCR/${n11.name}`)).body.data, 'NCR-9999');
+    const kept = (await admin.exists('ECR', r11.name)) && !(await admin.exists('ECR', 'ECR-9999')) && (await admin.exists('NCR', n11.name)) && !(await admin.exists('NCR', 'NCR-9999'));
+    log(`  run_doc_method rename force=true: ECR ${r11.name} as the release bot -> ${refusal(botTry)}; NCR ${n11.name} as the CM analyst -> ${refusal(danaTry)}; names unchanged: ${kept}`);
+    check(botTry.status === 403 && (await admin.exists('ECR', r11.name)) && !(await admin.exists('ECR', 'ECR-9999')), 'the release bot cannot rename an ECR, even forced');
+    check(danaTry.status === 403 && (await admin.exists('NCR', n11.name)) && !(await admin.exists('NCR', 'NCR-9999')), 'a CM analyst cannot rename an NCR, even forced');
+  } finally {
+    for (const [dt, names] of [['ECR', [r11.name, 'ECR-9999']], ['NCR', [n11.name, 'NCR-9999']]] as const) {
+      for (const nm of names) if (await admin.exists(dt, nm)) await admin.del(`/api/resource/${dt}/${nm}`, { allow: true });
+    }
+    await setSeries('ECR-', 424);
+    await setSeries('NCR-', 125);
+    log('  probe ECR and NCR deleted; naming series restored (next ECR-0424, NCR-0125)');
+  }
+
   log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed. ECR-0417 now carries the test impact assessment; run with --clear to remove it.');
   process.exit(failures ? 1 : 0);
 }
