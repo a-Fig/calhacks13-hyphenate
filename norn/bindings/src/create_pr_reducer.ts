@@ -10,7 +10,15 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+import {
+  CallMeta,
+} from "./types";
+
 export default {
+  get meta() {
+    return CallMeta;
+  },
+  plmEcrNumber: __t.string(),
   title: __t.string(),
   description: __t.string(),
 };

@@ -39,19 +39,19 @@ const check = (name: string, ok: boolean, detail = '') => {
 const out: Record<string, unknown> = {};
 
 const O = await connect({ kind: 'agent', name: 'spike-observer', origin: 'norn', spawnedBy: 'Norn' }, { persistToken: false, quiet: true });
-await subscribe(O.conn, ['SELECT * FROM check_run', 'SELECT * FROM check_progress', 'SELECT * FROM check_result', 'SELECT * FROM pull_request']);
+await subscribe(O.conn, ['SELECT * FROM check_run', 'SELECT * FROM check_progress', 'SELECT * FROM check_result', 'SELECT * FROM pull_request', 'SELECT * FROM principal']);
 
 // Row changes with the time we saw them. Polling would miss a state that lasts a few milliseconds
 // (a requeued run is claimed again almost at once).
 const events: { t: number; run: bigint; status: string; attempts: number; by: string | undefined; note: string }[] = [];
-const rec = (r: { id: bigint; status: string; attempts: number; claimedByName?: string | undefined; note: string }) =>
-  events.push({ t: Date.now(), run: r.id, status: r.status, attempts: r.attempts, by: r.claimedByName ?? undefined, note: r.note });
+const rec = (r: { id: bigint; status: string; attempts: number; claimedBy?: { toHexString(): string } | undefined; note: string }) =>
+  events.push({ t: Date.now(), run: r.id, status: r.status, attempts: r.attempts, by: r.claimedBy ? O.conn.db.principal.identity.find(r.claimedBy as never)?.name : undefined, note: r.note });
 O.conn.db.checkRun.onInsert((_c, r) => rec(r));
 O.conn.db.checkRun.onUpdate((_c, _o, r) => rec(r));
 
 async function newPr(title: string) {
   const before = new Set([...O.conn.db.pullRequest.iter()].map(p => p.id));
-  await O.conn.reducers.createPr({ title, description: 'spike' });
+  await O.R.createPr({ plmEcrNumber: '', title, description: 'spike' });
   for (let i = 0; i < 100; i++) {
     const pr = [...O.conn.db.pullRequest.iter()].find(p => !before.has(p.id) && p.title === title);
     if (pr) return pr;
@@ -117,7 +117,7 @@ try {
 
   // ---- B. attempts used up: the run fails instead of looping
   kill('crash-y');
-  await O.conn.reducers.setConfig({ key: 'max_attempts', value: '1' });
+  await O.R.setConfig({ key: 'max_attempts', value: '1' });
   start('crash-x2', { NORN_STAGES: 's4_supply', NORN_LEASE_MS: LEASE });
   await sleep(3000);
   const pr2 = await newPr('spike attempts exhausted');
@@ -129,7 +129,7 @@ try {
   const failedEv = events.find(e => e.run === r2.id && e.status === 'failed')!;
   out.exhausted = { killToFailedMs: failedEv.t - tKill2, note: failed.note, attempts: failed.attempts, maxAttempts: failed.maxAttempts };
   check('with max_attempts=1 a killed worker\'s run ends as failed (not requeued forever)', failed.attempts === 1 && failed.note.includes('giving up'), `${failedEv.t - tKill2} ms after the kill; ${failed.note}`);
-  await O.conn.reducers.setConfig({ key: 'max_attempts', value: '3' });
+  await O.R.setConfig({ key: 'max_attempts', value: '3' });
 
   // ---- C. the action log names the reaper, not a person
   await sleep(300);

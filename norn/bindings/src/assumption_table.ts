@@ -20,6 +20,6 @@ export default __t.row({
   rev: __t.u32(),
   current: __t.bool(),
   affects: __t.array(__t.string()),
-  createdBy: __t.string().name("created_by"),
+  createdBy: __t.identity().name("created_by"),
   createdAt: __t.timestamp().name("created_at"),
 });

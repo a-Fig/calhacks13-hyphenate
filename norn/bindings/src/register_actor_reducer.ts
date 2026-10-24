@@ -10,10 +10,16 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+import {
+  CallMeta,
+} from "./types";
+
 export default {
+  get meta() {
+    return CallMeta;
+  },
   kind: __t.string(),
   name: __t.string(),
   origin: __t.string(),
   onBehalfOf: __t.option(__t.string()),
-  spawnedBy: __t.string(),
 };

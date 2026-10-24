@@ -38,20 +38,23 @@ import AddCommentReducer from "./add_comment_reducer";
 import ClaimCheckReducer from "./claim_check_reducer";
 import CompleteCheckReducer from "./complete_check_reducer";
 import CreatePrReducer from "./create_pr_reducer";
+import EditPrTextReducer from "./edit_pr_text_reducer";
 import EnqueueCheckReducer from "./enqueue_check_reducer";
 import FailCheckReducer from "./fail_check_reducer";
 import HeartbeatCheckReducer from "./heartbeat_check_reducer";
+import RecordAgentEventsReducer from "./record_agent_events_reducer";
 import RecordAssumptionReducer from "./record_assumption_reducer";
 import RegisterActorReducer from "./register_actor_reducer";
 import ReportProgressReducer from "./report_progress_reducer";
 import SetConfigReducer from "./set_config_reducer";
 import SetPrStatusReducer from "./set_pr_status_reducer";
-import SpikeFailReducer from "./spike_fail_reducer";
+import UpsertPartReducer from "./upsert_part_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
 import ActionLogRow from "./action_log_table";
+import AgentEventRow from "./agent_event_table";
 import AssumptionRow from "./assumption_table";
 import CheckProgressRow from "./check_progress_table";
 import CheckResultRow from "./check_result_table";
@@ -59,6 +62,7 @@ import CheckRunRow from "./check_run_table";
 import CommentRow from "./comment_table";
 import MainVersionRow from "./main_version_table";
 import NornConfigRow from "./norn_config_table";
+import PartRow from "./part_table";
 import PrincipalRow from "./principal_table";
 import PullRequestRow from "./pull_request_table";
 
@@ -75,11 +79,38 @@ const tablesSchema = __schema({
       { accessor: 'prId', name: 'action_log_pr_id_idx_btree', algorithm: 'btree', columns: [
         'prId',
       ] },
+      { accessor: 'requestId', name: 'action_log_request_id_idx_btree', algorithm: 'btree', columns: [
+        'requestId',
+      ] },
     ],
     constraints: [
       { name: 'action_log_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActionLogRow),
+  agentEvent: __table({
+    name: 'agent_event',
+    indexes: [
+      { accessor: 'checkRunId', name: 'agent_event_check_run_id_idx_btree', algorithm: 'btree', columns: [
+        'checkRunId',
+      ] },
+      { accessor: 'eventKey', name: 'agent_event_event_key_idx_btree', algorithm: 'btree', columns: [
+        'eventKey',
+      ] },
+      { accessor: 'id', name: 'agent_event_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'jobId', name: 'agent_event_job_id_idx_btree', algorithm: 'btree', columns: [
+        'jobId',
+      ] },
+      { accessor: 'prId', name: 'agent_event_pr_id_idx_btree', algorithm: 'btree', columns: [
+        'prId',
+      ] },
+    ],
+    constraints: [
+      { name: 'agent_event_event_key_key', constraint: 'unique', columns: ['eventKey'] },
+      { name: 'agent_event_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, AgentEventRow),
   assumption: __table({
     name: 'assumption',
     indexes: [
@@ -159,12 +190,12 @@ const tablesSchema = __schema({
   mainVersion: __table({
     name: 'main_version',
     indexes: [
-      { accessor: 'id', name: 'main_version_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
+      { accessor: 'version', name: 'main_version_version_idx_btree', algorithm: 'btree', columns: [
+        'version',
       ] },
     ],
     constraints: [
-      { name: 'main_version_id_key', constraint: 'unique', columns: ['id'] },
+      { name: 'main_version_version_key', constraint: 'unique', columns: ['version'] },
     ],
   }, MainVersionRow),
   nornConfig: __table({
@@ -178,6 +209,21 @@ const tablesSchema = __schema({
       { name: 'norn_config_key_key', constraint: 'unique', columns: ['key'] },
     ],
   }, NornConfigRow),
+  part: __table({
+    name: 'part',
+    indexes: [
+      { accessor: 'id', name: 'part_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'partNumber', name: 'part_part_number_idx_btree', algorithm: 'btree', columns: [
+        'partNumber',
+      ] },
+    ],
+    constraints: [
+      { name: 'part_id_key', constraint: 'unique', columns: ['id'] },
+      { name: 'part_part_number_key', constraint: 'unique', columns: ['partNumber'] },
+    ],
+  }, PartRow),
   principal: __table({
     name: 'principal',
     indexes: [
@@ -195,12 +241,16 @@ const tablesSchema = __schema({
       { accessor: 'id', name: 'pull_request_id_idx_btree', algorithm: 'btree', columns: [
         'id',
       ] },
+      { accessor: 'plmEcrNumber', name: 'pull_request_plm_ecr_number_idx_btree', algorithm: 'btree', columns: [
+        'plmEcrNumber',
+      ] },
       { accessor: 'status', name: 'pull_request_status_idx_btree', algorithm: 'btree', columns: [
         'status',
       ] },
     ],
     constraints: [
       { name: 'pull_request_id_key', constraint: 'unique', columns: ['id'] },
+      { name: 'pull_request_plm_ecr_number_key', constraint: 'unique', columns: ['plmEcrNumber'] },
     ],
   }, PullRequestRow),
 });
@@ -211,15 +261,17 @@ const reducersSchema = __reducers(
   __reducerSchema("claim_check", ClaimCheckReducer),
   __reducerSchema("complete_check", CompleteCheckReducer),
   __reducerSchema("create_pr", CreatePrReducer),
+  __reducerSchema("edit_pr_text", EditPrTextReducer),
   __reducerSchema("enqueue_check", EnqueueCheckReducer),
   __reducerSchema("fail_check", FailCheckReducer),
   __reducerSchema("heartbeat_check", HeartbeatCheckReducer),
+  __reducerSchema("record_agent_events", RecordAgentEventsReducer),
   __reducerSchema("record_assumption", RecordAssumptionReducer),
   __reducerSchema("register_actor", RegisterActorReducer),
   __reducerSchema("report_progress", ReportProgressReducer),
   __reducerSchema("set_config", SetConfigReducer),
   __reducerSchema("set_pr_status", SetPrStatusReducer),
-  __reducerSchema("spike_fail", SpikeFailReducer),
+  __reducerSchema("upsert_part", UpsertPartReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */

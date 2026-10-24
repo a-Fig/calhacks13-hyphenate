@@ -16,6 +16,5 @@ export default __t.row({
   name: __t.string(),
   origin: __t.string(),
   onBehalfOf: __t.option(__t.string()).name("on_behalf_of"),
-  spawnedBy: __t.string().name("spawned_by"),
   registeredAt: __t.timestamp().name("registered_at"),
 });

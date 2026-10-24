@@ -16,6 +16,7 @@ main { display:grid; grid-template-columns: 300px minmax(0, 1fr); gap:16px; padd
 .chip { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; background:#eef0f4; color:#374151; }
 .chip.running { background:#e0ecff; color:#1d4ed8; } .chip.queued { background:#fff1d6; color:var(--warn); }
 .chip.done, .chip.approved, .chip.merged { background:#dcf5e7; color:var(--ok); }
+.chip.blocked { background:#f3e8ff; color:#6b21a8; }
 .chip.failed { background:#fde4e1; color:var(--bad); } .chip.stale, .chip.cancelled, .chip.closed { background:#eceff3; color:var(--stale); }
 .chip.mock { background:#fff4d6; color:#6a4a00; }
 table { border-collapse:collapse; width:100%; }

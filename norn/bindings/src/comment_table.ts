@@ -13,8 +13,7 @@ import {
 export default __t.row({
   id: __t.u64().primaryKey(),
   prId: __t.u64().name("pr_id"),
-  authorName: __t.string().name("author_name"),
-  authorKind: __t.string().name("author_kind"),
+  author: __t.identity(),
   anchor: __t.string(),
   body: __t.string(),
   createdAt: __t.timestamp().name("created_at"),

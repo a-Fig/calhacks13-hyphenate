@@ -1,10 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
 import { useNorn, useTableVersion, nornDebug } from './store.tsx';
-import { STAGE_LABEL, STAGE_ORDER, STATUS_LABEL, num, ts } from './format.ts';
+import { STAGE_LABEL, STAGE_ORDER, STATUS_LABEL, nameOf, num, ts } from './format.ts';
 import type { Assumption, CheckProgress, CheckResult, CheckRun } from '@norn/bindings/types';
 
 export function PrPage({ prId, loadingFor }: { prId: bigint; loadingFor: bigint | null }) {
-  const { conn } = useNorn();
+  const { conn, R } = useNorn();
   const v = useTableVersion('pullRequest', 'assumption', 'checkRun', 'checkProgress', 'checkResult', 'comment', 'actionLog', 'principal');
   const [actionErr, setActionErr] = useState('');
 
@@ -25,11 +25,11 @@ export function PrPage({ prId, loadingFor }: { prId: bigint; loadingFor: bigint 
   }, [conn, prId, v]);
 
   nornDebug.pageRenders = ((nornDebug.pageRenders as number) ?? 0) + 1;
-  if (!conn || !data || !data.pr) return <div className="card mute">Loading…</div>;
+  if (!conn || !R || !data || !data.pr) return <div className="card mute">Loading…</div>;
   const { pr, runs, progress, results, comments, log, assumptions } = data;
 
   const act = (p: Promise<unknown>) => p.then(() => setActionErr('')).catch(e => setActionErr((e as Error).message));
-  const setStatus = (status: string) => act(conn.reducers.setPrStatus({ prId, status }));
+  const setStatus = (status: string) => act(R.setPrStatus({ prId, status }));
   const open = ['draft', 'review', 'approved'].includes(pr.status);
   const back = pr.status === 'approved' ? 'review' : 'draft';
 
@@ -40,6 +40,7 @@ export function PrPage({ prId, loadingFor }: { prId: bigint; loadingFor: bigint 
           <h2 style={{ margin: 0 }}>ECR-{String(pr.id)}</h2>
           <span className={`chip ${pr.status}`} data-testid="pr-status">{STATUS_LABEL[pr.status] ?? pr.status}</span>
           <span className="mute" data-testid="pr-revision">r{pr.revision}</span>
+          <span className="mute" data-testid="pr-plm">{pr.plmEcrNumber}</span>
           <span className="mute">checked against baseline v{pr.baseVersion}</span>
           {loadingFor !== null && <span className="chip queued" data-testid="loading">loading ECR-{String(loadingFor)}…</span>}
         </div>
@@ -72,7 +73,7 @@ export function PrPage({ prId, loadingFor }: { prId: bigint; loadingFor: bigint 
                 results={results}
                 progress={progress}
                 canAct={open}
-                onRequest={() => act(conn.reducers.enqueueCheck({ prId, stage, trigger: 'requested' }))}
+                onRequest={() => act(R.enqueueCheck({ prId, stage, trigger: 'requested' }))}
               />
             ))}
           </tbody>
@@ -96,7 +97,7 @@ export function PrPage({ prId, loadingFor }: { prId: bigint; loadingFor: bigint 
           <h2>Comments</h2>
           {comments.map(c => (
             <div key={String(c.id)} style={{ marginBottom: 6 }}>
-              <b>{c.authorName}</b> <span className="mute">{ts(c.createdAt)}{c.anchor ? ` · on ${c.anchor}` : ''}</span>
+              <b>{nameOf(conn, c.author)}</b> <span className="mute">{ts(c.createdAt)}{c.anchor ? ` · on ${c.anchor}` : ''}</span>
               <div>{c.body}</div>
             </div>
           ))}
@@ -134,6 +135,7 @@ function StageRow(props: {
   onRequest: () => void;
 }) {
   const { stage, runs, results, progress, canAct, onRequest } = props;
+  const { conn } = useNorn();
   const latest = [...runs].sort((a, b) => Number(b.id - a.id))[0];
   const tier = latest?.tier ?? (stage === 's0_extract' || stage === 's5_card' ? 'deep' : 'code');
   const res = latest ? results.filter(r => r.checkRunId === latest.id) : [];
@@ -169,7 +171,7 @@ function StageRow(props: {
         ))}
         {latest?.status === 'running' && prog && <ProgressView p={prog} />}
       </td>
-      <td className="mute">{latest?.claimedByName ?? ''}</td>
+      <td className="mute">{latest?.claimedBy && conn ? nameOf(conn, latest.claimedBy) : ''}</td>
       <td>
         {tier === 'deep' && canAct && (!latest || latest.status === 'stale' || latest.status === 'failed' || latest.status === 'cancelled') && (
           <button data-testid={`request-${stage}`} onClick={onRequest}>Request</button>
@@ -201,7 +203,7 @@ function ProgressView({ p }: { p: CheckProgress }) {
 }
 
 function AssumptionRow({ row, scope, prId, editable }: { row: Assumption; scope: 'baseline' | 'ecr'; prId: bigint; editable: boolean }) {
-  const { conn } = useNorn();
+  const { R } = useNorn();
   const [draft, setDraft] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const shown = draft ?? row.distJson;
@@ -212,7 +214,7 @@ function AssumptionRow({ row, scope, prId, editable }: { row: Assumption; scope:
       // Saving over a baseline row from an ECR page creates this ECR's own override (expected rev 0).
       const target = toBaseline ? 0n : prId;
       const expectedRev = (toBaseline && scope === 'baseline') || (!toBaseline && scope === 'ecr') ? row.rev : 0;
-      await conn!.reducers.recordAssumption({
+      await R!.recordAssumption({
         prId: target,
         key: row.key,
         distJson: shown,
@@ -252,7 +254,7 @@ function AssumptionRow({ row, scope, prId, editable }: { row: Assumption; scope:
 }
 
 function CommentBox({ prId }: { prId: bigint }) {
-  const { conn } = useNorn();
+  const { R } = useNorn();
   const [body, setBody] = useState('');
   const [err, setErr] = useState('');
   return (
@@ -263,7 +265,7 @@ function CommentBox({ prId }: { prId: bigint }) {
         data-testid="comment-send"
         onClick={async () => {
           try {
-            await conn!.reducers.addComment({ prId, anchor: '', body });
+            await R!.addComment({ prId, anchor: '', body });
             setBody('');
             setErr('');
           } catch (e) {

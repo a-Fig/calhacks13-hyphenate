@@ -11,8 +11,12 @@ import {
 } from "spacetimedb";
 
 export default __t.row({
-  id: __t.u32().primaryKey(),
-  version: __t.u32(),
-  updatedAt: __t.timestamp().name("updated_at"),
+  version: __t.u32().primaryKey(),
+  parent: __t.u32(),
+  cause: __t.string(),
+  mergedPrId: __t.u64().name("merged_pr_id"),
+  effectivity: __t.option(__t.timestamp()),
+  at: __t.timestamp(),
+  by: __t.identity(),
   note: __t.string(),
 });

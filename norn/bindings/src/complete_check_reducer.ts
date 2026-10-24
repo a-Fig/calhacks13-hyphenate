@@ -11,10 +11,14 @@ import {
 } from "spacetimedb";
 
 import {
+  CallMeta,
   ResultInput,
 } from "./types";
 
 export default {
+  get meta() {
+    return CallMeta;
+  },
   checkRunId: __t.u64(),
   attempt: __t.u32(),
   get results() {

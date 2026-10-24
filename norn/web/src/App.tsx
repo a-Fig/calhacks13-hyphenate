@@ -4,7 +4,7 @@ import { STATUS_LABEL, short } from './format.ts';
 import { PrPage } from './PrPage.tsx';
 
 export function App() {
-  const { conn, status, error, identityHex, me, globalReady } = useNorn();
+  const { conn, R, status, error, identityHex, me, globalReady } = useNorn();
   const v = useTableVersion('pullRequest', 'mainVersion', 'nornConfig');
   const [selected, setSelected] = useState<bigint | null>(null);
 
@@ -12,7 +12,7 @@ export function App() {
     () => (conn ? [...conn.db.pullRequest.iter()].sort((a, b) => Number(a.id - b.id)) : []),
     [conn, v]
   );
-  const main = useMemo(() => (conn ? [...conn.db.mainVersion.iter()][0] : undefined), [conn, v]);
+  const main = useMemo(() => (conn ? [...conn.db.mainVersion.iter()].sort((a, b) => b.version - a.version)[0] : undefined), [conn, v]);
   const deepMode = useMemo(() => (conn ? conn.db.nornConfig.key.find('deep_review_mode')?.value : undefined), [conn, v]);
 
   const readyFor = usePrSubscription(selected);
@@ -29,13 +29,13 @@ export function App() {
         <small>
           you: <b data-testid="me">{me}</b> ({short(identityHex)}) · {DB} @ {URI}
         </small>
-        {conn && (
+        {conn && R && (
           <label>
             <small>Full assessments:&nbsp;</small>
             <select
               value={deepMode ?? 'on_request'}
               data-testid="deep-mode"
-              onChange={e => conn.reducers.setConfig({ key: 'deep_review_mode', value: e.target.value }).catch(alert)}
+              onChange={e => R.setConfig({ key: 'deep_review_mode', value: e.target.value }).catch(alert)}
             >
               <option value="on_request">on request</option>
               <option value="auto">automatic</option>
@@ -81,7 +81,7 @@ export function App() {
 }
 
 function NewEcr() {
-  const { conn } = useNorn();
+  const { conn, R } = useNorn();
   const [title, setTitle] = useState('');
   const [err, setErr] = useState('');
   return (
@@ -89,7 +89,7 @@ function NewEcr() {
       onSubmit={async e => {
         e.preventDefault();
         try {
-          await conn!.reducers.createPr({ title, description: '' });
+          await R!.createPr({ plmEcrNumber: '', title, description: '' });
           setTitle('');
           setErr('');
         } catch (x) {

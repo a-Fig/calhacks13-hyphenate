@@ -15,6 +15,7 @@ import {
   type ReactNode,
 } from 'react';
 import { DbConnection } from '@norn/bindings';
+import { reducersFor, type WithMeta } from './rpc.ts';
 
 export const URI: string = import.meta.env.VITE_NORN_URI ?? 'ws://127.0.0.1:3000';
 export const DB: string = import.meta.env.VITE_NORN_DB ?? 'norn';
@@ -23,6 +24,8 @@ type Status = 'connecting' | 'connected' | 'reconnecting' | 'error';
 
 type NornState = {
   conn: DbConnection | null;
+  /** conn.reducers with `meta` filled in: use this for every write. */
+  R: WithMeta<DbConnection['reducers']> | null;
   status: Status;
   error: string | null;
   identityHex: string | null;
@@ -35,6 +38,7 @@ const defaultName = params.get('as') ?? `Reviewer-${Math.random().toString(16).s
 
 const initial: NornState = {
   conn: null,
+  R: null,
   status: 'connecting',
   error: null,
   identityHex: null,
@@ -84,8 +88,9 @@ export function NornProvider({ children }: { children: ReactNode }) {
           }
           return out;
         };
-        setState(s => ({ ...s, conn: c, status: 'connected', identityHex, error: null }));
-        await c.reducers.registerActor({ kind: 'person', name: defaultName, origin: 'human', onBehalfOf: undefined, spawnedBy: 'web' });
+        const R = reducersFor(c);
+        setState(s => ({ ...s, conn: c, R, status: 'connected', identityHex, error: null }));
+        await R.registerActor({ kind: 'person', name: defaultName, origin: 'human', onBehalfOf: undefined });
         c.subscriptionBuilder()
           .onApplied(() => setState(s => ({ ...s, globalReady: true })))
           .subscribe([

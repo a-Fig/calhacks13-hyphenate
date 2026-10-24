@@ -11,11 +11,21 @@ export type Result = {
   detailJson: string;
 };
 
+/** Thrown by a handler that noticed the server no longer wants its work (stale inputs, run lost). */
+export class AbortedError extends Error {
+  constructor() {
+    super('the server no longer wants this run');
+    this.name = 'AbortedError';
+  }
+}
+
 export type RunCtx = {
   runId: bigint;
   prId: bigint;
   stage: string;
   inputHash: string;
+  /** Aborted when a heartbeat or progress call is told the run is stale or no longer ours. */
+  signal: AbortSignal;
   /** Stream progress; resolves when the server has accepted it. Throws if the run is stale or lost. */
   progress: (p: { done: number; total: number; percentiles: number[]; histogram: number[]; histMin: number; histMax: number }) => Promise<void>;
   log: (msg: string) => void;
@@ -66,6 +76,7 @@ export const HANDLERS: Record<string, (ctx: RunCtx) => Promise<Result[]>> = {
     let n = 0;
     const rtts: number[] = []; // how long the server took to accept each progress report
     while (n < total) {
+      if (ctx.signal.aborted) throw new AbortedError();
       const started = Date.now();
       const end = Math.min(total, n + per);
       for (; n < end; n++) draws[n] = drawCostAtRisk(rand);
@@ -92,12 +103,13 @@ export const HANDLERS: Record<string, (ctx: RunCtx) => Promise<Result[]>> = {
   },
 
   // Agent stages. No LLM is called; the output says so.
+  // NORN_AGENT_STAGE_MS stands in for an LLM call that outlives the lease.
   s0_extract: async ctx => {
-    await sleep(1500);
+    await sleep(Number(process.env.NORN_AGENT_STAGE_MS ?? 1500));
     return [{ key: 'extracted_changes', label: 'Changes extracted from the ECR text', unit: 'changes', p10: 4, p50: 4, p90: 4, detailJson: detail({ note: 'MOCK: no LLM call was made' }) }];
   },
   s5_card: async ctx => {
-    await sleep(1500);
+    await sleep(Number(process.env.NORN_AGENT_STAGE_MS ?? 1500));
     return [{ key: 'impact_statement', label: 'Change impact statement', unit: 'card', p10: 1, p50: 1, p90: 1, detailJson: detail({ note: 'MOCK: no LLM call was made', pr: String(ctx.prId) }) }];
   },
 };

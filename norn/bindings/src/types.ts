@@ -14,7 +14,9 @@ export const ActionLog = __t.object("ActionLog", {
   id: __t.u64(),
   at: __t.timestamp(),
   prId: __t.u64(),
+  requestId: __t.string(),
   reducer: __t.string(),
+  outcome: __t.string(),
   entity: __t.string(),
   summary: __t.string(),
   detailJson: __t.string(),
@@ -28,6 +30,40 @@ export const ActionLog = __t.object("ActionLog", {
 });
 export type ActionLog = __Infer<typeof ActionLog>;
 
+export const AgentEvent = __t.object("AgentEvent", {
+  id: __t.u64(),
+  eventKey: __t.string(),
+  jobId: __t.string(),
+  seq: __t.u32(),
+  checkRunId: __t.u64(),
+  prId: __t.u64(),
+  ts: __t.timestamp(),
+  role: __t.string(),
+  actor: __t.string(),
+  onBehalfOf: __t.option(__t.string()),
+  spawnedBy: __t.string(),
+  sessionId: __t.option(__t.string()),
+  eventType: __t.string(),
+  payloadJson: __t.string(),
+  sender: __t.identity(),
+  recordedAt: __t.timestamp(),
+});
+export type AgentEvent = __Infer<typeof AgentEvent>;
+
+export const AgentEventInput = __t.object("AgentEventInput", {
+  jobId: __t.string(),
+  seq: __t.u32(),
+  ts: __t.timestamp(),
+  role: __t.string(),
+  actor: __t.string(),
+  onBehalfOf: __t.option(__t.string()),
+  spawnedBy: __t.string(),
+  sessionId: __t.option(__t.string()),
+  eventType: __t.string(),
+  payloadJson: __t.string(),
+});
+export type AgentEventInput = __Infer<typeof AgentEventInput>;
+
 export const Assumption = __t.object("Assumption", {
   id: __t.u64(),
   prId: __t.u64(),
@@ -38,10 +74,16 @@ export const Assumption = __t.object("Assumption", {
   rev: __t.u32(),
   current: __t.bool(),
   affects: __t.array(__t.string()),
-  createdBy: __t.string(),
+  createdBy: __t.identity(),
   createdAt: __t.timestamp(),
 });
 export type Assumption = __Infer<typeof Assumption>;
+
+export const CallMeta = __t.object("CallMeta", {
+  requestId: __t.string(),
+  spawnedBy: __t.string(),
+});
+export type CallMeta = __Infer<typeof CallMeta>;
 
 export const CheckProgress = __t.object("CheckProgress", {
   checkRunId: __t.u64(),
@@ -79,13 +121,13 @@ export const CheckRun = __t.object("CheckRun", {
   tier: __t.string(),
   trigger: __t.string(),
   inputHash: __t.string(),
+  inputsJson: __t.string(),
   status: __t.string(),
   attempts: __t.u32(),
   maxAttempts: __t.u32(),
   claimedBy: __t.option(__t.identity()),
-  claimedByName: __t.option(__t.string()),
   leaseExpiresAt: __t.option(__t.timestamp()),
-  requestedBy: __t.string(),
+  requestedBy: __t.identity(),
   note: __t.string(),
   createdAt: __t.timestamp(),
   startedAt: __t.option(__t.timestamp()),
@@ -96,8 +138,7 @@ export type CheckRun = __Infer<typeof CheckRun>;
 export const Comment = __t.object("Comment", {
   id: __t.u64(),
   prId: __t.u64(),
-  authorName: __t.string(),
-  authorKind: __t.string(),
+  author: __t.identity(),
   anchor: __t.string(),
   body: __t.string(),
   createdAt: __t.timestamp(),
@@ -105,9 +146,13 @@ export const Comment = __t.object("Comment", {
 export type Comment = __Infer<typeof Comment>;
 
 export const MainVersion = __t.object("MainVersion", {
-  id: __t.u32(),
   version: __t.u32(),
-  updatedAt: __t.timestamp(),
+  parent: __t.u32(),
+  cause: __t.string(),
+  mergedPrId: __t.u64(),
+  effectivity: __t.option(__t.timestamp()),
+  at: __t.timestamp(),
+  by: __t.identity(),
   note: __t.string(),
 });
 export type MainVersion = __Infer<typeof MainVersion>;
@@ -118,26 +163,37 @@ export const NornConfig = __t.object("NornConfig", {
 });
 export type NornConfig = __Infer<typeof NornConfig>;
 
+export const Part = __t.object("Part", {
+  id: __t.u64(),
+  partNumber: __t.string(),
+  name: __t.string(),
+  category: __t.string(),
+  specJson: __t.string(),
+  updatedAt: __t.timestamp(),
+});
+export type Part = __Infer<typeof Part>;
+
 export const Principal = __t.object("Principal", {
   identity: __t.identity(),
   kind: __t.string(),
   name: __t.string(),
   origin: __t.string(),
   onBehalfOf: __t.option(__t.string()),
-  spawnedBy: __t.string(),
   registeredAt: __t.timestamp(),
 });
 export type Principal = __Infer<typeof Principal>;
 
 export const PullRequest = __t.object("PullRequest", {
   id: __t.u64(),
+  kind: __t.string(),
+  plmEcrNumber: __t.string(),
   title: __t.string(),
   description: __t.string(),
   status: __t.string(),
   baseVersion: __t.u32(),
   revision: __t.u32(),
   inputsDigest: __t.string(),
-  createdBy: __t.string(),
+  createdBy: __t.identity(),
   createdAt: __t.timestamp(),
   updatedAt: __t.timestamp(),
   mergedVersion: __t.option(__t.u32()),

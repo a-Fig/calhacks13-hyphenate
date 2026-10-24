@@ -5,6 +5,7 @@
   "description": "Norn: forecast the production impact of an engineering change. Skeleton + SpacetimeDB spike.",
   "workspaces": [
     "module",
+    "module-test",
     "bindings",
     "workers",
     "web"
@@ -27,6 +28,8 @@
     "spike:errors": "npm run spike:errors -w @norn/workers",
     "spike:crash": "npm run spike:crash -w @norn/workers",
     "spike:browsers": "node web/spike/two-browsers.mjs",
-    "spike:streaming": "node web/spike/streaming.mjs"
+    "spike:streaming": "node web/spike/streaming.mjs",
+    "test-db:publish": "npm run typecheck -w @norn/module-test --silent && spacetime publish norn-test --no-config --module-path module-test --server local --delete-data=always --yes",
+    "test-db:generate": "npm run typecheck -w @norn/module-test --silent && spacetime generate --no-config --lang typescript --module-path module-test --out-dir module-test/bindings/src --yes"
   }
 }

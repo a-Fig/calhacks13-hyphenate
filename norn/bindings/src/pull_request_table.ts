@@ -12,13 +12,15 @@ import {
 
 export default __t.row({
   id: __t.u64().primaryKey(),
+  kind: __t.string(),
+  plmEcrNumber: __t.string().name("plm_ecr_number"),
   title: __t.string(),
   description: __t.string(),
   status: __t.string(),
   baseVersion: __t.u32().name("base_version"),
   revision: __t.u32(),
   inputsDigest: __t.string().name("inputs_digest"),
-  createdBy: __t.string().name("created_by"),
+  createdBy: __t.identity().name("created_by"),
   createdAt: __t.timestamp().name("created_at"),
   updatedAt: __t.timestamp().name("updated_at"),
   mergedVersion: __t.option(__t.u32()).name("merged_version"),
