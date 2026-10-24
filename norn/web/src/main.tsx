@@ -6,7 +6,8 @@ import { Shell } from './screens/Shell.tsx';
 import { EcrList } from './screens/EcrList.tsx';
 import { EcrPage } from './screens/EcrPage.tsx';
 
-// The SpacetimeDB spike page lives at /spike. It is loaded only there, so the demo screens never open a
+// Routes: / is the ECR list, /ecr/ECR-0417 an ECR page, /spike the SpacetimeDB spike page.
+// The spike page lives at /spike. It is loaded only there, so the demo screens never open a
 // database connection. No StrictMode: the spike would open its dev connection twice.
 const Spike = lazy(() => import('./SpikeRoute.tsx'));
 

@@ -6,7 +6,7 @@
 // screens, and the engine in ../engine.ts draws them. The shape follows docs/IN-PRACTICE.md section 1.
 import { likelihoodWord, runModel, type InputDef, type RowDef } from '../engine.ts';
 import type { ActivityEvent, EcrSummary, ImpactAssessment, Likelihood } from '../types.ts';
-import { dateLong, dateShort, fig as figText, usd, usdK } from '../../ui/fmt.ts';
+import { dateShort, usd, usdK } from '../../ui/fmt.ts';
 
 const DAY = 86400000;
 const APPROVAL = Date.UTC(2026, 10, 12); // CCB meeting, second Thursday of November
@@ -578,5 +578,3 @@ export const ecr0417: ImpactAssessment = {
   activity,
   traces: t,
 };
-
-export const _check = { perWeek, pUnder, pByMarch, pSlip, figText, dateLong };

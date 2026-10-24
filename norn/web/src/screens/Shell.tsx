@@ -18,7 +18,8 @@ export function Shell({ children }: { children: ReactNode }) {
             <i /> Mock data
           </span>
         )}
-        <a href="/spike" className="nx-nav" style={{ fontSize: 12.5, color: 'var(--mute)' }}>Spike</a>
+        {/* A plain link, not in-app: the spike page opens its own database connection. */}
+        <a href="/spike" className="nx-spike">Spike</a>
       </div>
       {children}
     </div>

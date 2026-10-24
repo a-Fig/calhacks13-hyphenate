@@ -58,6 +58,8 @@ body { margin: 0; }
   border: 1px solid #eadfc2;
 }
 .nx-mock i { width: 6px; height: 6px; border-radius: 50%; background: #c9a24a; }
+.nx-spike { font-size: 12.5px; color: var(--mute); padding: 5px 8px; border-radius: 7px; }
+.nx-spike:hover { background: var(--line2); color: var(--ink); }
 .nx-nav { display: flex; gap: 4px; }
 .nx-nav a { padding: 5px 10px; border-radius: 7px; font-size: 13px; color: var(--ink2); }
 .nx-nav a:hover { background: var(--line2); }

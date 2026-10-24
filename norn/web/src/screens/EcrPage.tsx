@@ -217,8 +217,8 @@ function FragmentRows({ label, rows, sub }: { label: string; rows: CostRow[]; su
         <td>{label}</td>
         <td />
         <td />
-        <td><Num f={sub} /></td>
-        <td className="rg num" style={{ fontWeight: 400 }}>{rangeText(sub, 'short')}</td>
+        <td>{rows.every(r => r.notAssessed) ? <span className="dash">&ndash;</span> : <Num f={sub} />}</td>
+        <td className="rg num" style={{ fontWeight: 400 }}>{rows.every(r => r.notAssessed) ? '' : rangeText(sub, 'short')}</td>
       </tr>
       {rows.map(r => {
         const recurring = !!r.unitCost && !r.oneTime;
@@ -236,10 +236,16 @@ function FragmentRows({ label, rows, sub }: { label: string; rows: CostRow[]; su
                 {r.note}
               </div>
             </td>
-            <td className="num">{!recurring ? <Num f={r.total} /> : <span className="dash">&ndash;</span>}</td>
-            <td className="num">{recurring ? <Num f={r.total} /> : <span className="dash">&ndash;</span>}</td>
-            <td />
-            <td className="rg num">{rangeText(r.total, 'full') || <span className="dash">exact</span>}</td>
+            {r.notAssessed ? (
+              <td colSpan={4} className="rg" style={{ fontStyle: 'italic' }}>Not assessed yet</td>
+            ) : (
+              <>
+                <td className="num">{!recurring ? <Num f={r.total} /> : <span className="dash">&ndash;</span>}</td>
+                <td className="num">{recurring ? <Num f={r.total} /> : <span className="dash">&ndash;</span>}</td>
+                <td />
+                <td className="rg num">{rangeText(r.total, 'full') || <span className="dash">exact</span>}</td>
+              </>
+            )}
           </tr>
         );
       })}
@@ -251,12 +257,10 @@ function FragmentRows({ label, rows, sub }: { label: string; rows: CostRow[]; su
 
 function Decision({ a }: { a: ImpactAssessment }) {
   const r = a.recommendation;
-  const done = a.route.steps.filter(s => s.state === 'approved').length;
   const reviews = a.route.steps.filter(s => s.role !== 'CCB' && s.state !== 'not_required');
   const reviewDone = reviews.filter(s => s.state === 'approved').length;
   const c = a.changeClass;
   const waiting = r.verdict === 'wait';
-  void done;
   return (
     <div className="nx-card nx-decide">
       <div className="sec verdict">
@@ -300,7 +304,7 @@ function Decision({ a }: { a: ImpactAssessment }) {
             <li key={i}>
               <StepIcon state={s.state} />
               <div className="who">
-                {s.person ?? s.by ?? s.role} <span>&middot; {s.role}</span>
+                {s.person ?? s.role} {s.person && <span>&middot; {s.role}</span>}
               </div>
               <span className="st">{stepText(s.state, s.when, s.by)}</span>
             </li>
@@ -325,9 +329,11 @@ function Decision({ a }: { a: ImpactAssessment }) {
         </div>
       )}
 
-      <div className="sec">
-        <button className="nx-release" type="button" disabled>Release ECO</button>
-      </div>
+      {a.route.steps.some(s => s.state === 'pending' || s.state === 'waiting') && (
+        <div className="sec">
+          <button className="nx-release" type="button" disabled>Release ECO</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -336,7 +342,7 @@ function stepText(state: StepState, when?: string, by?: string) {
   if (state === 'approved') return when ? `Approved ${when}` : by ? 'Approved' : 'Approved';
   if (state === 'pending') return 'Needed';
   if (state === 'waiting') return when ? `Meets ${when}` : 'Waiting';
-  return '';
+  return 'Not needed';
 }
 
 // ---------------------------------------------------------------- agent activity

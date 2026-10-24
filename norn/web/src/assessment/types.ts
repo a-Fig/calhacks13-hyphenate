@@ -41,6 +41,8 @@ export interface CostRow {
   /** Year-1 total of the line. */
   total: Figure;
   note?: string;
+  /** Norn has not costed this line yet (Level 1). Shown as such, and left out of the totals. */
+  notAssessed?: boolean;
 }
 
 export interface BlockSubtotal {

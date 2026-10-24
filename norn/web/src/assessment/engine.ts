@@ -176,13 +176,13 @@ export function runModel(def: ModelDef): ModelResult {
     const s = Float64Array.from(arr).sort();
     return { p10: pct(s, 0.1), p50: pct(s, 0.5), p90: pct(s, 0.9) };
   };
-  const fig = (id: string, unit: Unit, ev: Evidence, q: Quantity, step: number): Figure => {
+  const fig = (id: string, unit: Unit, ev: Evidence, q: Quantity, step: number, cents = false): Figure => {
     const exact = Math.abs(q.p90 - q.p10) < 1e-6;
     // Rows and totals round to their step (whole dollars at least); per-unit amounts and exact quotes keep cents when small.
     const rd = (v: number) =>
       unit !== 'usd' ? round(unit, v, step)
         : step >= 10 ? Math.round(v / step) * step
-        : exact || Math.abs(v) < 100 ? Math.round(v * 100) / 100
+        : exact || (cents && Math.abs(v) < 100) ? Math.round(v * 100) / 100
         : Math.round(v);
     const p10 = rd(q.p10), p50 = rd(q.p50), p90 = rd(q.p90);
     return p10 === p50 && p50 === p90 ? { id, unit, p50, evidence: ev } : { id, unit, p10, p50, p90, evidence: ev };
@@ -209,7 +209,7 @@ export function runModel(def: ModelDef): ModelResult {
     const row: CostRow = { id: r.id, block: r.block, label: r.label, note: r.note, total: tot };
     if (r.oneTime) row.oneTime = tot;
     if (r.unit) {
-      row.unitCost = fig(r.unit.traceId ?? r.id, 'usd', r.unit.evidence, q3(unitVals[i]!), 1);
+      row.unitCost = fig(r.unit.traceId ?? r.id, 'usd', r.unit.evidence, q3(unitVals[i]!), 1, true);
       row.quantity = r.unit.qty;
     }
     return row;
@@ -220,7 +220,8 @@ export function runModel(def: ModelDef): ModelResult {
     .filter(b => blockVals[b])
     .map(b => {
       const id = `sub.${b}`;
-      const f = fig(id, 'usd', 'computation', q3(blockVals[b]!), 100);
+      const bq = q3(blockVals[b]!);
+      const f = fig(id, 'usd', 'computation', bq, Math.abs(bq.p50) < 5000 ? 1 : 100);
       const body = def.subtotalTrace(b);
       const rowIns: TraceInput[] = def.rows.filter(r => r.block === b).map(r => {
         const row = rows.find(z => z.id === r.id)!;
@@ -229,7 +230,8 @@ export function runModel(def: ModelDef): ModelResult {
       addTrace(id, `${b[0].toUpperCase()}${b.slice(1)} subtotal`, 'computation', { ...body, inputs: [...(body.inputs ?? []), ...rowIns] }, 'Cost (S2)');
       return { block: b, total: f };
     });
-  const net = fig('net', 'usd', 'computation', q3(total), 100);
+  const nq = q3(total);
+  const net = fig('net', 'usd', 'computation', nq, Math.abs(nq.p50) < 5000 ? 1 : 100);
   addTrace('net', 'Year-1 total', 'computation', {
     ...def.netTrace,
     inputs: [...(def.netTrace.inputs ?? []), ...subtotals.map(s => ({

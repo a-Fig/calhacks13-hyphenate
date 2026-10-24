@@ -1,20 +1,15 @@
 // MOCK fixtures for the ECR list and pages. Bowman's ten open ECRs, with numbers drawn from the
 // dataset (bowman/data/changes.ts) and its answer key (scenarios.ts). Year-1 means 2027 at the
-// planned 24 aircraft unless the ECR's cut-in is later. Only the starred ECRs carry a full impact
+// planned 24 aircraft unless the ECR's cut-in is later. ECR-0417, ECR-0409 and ECR-0423 carry a full impact
 // assessment; the rest show what Norn's Level 1 would put on the backlog.
 import type { EcrSummary, ImpactAssessment } from '../types.ts';
+import { ecr0409, ecr0409Summary } from './ecr0409.ts';
 import { ecr0417, ecr0417Summary } from './ecr0417.ts';
+import { ecr0423, ecr0423Summary } from './ecr0423.ts';
 
 const PT = '-07:00';
 
 const others: EcrSummary[] = [
-  {
-    id: 'ECR-0423', title: 'Avionics bay closeout panel BW-9440-030: grey to charcoal',
-    program: 'Vesper', partNumber: 'BW-9440-030', companyClass: 'II', faa: 'minor', priority: 'Routine', status: 'Approved',
-    cost: { p10: -310, p50: -274, p90: -180 }, level: 3,
-    lastActivity: `2026-10-23T13:10:00${PT}`, lastActivityBy: 'Norn approved, fast track',
-    originator: 'Ayesha Karimi', filedOn: '2026-10-22', flag: 'Fast track: Norn approved within its limits', hasAssessment: false,
-  },
   {
     id: 'ECR-0421', title: 'Meridian cruise motor magnets BW-M512-340: qualify UH grade for the first-flight rotors',
     program: 'Meridian', partNumber: 'BW-M512-340', companyClass: 'I', faa: 'major', priority: 'Routine', status: 'Submitted',
@@ -51,13 +46,6 @@ const others: EcrSummary[] = [
     originator: 'Wei-Lin Zhao', filedOn: '2026-10-07', flag: 'Removes redundancy: filed FAA minor, Norn says major', hasAssessment: false,
   },
   {
-    id: 'ECR-0409', title: 'Aft lift propellers: 2 blades with dampers to 4 blades without',
-    program: 'Vesper', partNumber: 'BW-4200-000', companyClass: 'I', faa: 'major', priority: 'Routine', status: 'Submitted',
-    cost: { p10: 1380000, p50: 1620000, p90: 2150000 }, level: 1,
-    lastActivity: `2026-10-24T08:52:00${PT}`, lastActivityBy: 'Norn is reviewing Level 1',
-    originator: 'Maren Solheim', filedOn: '2026-10-05', flag: 'Retrofit of built aircraft is not scoped', hasAssessment: false,
-  },
-  {
     id: 'ECR-0407', title: 'Carbon prepreg: move to Cardinal’s new resin system',
     program: 'Vesper', partNumber: undefined, companyClass: 'I', faa: 'major', priority: 'Routine', status: 'Submitted',
     cost: { p10: -62000, p50: -50300, p90: -38000 }, level: 1,
@@ -74,9 +62,11 @@ const others: EcrSummary[] = [
 ];
 
 export const mockAssessments: Record<string, ImpactAssessment> = {
+  'ECR-0409': ecr0409,
   'ECR-0417': ecr0417,
+  'ECR-0423': ecr0423,
 };
 
-export const mockEcrs: EcrSummary[] = [ecr0417Summary, ...others]
+export const mockEcrs: EcrSummary[] = [ecr0417Summary, ecr0409Summary, ecr0423Summary, ...others]
   .map(e => ({ ...e, hasAssessment: e.id in mockAssessments }))
   .sort((a, b) => b.id.localeCompare(a.id));

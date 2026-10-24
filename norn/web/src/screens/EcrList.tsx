@@ -3,7 +3,7 @@ import { source } from '../assessment/source.ts';
 import type { EcrSummary } from '../assessment/types.ts';
 import { LevelPill, StatusIcon } from '../ui/Bits.tsx';
 import { Glyph } from '../ui/Evidence.tsx';
-import { ago, usd, usdK } from '../ui/fmt.ts';
+import { ago, usdK } from '../ui/fmt.ts';
 import { navigate } from '../router.tsx';
 
 type Filter = 'all' | 'decision' | 'flagged' | 'done';
@@ -132,7 +132,7 @@ export function EcrList() {
                 <td className="r">
                   {e.cost ? (
                     <div className="cost num">
-                      {usd(e.cost.p50, { plus: true })}
+                      {usdK(e.cost.p50, { plus: true })}
                       <small>{usdK(e.cost.p10)} &ndash; {usdK(e.cost.p90)}</small>
                     </div>
                   ) : (
