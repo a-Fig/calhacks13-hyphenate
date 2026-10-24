@@ -1,0 +1,14 @@
+node_modules/
+dist/
+target/
+.env
+.env.*
+!.env.example
+*.log
+*.mp4
+*.mov
+*.webm
+playwright-report/
+test-results/
+.claude/settings.local.json
+.claude/worktrees/
