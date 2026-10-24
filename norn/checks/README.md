@@ -52,13 +52,22 @@ own stream, keyed by the seed and the input's id (`price:BW-5120-210`, `cost:ECR
 so an input both sides use gets the same numbers on both, whatever else the change adds or
 removes. A change is the percentiles of the per-draw difference, never p50(head) − p50(base).
 
-**The seed is the deployment's configured seed (`norn_config.seed`), the same for base, head and
-every ECR.** It is not derived from the run's input hash: a hash of the head's inputs differs
-between base and head and would unpair them. The skeleton worker seeds from the input hash today
+**The seed is the deployment's configured seed (`norn_config.seed`), the same for every ECR and
+every run.** Inside one `costCheck` call, base and head share draws whatever the seed. The rule
+matters across runs:
+- a revised ECR is compared with its previous forecast on the same draws;
+- a backlog roll-up of several ECRs agrees with each ECR on its own, because an item's price draws
+  are the same in all of them;
+- a cached forecast of the baseline stays comparable with every ECR built on it.
+
+A seed derived from the run's input hash changes whenever the inputs change, so none of those
+comparisons would be paired. The skeleton worker seeds from the input hash today
 (`workers/src/sim.ts`, `seedFrom`); when these checks are wired in, pass the configured seed
-instead. The run stays deterministic because the seed is part of the input hash. One seed for all
-ECRs also means an item's price draws are the same in every ECR, so a backlog roll-up of several
-ECRs is consistent with each ECR on its own.
+instead. The run stays deterministic because the seed is part of the input hash.
+
+The point estimate (every input at its stated value) of a unit cost at base is the standard cost.
+Its p50 is higher, because most price ranges lean upward: for Vesper the standard sits near p11.
+That is the S-curve doing its job, and the card should label it rather than call it a mismatch.
 
 ## Traces
 
@@ -72,14 +81,33 @@ An assumption recorded on the ECR replaces a default by id
 (`options.assumptions: [{ id, source: 'agent_estimated', dist, rationale }]`). That is how an
 agent's estimate of a blank row, a recovery share (#32) or a cut-in lands, and how the trace
 shows it.
+- **Stable ids.** A cost-page row's id is the PLM's row id when it has one, else a slug of its
+  label, so adding or reordering rows doesn't move an assumption onto another row. An example is
+  `cost:ECR-0417:other:delay-cost-of-holding-s-n-011-014-at-the`.
+- **Stated numbers.** A number someone stated, such as a quote or an engineer's estimate, is
+  replaced only by an assumption with `replacesGiven: true`. Otherwise the assumption is recorded,
+  not applied, and flagged.
+- **Unused assumptions.** An assumption that matches no input is flagged, never dropped silently.
 
 ## Rules it applies that a reader might not guess
 
 - **Unit price.** An item's base unit price is its standard cost. The overlay's
   `unit_price_usd` sets it at head. The new price traces to any quote line that states it.
-- **Early-lot premium.** A quote line priced above the new steady-state price, with a quantity,
-  is read as an early-lot premium: (lot price − steady price) × lot quantity. It is flagged for a
-  person to confirm, because extra hardware such as engineering samples looks the same.
+- **First-lot premium.** A quote line priced above the new steady-state price, with a quantity,
+  is read as a first-lot premium: (lot price − steady price) × lot quantity.
+  - It is its own one-time row, "First-lot price premium (booked as PPV)". It is cash the change
+    causes, and the books show it as a purchase price variance against the new standard.
+  - It is skipped if the cost page already lists it.
+  - It is flagged for a person to confirm, because extra hardware such as engineering samples looks
+    the same.
+- **Budgetary quotes.** A quote marked `firmness: 'budgetary'`, or whose note says budgetary,
+  indicative or plus or minus, gets the wider spread (0.15). Without a mark the quote counts as
+  firm (0.05). Its new prices also carry an extra multiplier of their own.
+- **BOM lines.** Two lines with the same parent and child are summed into one.
+- **Bad sourcing ranges.** A sourcing range that isn't positive and in order falls back to the
+  default range, with a flag; it doesn't fail the check.
+- **Conflicts.** A conflicted ECR is still computed, so the reviewer sees its numbers, but its
+  result says `bomDelta.ok: false` and lists every conflict as a flag.
 - **Cancellation charge.** A quote line for the item, with the on-order quantity and a price
   below the old price, gives the cancellation charge. Otherwise the charge is a default
   PERT(5%, 10%, 30%) of price.

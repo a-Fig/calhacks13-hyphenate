@@ -141,15 +141,23 @@ export interface SupplierQuote {
   item: ItemCode;
   lines: QuoteLine[];
   leadTimeWeeks?: number;
+  /** A budgetary quote moves more than a firm one. Unset: read from `note`, else firm. */
+  firmness?: 'firm' | 'budgetary';
+  note?: string;
 }
 
 export type CostBasis = 'supplier_quote' | 'engineer_estimate' | 'not_provided';
 
 /** One row of the ECP cost page as the originator filled it. Savings are negative. */
 export interface CostPageRow {
+  /** A stable id for the row, from the PLM. Unset: a slug of the label. Assumptions find a row by it. */
+  id?: string;
   label: string;
   oneTime?: number;
-  /** Per unit: per aircraft for production rows, per kit or unit for the other blocks. */
+  /**
+   * Unit cost. On a production row, per part, with `quantity` the parts per finished unit (34.60 x 12
+   * brackets per aircraft); on the other blocks, per kit or unit, with `quantity` the kits or units.
+   */
   unitCost?: number;
   quantity?: number;
   basis: CostBasis;
@@ -235,6 +243,8 @@ export interface AssumptionOverride {
   dist?: Dist;
   /** For a fixed input such as an effectivity serial (number) or month ('YYYY-MM'). */
   value?: number | string;
+  /** Needed to replace a number someone stated (a quote, an engineer's estimate). Defaults can always be replaced. */
+  replacesGiven?: boolean;
   by?: string;
 }
 

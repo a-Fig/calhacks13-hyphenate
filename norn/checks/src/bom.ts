@@ -1,7 +1,8 @@
 // S1, the BOM delta (ARCHITECTURE.md §5): apply an ECR's item and BOM overlay to the baseline and
 // return the BOM at head, the diff, and the affected items, assemblies, suppliers and programs.
-// Each change carries the value its author saw on the baseline (`from`, `fromRev`, `qtyFrom`); a
-// mismatch is a conflict (§2, `expected_old`), reported rather than silently applied over.
+// Each change carries the value its author saw on the baseline (`from`, `fromRev`, `qtyFrom`). A
+// mismatch is a conflict (§2, `expected_old`): the change is still applied, so later checks can run,
+// but the result says `ok: false` and lists the conflict, and nothing downstream should read it as clean.
 
 import type {
   Baseline, BomLine, ChangeRequest, FieldValue, Item, ItemCode, ProgramId, SupplierId, Trace,
@@ -242,8 +243,16 @@ export function applyOverlay(baseline: Baseline, ecr: ChangeRequest): HeadState 
     }
   });
 
-  // BOM lines.
-  const baseBom = baseline.bom.map((l) => ({ ...l }));
+  // BOM lines. A parent may list one child on two lines (ERPNext allows it); here they are one line
+  // with the quantities summed, and base and head both explode from these merged lines.
+  const merged = new Map<string, BomLine>();
+  for (const l of baseline.bom) {
+    const k = lineKey(l.parent, l.child);
+    const m = merged.get(k);
+    if (m) m.qty += l.qty;
+    else merged.set(k, { ...l });
+  }
+  const baseBom = [...merged.values()];
   const headLines = new Map(baseBom.map((l) => [lineKey(l.parent, l.child), { ...l }]));
   const bomDiffs: BomLineDiff[] = [];
   ecr.bomChanges.forEach((bc, j) => {

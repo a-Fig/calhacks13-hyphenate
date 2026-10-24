@@ -50,5 +50,14 @@ export function costCheckRows(r: CostCheckResult): CheckResultRow[] {
     out.push(moneyRow(`block:${b}`, `Subtotal, ${b}`, r.blockTotals[b].total));
   }
   for (const p of r.periods) out.push(moneyRow(`period:${p.program}:${p.period}`, `Recurring, ${p.program}, ${p.period}`, p.recurring, { units: p.units }));
+  // Everything a trace points at, and what the card needs besides the numbers, in one row.
+  out.push({
+    key: 'detail', label: 'Inputs, flags and supporting results', unit: 'json', p10: 0, p50: 0, p90: 0,
+    detailJson: JSON.stringify({
+      codeVersion: r.codeVersion, seed: r.seed, draws: r.draws, correlation: r.correlation, window: r.window, bomDelta: r.bomDelta,
+      inputs: r.inputs, flags: r.flags, drivers: r.drivers, convergence: r.convergence, effectivity: r.effectivity,
+      inventory: r.inventory, unitCost: r.unitCost, piecePrices: r.piecePrices,
+    }),
+  });
   return out;
 }

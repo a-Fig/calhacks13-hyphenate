@@ -24,7 +24,7 @@ import { addMonths, firstSerialFrom, lastBuiltSerial, monthOfSerial, serialsByMo
 
 export interface CostDefaults {
   /** Log-space spread around a stated cost, by who stated it (Joint Agency handbook Table 2-9). */
-  spread: Record<'supplier_quote' | 'engineer_estimate' | 'agent_estimated', number>;
+  spread: Record<'supplier_quote' | 'budgetary_quote' | 'engineer_estimate' | 'agent_estimated', number>;
   /** Forward price range for an item with no sourcing record, as multipliers on its price. */
   newItemPrice: { p10: number; p90: number };
   /** Share of a scrapped unit's value that is recovered: resale, reuse elsewhere, or metal value (#32). */
@@ -34,7 +34,7 @@ export interface CostDefaults {
 }
 
 export const COST_DEFAULTS: CostDefaults = {
-  spread: { supplier_quote: 0.05, engineer_estimate: 0.15, agent_estimated: 0.25 },
+  spread: { supplier_quote: 0.05, budgetary_quote: 0.15, engineer_estimate: 0.15, agent_estimated: 0.25 },
   newItemPrice: { p10: 0.95, p90: 1.08 },
   scrapRecovery: { min: 0, mode: 0.0153, max: 0.05 },
   cancellation: { min: 0.05, mode: 0.1, max: 0.3 },
@@ -42,6 +42,7 @@ export const COST_DEFAULTS: CostDefaults = {
 
 const DEFAULT_WHY: Record<string, string> = {
   'spread:supplier_quote': 'A firm supplier quote moves little: change orders only. Log-space spread 0.05 (Norn default).',
+  'spread:budgetary_quote': 'A budgetary quote ("plus or minus 20%"): log-space spread 0.15, so p10 and p90 sit about 18% either side (Norn default).',
   'spread:engineer_estimate': 'An engineer\'s estimate: log-space spread 0.15, "low" in Joint Agency handbook Table 2-9 (docs/IN-PRACTICE.md §5).',
   'spread:agent_estimated': 'An agent\'s estimate: log-space spread 0.25, wider than a person\'s (docs/IN-PRACTICE.md §8, recommendation 6).',
   newItemPrice: 'An item with no sourcing record: forward price p10 0.95 and p90 1.08 times its quoted price (Norn default).',
@@ -192,6 +193,17 @@ const FIELD: Record<StockLocation, keyof StockRow> = {
   stores: 'stores', wip: 'wip', finished_goods: 'finishedGoods', supplier_finished: 'supplierFinished', on_order: 'onOrder', in_field: 'inField',
 };
 const LOCATIONS = Object.keys(FIELD) as StockLocation[];
+/** 'NC programming (Halden)' -> 'nc-programming-halden'. Whole words, at most 48 characters. */
+export function slug(label: string): string {
+  const words = label.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  let out = '';
+  for (const w of words) {
+    const next = out ? `${out}-${w}` : w;
+    if (next.length > 48) break;
+    out = next;
+  }
+  return out || (words[0] ?? 'row').slice(0, 48);
+}
 const addDays = (d: string, n: number) => {
   const t = new Date(d + 'T00:00:00Z');
   t.setUTCDate(t.getUTCDate() + n);
@@ -236,6 +248,9 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const overrides = new Map((options.assumptions ?? []).map((a) => [a.id, a]));
   const flags: Flag[] = [];
   const pending = new Map<string, Pending>();
+  const usedOverrides = new Set<string>();
+  /** Ids with a known reason an assumption can't apply there, for the unused-assumption flag. */
+  const noVariable = new Map<string, string>();
 
   const input = (rec: InputRecord): string => {
     if (!reg.has(rec.id)) reg.set(rec.id, rec);
@@ -244,10 +259,20 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const defaultInput = (key: keyof typeof DEFAULT_WHY | string, label: string, value: number | string) =>
     input({ id: `default:${key}`, label, source: 'default', value, rationale: DEFAULT_WHY[key] });
 
-  /** An uncertain input. An override with the same id replaces its distribution and source. */
+  /**
+   * An uncertain input. An assumption with the same id replaces its distribution and source: always
+   * for a default, and for a number someone stated (a quote, an estimate) only with `replacesGiven`.
+   */
   const variable = (v: { id: string; label: string; dist: Dist; groups?: string[]; source: Source; ref?: string; rationale?: string; needsEstimate?: boolean }): string => {
     if (vars.has(v.id)) return v.id;
-    const ov = overrides.get(v.id);
+    let ov = overrides.get(v.id);
+    if (ov?.dist && v.source === 'given' && !ov.replacesGiven) {
+      usedOverrides.add(v.id);
+      flags.push({ kind: 'assumption_not_applied', severity: 'warn', ref: v.id, message: `An assumption for ${v.id} would replace a stated number ("${v.label}"). Recorded but not applied: set replacesGiven to replace it.` });
+      ov = undefined;
+    }
+    if (ov && !ov.dist) ov = undefined; // reported as unused at the end: a distribution is needed here
+    if (ov) usedOverrides.add(v.id);
     const dist = ov?.dist ?? v.dist;
     const rec: InputRecord = {
       id: v.id, label: v.label, source: ov?.dist ? ov.source : v.source, value: r2(pointOf(dist)), dist, groups: v.groups ?? [],
@@ -279,7 +304,11 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     const src = sourcingOf(code);
     const supplier = src?.supplier ?? s.head.get(code)?.supplier ?? s.base.get(code)?.supplier;
     const groups = supplier ? [`supplier:${supplier}`] : [];
-    if (src && src.unitPrice.p50 > 0) {
+    const okRange = (p: { p10: number; p50: number; p90: number }) => [p.p10, p.p50, p.p90].every(Number.isFinite) && p.p10 > 0 && p.p10 <= p.p50 && p.p50 <= p.p90;
+    if (src && !okRange(src.unitPrice)) {
+      flags.push({ kind: 'bad_sourcing', severity: 'warn', ref: code, message: `${code}: the sourcing price range (p10 ${src.unitPrice.p10}, p50 ${src.unitPrice.p50}, p90 ${src.unitPrice.p90}) is not positive and in order, so the default range is used.` });
+    }
+    if (src && okRange(src.unitPrice)) {
       const p = src.unitPrice;
       return variable({
         id, label: `${code} price index (next 12 months)`, groups, source: 'given',
@@ -295,6 +324,17 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     });
   };
 
+  // A budgetary quote's price can move on its own, beyond the market: its head price gets a second multiplier.
+  const budgetary = (q: ChangeRequest['supplierQuotes'][number]) =>
+    q.firmness ? q.firmness === 'budgetary' : /budgetary|indicative|plus or minus|±/i.test(q.note ?? '');
+  const budgetaryItems = new Map<ItemCode, string>(); // item -> quote id, filled from the price evidence below
+  const quoteVar = (code: ItemCode): string => {
+    const k = defaultInput('spread:budgetary_quote', 'Spread of a budgetary supplier quote', D.spread.budgetary_quote);
+    return variable({ id: `quote:${code}`, label: `${code}: budgetary quote moves`, dist: lognormal(1, D.spread.budgetary_quote), groups: [], source: 'default', ref: k, rationale: `The new price comes from budgetary quote ${budgetaryItems.get(code)}. ${DEFAULT_WHY['spread:budgetary_quote']}` });
+  };
+  /** The inputs that scale an item's price at head. */
+  const headVars = (code: ItemCode): string[] => (budgetaryItems.has(code) ? [priceVar(code), quoteVar(code)] : [priceVar(code)]);
+
   // ---------------------------------------------------------------- unit cost at base and head, per program
   const unitCostExpr = (program: ProgramId, side: 'base' | 'head'): Expr => {
     const q = (side === 'base' ? s.explodedBase : s.explodedHead).get(program) ?? new Map<ItemCode, number>();
@@ -303,7 +343,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     for (const [code, qty] of q) {
       const it = items.get(code);
       if (!it) continue;
-      if (it.makeBuy === 'buy') e.push({ coef: qty * (it.unitPrice ?? 0), vars: [priceVar(code)] });
+      if (it.makeBuy === 'buy') e.push({ coef: qty * (it.unitPrice ?? 0), vars: side === 'head' ? headVars(code) : [priceVar(code)] });
       else {
         const labor = qty * (it.laborHours ?? 0) * (rate.get(it.workCenter ?? '') ?? 0);
         if (labor) e.push({ coef: labor, vars: [] });
@@ -315,8 +355,12 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     const e: Expr = [];
     for (const r of changedRows(s, program)) {
       if (r.makeBuy === 'buy') {
-        const c = r.qtyHead * (r.priceHead ?? 0) - r.qtyBase * (r.priceBase ?? 0);
-        if (c !== 0) e.push({ coef: c, vars: [priceVar(r.item)] });
+        const h = r.qtyHead * (r.priceHead ?? 0);
+        const b = r.qtyBase * (r.priceBase ?? 0);
+        if (budgetaryItems.has(r.item)) {
+          if (h !== 0) e.push({ coef: h, vars: headVars(r.item) });
+          if (b !== 0) e.push({ coef: -b, vars: [priceVar(r.item)] });
+        } else if (h - b !== 0) e.push({ coef: h - b, vars: [priceVar(r.item)] });
       } else {
         const wc = s.head.get(r.item)?.workCenter ?? s.base.get(r.item)?.workCenter ?? '';
         const c = (r.qtyHead * (r.hoursHead ?? 0) - r.qtyBase * (r.hoursBase ?? 0)) * (rate.get(wc) ?? 0);
@@ -359,10 +403,16 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
         q.lines.forEach((l, li) => {
           if (lineItem(q, l.description) !== r.item) return;
           covered = true;
-          if (l.unitPrice !== undefined && l.oneTime === undefined && near(l.unitPrice, r.priceHead!)) ev.push(quoteLineId(q.id, li));
+          if (l.unitPrice !== undefined && l.oneTime === undefined && near(l.unitPrice, r.priceHead!)) {
+            ev.push(quoteLineId(q.id, li));
+            if (budgetary(q)) budgetaryItems.set(r.item, q.id);
+          }
         });
       }
       priceEvidence.set(r.item, ev);
+      if (budgetaryItems.has(r.item)) {
+        flags.push({ kind: 'budgetary_quote', severity: 'info', ref: r.item, message: `${r.item}: the new price is from budgetary quote ${budgetaryItems.get(r.item)}, so it carries an extra spread of ${D.spread.budgetary_quote}.` });
+      }
       if (!covered) {
         flags.push({ kind: 'no_quote', severity: 'warn', message: `${r.item}: the unit cost changes (${r.priceBase ?? 'new'} to ${r.priceHead}) but no supplier quote covers it. A piece-cost change needs a firm quote (docs/IN-PRACTICE.md §8, recommendation 3).`, ref: r.item });
       } else if (ev.length === 0) {
@@ -383,6 +433,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     const ov = overrides.get(id);
     let e: Omit<EffectivityResult, 'cutInMonth'>;
     if (ov?.value !== undefined) {
+      usedOverrides.add(id);
       const serial = typeof ov.value === 'number' ? ov.value : (firstSerialFrom(sm, String(ov.value).slice(0, 7)) ?? beyond);
       e = { id, program: p.id, basis: 'override', cutInSerial: serial, source: ov.source, rationale: ov.rationale };
     } else if (p.id === ecr.program) {
@@ -426,13 +477,17 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
 
   const own = effectivity.get(ecr.program);
   const windowFrom = own?.cutInMonth ?? null;
+  if (own && !own.cutInMonth) {
+    flags.push({ kind: 'cut_in_beyond_plan', severity: 'warn', ref: own.id, message: `The cut-in (S/N ${own.cutInSerial}) is beyond the volume plan, so no recurring cost falls in the year-one window.` });
+  }
   const counts = new Map(
     programs.map((p) => [p.id, unitsAfterCutIn(serials.get(p.id)!, { serial: effectivity.get(p.id)!.cutInSerial }, windowFrom ? { from: windowFrom, months: windowMonths } : undefined)]),
   );
 
   // ---------------------------------------------------------------- the rows
   const rows: RowDraft[] = [];
-  const spreadId = (basis: 'supplier_quote' | 'engineer_estimate') => defaultInput(`spread:${basis}`, `Spread of a cost stated by ${basis === 'supplier_quote' ? 'a supplier quote' : 'an engineer'}`, D.spread[basis]);
+  const spreadId = (basis: 'supplier_quote' | 'budgetary_quote' | 'engineer_estimate') =>
+    defaultInput(`spread:${basis}`, `Spread of a cost stated by ${basis === 'engineer_estimate' ? 'an engineer' : basis === 'budgetary_quote' ? 'a budgetary supplier quote' : 'a supplier quote'}`, D.spread[basis]);
 
   // Production recurring: one row per affected program.
   for (const p of programs) {
@@ -458,14 +513,21 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const quoteSupplier = [...new Set(ecr.supplierQuotes.map((q) => q.supplier))];
 
   for (const block of COST_BLOCKS) {
+    const taken = new Set<string>();
     ecr.costPage[block].forEach((row: CostPageRow, i: number) => {
+      // Ids survive rows being added or reordered: the PLM's row id, else a slug of the label.
+      const stem = row.id ?? slug(row.label);
+      let key = stem;
+      for (let k = 2; taken.has(key); k++) key = `${stem}-${k}`;
+      taken.add(key);
       const ref = `${ecr.id} costPage.${block}[${i}]`;
-      const id = `cost:${ecr.id}:${block}[${i}]`;
-      input({ id: `row:${ecr.id}:${block}[${i}]`, label: row.label, source: 'given', ref, value: row.basis, ...(row.note ? { rationale: row.note } : {}) });
-      const rowInput = `row:${ecr.id}:${block}[${i}]`;
+      const id = `cost:${ecr.id}:${block}:${key}`;
+      const rowInput = `row:${ecr.id}:${block}:${key}`;
+      input({ id: rowInput, label: row.label, source: 'given', ref, value: row.basis, ...(row.note ? { rationale: row.note } : {}) });
       if (row.basis === 'not_provided') {
         if (block === 'production' && SCRAP_ROW.test(row.label)) {
           blankScrapRows.push(row.label);
+          noVariable.set(id, `"${row.label}" is filled by the inventory disposition line; record a recovery share (recovery:<item>) instead`);
           return;
         }
         const v = variable({
@@ -488,7 +550,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
         if (!row.oneTime) return;
       }
       const basis = row.basis;
-      const spread = spreadId(basis);
+      let spreadKey: 'supplier_quote' | 'budgetary_quote' | 'engineer_estimate' = basis;
       const quoteRefs: string[] = [];
       let supplier: string | undefined;
       if (basis === 'supplier_quote') {
@@ -512,15 +574,22 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
           }
         }
         supplier ??= quoteSupplier.length === 1 ? quoteSupplier[0] : undefined;
+        const fromBudgetary = ecr.supplierQuotes.some((q) => budgetary(q) && quoteRefs.some((x) => x.startsWith(`quote:${q.id}#`)));
+        if (fromBudgetary) {
+          spreadKey = 'budgetary_quote';
+          flags.push({ kind: 'budgetary_quote', severity: 'info', ref, message: `"${row.label}" is from a budgetary quote, so it carries a spread of ${D.spread.budgetary_quote} rather than ${D.spread.supplier_quote}.` });
+        }
         if (quoteRefs.length === 0) flags.push({ kind: 'quote_unmatched', severity: 'info', message: `"${row.label}" is marked as a supplier quote, but no quote line on the ECR states ${row.oneTime ?? row.unitCost}.`, ref });
       }
       const groups = basis === 'supplier_quote' ? (supplier ? [`supplier:${supplier}`] : []) : ['labor:internal'];
       const why = basis === 'supplier_quote' ? 'Stated on the cost page from a supplier quote.' : 'Stated on the cost page as an engineer\'s estimate.';
       let oneTime: Expr | null = null;
       let unit: Expr | null = null;
+      const spread = spreadId(spreadKey);
+      const sigma = D.spread[spreadKey];
       const uses = [rowInput, spread, ...quoteRefs];
       if (row.oneTime !== undefined) {
-        const v = variable({ id, label: row.label, dist: lognormal(row.oneTime, D.spread[basis]), groups, source: 'given', ref, rationale: `${why} Lognormal around it, spread ${D.spread[basis]}.` });
+        const v = variable({ id, label: row.label, dist: lognormal(row.oneTime, sigma), groups, source: 'given', ref, rationale: `${why} Lognormal around it, spread ${sigma}.` });
         oneTime = [{ coef: 1, vars: [v] }];
         uses.push(v);
       }
@@ -528,10 +597,10 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
         const linked = basis === 'supplier_quote' ? [...affectedBuyHeadPrice].find(([, price]) => near(price, row.unitCost!))?.[0] : undefined;
         if (linked) {
           // A kit of the changed part costs what the part costs: it moves with the part's price index.
-          unit = [{ coef: row.unitCost, vars: [priceVar(linked)] }];
-          uses.push(priceVar(linked));
+          unit = [{ coef: row.unitCost, vars: headVars(linked) }];
+          uses.push(...headVars(linked));
         } else {
-          const v = variable({ id: `${id}:unit`, label: `${row.label} (unit cost)`, dist: lognormal(row.unitCost, D.spread[basis]), groups, source: 'given', ref, rationale: `${why} Lognormal around it, spread ${D.spread[basis]}.` });
+          const v = variable({ id: `${id}:unit`, label: `${row.label} (unit cost)`, dist: lognormal(row.unitCost, sigma), groups, source: 'given', ref, rationale: `${why} Lognormal around it, spread ${sigma}.` });
           unit = [{ coef: 1, vars: [v] }];
           uses.push(v);
         }
@@ -576,17 +645,23 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
       if (steady === undefined || l.unitPrice === undefined || !l.qty || l.oneTime !== undefined) return;
       if (l.unitPrice <= steady + 0.005) return;
       const premium = (l.unitPrice - steady) * l.qty;
+      const listed = COST_BLOCKS.flatMap((b) => ecr.costPage[b]).find((x) => x.oneTime !== undefined && near(x.oneTime, premium));
+      if (listed) {
+        flags.push({ kind: 'read_from_quote', severity: 'info', ref: `supplier quote ${q.id} line ${li + 1}`, message: `The first-lot premium on quote ${q.id} (${r2(premium)}) is already on the cost page as "${listed.label}", so it is not added again.` });
+        return;
+      }
       rows.push({
         id: `premium:${q.id}#${li}`, block: 'production', recurring: false, basis: 'supplier_quote',
-        label: `Early-lot price premium, ${code}: ${l.qty} at ${l.unitPrice} against ${steady}`,
+        label: 'First-lot price premium (booked as PPV)',
         oneTime: constant(premium), unit: null, quantity: null,
-        formula: '(early-lot unit price − steady-state unit price) × lot quantity, both from the quote',
+        formula: '(first-lot unit price − steady-state unit price) × lot quantity, both from the quote',
         uses: [quoteLineId(q.id, li), `ecr:${ecr.id}:overlay`],
         ref: `supplier quote ${q.id} line ${li + 1}`,
+        note: `${code}: ${l.qty} at ${l.unitPrice} against the new standard of ${steady}. Cash this change causes; the books show it as a purchase price variance against the new standard.`,
       });
       flags.push({
         kind: 'read_from_quote', severity: 'info', ref: `premium:${q.id}#${li}`,
-        message: `Quote ${q.id} line ${li + 1} ("${l.description}") is read as an early-lot premium: (${l.unitPrice} − ${steady}) × ${l.qty} = ${r2(premium)}. If those units are extra hardware rather than production parts, the cost is ${r2(l.unitPrice * l.qty)}.`,
+        message: `Quote ${q.id} line ${li + 1} ("${l.description}") is read as a first-lot premium: (${l.unitPrice} − ${steady}) × ${l.qty} = ${r2(premium)}. If those units are extra hardware rather than production parts, the cost is ${r2(l.unitPrice * l.qty)}.`,
       });
     });
   }
@@ -633,7 +708,10 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
         expr = [{ coef: 1, vars: [v] }];
         if (reg.get(v)!.needsEstimate) flags.push({ kind: 'needs_estimate', severity: 'warn', message: `Rework of ${qty} ${code} (${pr.location}) is not costed.`, ref: v });
       } else if (pr.disposition === 'tbd') {
-        flags.push({ kind: 'disposition_tbd', severity: 'warn', message: `${qty} ${code} (${pr.location.replace('_', ' ')}): disposition not decided. Counted as used up; scrapping them would cost ${r2(qty * value)} before recovery.`, ref: code });
+        const what = pr.location === 'on_order'
+          ? `cancelling them would cost about ${r2(qty * value * pointOf(vars.get(cancelVar(code, qty, value))!.dist))}`
+          : `scrapping them would cost ${r2(qty * value)} before recovery`;
+        flags.push({ kind: 'disposition_tbd', severity: 'warn', message: `${qty} ${code} (${pr.location.replace('_', ' ')}): disposition not decided. Counted as used up; ${what}.`, ref: code });
       }
       parts.push({ location: pr.location, disposition: pr.disposition, qty, unitValue: value, expr, ...(pr.note ? { note: pr.note } : {}) });
     }
@@ -727,7 +805,8 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     const b = s.base.get(code);
     const h = s.head.get(code);
     if (b?.unitPrice !== undefined && b.status === 'released') track(`piece:${code}/base`, [{ coef: b.unitPrice, vars: [priceVar(code)] }], 'unit price at base × price index', ['baseline:items']);
-    if (h?.unitPrice !== undefined) track(`piece:${code}/head`, [{ coef: h.unitPrice, vars: [priceVar(code)] }], 'unit price at head × price index', [`ecr:${ecr.id}:overlay`, ...(priceEvidence.get(code) ?? [])]);
+    const usedAtHead = [...s.explodedHead.values()].some((q) => (q.get(code) ?? 0) > 0);
+    if (h?.unitPrice !== undefined && usedAtHead) track(`piece:${code}/head`, [{ coef: h.unitPrice, vars: headVars(code) }], 'unit price at head × price index', [`ecr:${ecr.id}:overlay`, ...(priceEvidence.get(code) ?? [])]);
   }
   for (const inv of inventory) {
     inv.parts.forEach((x, k) => track(`inventory:${inv.item}/part${k}`, x.expr, x.disposition === 'cancel' ? 'qty × price × cancellation share' : x.disposition === 'scrap' || x.disposition === 'mandatory_install' ? 'qty × standard cost × (1 − recovery share)' : x.disposition === 'rework' ? 'rework estimate' : 'used up: no write-off', [`stock:${inv.item}:${x.location}`, 'baseline:items', `row:${ecr.id}:inventory`]));
@@ -755,7 +834,9 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const pointOfVar = (id: string) => pointOf(vars.get(id)!.dist);
   const trace = (p: Pending): Trace => {
     const ids = [...new Set([...p.uses, ...varsOf(p.expr)])];
-    const uses: TraceUse[] = ids.filter((id) => reg.has(id)).map((id) => ({ id, source: reg.get(id)!.source }));
+    const missing = ids.filter((id) => !reg.has(id));
+    if (missing.length) throw new Error(`trace of ${p.key} names ids that are not inputs: ${missing.join(', ')}`);
+    const uses: TraceUse[] = ids.map((id) => ({ id, source: reg.get(id)!.source }));
     return { formula: p.formula, uses, evidence: 'computation' };
   };
   const money = (key: string, sumOverride?: Summary): Money => {
@@ -821,6 +902,12 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   );
 
   for (const c of s.conflicts) flags.push({ kind: 'conflict', severity: 'warn', message: c.message, ref: c.change });
+  for (const a of options.assumptions ?? []) {
+    if (usedOverrides.has(a.id)) continue;
+    const why = noVariable.get(a.id)
+      ?? (vars.has(a.id) && !a.dist ? 'it has no distribution, and this input needs one' : 'no input of this check has that id');
+    flags.push({ kind: 'unused_assumption', severity: 'warn', ref: a.id, message: `Assumption ${a.id} was not applied: ${why}.` });
+  }
 
   return {
     check: 's2_cost',

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bowman } from '../../../bowman/data/index.ts';
 import { demoScenarios } from '../../../bowman/data/scenarios.ts';
-import { costCheck, type CostCheckResult, type Money } from '../src/cost.ts';
+import { costCheck, slug, type CostCheckResult, type Money } from '../src/cost.ts';
 import { lognormal, point } from '../src/dist.ts';
 import { formatUsd, renderCostPage } from '../src/format.ts';
 import { costCheckRows } from '../src/rows.ts';
@@ -23,6 +23,10 @@ const row = (r: CostCheckResult, id: string) => {
   return x;
 };
 const key = (id: string) => demoScenarios.find((s) => s.ecrs.includes(id))!.reference!;
+/** A cost-page row's id: the slug of its label, so it survives rows being added or reordered. */
+const rowId = (ecrId: string, block: string, label: string) => `cost:${ecrId}:${block}:${slug(label)}`;
+const DELAY = rowId('ECR-0417', 'other', 'Delay cost of holding S/N 011-014 at the controller-install station');
+const PREMIUM = 'premium:Q-HAL-26-1187#1';
 
 const r417 = costCheck(bowman, ecr('ECR-0417'), { seed: SEED });
 
@@ -30,29 +34,34 @@ test('ECR-0417 matches the answer key in bowman/data/scenarios.ts', () => {
   const k = key('ECR-0417');
   const vesper = r417.headline.unitCostDelta.find((u) => u.program === 'vesper')!.perUnit;
   assert.equal(vesper.point, k.steadyStateDeltaPerAircraftUsd, 'steady state +12 × $34.60 per aircraft');
-  const nre = ['production[1]', 'production[2]', 'production[3]', 'production[4]', 'production[5]'].reduce((a, i) => a + row(r417, `cost:ECR-0417:${i}`).total.point, 0);
+  const nre = r417.blocks.production.filter((x) => x.id.startsWith('cost:ECR-0417:production:')).reduce((a, x) => a + x.total.point, 0);
   assert.equal(nre, k.oneTimeNreUsd, 'tooling, NC programming, first article, engineering, qualification');
-  assert.equal(row(r417, 'cost:ECR-0417:retrofit[0]').total.point, k.retrofitPartsUsd);
-  assert.equal(row(r417, 'cost:ECR-0417:retrofit[1]').total.point, k.retrofitLaborUsd);
+  assert.equal(row(r417, rowId('ECR-0417', 'retrofit', 'Rev C brackets for retrofit, S/N 001-010')).total.point, k.retrofitPartsUsd);
+  assert.equal(row(r417, rowId('ECR-0417', 'retrofit', 'Installation labor, 12 h per aircraft at $110')).total.point, k.retrofitLaborUsd);
   const inv = r417.inventory.find((i) => i.item === 'BW-5120-210')!;
   const scrapped = inv.rows.filter((x) => x.disposition === 'scrap' || x.disposition === 'mandatory_install');
   assert.equal(scrapped.reduce((a, x) => a + x.qty, 0), k.brackets_scrapped, 'stores 96, WIP 48, at Halden 60, installed 120');
   near(scrapped.reduce((a, x) => a + x.cost.point, 0), k.scrapNetOfSalvageUsd, 0.001, 'scrap net of salvage');
   assert.equal(inv.rows.find((x) => x.disposition === 'cancel')!.cost.point, k.cancellationChargeUsd, 'the quoted 10% on 60 not started');
-  const premium = row(r417, 'premium:Q-HAL-26-1187#1').total.point;
-  assert.equal(premium, 25 * (239.5 - 221), 'first lot of 25 at $239.50: $18.50 a bracket over the new standard');
-  near(r417.headline.oneTimeTotal.point, k.oneTimeTotalUsd + premium, 0.001, 'one-time total (the key leaves out the first-lot premium)');
+  const ppv = row(r417, PREMIUM);
+  assert.equal(ppv.label, 'First-lot price premium (booked as PPV)');
+  assert.equal(ppv.basis, 'supplier_quote');
+  assert.equal(ppv.total.point, 25 * (239.5 - 221), 'first lot of 25 at $239.50: $18.50 a bracket over the new standard');
+  // The key books the premium as a purchase price variance, not one-time cost: compare without that row.
+  near(r417.headline.oneTimeTotal.point - ppv.total.point, k.oneTimeTotalUsd, 0.001, 'one-time total without the PPV row');
   assert.equal(r417.headline.unitCostDelta.find((u) => u.program === 'meridian')!.perUnit.point, 34.6 * 8, 'Meridian: $34.60 × 8, no retrofit');
   assert.deepEqual(r417.effectivity.map((e) => [e.program, e.cutInSerial, e.source]), [['vesper', 11, 'given'], ['meridian', 1, 'default']]);
 });
 
 test('ECR-0417 has the shape and rough size of docs/IN-PRACTICE.md\'s worked example, scaled to the dataset', () => {
-  // The worked example: 4 retrofit aircraft and 252 scrapped brackets; one-time $111,194, steady state +$415.
-  // Bowman's data: 10 aircraft built and 324 brackets to scrap. Scale the volume-driven lines, keep the rest.
+  // The worked example: 4 retrofit aircraft and 252 scrapped brackets; one-time $111,194 (which includes the
+  // $462.50 first-lot premium), steady state +$415. Bowman's data: 10 aircraft built and 324 brackets to
+  // scrap. Scale the volume-driven lines, keep the rest.
   const retrofit = (10_608 + 5_280) * (10 / 4);
   const scrap = (46_973 - 718) * (324 / 252);
-  const fixed = 13_600 + 18_500 + 15_370 + 1_118;
-  near(r417.headline.oneTimeTotal.point, retrofit + scrap + fixed, 0.01, 'one-time total against the scaled example');
+  const fixed = 13_600 + 18_500 + 15_370 + 1_118 + 462.5;
+  assert.ok(Math.abs(13_600 + 18_500 + 15_370 + 10_608 + 5_280 + 46_973 - 718 + 1_118 + 462.5 - 111_194) < 1, 'the example adds up with the premium in it');
+  near(r417.headline.oneTimeTotal.point, retrofit + scrap + fixed, 0.001, 'one-time total against the scaled example');
   near(r417.headline.unitCostDelta[0].perUnit.p50, 415, 0.01, 'steady state per aircraft');
   for (const b of COST_BLOCKS) assert.ok(Array.isArray(r417.blocks[b]), `block ${b}`);
   assert.ok(r417.blocks.production.some((x) => x.recurring) && r417.blocks.production.some((x) => !x.recurring), 'production has recurring and one-time rows');
@@ -65,15 +74,15 @@ test('ECR-0417 has the shape and rough size of docs/IN-PRACTICE.md\'s worked exa
 });
 
 test('blank cost-page rows become flagged default assumptions; the blank scrap row is filled by the disposition line', () => {
-  const delay = row(r417, 'cost:ECR-0417:other[0]');
+  const delay = row(r417, DELAY);
   assert.equal(delay.basis, 'default');
   assert.equal(delay.needsEstimate, true);
   assert.equal(delay.total.point, 0);
-  const rec = r417.inputs.find((i) => i.id === 'cost:ECR-0417:other[0]')!;
+  const rec = r417.inputs.find((i) => i.id === DELAY)!;
   assert.equal(rec.source, 'default');
   assert.equal(rec.needsEstimate, true);
-  assert.ok(r417.flags.some((f) => f.kind === 'needs_estimate' && f.ref === 'cost:ECR-0417:other[0]'));
-  assert.ok(!rows(r417).some((x) => x.id === 'cost:ECR-0417:production[6]'), 'no $0 placeholder for the scrap row');
+  assert.ok(r417.flags.some((f) => f.kind === 'needs_estimate' && f.ref === DELAY));
+  assert.ok(!rows(r417).some((x) => x.id === rowId('ECR-0417', 'production', 'Scrap and write-off of Rev B inventory')), 'no $0 placeholder for the scrap row');
   assert.match(row(r417, 'inventory:BW-5120-210').note ?? '', /Scrap and write-off of Rev B inventory/);
 });
 
@@ -112,7 +121,7 @@ test('the result is plain JSON, ready to store as check result rows', () => {
   assert.ok(out.length > 15);
   for (const x of out) {
     assert.ok(Number.isFinite(x.p10) && x.p10 <= x.p50 && x.p50 <= x.p90, x.key);
-    assert.equal(JSON.parse(x.detailJson).trace.evidence, 'computation', x.key);
+    if (x.key !== 'detail') assert.equal(JSON.parse(x.detailJson).trace.evidence, 'computation', x.key);
   }
   assert.ok(out.some((x) => x.key === 'one_time_total' && x.unit === 'USD'));
 });
@@ -164,16 +173,16 @@ test('an agent\'s estimate replaces a default by id, and the trace says so (#32 
   const r = costCheck(bowman, ecr('ECR-0417'), {
     seed: SEED,
     assumptions: [
-      { id: 'cost:ECR-0417:other[0]', source: 'agent_estimated', dist: lognormal(30_000, 0.25), rationale: 'Four aircraft held 14 weeks', by: 'planner agent' },
+      { id: DELAY, source: 'agent_estimated', dist: lognormal(30_000, 0.25), rationale: 'Four aircraft held 14 weeks', by: 'planner agent' },
       { id: 'recovery:BW-5120-210', source: 'agent_estimated', dist: point(0.5), rationale: 'Half the Rev B stock reworks into Meridian spares' },
     ],
   });
-  const delay = row(r, 'cost:ECR-0417:other[0]');
+  const delay = row(r, DELAY);
   assert.equal(delay.basis, 'agent_estimated');
   assert.equal(delay.needsEstimate, undefined);
   assert.equal(delay.total.point, 30_000);
-  assert.ok(!r.flags.some((f) => f.ref === 'cost:ECR-0417:other[0]'), 'no longer flagged');
-  assert.deepEqual(delay.total.trace.uses.find((u) => u.id === 'cost:ECR-0417:other[0]'), { id: 'cost:ECR-0417:other[0]', source: 'agent_estimated' });
+  assert.ok(!r.flags.some((f) => f.ref === DELAY), 'no longer flagged');
+  assert.deepEqual(delay.total.trace.uses.find((u) => u.id === DELAY), { id: DELAY, source: 'agent_estimated' });
   const scrap = (x: CostCheckResult) => x.inventory[0].rows.filter((y) => y.disposition !== 'cancel').reduce((a, y) => a + y.cost.point, 0);
   near(scrap(r), 324 * 186.4 * 0.5, 1e-9, 'scrap at 50% recovery');
   near(r.headline.oneTimeTotal.point - r417.headline.oneTimeTotal.point, 30_000 + scrap(r) - scrap(r417), 1e-9, 'one-time total moves by exactly the two estimates');
@@ -208,4 +217,93 @@ test('every ECR in the dataset runs, converges and stays traceable', () => {
     assert.ok(r.convergence.converged, `${e.id}: ${JSON.stringify(r.convergence.metrics)}`);
     assert.ok(r.headline.unitCostDelta.length >= 1, e.id);
   }
+});
+
+test('an assumption stays on its row when rows are added above it', () => {
+  const e = ecr('ECR-0417');
+  e.costPage.other.unshift({ label: 'Line stoppage contingency', oneTime: 80_000, basis: 'engineer_estimate' });
+  const r = costCheck(bowman, e, { seed: SEED, draws: 2000, assumptions: [{ id: DELAY, source: 'agent_estimated', dist: point(30_000), rationale: 'Planner estimate' }] });
+  assert.equal(row(r, DELAY).total.point, 30_000);
+  assert.equal(row(r, DELAY).basis, 'agent_estimated');
+  const added = row(r, rowId('ECR-0417', 'other', 'Line stoppage contingency'));
+  assert.equal(added.total.point, 80_000);
+  assert.equal(added.basis, 'engineer_estimate');
+});
+
+test('assumptions that match nothing, or that would replace a stated number, are flagged and not applied', () => {
+  const qual = rowId('ECR-0417', 'production', 'Qualification: vibration re-test on the endurance rig');
+  const r = costCheck(bowman, ecr('ECR-0417'), {
+    seed: SEED, draws: 2000,
+    assumptions: [
+      { id: 'cost:ECR-0417:other:typo', source: 'agent_estimated', dist: point(1), rationale: 'mistyped id' },
+      { id: rowId('ECR-0417', 'production', 'Scrap and write-off of Rev B inventory'), source: 'agent_estimated', dist: point(5_000), rationale: 'the blank scrap row' },
+      { id: 'recovery:BW-5120-210', source: 'agent_estimated', value: 0.5, rationale: 'a value where a distribution is needed' },
+      { id: qual, source: 'agent_estimated', dist: point(40_000), rationale: 'the engineer is low' },
+    ],
+  });
+  const unused = r.flags.filter((f) => f.kind === 'unused_assumption').map((f) => f.ref);
+  assert.deepEqual(unused.sort(), ['cost:ECR-0417:other:typo', 'recovery:BW-5120-210', rowId('ECR-0417', 'production', 'Scrap and write-off of Rev B inventory')].sort());
+  assert.match(r.flags.find((f) => f.ref?.includes('scrap-and-write-off'))!.message, /recovery share/);
+  assert.equal(row(r, qual).total.point, 18_500, 'the engineer\'s number stands');
+  assert.ok(r.flags.some((f) => f.kind === 'assumption_not_applied' && f.ref === qual));
+  const r2 = costCheck(bowman, ecr('ECR-0417'), { seed: SEED, draws: 2000, assumptions: [{ id: qual, source: 'agent_estimated', dist: point(40_000), rationale: 'the engineer is low', replacesGiven: true }] });
+  assert.equal(row(r2, qual).total.point, 40_000);
+  assert.equal(row(r2, qual).total.trace.uses.find((u) => u.id === qual)!.source, 'agent_estimated');
+});
+
+test('a duplicated BOM line is summed, not double-exploded', () => {
+  const base = structuredClone(bowman);
+  const line = base.bom.find((l) => l.parent === 'BW-0001-000')!;
+  base.bom.push({ ...line, seq: 999 });
+  const r = costCheck(base, ecr('ECR-0423'), { seed: SEED, draws: 2000 });
+  assert.equal(r.headline.unitCostDelta[0].perUnit.point, -11.4);
+  assert.equal(r.bomDelta.ok, true);
+});
+
+test('a bad sourcing range on an unrelated part falls back to the default and is flagged', () => {
+  const base = structuredClone(bowman);
+  const src = base.sourcing.find((x) => x.item === 'BW-1110-100')!;
+  src.unitPrice.p10 = 0;
+  const r = costCheck(base, ecr('ECR-0423'), { seed: SEED, draws: 2000 });
+  assert.equal(r.headline.unitCostDelta[0].perUnit.point, -11.4);
+  assert.ok(r.flags.some((f) => f.kind === 'bad_sourcing' && f.ref === 'BW-1110-100'));
+});
+
+test('a first-lot premium the engineer already listed is not added again', () => {
+  const e = ecr('ECR-0417');
+  e.costPage.production.push({ label: 'First lot premium, 25 at $239.50', oneTime: 462.5, basis: 'supplier_quote' });
+  const r = costCheck(bowman, e, { seed: SEED, draws: 2000 });
+  assert.ok(!rows(r).some((x) => x.id === PREMIUM));
+  near(r.headline.oneTimeTotal.point, r417.headline.oneTimeTotal.point, 1e-9, 'one-time total unchanged');
+});
+
+test('stored rows carry everything their traces point at', () => {
+  const out = costCheckRows(r417);
+  const detail = out.find((x) => x.key === 'detail')!;
+  const d = JSON.parse(detail.detailJson);
+  const ids = new Set((d.inputs as { id: string }[]).map((i) => i.id));
+  for (const x of out) {
+    if (x.key === 'detail') continue;
+    for (const u of JSON.parse(x.detailJson).trace.uses) assert.ok(ids.has(u.id), `${x.key}: ${u.id}`);
+  }
+  assert.ok(Array.isArray(d.flags) && Array.isArray(d.drivers) && d.convergence.converged === true);
+});
+
+test('a budgetary quote widens its rows and its new prices', () => {
+  const r = costCheck(bowman, ecr('ECR-0409'), { seed: SEED, draws: 4000 });
+  const tooling = r.inputs.find((i) => i.id === rowId('ECR-0409', 'production', 'Blade mould set and hub forging tooling'))!;
+  assert.equal(tooling.dist?.kind === 'lognormal' && tooling.dist.sigmaHigh, 0.15);
+  assert.ok(r.flags.some((f) => f.kind === 'budgetary_quote'));
+  const e = ecr('ECR-0409');
+  for (const q of e.supplierQuotes) q.firmness = 'firm';
+  const firm = costCheck(bowman, e, { seed: SEED, draws: 4000 });
+  const width = (x: CostCheckResult) => x.headline.unitCostDelta[0].perUnit.p90 - x.headline.unitCostDelta[0].perUnit.p10;
+  assert.ok(width(r) > width(firm) * 1.5, `per-unit range ${width(r)} budgetary against ${width(firm)} firm`);
+  assert.equal(r.headline.unitCostDelta[0].perUnit.point, 8640, 'the point estimate does not move');
+  assert.equal(r.piecePrices.find((p) => p.item === 'BW-4210-100')!.head, null, 'a part the change removes has no head price');
+});
+
+test('undecided units on order are priced as cancelled, not scrapped', () => {
+  const r = costCheck(bowman, ecr('ECR-0419'), { seed: SEED, draws: 2000 });
+  assert.match(r.flags.find((f) => f.kind === 'disposition_tbd' && f.message.includes('on order'))!.message, /cancelling them would cost about/);
 });

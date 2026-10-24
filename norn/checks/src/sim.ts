@@ -2,9 +2,9 @@
 // expression is a sum of terms, coefficient times a product of inputs. Inputs are drawn once per
 // run and shared by every expression, so base, head and any line item see the same draws.
 //
-// Correlation (docs/IN-PRACTICE.md §8, recommendation 7): inputs in the same group (same
-// supplier, same material, shared labour) are correlated 0.3, inputs in no common group are
-// independent. One shared normal factor per group carries the correlation: an input in k groups
+// Correlation (docs/IN-PRACTICE.md §8, recommendation 7): inputs in the same group are correlated
+// 0.3, inputs in no common group are independent. The cost check uses a group per supplier and one
+// for internal labour; it has no material data to group by. One shared normal factor per group carries the correlation: an input in k groups
 // gets sqrt(rho) of each group's factor plus sqrt(1 - k rho) of its own noise.
 
 import { normals } from './random.ts';
