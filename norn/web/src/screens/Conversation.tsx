@@ -1,13 +1,14 @@
 import { useState, type ReactNode } from 'react';
 import {
-  AlertFillIcon, CheckCircleFillIcon, CheckIcon, ChecklistIcon, CircleIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, CommentIcon,
-  DotFillIcon, EyeIcon, FileDiffIcon, GitMergeIcon, GraphIcon, NoteIcon, PackageIcon, SearchIcon, ShieldCheckIcon, TagIcon,
+  AlertFillIcon, CheckCircleFillIcon, CheckIcon, CircleIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, CommentIcon,
+  DotFillIcon, EyeIcon, GraphIcon, NoteIcon, SearchIcon, ShieldCheckIcon, TagIcon,
 } from '@primer/octicons-react';
 import { AvatarStack, Button, Checkbox, Label, PageLayout, ProgressBar, Spinner, Timeline } from '@primer/react';
 import type { ActivityEvent, ErpPackage, EventKind, ImpactAssessment, RiskLevel, StepState } from '../assessment/types.ts';
 import { monthLabel } from '../assessment/adapter.ts';
 import { DiffTable } from './Changes.tsx';
 import { CheckStateIcon, LevelLabel, MockTag, Person, SavedRun, StaleNote } from '../ui/Bits.tsx';
+import { BoardIcon, CaliperIcon, CostIcon, GaugeIcon, NcrIcon, ReleaseIcon } from '../ui/EngineeringIcons.tsx';
 import { Glyph, Mark, Num } from '../ui/Evidence.tsx';
 import { ago, dateTime, dayLabel, dateShort, range as rangeText, usdK } from '../ui/fmt.ts';
 import { Link } from '../router.tsx';
@@ -90,7 +91,7 @@ function BotComment({ a }: { a: ImpactAssessment }) {
     <Timeline.Item className="nx-t-comment">
       <div className="nx-av-col"><Person name="Norn" kind="norn" size={40} /></div>
       <Timeline.Body className="nx-t-body">
-        <CommentBox name="norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? a.activity[a.activity.length - 1]?.at ?? ''} edited={a.source !== 'live'} right={a.level ? <LevelLabel level={a.level} long /> : undefined}>
+        <CommentBox name="Norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? a.activity[a.activity.length - 1]?.at ?? ''} edited={a.source !== 'live'} right={a.level ? <LevelLabel level={a.level} long /> : undefined}>
           <h3 className="nx-h3">Impact assessment <SavedRun source={a.source} /></h3>
           {a.ecr.staleCost && <p className="nx-small"><StaleNote state={a.ecr.staleCost} /></p>}
           <table className="nx-bot-table">
@@ -202,12 +203,12 @@ function swing(lo: number, hi: number) {
 
 type BadgeSpec = { icon: ReactNode; variant?: 'success' | 'danger' | 'done' | 'attention' | 'accent' };
 const BADGE: Partial<Record<EventKind, BadgeSpec>> = {
-  ran_checks: { icon: <ChecklistIcon /> },
+  ran_checks: { icon: <GaugeIcon /> },
   label: { icon: <TagIcon /> },
   review_requested: { icon: <EyeIcon /> },
   report: { icon: <GraphIcon /> },
   approved: { icon: <CheckIcon />, variant: 'success' },
-  changes_requested: { icon: <FileDiffIcon />, variant: 'danger' },
+  changes_requested: { icon: <CaliperIcon />, variant: 'danger' },
   comment: { icon: <CommentIcon /> },
   research: { icon: <SearchIcon /> },
   policy: { icon: <ShieldCheckIcon />, variant: 'done' },
@@ -303,7 +304,7 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
 
       {decided ? (
         <MergeRow
-          icon={<GitMergeIcon size={24} className="nx-fg-done" />}
+          icon={a.ecr.status === 'ECO released' ? <ReleaseIcon size={24} className="nx-fg-done" /> : <CheckCircleFillIcon size={24} className="nx-fg-success" />}
           title={a.ecr.status === 'ECO released' ? 'ECO released' : 'Approved'}
           sub={ccb && ccb.state === 'not_required' ? 'Within Norn’s limits, no CCB needed' : 'The CCB approved this ECR'}
         />
@@ -325,7 +326,7 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
 
       {!decided && (
         <div className="nx-merge-foot">
-          <Button variant="primary" disabled leadingVisual={PackageIcon}>Release ECO</Button>
+          <Button variant="primary" disabled leadingVisual={ReleaseIcon}>Release ECO</Button>
           <span className="nx-fg-muted">
             {ccb?.when ? `Waiting for the CCB on ${ccb.when}` : 'Waiting for approvals'}
           </span>
@@ -359,9 +360,9 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
           {steps.map((s, i) => (
             <li key={i}>
               {s.role === 'CCB'
-                ? <Person name="CCB" kind="team" size={20} />
+                ? <BoardIcon size={20} />
                 : <Person name={s.person ?? s.role} kind={s.person === 'Norn' ? 'norn' : 'person'} size={20} />}
-              <span className="nx-side-name">{s.role === 'CCB' ? 'bowman-aviation/ccb' : s.person}</span>
+              <span className="nx-side-name">{s.role === 'CCB' ? 'Change Control Board' : s.person}</span>
               <span className="nx-side-trail"><StepIcon state={s.state} /></span>
             </li>
           ))}
@@ -399,7 +400,7 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
           <ul className="nx-side-list nx-linked">
             {a.linked.map(l => (
               <li key={l.ref}>
-                {l.state === 'released' ? <GitMergeIcon size={16} className="nx-fg-done" /> : l.state === 'open' ? <DotFillIcon size={16} className="nx-fg-open" /> : <CheckCircleFillIcon size={16} className="nx-fg-done" />}
+                {l.kind === 'NCR' ? <NcrIcon size={16} className={l.state === 'open' ? 'nx-fg-attention' : 'nx-fg-muted'} /> : l.state === 'released' ? <ReleaseIcon size={16} className="nx-fg-done" /> : l.state === 'open' ? <DotFillIcon size={16} className="nx-fg-open" /> : <CheckCircleFillIcon size={16} className="nx-fg-done" />}
                 <span><b>{l.ref}</b> <span className="nx-fg-muted">{l.title}</span></span>
               </li>
             ))}
@@ -427,7 +428,7 @@ function ErpCard({ pkg, mock }: { pkg: ErpPackage; mock: boolean }) {
   return (
     <section className="nx-erp" aria-label="ERP change package">
       <header className="nx-erp-head">
-        <PackageIcon size={16} />
+        <CostIcon size={16} />
         <b>ERP change package</b>
         <MockTag on={mock} />
         <span className="nx-fg-muted">Lines for a person to enter in {pkg.system}</span>
