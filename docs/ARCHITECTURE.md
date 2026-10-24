@@ -143,9 +143,13 @@ Minimum viable version: one effectivity date per ECO and a simple inventory burn
 - **Edit bursts and approvals.** Assumption edits are debounced so a reviewer typing doesn't trigger a burst of recomputes. A new revision of a PR dismisses approvals given on the previous one.
 - **Determinism.** Seeds and code version are in the hash. Only S0, gap-filling, and S5 involve an LLM; their outputs are stored, not re-derived.
 
-## 9. State layer: SpacetimeDB or not (decision open)
+## 9. State layer: SpacetimeDB (decided)
 
-The team has a strong preference for SpacetimeDB and wants a reason it fits, not just a reason it doesn't hurt. Status on 2026-10-24: SpacetimeDB is the leading option, conditional on the spike below. Both the author's analysis and an independent review (a separate agent, briefed with the workload and the docs findings but not the author's conclusion) are recorded here.
+**Decision, 2026-10-24: the team is using SpacetimeDB.** It is the confirmed state and coordination layer; the rest of the stack is still open. The team wanted a reason it fits, not just a reason it doesn't hurt. The reasoning below (the author's analysis plus an independent review by a separate agent, briefed with the workload and the docs findings but not the author's conclusion) is kept so later readers can see what the choice rests on and what it doesn't.
+
+What the choice rests on: the live, multi-user PR review surface (§2, §10) and the consistent single-update invalidation on assumption edits. What it does not rest on: price (Maincloud is $0 / $25 / $250 per month at the Free / Pro / Team tiers on 2026-10-24, and the source is available on GitHub under a Business Source License; the license text itself has not been read), analytics, or compute, none of which SpacetimeDB contributes.
+
+Known open risks, not blockers: the TypeScript client and module are the best-supported path while a Python compute worker is second-class (HTTP only); the product is young with breaking changes in recent minor releases; and if Archer's ECR/BOM data is export-controlled (e.g. ITAR; not checked), Maincloud may be unusable and the options are self-hosting or the custom-priced Enterprise tier. Whether finance values "live" as much as the demo does is also untested; ECR review is largely asynchronous.
 
 ### What the layer must provide
 
@@ -209,7 +213,7 @@ Where it is worse:
 | Dolt | Native branch/diff/merge over SQL (`dolt_diff`, `DOLT_MERGE`) | No live push; not designed for many small concurrent edits; still need a reactive layer |
 | SQLite/Postgres + a small websocket server | Simplest to reason about | Hand-rolled everything live |
 
-### Spike (time-boxed) before committing
+### Spike (first build step, time-boxed)
 
 The spike exercises the real scenario, not a toy. The reviewer estimated about 4 hours; that figure is unverified.
 1. **Worker over HTTP** (Python if that's our compute language): claim a check run, write results, and hit a reducer error. Confirm the HTTP status and error message are reliable enough to build retry logic on.
@@ -219,7 +223,7 @@ The spike exercises the real scenario, not a toy. The reviewer estimated about 4
 5. **Iteration speed**: republishing after a column change plus reseeding takes under a minute.
 6. **Hosting**: a Maincloud deploy with anonymous demo users works, or we decide to run locally with `spacetime start` for the demo.
 
-Adopt it if 1–3 are smooth and 4–6 are acceptable. If the Python path is painful, or any of 1–3 takes unreasonable time, switch to Postgres + Supabase Realtime. The narrow API below keeps that switch contained.
+The decision is made, so the spike's job is to surface problems early, not to approve the choice. If something fails badly (the Python path is painful, or any of 1–3 takes unreasonable time), bring it back to the team with what was tried before changing course; the contingency is Postgres + Supabase Realtime, and the narrow API below keeps that switch contained.
 
 ### Fallback and portability
 
@@ -227,7 +231,7 @@ All writes go through a narrow API (`enqueue_check`, `claim_check`, `complete_ch
 
 ## 10. Components
 
-Stack is deferred. The architecture implies four pieces:
+SpacetimeDB is the one confirmed part of the stack; the rest is open. The architecture implies four pieces:
 
 1. **State + coordination layer** (§9): the tables in §4 and the narrow API.
 2. **Workers**:
@@ -256,7 +260,7 @@ Data will be generated and synthetic. When built it needs: a baseline BOM of a p
 
 Ordered by dependency, not time. The line after step 7 is the minimum credible demo.
 
-1. State-layer spike (§9) and decision.
+1. SpacetimeDB spike (§9): stand up a module, a worker, and two live browsers, and surface problems early.
 2. Schema + narrow API + check-run queue running end to end with a dummy check.
 3. Minimal fake data: small BOM, a few suppliers, 3–5 ECRs.
 4. Branch/overlay model: apply an overlay to `main`, produce the BOM at head and the diff (S1), PR page shell.
