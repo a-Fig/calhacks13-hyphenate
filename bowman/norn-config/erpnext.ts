@@ -15,6 +15,10 @@ export const erpnext: ErpnextSettings = {
     'Finished Goods - BWA': 'finishedGoods',
     'At Supplier - BWA': 'supplierFinished',
   },
+  // Bowman's seed keeps finished units at the supplier on their open POs as well (bowman/erp/NOTES.md, Stock).
+  supplierFinishedOnOpenOrders: true,
+  // Bowman dates its records in Pacific time, so "today" is Pacific wherever Norn runs.
+  timeZone: 'America/Los_Angeles',
   // The two program top items (Vesper V4, Meridian M6) are the items in this group.
   programItemGroup: 'Aircraft',
   // The item is "Vesper V4 air vehicle"; the program is "Vesper V4".
