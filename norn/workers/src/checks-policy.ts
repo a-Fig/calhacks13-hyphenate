@@ -27,7 +27,7 @@ check('a denied call returns normally and its log row is kept, matched by reques
 check('...and the write did not happen', ![...db.comment.iter()].some(c => c.prId === E.id && c.body.startsWith('policy:deny')));
 await A.R.addComment({ prId: E.id, anchor: '', body: 'an ordinary comment', meta: { requestId: `ok-${stamp}` } });
 const okRow = await until(() => logs(l => l.requestId === `ok-${stamp}`)[0], 3000, 'the allowed call in the log');
-check('an allowed call is logged as applied with the allow reason', okRow.outcome === 'applied' && okRow.policy === 'allow (no rules yet)' && [...db.comment.iter()].some(c => c.prId === E.id && c.body === 'an ordinary comment'), okRow.policy);
+check('an allowed call is logged as applied with the allow reason', okRow.outcome === 'applied' && okRow.policy === 'allow (no company configuration is stored, so no company limits apply)' && [...db.comment.iter()].some(c => c.prId === E.id && c.body === 'an ordinary comment'), okRow.policy);
 
 // downgrade: approve -> recommend
 await allCodeDone(E.id);

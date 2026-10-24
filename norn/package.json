@@ -38,6 +38,7 @@
     "ingest": "npm run ingest -w @norn/workers",
     "check:pipeline": "npm run check:pipeline -w @norn/workers",
     "check:config": "npm run check:config -w @norn/workers",
+    "check:gate": "npm run check:gate -w @norn/workers",
     "test:workers": "npm run test -w @norn/workers"
   }
 }
