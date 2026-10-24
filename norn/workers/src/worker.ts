@@ -7,10 +7,12 @@
 //   NORN_ERP_SETTINGS=<module exporting erpnext>   the company's ERPNext settings; the connection comes from the .env
 //   NORN_BASELINE_FILE=<baseline.json>             a test baseline instead of the ERP
 //   NORN_BASELINE_POLL_MS                          how often to re-read the baseline (default 60000)
+//   NORN_WEB_URL, NORN_PACKAGE_POLL_MS             the ERP change package (package.ts): where Norn's ECR pages are, and how often to check
 import { BaselineStore, baselineSourceFromEnv } from './baseline.ts';
 import { classify, connect, subscribe, withRetry } from './connect.ts';
 import { CHECKS_CODE_VERSION } from '../../checks/src/index.ts';
 import { REAL_STAGES, impactHandlers } from './impact.ts';
+import { GUARD_KEYS, erpPlanner, packageOnce } from './package.ts';
 import { sleep } from './sim.ts';
 import { AbortedError, FatalRunError, HANDLERS as MOCK_HANDLERS, type Result, type RunCtx } from './stages.ts';
 
@@ -233,6 +235,37 @@ if (baselines.source) {
   const poll = () => baselines.refresh(log).catch(e => log(`baseline read failed: ${(e as Error).message}`));
   void poll();
   setInterval(poll, Number(process.env.NORN_BASELINE_POLL_MS ?? 60_000));
+}
+
+// The ERP change package on each released ECO (#72), checked again on every new ERP read. Only a
+// worker that reads the ERP builds packages; the connector's planner only reads.
+if (baselines.source?.erp) {
+  const { connection, settings } = baselines.source.erp;
+  await subscribe(conn, [
+    "SELECT * FROM pull_request WHERE status = 'merged'",
+    'SELECT * FROM eco_release',
+    'SELECT * FROM erp_package',
+    "SELECT * FROM check_run WHERE stage = 's2_cost' AND status = 'done'",
+    ...GUARD_KEYS.map(k => `SELECT * FROM check_result WHERE key = '${k}'`),
+  ]);
+  const planner = erpPlanner(connection, settings);
+  const opts = { webUrl: process.env.NORN_WEB_URL ?? 'http://localhost:5173', timeZone: settings.timeZone };
+  let busy = false;
+  const said = new Set<string>();
+  const packages = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const r = await packageOnce(conn, R, baselines, planner, opts, log);
+      for (const s of r.skipped) if (!said.has(s)) (said.add(s), log(`no ERP change package yet: ${s}`));
+    } catch (e) {
+      log(`ERP change package failed: ${classify(e).message}`);
+    } finally {
+      busy = false;
+    }
+  };
+  setInterval(() => void packages(), Number(process.env.NORN_PACKAGE_POLL_MS ?? 15_000));
+  void packages();
 }
 
 // A bug in one run must not take the worker, and every other run it holds, down with it.

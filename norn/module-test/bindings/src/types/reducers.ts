@@ -21,6 +21,8 @@ import PostImpactStatementReducer from "../post_impact_statement_reducer";
 import RecordAgentEventsReducer from "../record_agent_events_reducer";
 import RecordAssumptionReducer from "../record_assumption_reducer";
 import RecordBaselineReducer from "../record_baseline_reducer";
+import RecordEcoReleaseReducer from "../record_eco_release_reducer";
+import RecordErpPackageReducer from "../record_erp_package_reducer";
 import RegisterActorReducer from "../register_actor_reducer";
 import ReportProgressReducer from "../report_progress_reducer";
 import SetConfigReducer from "../set_config_reducer";
@@ -42,6 +44,8 @@ export type PostImpactStatementParams = __Infer<typeof PostImpactStatementReduce
 export type RecordAgentEventsParams = __Infer<typeof RecordAgentEventsReducer>;
 export type RecordAssumptionParams = __Infer<typeof RecordAssumptionReducer>;
 export type RecordBaselineParams = __Infer<typeof RecordBaselineReducer>;
+export type RecordEcoReleaseParams = __Infer<typeof RecordEcoReleaseReducer>;
+export type RecordErpPackageParams = __Infer<typeof RecordErpPackageReducer>;
 export type RegisterActorParams = __Infer<typeof RegisterActorReducer>;
 export type ReportProgressParams = __Infer<typeof ReportProgressReducer>;
 export type SetConfigParams = __Infer<typeof SetConfigReducer>;

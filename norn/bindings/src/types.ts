@@ -168,6 +168,16 @@ export const Comment = __t.object("Comment", {
 });
 export type Comment = __Infer<typeof Comment>;
 
+export const EcoRelease = __t.object("EcoRelease", {
+  prId: __t.u64(),
+  ecoNumber: __t.string(),
+  source: __t.string(),
+  sourceRef: __t.string(),
+  recordedBy: __t.identity(),
+  recordedAt: __t.timestamp(),
+});
+export type EcoRelease = __Infer<typeof EcoRelease>;
+
 export const EcrRevision = __t.object("EcrRevision", {
   id: __t.u64(),
   prId: __t.u64(),
@@ -181,6 +191,23 @@ export const EcrRevision = __t.object("EcrRevision", {
   createdAt: __t.timestamp(),
 });
 export type EcrRevision = __Infer<typeof EcrRevision>;
+
+export const ErpPackage = __t.object("ErpPackage", {
+  prId: __t.u64(),
+  ecoNumber: __t.string(),
+  s2RunId: __t.u64(),
+  erpBaseline: __t.string(),
+  releaseJson: __t.string(),
+  packageJson: __t.string(),
+  lines: __t.u32(),
+  entered: __t.u32(),
+  conflicts: __t.u32(),
+  notesJson: __t.string(),
+  builtBy: __t.identity(),
+  builtAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type ErpPackage = __Infer<typeof ErpPackage>;
 
 export const ImpactStatement = __t.object("ImpactStatement", {
   id: __t.u64(),

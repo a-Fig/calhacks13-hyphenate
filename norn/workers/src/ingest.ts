@@ -10,7 +10,15 @@ import { pathToFileURL } from 'node:url';
 import { classify, connect, withRetry, type Client } from './connect.ts';
 import { sleep } from './sim.ts';
 
-export type IngestItem = { plmEcrNumber: string; title: string; description: string; changeRequest: object; sourceRef: string };
+export type IngestItem = {
+  plmEcrNumber: string;
+  title: string;
+  description: string;
+  changeRequest: object;
+  sourceRef: string;
+  /** The change order the PLM released for the ECR, once it has (#72). */
+  eco?: string;
+};
 export type IngestSource = { name: string; list: () => Promise<IngestItem[]> };
 
 /** JSON with object keys sorted, so the same content always gives the same text and digest. */
@@ -23,10 +31,16 @@ export function canonicalJson(v: unknown): string {
   return JSON.stringify(v ?? null);
 }
 
-/** A change request as the checks read it, with the title and text the ECR shows. */
-export function itemOf(cr: Record<string, any>, sourceRef: string): IngestItem {
+/**
+ * A change request as the checks read it, with the title and text the ECR shows. An `eco` field is the
+ * released change order's number: it is kept out of the change request, so releasing changes nothing
+ * the checks read.
+ */
+export function itemOf(json: Record<string, any>, sourceRef: string): IngestItem {
+  const { eco, ...cr } = json;
   if (typeof cr.id !== 'string' || !cr.id) throw new Error('a change request needs its ECR number in `id`');
-  return { plmEcrNumber: cr.id, title: String(cr.title ?? cr.id), description: String(cr.description ?? ''), changeRequest: cr, sourceRef };
+  if (eco !== undefined && (typeof eco !== 'string' || !eco)) throw new Error(`${cr.id}: \`eco\` must be the change order number`);
+  return { plmEcrNumber: cr.id, title: String(cr.title ?? cr.id), description: String(cr.description ?? ''), changeRequest: cr, sourceRef, ...(eco ? { eco } : {}) };
 }
 
 /** A directory of change-request JSON files: a test feed, labelled 'stub' everywhere it lands. */
@@ -71,6 +85,19 @@ export async function ingestOnce(R: Client['R'], source: IngestSource, sent: Map
       // Refused for good (closed ECR, malformed change request): remember it, so it is not retried every poll.
       if (c.name === 'SenderError') sent.set(it.plmEcrNumber, key);
       log(`could not report ${it.plmEcrNumber}: ${c.name}: ${c.message}`);
+    }
+    // The PLM has released the ECO: record its number, once.
+    if (it.eco && sent.get(`eco:${it.plmEcrNumber}`) !== it.eco) {
+      try {
+        await withRetry(() => R.recordEcoRelease({ plmEcrNumber: it.plmEcrNumber, ecoNumber: it.eco!, source: source.name, sourceRef: it.sourceRef }), { idempotent: true, label: `record_eco_release ${it.plmEcrNumber}` });
+        sent.set(`eco:${it.plmEcrNumber}`, it.eco);
+        log(`${it.plmEcrNumber} released as ${it.eco} (${source.name})`);
+      } catch (e) {
+        const c = classify(e);
+        out.failed++;
+        if (c.name === 'SenderError') sent.set(`eco:${it.plmEcrNumber}`, it.eco);
+        log(`could not record ${it.plmEcrNumber}'s change order ${it.eco}: ${c.name}: ${c.message}`);
+      }
     }
   }
   return out;
