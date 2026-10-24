@@ -1,3 +1,5 @@
+import type { SDKRateLimitInfo } from '@anthropic-ai/claude-agent-sdk';
+import { resetsAtIso } from './events.ts';
 import type { Observations } from './events.ts';
 import type { JobError, JobErrorKind } from './types.ts';
 
@@ -29,9 +31,21 @@ function error(kind: JobErrorKind, message: string, resetsAt: string | null = nu
 }
 
 function resetsAtOf(obs: Observations): string | null {
-  const at = obs.rejectedRateLimit?.resetsAt;
-  if (typeof at !== 'number') return null;
-  return new Date(at < 1e12 ? at * 1000 : at).toISOString();
+  return resetsAtIso(obs.rejectedRateLimit?.resetsAt);
+}
+
+/**
+ * The job was stopped because the subscription's included usage ran out and the account would have
+ * carried on with paid overage, which this job does not allow. The agent did not fail; the runner
+ * chose not to spend.
+ */
+export function overageStopError(info: SDKRateLimitInfo): JobError {
+  const window = info.rateLimitType ?? 'usage';
+  return error(
+    'usage_limit',
+    `The subscription's ${window} limit is used up and the account would carry on with paid overage; the job was stopped because it does not allow overage`,
+    resetsAtIso(info.resetsAt),
+  );
 }
 
 /** Credentials never belong in an error message, whatever the CLI printed. */
@@ -57,6 +71,8 @@ export function classifyFailure(obs: Observations, thrown?: unknown, stderrTail?
   const errorText = scrub(parts.join(' | '));
   const status = result && 'api_error_status' in result ? result.api_error_status : null;
 
+  // Only a report that blocks the session outright counts. A rejection the account got past on paid
+  // overage is not why a later failure happened.
   if (obs.rejectedRateLimit) {
     const limit = obs.rejectedRateLimit.rateLimitType ?? 'usage';
     return error('usage_limit', errorText || `Subscription ${limit} limit reached`, resetsAtOf(obs));

@@ -59,7 +59,7 @@ export class Runner {
     const job = resolveJob(spec, this.config);
     if (this.active.has(job.id)) throw new JobSpecError(`job ${JSON.stringify(job.id)}: a job with this id is already queued or running`);
 
-    const emitter = new JobEmitter(job.id, job.role, job.identity, this.opts.sink);
+    const emitter = new JobEmitter(job.id, job.role, job.identity, this.opts.sink, this.config.sinkTimeoutMs);
     let settle!: (result: JobResult) => void;
     const result = new Promise<JobResult>((resolve) => (settle = resolve));
     const entry: Entry = { spec, model: job.model, emitter, abort: new AbortController(), settle };
@@ -153,6 +153,7 @@ export class Runner {
       finishedAt: now,
       usage: null,
       estimatedCostUsd: null,
+      usedOverage: false,
       permissionDenials: [],
       eventCount: entry.emitter.count,
     });
@@ -178,6 +179,7 @@ export class Runner {
       finishedAt: now,
       usage: null,
       estimatedCostUsd: null,
+      usedOverage: false,
       permissionDenials: [],
       eventCount: entry.emitter.count,
     };

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test:unit": "node --test test/unit.ts",
+    "test:unit": "node --test test/unit.ts test/safety.ts",
     "smoke": "node test/smoke.ts",
     "job": "node src/cli.ts"
   },

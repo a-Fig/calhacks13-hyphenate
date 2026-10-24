@@ -36,6 +36,12 @@ export interface JobSpec {
    */
   mcpServers?: Record<string, McpServerConfig>;
   /**
+   * Whether the session may carry on when the subscription's included usage is used up and the
+   * account has paid overage switched on. Default false: the runner stops the job instead of
+   * spending money.
+   */
+  allowOverage?: boolean;
+  /**
    * Exactly the tools this role may use; everything else is denied without asking. Built-ins by
    * name (`WebSearch`, `WebFetch`, `Read`), MCP tools as `mcp__<server>__<tool>` or
    * `mcp__<server>__*`. A bare `*` is not accepted.
@@ -59,6 +65,12 @@ export interface RunnerConfig {
   keepWorkDirs: boolean;
   /** Longer text fields in events are cut to this many characters and flagged. */
   maxEventFieldChars: number;
+  /** One sink call may take this long; a slower one fails the job as `sink_failed`. */
+  sinkTimeoutMs: number;
+  /** After a session is stopped, how long to wait for its process to exit before killing it. */
+  processExitMs: number;
+  /** After a stop, how long `runJob` waits for its own loop before settling without it. */
+  stopGraceMs: number;
 }
 
 // ---- Events -------------------------------------------------------------------------------
@@ -99,6 +111,8 @@ export type EventBody =
       allowedTools: string[];
       builtinTools: string[];
       mcpServers: string[];
+      /** Names (never values) of the environment variables the session's process received. */
+      envNames: string[];
       maxTurns: number;
       timeoutMs: number;
       effort: EffortLevel | null;
@@ -116,7 +130,12 @@ export type EventBody =
       plugins: string[];
       slashCommands: string[];
     }
-  | { type: 'assistant_text'; text: string; parentToolUseId: string | null; error: string | null }
+  | { type: 'assistant_text'; text: string; truncated: boolean; parentToolUseId: string | null; error: string | null }
+  /**
+   * A user-role message that arrived mid-session and is not a tool result: a message from another
+   * session, a channel, or the CLI itself. The job's own prompt is in `job_started`, not here.
+   */
+  | { type: 'user_message'; text: string; truncated: boolean; origin: string | null; from: string | null; synthetic: boolean }
   | { type: 'tool_call'; toolUseId: string; tool: string; input: unknown; parentToolUseId: string | null }
   | {
       type: 'tool_result';
@@ -134,7 +153,18 @@ export type EventBody =
       resetsAt: string | null;
       utilization: number | null;
       errorCode: string | null;
+      /** Paid extra usage. `status: 'rejected'` with `overageStatus: 'allowed'` means it would be spent. */
+      overageStatus: string | null;
+      overageResetsAt: string | null;
+      overageDisabledReason: string | null;
+      isUsingOverage: boolean | null;
+      overageInUse: boolean | null;
+      overageEnabled: boolean | null;
+      surpassedThreshold: number | null;
+      limitScope: string | null;
     }
+  /** A call that was still open when the job ended; what it did, if anything, is unknown. */
+  | { type: 'tool_abandoned'; toolUseId: string; tool: string; reason: string }
   /** A tool call refused without asking anyone (the role's allowlist, not a person, decided). */
   | { type: 'permission_denied'; tool: string; toolUseId: string; reasonType: string | null; reason: string | null }
   | { type: 'api_retry'; attempt: number; maxRetries: number; delayMs: number; errorStatus: number | null; error: string }
@@ -145,6 +175,7 @@ export type EventBody =
       subtype: string;
       isError: boolean;
       text: string | null;
+      textTruncated: boolean;
       errors: string[];
       numTurns: number;
       durationMs: number;
@@ -176,7 +207,10 @@ export type EventSink = (event: NornEvent) => void | Promise<void>;
 export type JobStatus = 'succeeded' | 'failed' | 'cancelled' | 'timed_out';
 
 export type JobErrorKind =
-  /** The subscription's usage window is used up. Retry after `resetsAt`. */
+  /**
+   * The subscription's usage window is used up (or the job was stopped rather than spend paid
+   * overage). Retry after `resetsAt`.
+   */
   | 'usage_limit'
   /** A transient 429 or an overloaded API that outlasted the SDK's own retries. */
   | 'rate_limited'
@@ -218,6 +252,8 @@ export interface JobResult {
   finishedAt: string;
   usage: TokenUsage | null;
   estimatedCostUsd: number | null;
+  /** True if any part of the session ran on paid overage (only possible when `allowOverage` is set). */
+  usedOverage: boolean;
   permissionDenials: PermissionDenial[];
   eventCount: number;
 }

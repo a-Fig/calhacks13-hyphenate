@@ -1,7 +1,7 @@
 import type { SDKMessage, SDKResultMessage, SDKRateLimitInfo } from '@anthropic-ai/claude-agent-sdk';
 import type { EventBody, EventSink, Identity, NornEvent, PermissionDenial, TokenUsage } from './types.ts';
 
-/** Thrown by `JobEmitter.emit` when the sink failed. The job is stopped rather than left unlogged. */
+/** Thrown by `JobEmitter.emit` when the sink failed or hung. The job is stopped rather than left unlogged. */
 export class SinkError extends Error {
   constructor(cause: unknown) {
     super(`event sink failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
@@ -12,7 +12,8 @@ export class SinkError extends Error {
 /**
  * Stamps a job's events with their tags and a sequence number, and hands them to the sink one at
  * a time, in order. The runner awaits each emit, so a slow sink slows the job down rather than
- * reordering or dropping anything.
+ * reordering or dropping anything. One sink call may take `sinkTimeoutMs`; after that the emit
+ * fails with `SinkError`, so a hung sink cannot hold a job (or the Runner slot under it) forever.
  */
 export class JobEmitter {
   readonly jobId: string;
@@ -21,17 +22,22 @@ export class JobEmitter {
   sessionId: string | null = null;
   count = 0;
   sinkError: SinkError | null = null;
+  /** Set once the job has been finalised; later emits (from an abandoned loop) are refused. */
+  closed = false;
   private chain: Promise<void> = Promise.resolve();
   private readonly sink: EventSink;
+  private readonly sinkTimeoutMs: number;
 
-  constructor(jobId: string, role: string, identity: Identity, sink: EventSink) {
+  constructor(jobId: string, role: string, identity: Identity, sink: EventSink, sinkTimeoutMs = 30_000) {
     this.jobId = jobId;
     this.role = role;
     this.identity = identity;
     this.sink = sink;
+    this.sinkTimeoutMs = sinkTimeoutMs;
   }
 
   emit(body: EventBody): Promise<void> {
+    if (this.closed) return Promise.reject(new Error(`job ${this.jobId} is finished; event refused`));
     const event = {
       seq: this.count++,
       ts: new Date().toISOString(),
@@ -43,11 +49,17 @@ export class JobEmitter {
     } as NornEvent;
     const turn = this.chain.then(async () => {
       if (this.sinkError) throw this.sinkError;
+      let timer: NodeJS.Timeout | undefined;
       try {
-        await this.sink(event);
+        const slow = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`sink did not return within ${this.sinkTimeoutMs} ms`)), this.sinkTimeoutMs);
+        });
+        await Promise.race([Promise.resolve().then(() => this.sink(event)), slow]);
       } catch (cause) {
         this.sinkError = new SinkError(cause);
         throw this.sinkError;
+      } finally {
+        clearTimeout(timer);
       }
     });
     this.chain = turn.catch(() => {});
@@ -63,8 +75,18 @@ export interface Observations {
   /** Last `error` field seen on an assistant message (e.g. `rate_limit`, `authentication_failed`). */
   assistantError: string | null;
   assistantErrorText: string | null;
+  /** A rate-limit report that blocks the session outright (rejected, and no paid overage to fall back on). */
   rejectedRateLimit: SDKRateLimitInfo | null;
+  /** The latest report that says the session is on, or would continue on, paid overage. */
+  overage: SDKRateLimitInfo | null;
+  /** True once a report said the session is running on paid overage (not merely that it could). */
+  overageUsed: boolean;
   initSeen: boolean;
+}
+
+/** Whether a rate-limit report means the session is on, or would go on, paid overage. */
+export function overageInPlay(info: SDKRateLimitInfo): boolean {
+  return info.isUsingOverage === true || info.overageInUse === true || (info.status === 'rejected' && info.overageStatus === 'allowed');
 }
 
 export function clip(value: string, max: number): { text: string; truncated: boolean } {
@@ -81,11 +103,14 @@ function clipInput(input: unknown, max: number): unknown {
   return json.length <= max ? input : { _truncated: true, preview: json.slice(0, max) };
 }
 
-function resetsAtIso(value: number | undefined): string | null {
+export function resetsAtIso(value: number | undefined): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   // The SDK reports epoch seconds; accept milliseconds too.
   return new Date(value < 1e12 ? value * 1000 : value).toISOString();
 }
+
+/** A block of a user-role message, as far as the translator reads it. */
+type ContentBlock = { type: string; text?: string; tool_use_id?: string; content?: unknown; is_error?: boolean };
 
 function textOfContent(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -117,7 +142,8 @@ export function usageOf(usage: {
 
 /**
  * Turns the SDK's messages into Norn events, one pass, in order. It keeps just enough state to
- * name the tool behind each tool result and to remember what a failure looked like.
+ * name the tool behind each tool result, to know which calls are still open, and to remember what
+ * a failure looked like.
  */
 export class MessageTranslator {
   readonly seen: Observations = {
@@ -125,15 +151,33 @@ export class MessageTranslator {
     assistantError: null,
     assistantErrorText: null,
     rejectedRateLimit: null,
+    overage: null,
+    overageUsed: false,
     initSeen: false,
   };
   sessionId: string | null = null;
-  private readonly toolNames = new Map<string, string>();
+  private readonly open = new Map<string, string>();
+  private readonly names = new Map<string, string>();
+  private readonly hookDenials = new Map<string, string>();
   private lastRateLimitKey = '';
   private readonly maxChars: number;
 
   constructor(maxChars: number) {
     this.maxChars = maxChars;
+  }
+
+  /**
+   * A PreToolUse hook refused this call. The SDK does not report hook denials as permission
+   * denials, so the runner records them here and the matching tool result is preceded by a
+   * `permission_denied` event.
+   */
+  noteHookDenial(toolUseId: string | undefined, reason: string): void {
+    if (toolUseId) this.hookDenials.set(toolUseId, reason);
+  }
+
+  /** Calls that were made and never answered. */
+  openCalls(): { toolUseId: string; tool: string }[] {
+    return [...this.open].map(([toolUseId, tool]) => ({ toolUseId, tool }));
   }
 
   translate(msg: SDKMessage): EventBody[] {
@@ -184,14 +228,15 @@ export class MessageTranslator {
         const error = msg.error ?? null;
         for (const block of msg.message.content) {
           if (block.type === 'text') {
-            const { text } = clip(block.text, this.maxChars);
-            out.push({ type: 'assistant_text', text, parentToolUseId: parent, error });
+            const { text, truncated } = clip(block.text, this.maxChars);
+            out.push({ type: 'assistant_text', text, truncated, parentToolUseId: parent, error });
             if (error) {
               this.seen.assistantError = error;
               this.seen.assistantErrorText = block.text.slice(0, 500);
             }
           } else if (block.type === 'tool_use' || block.type === 'server_tool_use' || block.type === 'mcp_tool_use') {
-            this.toolNames.set(block.id, block.name);
+            this.names.set(block.id, block.name);
+            this.open.set(block.id, block.name);
             out.push({
               type: 'tool_call',
               toolUseId: block.id,
@@ -208,14 +253,29 @@ export class MessageTranslator {
       }
       case 'user': {
         const content = msg.message.content;
-        if (Array.isArray(content)) {
-          for (const block of content) {
-            if (block.type !== 'tool_result') continue;
+        const blocks = (typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : []) as ContentBlock[];
+        const texts: string[] = [];
+        for (const block of blocks) {
+          if (block.type === 'text' && typeof block.text === 'string') {
+            texts.push(block.text);
+          } else if (block.type === 'tool_result' && typeof block.tool_use_id === 'string') {
+            const denial = this.hookDenials.get(block.tool_use_id);
+            if (denial !== undefined) {
+              out.push({
+                type: 'permission_denied',
+                tool: this.names.get(block.tool_use_id) ?? 'unknown',
+                toolUseId: block.tool_use_id,
+                reasonType: 'hook',
+                reason: denial,
+              });
+              this.hookDenials.delete(block.tool_use_id);
+            }
+            this.open.delete(block.tool_use_id);
             const { text, truncated } = clip(textOfContent(block.content), this.maxChars);
             out.push({
               type: 'tool_result',
               toolUseId: block.tool_use_id,
-              tool: this.toolNames.get(block.tool_use_id) ?? null,
+              tool: this.names.get(block.tool_use_id) ?? null,
               isError: block.is_error === true,
               content: text,
               truncated,
@@ -223,13 +283,34 @@ export class MessageTranslator {
             });
           }
         }
+        // Text that arrives from outside the session's own tool loop (another session's message, a
+        // channel, the CLI) is part of what the agent was told, so it is logged. A session started
+        // with a string prompt does not echo that prompt back, so this is never the job's own prompt.
+        if (texts.length > 0) {
+          const { text, truncated } = clip(texts.join('\n'), this.maxChars);
+          const origin = msg.origin;
+          out.push({
+            type: 'user_message',
+            text,
+            truncated,
+            origin: origin?.kind ?? null,
+            from: origin?.kind === 'peer' ? (origin.name ?? origin.from) : origin?.kind === 'channel' ? origin.server : null,
+            synthetic: msg.isSynthetic === true,
+          });
+        }
         break;
       }
       case 'rate_limit_event': {
         const info = msg.rate_limit_info;
-        if (info.status === 'rejected') this.seen.rejectedRateLimit = info;
-        // The CLI repeats an unchanged "allowed" report after most API calls.
-        const key = JSON.stringify([info.status, info.rateLimitType, info.resetsAt, info.utilization, info.errorCode]);
+        // Hard-blocked: rejected with no paid overage to carry on with.
+        if (info.status === 'rejected' && info.overageStatus !== 'allowed') this.seen.rejectedRateLimit = info;
+        if (overageInPlay(info)) {
+          this.seen.overage = info;
+          // "Would carry on with overage" is not yet spending; only these two say it is.
+          if (info.isUsingOverage === true || info.overageInUse === true) this.seen.overageUsed = true;
+        }
+        // The CLI repeats an unchanged report after most API calls.
+        const key = JSON.stringify(info);
         if (key === this.lastRateLimitKey) break;
         this.lastRateLimitKey = key;
         out.push({
@@ -239,6 +320,14 @@ export class MessageTranslator {
           resetsAt: resetsAtIso(info.resetsAt),
           utilization: info.utilization ?? null,
           errorCode: info.errorCode ?? null,
+          overageStatus: info.overageStatus ?? null,
+          overageResetsAt: resetsAtIso(info.overageResetsAt),
+          overageDisabledReason: info.overageDisabledReason ?? null,
+          isUsingOverage: info.isUsingOverage ?? null,
+          overageInUse: info.overageInUse ?? null,
+          overageEnabled: info.overageEnabled ?? null,
+          surpassedThreshold: info.surpassedThreshold ?? null,
+          limitScope: info.limitScope ?? null,
         });
         break;
       }
@@ -249,11 +338,13 @@ export class MessageTranslator {
           toolUseId: d.tool_use_id,
           input: clipInput(d.tool_input, this.maxChars),
         }));
+        const clipped = msg.subtype === 'success' ? clip(msg.result, this.maxChars) : null;
         out.push({
           type: 'result',
           subtype: msg.subtype,
           isError: msg.is_error,
-          text: msg.subtype === 'success' ? clip(msg.result, this.maxChars).text : null,
+          text: clipped?.text ?? null,
+          textTruncated: clipped?.truncated ?? false,
           errors: msg.subtype === 'success' ? [] : msg.errors,
           numTurns: msg.num_turns,
           durationMs: msg.duration_ms,

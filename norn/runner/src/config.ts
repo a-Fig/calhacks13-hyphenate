@@ -19,6 +19,9 @@ export function defaultConfig(): RunnerConfig {
     workRoot: join(tmpdir(), 'norn-runner'),
     keepWorkDirs: false,
     maxEventFieldChars: 100_000,
+    sinkTimeoutMs: 30_000,
+    processExitMs: 10_000,
+    stopGraceMs: 15_000,
   };
 }
 
@@ -60,6 +63,12 @@ export function resolveJob(spec: JobSpec, config: RunnerConfig): ResolvedJob {
     fail('allowedTools must be an array of tool names (use [] to allow none)');
   }
   for (const tool of spec.allowedTools) {
+    // A specifier on these does not narrow the tool: read-only commands (cat, ls, grep, find ...)
+    // run without a prompt in every mode, so `Bash(git status)` would expose the whole shell.
+    const named = /^(Bash|PowerShell|Monitor)\s*\(/.exec(tool);
+    if (named) {
+      fail(`allowedTools entry ${JSON.stringify(tool)}: a specifier on ${named[1]} does not limit it, so the whole tool would be exposed; list ${named[1]} without one, or leave it out`);
+    }
     // The SDK ignores unanchored wildcards, which would read as "allow nothing" while looking
     // like "allow everything". Refuse them.
     if (tool === '*' || tool === 'mcp__*' || /^mcp__[^_]*\*/.test(tool)) {

@@ -16,58 +16,7 @@ import { buildSdkOptions, buildSessionEnv } from '../src/session.ts';
 import { jsonlFileSink, memorySink, readJsonl } from '../src/sinks.ts';
 import type { JobResult, JobSpec, NornEvent } from '../src/types.ts';
 
-const identity = { actor: 'agent:norn/test', onBehalfOf: null, spawnedBy: 'norn' };
-const baseSpec = (over: Partial<JobSpec> = {}): JobSpec => ({
-  id: 'job-1',
-  role: 'researcher',
-  prompt: 'do the thing',
-  allowedTools: ['mcp__norn__*', 'WebSearch'],
-  identity,
-  ...over,
-});
-
-// ---- canned SDK messages ------------------------------------------------------------------
-
-const usage = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 1, cache_creation_input_tokens: 2 };
-const sid = { session_id: 's-1', uuid: 'u-1' };
-const init = {
-  type: 'system', subtype: 'init', ...sid, claude_code_version: '2.1.310', model: 'm', permissionMode: 'dontAsk',
-  apiKeySource: 'none', tools: ['mcp__norn__get_bom'], mcp_servers: [{ name: 'norn', status: 'connected' }],
-  skills: [], plugins: [], slash_commands: [], cwd: '/x', output_style: 'default', agents: [],
-} as unknown as SDKMessage;
-const assistant = (content: unknown[], extra: object = {}) =>
-  ({ type: 'assistant', ...sid, parent_tool_use_id: null, message: { content, role: 'assistant' }, ...extra }) as unknown as SDKMessage;
-const toolResult = (id: string, content: unknown, isError = false) =>
-  ({ type: 'user', ...sid, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] } }) as unknown as SDKMessage;
-const resultOk = (text = 'done') =>
-  ({ type: 'result', subtype: 'success', ...sid, is_error: false, result: text, num_turns: 2, duration_ms: 50, duration_api_ms: 40,
-     stop_reason: 'end_turn', total_cost_usd: 0.001, usage, modelUsage: {}, permission_denials: [] }) as unknown as SDKMessage;
-const resultErr = (subtype: string, over: object = {}) =>
-  ({ type: 'result', subtype, ...sid, is_error: true, num_turns: 1, duration_ms: 5, duration_api_ms: 4, stop_reason: null,
-     total_cost_usd: 0, usage, modelUsage: {}, permission_denials: [], errors: ['boom'], ...over }) as unknown as SDKMessage;
-
-async function* stream(messages: SDKMessage[], thenThrow?: Error): AsyncGenerator<SDKMessage> {
-  for (const m of messages) yield m;
-  if (thenThrow) throw thenThrow;
-}
-const fakeQuery = (messages: SDKMessage[], thenThrow?: Error): QueryFn => () => stream(messages, thenThrow);
-/**
- * A session that runs until the query is closed, like a long agent turn. Like the real SDK, it
- * ignores the abort signal: only close() ends it.
- */
-const hangingQuery: QueryFn = () => {
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => (release = resolve));
-  const session = (async function* (): AsyncGenerator<SDKMessage> {
-    yield init;
-    await gate;
-    yield assistant([{ type: 'text', text: 'carrying on after the stop' }]);
-    yield resultOk('should never be logged');
-  })();
-  return Object.assign(session, { close: () => release() });
-};
-
-const tmpRoot = () => mkdtemp(join(tmpdir(), 'norn-unit-'));
+import { identity, baseSpec, usage, sid, init, assistant, toolResult, resultOk, resultErr, stream, fakeQuery, hangingQuery, tmpRoot } from './fixtures.ts';
 
 // ---- tests ----------------------------------------------------------------------------------
 
@@ -100,13 +49,13 @@ describe('session environment and options', () => {
   });
 
   it('builds locked-down SDK options', () => {
-    const job = resolveJob(baseSpec({ allowedTools: ['WebSearch', 'Bash(ls *)', 'mcp__norn__get_bom'] }), defaultConfig());
+    const job = resolveJob(baseSpec({ allowedTools: ['WebSearch', 'WebFetch(domain:example.com)', 'mcp__norn__get_bom'] }), defaultConfig());
     const ac = new AbortController();
     const o: Options = buildSdkOptions(job, { cwd: '/w', abortController: ac, env: {} });
     assert.deepEqual(o.settingSources, []);
     assert.equal(o.strictMcpConfig, true);
-    assert.deepEqual(o.tools, ['WebSearch', 'Bash']);
-    assert.deepEqual(o.allowedTools, ['WebSearch', 'Bash(ls *)', 'mcp__norn__get_bom']);
+    assert.deepEqual(o.tools, ['WebSearch', 'WebFetch']);
+    assert.deepEqual(o.allowedTools, ['WebSearch', 'WebFetch(domain:example.com)', 'mcp__norn__get_bom']);
     assert.equal(o.permissionMode, 'dontAsk');
     assert.equal(o.permissionPrompts, 'none');
     assert.equal(o.persistSession, false);
@@ -387,7 +336,7 @@ describe('runJob with a scripted session', () => {
 describe('Runner queue', () => {
   const fakeResult = (spec: JobSpec): JobResult => ({
     jobId: spec.id, role: spec.role, identity: spec.identity, status: 'succeeded', result: 'ok', error: null, sessionId: null,
-    model: 'm', numTurns: 1, durationMs: 1, startedAt: '', finishedAt: '', usage: null, estimatedCostUsd: null, permissionDenials: [], eventCount: 0,
+    model: 'm', numTurns: 1, durationMs: 1, startedAt: '', finishedAt: '', usage: null, estimatedCostUsd: null, usedOverage: false, permissionDenials: [], eventCount: 0,
   });
 
   it('never runs more sessions than the limit, and starts them in submission order', async () => {
