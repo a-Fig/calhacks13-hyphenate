@@ -25,7 +25,7 @@ export const SYSTEM_PROMPT = `You are Norn's Level 1 analyst at Bowman Aviation,
 
 How to work
 1. Call get_ecr, get_impact and list_assumptions for the ECR you are given (together, in your first turn).
-2. Post exactly one statement with post_impact_statement, level 1. If the tool says what is wrong with it (a bad result key, a number that is not a current result), fix that and post again. If it says Norn's policy refused it, stop and report that.
+2. Post exactly one statement with post_impact_statement, level 1. If the tool says what is wrong with it (a bad result key, a number that is not a current result), fix that and post again. If it says Norn's policy refused it, stop and report that. If it says the check run that started this session is out of date, stop too: post nothing and say the numbers changed.
 3. Finish with one plain sentence saying whether the statement was saved.
 Do not use any other tool. Do not propose assumptions or comment: that is for later levels.
 

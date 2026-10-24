@@ -2,7 +2,7 @@
 //   npm run test:level1 -w @norn/workers
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { actorFor, decide, jobIdFor, jobsFromEvents, parseJobId, type DecideOptions, type EcrFacts, type EventRow } from './plan.ts';
+import { actorFor, decide, jobIdFor, jobsFromEvents, parseJobId, supersededJobs, type DecideOptions, type EcrFacts, type EventRow } from './plan.ts';
 
 const T0 = Date.parse('2026-10-24T20:00:00Z');
 const opts = (over: Partial<DecideOptions> = {}): DecideOptions => ({ nowMs: T0 + 60_000, maxAttempts: 2, retryDelayMs: 60_000, orphanMs: 330_000, running: new Set(), ...over });
@@ -49,12 +49,12 @@ test('a session that is running, here or in the stored events, blocks a second',
 test('after a restart, a finished session with a statement starts nothing', () => {
   const id = jobIdFor('ECR-0417', 1, 1);
   const jobs = jobsFromEvents([ev(id, 'job_queued', T0 + 10_000), ev(id, 'job_finished', T0 + 30_000, { status: 'succeeded', error: null })]);
-  const d = decide(facts({ jobs, statements: [{ level: 1, createdMs: T0 + 25_000 }] }), opts({ nowMs: T0 + 3_600_000 }));
+  const d = decide(facts({ jobs, statements: [{ level: 1, createdMs: T0 + 25_000, crSeq: 1 }] }), opts({ nowMs: T0 + 3_600_000 }));
   assert.match((d as any).reason, /already has a statement/);
 });
 
 test('a baseline-only re-check starts nothing: same revision, a newer cost run, a statement already there', () => {
-  const f = facts({ s2Done: [{ id: 7, inputsRevision: 1, mock: false }, { id: 12, inputsRevision: 1, mock: false }], statements: [{ level: 1, createdMs: T0 + 25_000 }] });
+  const f = facts({ s2Done: [{ id: 7, inputsRevision: 1, mock: false }, { id: 12, inputsRevision: 1, mock: false }], statements: [{ level: 1, createdMs: T0 + 25_000, crSeq: 1 }] });
   assert.equal(decide(f, opts()).action, 'skip');
 });
 
@@ -64,7 +64,7 @@ test('a new revision gets its own session even though the previous revision has 
     crSeq: 2,
     crCreatedMs: T0 + 600_000,
     s2Done: [{ id: 7, inputsRevision: 1, mock: false }, { id: 15, inputsRevision: 2, mock: false }],
-    statements: [{ level: 1, createdMs: T0 + 25_000 }],
+    statements: [{ level: 1, createdMs: T0 + 25_000, crSeq: 1 }],
     jobs: jobsFromEvents([ev(old, 'job_finished', T0 + 30_000, { status: 'succeeded' })]),
   });
   assert.deepEqual(decide(f, opts({ nowMs: T0 + 700_000 })), { action: 'dispatch', revision: 2, attempt: 1, s2RunId: 15 });
@@ -111,4 +111,49 @@ test('job ids are runner-safe, name the revision and attempt, and fit an actor n
   }
   assert.equal(parseJobId('e2e-mcp-abc'), null);
   assert.equal(jobsFromEvents([ev('e2e-mcp-abc', 'job_queued', T0)]).length, 0, 'other jobs are not ours');
+});
+
+// ---- review findings on #80 -----------------------------------------------------------------------
+
+const rev2 = (over: Partial<EcrFacts> = {}) =>
+  facts({ crSeq: 2, crCreatedMs: T0 + 600_000, s2Done: [{ id: 7, inputsRevision: 1, mock: false }, { id: 15, inputsRevision: 2, mock: false }], ...over });
+
+test('a late statement from the revision-1 session does not stand in for revision 2', () => {
+  // revision 2 arrived at T0+600s; the old session posted at T0+650s from revision 1's check run (crSeq 1)
+  const late = { level: 1, createdMs: T0 + 650_000, crSeq: 1 };
+  assert.deepEqual(decide(rev2({ statements: [late] }), opts({ nowMs: T0 + 700_000 })), { action: 'dispatch', revision: 2, attempt: 1, s2RunId: 15 });
+  // revision 2's own statement does
+  const own = { level: 1, createdMs: T0 + 680_000, crSeq: 2 };
+  assert.match((decide(rev2({ statements: [late, own] }), opts({ nowMs: T0 + 700_000 })) as any).reason, /already has a statement/);
+  // a Level 2 written from revision 2's run supersedes Level 1 as before
+  assert.equal(decide(rev2({ statements: [{ level: 2, createdMs: T0 + 690_000, crSeq: 2 }] }), opts({ nowMs: T0 + 700_000 })).action, 'skip');
+});
+
+test('a statement that rests on no check run falls back to the time it was posted', () => {
+  const noRun = (createdMs: number) => ({ level: 1, createdMs, crSeq: null });
+  assert.equal(decide(rev2({ statements: [noRun(T0 + 25_000)] }), opts({ nowMs: T0 + 700_000 })).action, 'dispatch');
+  assert.equal(decide(rev2({ statements: [noRun(T0 + 650_000)] }), opts({ nowMs: T0 + 700_000 })).action, 'skip');
+});
+
+test('a session still running for revision 1 does not hold back revision 2, and is named for stopping', () => {
+  const old = jobIdFor('ECR-0417', 1, 1);
+  const jobs = jobsFromEvents([ev(old, 'job_queued', T0 + 10_000), ev(old, 'job_started', T0 + 11_000)]);
+  const running = new Set([old]);
+  assert.deepEqual(decide(rev2({ jobs }), opts({ nowMs: T0 + 700_000, running })), { action: 'dispatch', revision: 2, attempt: 1, s2RunId: 15 });
+  assert.deepEqual(supersededJobs({ number: 'ECR-0417', crSeq: 2 }, running), [old]);
+  assert.deepEqual(supersededJobs({ number: 'ECR-0417', crSeq: 1 }, running), [], 'the current revision is not superseded');
+  assert.deepEqual(supersededJobs({ number: 'ECR-0417', crSeq: null }, running), []);
+  assert.deepEqual(supersededJobs({ number: 'ECR-0423', crSeq: 2 }, running), [], "another ECR's sessions are not this one's to stop");
+});
+
+test("another ECR's revision-1 session does not block ECR-0417 revision 1", () => {
+  const other = jobIdFor('ECR-0423', 1, 1);
+  const running = new Set([other]);
+  assert.deepEqual(decide(facts(), opts({ running })), { action: 'dispatch', revision: 1, attempt: 1, s2RunId: 7 });
+  // nor do its stored events (if they were ever mixed into this ECR's list), nor its used-up attempts
+  const jobs = jobsFromEvents([ev(other, 'job_queued', T0 + 10_000), ev(jobIdFor('ECR-0423', 1, 2), 'job_finished', T0 + 20_000, { status: 'failed' })]);
+  assert.deepEqual(decide(facts({ jobs }), opts()), { action: 'dispatch', revision: 1, attempt: 1, s2RunId: 7 });
+  // but its own running session still does, and attempt numbers count from its own
+  const mine = jobIdFor('ECR-0417', 1, 1);
+  assert.match((decide(facts(), opts({ running: new Set([other, mine]) })) as any).reason, /running/);
 });

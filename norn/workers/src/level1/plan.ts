@@ -32,8 +32,11 @@ export interface EcrFacts {
   crCreatedMs: number | null;
   /** s2_cost runs with status `done` (not stale, not cancelled), oldest first. */
   s2Done: { id: number; inputsRevision: number | null; mock: boolean }[];
-  /** Impact statements of any level, when they were posted. */
-  statements: { level: number; createdMs: number }[];
+  /**
+   * Impact statements of any level. `crSeq` is the change-request revision of the check run a
+   * statement was written from (the module records the run), or null when it rests on no run.
+   */
+  statements: { level: number; createdMs: number; crSeq: number | null }[];
   jobs: JobRecord[];
 }
 
@@ -56,6 +59,21 @@ export function jobIdFor(ecrNumber: string, revision: number, attempt: number): 
   const tail = `-r${revision}-a${attempt}`;
   const slug = ecrNumber.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 46 - 3 - tail.length);
   return `l1-${slug}${tail}`;
+}
+
+/** Whether a job id is one of this ECR's sessions (the id carries the ECR's number, made filename-safe). */
+export function jobIsFor(jobId: string, ecrNumber: string): boolean {
+  const p = parseJobId(jobId);
+  return !!p && jobId === jobIdFor(ecrNumber, p.revision, p.attempt);
+}
+
+/**
+ * Whether a statement is the answer for change-request revision `rev`, which reached Norn at
+ * `crCreatedMs`. A statement written from a check run belongs to that run's revision, however
+ * late it was posted. Only one that rests on no run falls back to the time it was posted.
+ */
+export function statementIsFor(s: { createdMs: number; crSeq: number | null }, rev: number, crCreatedMs: number): boolean {
+  return s.crSeq !== null ? s.crSeq === rev : s.createdMs >= crCreatedMs;
 }
 
 export function parseJobId(jobId: string): { revision: number; attempt: number } | null {
@@ -109,17 +127,17 @@ export function decide(e: EcrFacts, o: DecideOptions): Decision {
   if (!run) return skip(`no finished s2_cost run on change-request revision ${rev} yet`);
   if (run.mock) return skip('the s2_cost run is mock compute');
 
-  // A statement written since this revision arrived is this revision's statement (any level: a
-  // Level 2 or 3 supersedes Level 1).
-  if (e.statements.some(s => s.createdMs >= e.crCreatedMs!)) return skip(`revision ${rev} already has a statement`);
+  // A statement written from this revision's check run is this revision's statement (any level: a
+  // Level 2 or 3 supersedes Level 1). One written for an earlier revision, however late it was posted, is not.
+  if (e.statements.some(s => statementIsFor(s, rev, e.crCreatedMs!))) return skip(`revision ${rev} already has a statement`);
 
-  // Sessions already started for this revision.
-  const mine = e.jobs.filter(j => j.revision === rev);
-  const runningHere = [...o.running].map(id => ({ id, p: parseJobId(id) })).filter(x => x.p?.revision === rev);
+  // Sessions already started for this ECR's revision (not another ECR's: ids name the ECR).
+  const mine = e.jobs.filter(j => j.revision === rev && jobIsFor(j.jobId, e.number));
+  const runningHere = [...o.running].filter(id => jobIsFor(id, e.number)).map(id => ({ id, p: parseJobId(id)! })).filter(x => x.p.revision === rev);
   const live = (j: JobRecord) => !j.finished && (o.running.has(j.jobId) || o.nowMs - j.lastEventMs < o.orphanMs);
   if (runningHere.length || mine.some(live)) return skip(`a session is running for revision ${rev}`);
 
-  const attempts = Math.max(0, ...mine.map(j => j.attempt), ...runningHere.map(x => x.p!.attempt));
+  const attempts = Math.max(0, ...mine.map(j => j.attempt), ...runningHere.map(x => x.p.attempt));
   if (attempts >= o.maxAttempts) return skip(`revision ${rev} has used its ${o.maxAttempts} attempt(s) without a statement`);
 
   // A retry waits: out of usage until the window resets, otherwise a fixed delay.
@@ -130,4 +148,14 @@ export function decide(e: EcrFacts, o: DecideOptions): Decision {
     if (o.nowMs < readyAt) return skip(`attempt ${last.attempt} ended; the next waits until ${new Date(readyAt).toISOString()}`);
   }
   return { action: 'dispatch', revision: rev, attempt: attempts + 1, s2RunId: run.id };
+}
+
+/**
+ * Running sessions of this ECR that are for an earlier change-request revision than the current one:
+ * their numbers and prompt are out of date, so the dispatcher stops them. (The module would refuse
+ * their statement anyway; this saves the tokens.)
+ */
+export function supersededJobs(e: Pick<EcrFacts, 'number' | 'crSeq'>, running: Iterable<string>): string[] {
+  if (e.crSeq === null) return [];
+  return [...running].filter(id => jobIsFor(id, e.number) && parseJobId(id)!.revision < e.crSeq!);
 }

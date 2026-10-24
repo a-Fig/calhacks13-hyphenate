@@ -266,8 +266,12 @@ export const StatementAssumption = t.object('StatementAssumption', {
 });
 
 // A Level 1-3 impact statement (#42). Append-only: a newer one for the same ECR and level
-// supersedes an older one in the reader's eyes. prRevision is the ECR revision it was written
-// against, so a reader can tell it has since gone out of date.
+// supersedes an older one in the reader's eyes. prRevision is the ECR's own revision counter when
+// it was written, so a reader can tell it has since gone out of date. checkRunId is the check run
+// the statement was written from. post_impact_statement records it and the agent cannot set it: the
+// run that started the session when the call's spawnedBy names one ('...check_run:<id>'), else the
+// run its first 'computation' number was copied from, else 0. That run's inputs name the
+// change-request revision and the ERP baseline, so a reader never has to guess them from numbers.
 const impactStatement = table(
   { name: 'impact_statement', public: true },
   {
@@ -275,6 +279,7 @@ const impactStatement = table(
     prId: t.u64().index('btree'),
     level: t.u8(), // 1 | 2 | 3
     prRevision: t.u32(),
+    checkRunId: t.u64(), // 0: no check run behind it (judgment only, posted outside a session)
     changeClass: t.string(),
     route: t.string(), // the proposed approval route
     headline: t.string(),
@@ -284,6 +289,20 @@ const impactStatement = table(
     claims: t.array(StatementClaim),
     author: t.identity(),
     createdAt: t.timestamp(),
+  }
+);
+
+// A short lease on writing one ECR's impact statement to the PLM (#42). The PLM has no
+// compare-and-set, so two publishers that each read "not there yet" would both write. The one
+// atomic step is claim_publication: it refuses while another holder's unexpired lease stands.
+// `holder` is a random id per publisher process (a saved identity is shared by processes of one name).
+const publicationClaim = table(
+  { name: 'publication_claim', public: true },
+  {
+    prId: t.u64().primaryKey(),
+    statementId: t.u64(),
+    holder: t.string(),
+    expiresAt: t.timestamp(),
   }
 );
 
@@ -349,6 +368,7 @@ const spacetimedb = schema({
   agentEvent,
   actorScope,
   impactStatement,
+  publicationClaim,
   ecrRevision,
   baselineSnapshot,
   reaperSchedule,

@@ -30,6 +30,15 @@ of the main checkout, which a worktree does not have). Run ONE dispatcher per da
   twice, and no extra table is needed. The key is the change request's revision, not the ECR's own
   counter, so a baseline-only re-check (ERP prices moved, an assumption changed) starts nothing. A
   session that failed or ended without a statement is retried, up to the attempt cap, under a new job id.
+- Which revision a statement belongs to. The module records the check run a statement was written
+  from (`impact_statement.checkRunId`: the run that started the session, from the credential's
+  spawnedBy `norn:check_run:<id>`, else the run its first computation number was copied from). The
+  run's inputs name the change-request revision and the ERP baseline. `post_impact_statement`
+  refuses a session whose run is no longer `done` (a new revision, baseline or assumption made it
+  stale), so a late revision-1 session cannot post, and cannot suppress revision 2's session. The
+  dispatcher also stops running sessions of an earlier revision when the next one arrives.
+- Sessions are keyed by ECR and revision (the job id names both), so another ECR's session never
+  blocks this one.
 - Events also go to a JSONL file (`teeSink`) as a fallback if the database is unreachable.
 
 ## The agent (`prompt.ts`)
@@ -58,6 +67,17 @@ plain fields match, nothing is written. A restart, a second publisher or a reset
 therefore writes nothing twice. A person editing a plain field gets it put back. Mock numbers
 (s3, s4 placeholders) never reach the PLM as a headline. `NORN_PUBLISH_ECRS=ECR-0417` limits it.
 
+Which statement: of those written from the ECR's current change-request revision, the highest level,
+then the newest. An earlier revision's statement is never published over the current one, and with
+none for the current revision nothing is written. The text's provenance (revision, baseline, code
+version, formulas) is read from the statement's own check run, never inferred from matching numbers.
+
+Two publishers at once: read-then-write is not atomic and the PLM cannot refuse a second identical
+write, so a write takes a lease first (`claim_publication` / `release_publication`, table
+`publication_claim`, one row per ECR, 60 s so a dead holder cannot block it). The holder reads the
+PLM again once it has the lease, writes, releases. A publisher that loses the claim writes nothing and
+finds the ref on its next 15 s sweep. A write that outlasts the lease could still race; none does today.
+
 ## The PLM ingest (`ingest-plm.ts`)
 
 Lists the PLM's ECRs once and takes in every one in a wanted state (`NORN_PLM_STATES`, default
@@ -79,4 +99,6 @@ the entry module and importing it back would deadlock on its top-level await.
 ## Tests
 
 `npm run test:level1 -w @norn/workers` (offline): dispatch rules and idempotency, the prompt,
-statement-to-PLM formatting, publisher idempotency.
+statement-to-PLM formatting, publisher idempotency and the lease race, statement selection and
+provenance. The module side (the recorded check run, the stale-run refusal, the lease) is in
+`npm run check:module`, against a scratch database.

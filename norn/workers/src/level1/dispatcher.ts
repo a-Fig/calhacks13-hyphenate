@@ -27,10 +27,11 @@ import { Runner, jsonlFileSink, teeSink, type JobSpec } from '../../../runner/sr
 import { connect, subscribe } from '../connect.ts';
 import { provenanceOf, type Inputs } from '../impact.ts';
 import { agentEventWriter } from './agent-events.ts';
-import { actorFor, decide, jobIdFor, jobsFromEvents, spawnedByFor, type EcrFacts, type EventRow } from './plan.ts';
+import { actorFor, decide, jobIdFor, jobsFromEvents, spawnedByFor, supersededJobs, type EcrFacts, type EventRow } from './plan.ts';
 import { SYSTEM_PROMPT, jobPrompt, screenDetail, type Detail, type HeadlineKey } from './prompt.ts';
 import { routeFor } from './routing.ts';
 import { settingsFromEnv, type Level1Settings } from './settings.ts';
+import { crSeqOfRun } from './source.ts';
 
 type Db = DbConnection['db'];
 type Pr = NonNullable<ReturnType<Db['pullRequest']['id']['find']>>;
@@ -66,7 +67,8 @@ export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
     crSeq: cur?.seq ?? null,
     crCreatedMs: cur ? ms(cur.createdAt) : null,
     s2Done,
-    statements: [...db.impactStatement.prId.filter(pr.id)].map(s => ({ level: s.level, createdMs: ms(s.createdAt) })),
+    // The revision of the run a statement was written from (the module records it), not of the moment it was posted.
+    statements: [...db.impactStatement.prId.filter(pr.id)].map(s => ({ level: s.level, createdMs: ms(s.createdAt), crSeq: crSeqOfRun(db, s.checkRunId) })),
     jobs: jobsFromEvents(events),
   };
 }
@@ -173,7 +175,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
       do {
         again = false;
         for (const pr of conn.db.pullRequest.iter()) {
-          const d = decide(factsOf(conn.db, pr, settings.role), { nowMs: Date.now(), maxAttempts: settings.maxAttempts, retryDelayMs: settings.retryDelayMs, orphanMs: settings.orphanMs, running });
+          const facts = factsOf(conn.db, pr, settings.role);
+          // A session for an earlier revision is out of date the moment the next one arrives: stop it.
+          for (const id of supersededJobs(facts, running)) if (runner.cancel(id)) log(`${id} stopped: ${pr.plmEcrNumber} is now on change-request revision ${facts.crSeq}`);
+          const d = decide(facts, { nowMs: Date.now(), maxAttempts: settings.maxAttempts, retryDelayMs: settings.retryDelayMs, orphanMs: settings.orphanMs, running });
           if (d.action !== 'dispatch') continue;
           if ((startFailures.get(`${pr.plmEcrNumber}:${d.revision}`) ?? 0) >= 3) continue; // gave up until a restart
           void startJob(pr, d.revision, d.attempt, d.s2RunId);

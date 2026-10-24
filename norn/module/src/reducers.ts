@@ -463,7 +463,7 @@ export const postImpactStatement = write(
     assumptions: t.array(StatementAssumption),
     claims: t.array(StatementClaim),
   },
-  (ctx, a) => {
+  (ctx, a, call) => {
     const required = (v: string, what: string, max: number) => {
       try {
         return nonEmpty(v, what, max);
@@ -485,8 +485,22 @@ export const postImpactStatement = write(
       if (!EVIDENCE.includes(e)) throw new Refusal(`${what}: evidence must be one of ${EVIDENCE.join(', ')}`);
     };
 
+    // A session started by a check run ('norn:check_run:7') may post only while that run still stands:
+    // the ECR's inputs have not changed since it read them. A session left over from an earlier
+    // change-request revision (or baseline) is refused even if some of its numbers happen to match.
+    // spawnedBy comes from the signed credential, not from the agent.
+    let checkRunId = 0n;
+    const started = /(?:^|:)check_run:(\d+)$/.exec(call.spawnedBy);
+    if (started) {
+      const run = ctx.db.checkRun.id.find(BigInt(started[1]!));
+      if (!run || run.prId !== pr.id) throw new Refusal(`this session was started by check run ${started[1]}, which is not a check run of ${pr.plmEcrNumber}`);
+      if (run.status !== 'done')
+        throw new Refusal(`check run ${run.id}, which started this session, is ${run.status}: ${pr.plmEcrNumber}'s inputs changed after the session read them (a new change-request revision, baseline or assumption), so its numbers are out of date. Post nothing; Norn starts a new session on the current numbers`);
+      checkRunId = run.id;
+    }
+
     // The newest result per key among runs that are still current ('done'; a stale run's are not).
-    const current = new Map<string, { id: bigint; label: string; unit: string; p10: number; p50: number; p90: number }>();
+    const current = new Map<string, { id: bigint; checkRunId: bigint; label: string; unit: string; p10: number; p50: number; p90: number }>();
     for (const r of ctx.db.checkResult.prId.filter(pr.id)) {
       if (ctx.db.checkRun.id.find(r.checkRunId)?.status !== 'done') continue;
       const seen = current.get(r.key);
@@ -507,6 +521,7 @@ export const postImpactStatement = write(
           throw new Refusal(`${what} is marked computation, so it keeps the label and unit of check result '${n.resultKey}' ('${r.label}', '${r.unit}'), not '${n.label}', '${n.unit}'`);
         if (r.p10 !== n.p10 || r.p50 !== n.p50 || r.p90 !== n.p90)
           throw new Refusal(`${what} is marked computation but differs from check result '${n.resultKey}' (${r.p10} / ${r.p50} / ${r.p90}); quote it exactly or mark it judgment`);
+        if (checkRunId === 0n) checkRunId = r.checkRunId; // no session run named: the run its first computation number came from
       }
     }
     for (const c of [...a.drivers, ...a.claims]) {
@@ -527,6 +542,7 @@ export const postImpactStatement = write(
       prId: pr.id,
       level: a.level,
       prRevision: pr.revision,
+      checkRunId,
       changeClass,
       route,
       headline,
@@ -541,10 +557,43 @@ export const postImpactStatement = write(
       prId: pr.id,
       entity: `impact_statement:${row.id}`,
       summary: `posted Level ${a.level} impact statement on ${pr.plmEcrNumber} (revision ${pr.revision}): ${headline.slice(0, 100)}`,
-      detail: { level: a.level, numbers: a.numbers.length, drivers: a.drivers.length, assumptions: a.assumptions.length, claims: a.claims.length },
+      detail: { level: a.level, numbers: a.numbers.length, drivers: a.drivers.length, assumptions: a.assumptions.length, claims: a.claims.length, checkRunId },
     };
   }
 );
+
+// ---------------------------------------------------------------------------------------------
+// Publication lease (#42). The publisher writes a statement into the PLM, which cannot refuse a
+// second identical write, so the write is taken in turns: claim, read the PLM, write, release.
+// A lease that is not released (the holder died) ends by itself.
+// ---------------------------------------------------------------------------------------------
+
+export const claimPublication = write(
+  'claim_publication',
+  { prId: t.u64(), statementId: t.u64(), holder: t.string(), leaseMs: t.u32() },
+  (ctx, a) => {
+    const pr = getPr(ctx, a.prId);
+    if (!ctx.db.impactStatement.id.find(a.statementId)) throw new SenderError(`statement ${a.statementId} does not exist`);
+    const holder = nonEmpty(a.holder, 'holder', 64);
+    if (a.leaseMs < 1000 || a.leaseMs > 300_000) throw new SenderError('a publication lease lasts 1 to 300 seconds');
+    const held = ctx.db.publicationClaim.prId.find(pr.id);
+    const now = ctx.timestamp.microsSinceUnixEpoch;
+    // A thrown SenderError is the answer "someone else is writing": the caller's call rejects, atomically.
+    if (held && held.holder !== holder && held.expiresAt.microsSinceUnixEpoch > now)
+      throw new SenderError(`[held] ${pr.plmEcrNumber} is being published by another holder until ${held.expiresAt.toISOString()}`);
+    const row = { prId: pr.id, statementId: a.statementId, holder, expiresAt: plusMs(ctx.timestamp, a.leaseMs) };
+    if (held) ctx.db.publicationClaim.prId.update(row);
+    else ctx.db.publicationClaim.insert(row);
+    return { prId: pr.id, entity: `publication_claim:${pr.id}`, summary: `claimed publishing statement ${a.statementId} to the PLM for ${a.leaseMs} ms` };
+  }
+);
+
+export const releasePublication = write('release_publication', { prId: t.u64(), holder: t.string() }, (ctx, a) => {
+  const held = ctx.db.publicationClaim.prId.find(a.prId);
+  if (!held || held.holder !== a.holder) return null; // not ours any more (it expired and was taken): nothing to release
+  ctx.db.publicationClaim.prId.delete(a.prId);
+  return null;
+});
 
 // ---------------------------------------------------------------------------------------------
 // Baseline parts (the connectors fill this in; only the external key exists so far)
