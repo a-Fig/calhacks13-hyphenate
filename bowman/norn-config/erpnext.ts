@@ -31,6 +31,9 @@ export const erpnext: ErpnextSettings = {
     },
     bom: { changeOrder: 'bw_eco', releasedOn: 'bw_released_on' },
     purchaseOrder: { externalId: 'bw_po_id' },
+    // The dataset's ids (SUP-HALDEN, WC-STRUCT), which change requests use. ERPNext names them 'Halden Precision' and 'Structure assembly'.
+    supplier: { externalId: 'bw_supplier_id' },
+    workCenter: { externalId: 'bw_work_center_id' },
   },
   // No `fallback`: the volume plan is a Master Production Schedule and the built aircraft are Serial Nos in
   // Bowman's ERPNext (bowman/erp/seed-planning.ts).

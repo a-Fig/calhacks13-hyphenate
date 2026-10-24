@@ -70,6 +70,7 @@ const wcByid = new Map(data.workCenters.map((w) => [w.id, w]));
 const CUSTOM_FIELDS: [dt: string, fieldname: string, label: string, fieldtype: string][] = [
   ["Item", "bw_rev", "Revision", "Data"], ["Item", "bw_status", "Lifecycle status", "Data"], ["Item", "bw_cost_group", "Cost group", "Data"],
   ["Item", "bw_safety_critical", "Safety critical", "Check"], ["Item", "bw_programs", "Programs", "Data"],
+  ["Supplier", "bw_supplier_id", "Dataset supplier id", "Data"], ["Workstation", "bw_work_center_id", "Dataset work center id", "Data"],
   ["Supplier", "bw_single_source", "Strategic single source", "Check"], ["Supplier", "bw_on_time_delivery_pct", "On-time delivery %", "Float"],
   ["Supplier", "bw_quality_ppm", "Quality (ppm)", "Float"], ["Supplier", "bw_programs", "Programs", "Data"],
   ["Item Price", "bw_price_p10", "Price p10", "Currency"], ["Item Price", "bw_price_p90", "Price p90", "Currency"],
@@ -119,9 +120,11 @@ async function phaseMasters() {
   for (const w of data.workCenters) {
     // v16 builds a Workstation's hour rate from operating-cost components; the loaded labor rate goes under Wages.
     const costs = [{ operating_component: "Wages", operating_cost: w.laborRatePerHour }];
-    if (!ws.has(w.name)) await create("Workstation", { workstation_name: w.name, workstation_costs: costs });
-    else if ((await erp.get(`/api/resource/Workstation/${enc(w.name)}`)).body.data.hour_rate !== w.laborRatePerHour) {
-      await erp.put(`/api/resource/Workstation/${enc(w.name)}`, { workstation_costs: costs });
+    if (!ws.has(w.name)) await create("Workstation", { workstation_name: w.name, workstation_costs: costs, bw_work_center_id: w.id });
+    else {
+      const have = (await erp.get(`/api/resource/Workstation/${enc(w.name)}`)).body.data;
+      if (have.hour_rate !== w.laborRatePerHour) await erp.put(`/api/resource/Workstation/${enc(w.name)}`, { workstation_costs: costs });
+      if (have.bw_work_center_id !== w.id) await erp.put(`/api/resource/Workstation/${enc(w.name)}`, { bw_work_center_id: w.id });
     }
     if (!ops.has(w.name)) await create("Operation", { name: w.name, workstation: w.name });
   }
@@ -129,11 +132,15 @@ async function phaseMasters() {
   if (!(await names("Supplier Group")).has("Aerospace Suppliers")) {
     await create("Supplier Group", { supplier_group_name: "Aerospace Suppliers", parent_supplier_group: "All Supplier Groups", is_group: 0 });
   }
-  const haveSup = await names("Supplier");
+  const haveSup = new Map((await list("Supplier", [], ["name", "bw_supplier_id"])).map((r) => [r.name, r.bw_supplier_id]));
   for (const s of data.suppliers) {
-    if (haveSup.has(s.name)) continue;
+    if (haveSup.has(s.name)) {
+      // Suppliers seeded before the id field existed.
+      if (haveSup.get(s.name) !== s.id) await erp.put(`/api/resource/Supplier/${enc(s.name)}`, { bw_supplier_id: s.id });
+      continue;
+    }
     await create("Supplier", {
-      supplier_name: s.name, supplier_group: "Aerospace Suppliers", supplier_type: "Company",
+      supplier_name: s.name, bw_supplier_id: s.id, supplier_group: "Aerospace Suppliers", supplier_type: "Company",
       country: COUNTRY[s.country] ?? s.country, default_currency: "USD",
       supplier_details: `Supplies: ${s.supplies}\nPayment terms: ${s.paymentTerms}\nLocation: ${s.country}`,
       bw_single_source: s.singleSource ? 1 : 0, bw_on_time_delivery_pct: s.onTimeDeliveryPct, bw_quality_ppm: s.qualityPpm, bw_programs: s.programs.join(","),

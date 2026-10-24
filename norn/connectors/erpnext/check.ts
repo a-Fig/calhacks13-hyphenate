@@ -9,7 +9,9 @@
 // --reference  overrides erpnextCheck.reference.
 // The reference is JSON holding the baseline's own arrays (programs, workCenters, items, bom, sourcing, stock,
 // volumePlan, builtAircraft). It may carry more fields (the checks only compare the ones the baseline has) and
-// `suppliers` / `workCenters` as {id, name}: ERPNext identifies both by name, so the reference ids are mapped.
+// Suppliers and work centers are compared by id, exactly as the reference has them: a baseline that names them by their
+// ERPNext names fails. (An earlier version mapped the reference ids to names first; that hid a baseline whose supplier
+// ids never equalled the ids on change requests, which shifted the cost check's correlated draws by about 0.1%.)
 // Needs ERPNEXT_URL, ERPNEXT_API_KEY and ERPNEXT_API_SECRET in the environment or in ENV_FILE (default: the .env at the repo root).
 
 import { readFileSync } from 'node:fs';
@@ -62,12 +64,10 @@ function check(ok: boolean, what: string, detail = '') {
 }
 /** A check that passes when `diffs` is empty; shows the first few differences. */
 const same = (what: string, n: number, diffs: string[]) => check(diffs.length === 0, `${what}: ${n - diffs.length} of ${n} match`, diffs.slice(0, 3).join('; '));
-const near = (a: number | undefined, c: number | undefined, tol = 1e-6) => Math.abs((a ?? 0) - (c ?? 0)) <= tol;
+const near = (a: number | undefined, c: number | undefined, tol = 1e-9) => Math.abs((a ?? 0) - (c ?? 0)) <= tol;
 
-const supplierName = new Map((ref.suppliers ?? []).map((s) => [s.id, s.name]));
-const centerName = new Map((ref.workCenters ?? []).map((w) => [w.id, w.name ?? w.id]));
-const sup = (id?: string) => (id === undefined ? undefined : supplierName.get(id) ?? id);
-const wc = (id?: string) => (id === undefined ? undefined : centerName.get(id) ?? id);
+const sup = (id?: string) => id;
+const wc = (id?: string) => id;
 
 // ---- counts ---------------------------------------------------------------------------------------
 const monthKey = (r: { month: string; program: string }) => `${r.month}|${r.program}`;
@@ -92,7 +92,7 @@ const items = new Map(b.items.map((i) => [i.code, i]));
     if (!i) { diffs.push(`${r.code} missing`); continue; }
     const bad = [
       i.name !== r.name && 'name', i.rev !== r.rev && 'rev', i.makeBuy !== r.makeBuy && 'makeBuy', i.status !== r.status && 'status',
-      !near(i.standardCost, r.standardCost, 0.005) && `standardCost ${i.standardCost} vs ${r.standardCost}`,
+      !near(i.standardCost, r.standardCost) && `standardCost ${i.standardCost} vs ${r.standardCost}`,
       i.defaultSupplier !== sup(r.defaultSupplier) && 'defaultSupplier', !near(i.laborHours, r.laborHours) && 'laborHours', i.workCenter !== wc(r.workCenter) && 'workCenter',
     ].filter(Boolean);
     if (bad.length) diffs.push(`${r.code} ${bad.join(', ')}`);
@@ -119,7 +119,7 @@ const items = new Map(b.items.map((i) => [i.code, i]));
     if (!s) { diffs.push(`${r.item}/${r.supplier} missing`); continue; }
     const bad = [
       s.primary !== r.primary && 'primary', s.qualified !== r.qualified && 'qualified', !near(s.allocation, r.allocation) && 'allocation',
-      ...(['p10', 'p50', 'p90'] as const).flatMap((q) => [!near(s.unitPrice[q], r.unitPrice[q], 0.005) && `price ${q}`, !near(s.leadTimeWeeks[q], r.leadTimeWeeks[q]) && `weeks ${q}`]),
+      ...(['p10', 'p50', 'p90'] as const).flatMap((q) => [!near(s.unitPrice[q], r.unitPrice[q]) && `price ${q}`, !near(s.leadTimeWeeks[q], r.leadTimeWeeks[q]) && `weeks ${q}`]),
     ].filter(Boolean);
     if (bad.length) diffs.push(`${r.item}/${r.supplier} ${bad.join(', ')}`);
   }
