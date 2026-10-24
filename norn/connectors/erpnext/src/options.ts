@@ -61,6 +61,10 @@ export interface CustomFieldNames {
     /** The company's own PO number, when ERPNext's differs (history reads only). */
     externalId?: string;
   };
+  /** Ids other systems use for work centers, held on the Workstation. A workstation without a value keeps its name. */
+  workCenter?: {
+    externalId?: string;
+  };
 }
 
 /** Where the volume plan and built aircraft come from when ERPNext holds none of them. */

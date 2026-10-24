@@ -4,7 +4,7 @@ const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const page = await (await browser.newContext()).newPage();
 page.on('console', m => { if (m.type() === 'error') console.log('[console.error]', m.text()); });
 page.on('pageerror', e => console.log('[pageerror]', e.message));
-await page.goto('http://127.0.0.1:5173/?as=Smoke');
+await page.goto('http://127.0.0.1:5173/spike?as=Smoke');
 await page.waitForSelector('[data-testid="conn"][data-status="connected"]', { timeout: 15000 });
 await page.waitForSelector('[data-testid="ecr-1"]', { timeout: 15000 });
 await page.click('[data-testid="ecr-1"]');
