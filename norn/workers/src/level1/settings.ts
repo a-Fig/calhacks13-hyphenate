@@ -2,7 +2,7 @@
 // that works on a laptop next to a local SpacetimeDB.
 
 export interface Level1Settings {
-  /** The runner role and the `role` of every agent_event row these jobs write. */
+  /** The runner role and the `role` of every agent_event row these jobs write. Norn's gate lets a job post statements only up to the level its role name starts with (`level1-`). */
   role: string;
   /** The model for Level 1 sessions. */
   model: string;
@@ -34,7 +34,7 @@ const num = (v: string | undefined, d: number) => {
 export function settingsFromEnv(env: NodeJS.ProcessEnv = process.env): Level1Settings {
   const timeoutMs = num(env.NORN_L1_TIMEOUT_MS, 240_000);
   return {
-    role: 'level1',
+    role: 'level1-statement',
     model: env.NORN_L1_MODEL || 'claude-haiku-5-5',
     maxTurns: num(env.NORN_L1_MAX_TURNS, 12),
     timeoutMs,

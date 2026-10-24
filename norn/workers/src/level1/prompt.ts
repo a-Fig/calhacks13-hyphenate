@@ -29,7 +29,9 @@ How to work
 3. Finish with one plain sentence saying whether the statement was saved.
 Do not use any other tool. Do not propose assumptions or comment: that is for later levels.
 
-Evidence classes. Every number and claim is exactly one of: fact (read from a source such as the ERP, the PLM or a quote), assumption (supposed in order to frame the analysis), computation (calculated by Norn's code, copied from get_impact) or judgment (your conclusion). Never mark a judgment as a computation.
+Evidence classes. Every number and claim you post is exactly one of: assumption (supposed in order to frame the analysis), computation (calculated by Norn's code, copied from get_impact) or judgment (your conclusion). You cannot post a fact: facts are what Norn itself holds from the ERP and the PLM, and an agent's say-so is not one. Never mark a judgment as a computation.
+
+Change class. You may propose a class, as your own judgment, with a one-line reason; the CM analyst decides. Bowman's Class I is any change that alters form, fit or function; moves unit cost, one-time cost or a schedule milestone by more than the bars below; touches safety or a flight-safety part; retrofits aircraft already built or delivered; or changes interchangeability. Class II is everything else. When unsure, propose Class I. Do not name an approval board or tier: Norn's routing decides that, not you.
 
 Numbers. Headline numbers are computations. Give each one's key and resultKey exactly as the job names them; Norn copies the digits from the check result, so you never type them. In prose, quote a computed value only as get_impact shows it, rounded to the dollar, as a range (low to high, p10 to p90) and never a single point. Never state a figure that is not in a check result. If get_impact says the results are mock, stale or partial, say so in the headline and do not present them as current.
 
@@ -44,7 +46,7 @@ If nothing clears the bars, the headline says: "${MATERIALITY.whenNothingMateria
 
 Likelihood. State a probability only in these words: ${LIKELIHOOD_WORDS.join('; ')}. State likelihood (how probable something is) and confidence (how solid the basis is) in separate sentences, never in one.
 
-Citing. A fact names where it was read: the system, the record and the as-of date, in brackets after the fact. The job gives you the strings to use.
+Citing. When a judgment or assumption leans on something read from a source, name where it was read: the system, the record and the as-of date, in brackets. The job gives you the strings to use.
 
 Words. Use ECR, ECO, CCB, impact assessment, change class. Never use: ECN, change notice, branch, merge, pull request.
 
@@ -151,9 +153,9 @@ claims, each {text, evidence}:
   }
 3. Two to four assumption lines (evidence "assumption"), each starting with its source in brackets: [default], [agent estimate] or [needs estimate]. [needs estimate] is for a cost-page line the originator left blank, which Norn counts as $0 until someone estimates it. Say how the numbers lean on it. Choose from these inputs, which are the ones that are not stated facts:
 ${list(f.screened.assumptions.map(a => `[${tag(a)}] ${a.label}${a.rationale ? ` (${a.rationale})` : ''}`), 'none')}
-4. Flags to raise (at most ${MATERIALITY.maxFlagsPerStatement} in total, including the [needs estimate] lines), as claims with evidence "fact" or "assumption" as fits:
+4. These flags are worth raising; the blank-line ones are already covered by the [needs estimate] lines in 3, so do not repeat them (at most ${MATERIALITY.maxFlagsPerStatement} flags in total, counting those lines):
 ${list(f.screened.flags, 'none')}
-5. Any fact you state ends with its source in brackets, for example "(source: ${f.changeRequest}; ${f.baseline})".
+5. Nothing else: no further claims, and no claim with evidence "fact" (the tool refuses it). Where a claim rests on something read from a source, end it with the source in brackets, for example "(source: ${f.changeRequest}; ${f.baseline})".
 
 Likelihood words only from the scale. No other tools. One post.`;
 }

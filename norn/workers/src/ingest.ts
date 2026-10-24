@@ -2,7 +2,7 @@
 // Norn through ingest_ecr, which opens the ECR or records its new revision and re-checks it in one
 // transaction. Reporting the same ECR twice changes nothing, so the loop simply repeats.
 //   NORN_INGEST_SOURCE=stub NORN_STUB_ECR_DIR=<dir> npm run ingest   (from norn/; each <dir>/*.json is one change request)
-//   NORN_INGEST_SOURCE=plm npm run ingest                            (the PLM connector, once it is merged)
+//   NORN_INGEST_SOURCE=plm npm run ingest                            (the PLM connector: lists once, then watches; level1/ingest-plm.ts)
 // NORN_INGEST_POLL_MS sets the interval (default 5000).
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -82,16 +82,21 @@ export function sourceFromEnv(env: NodeJS.ProcessEnv = process.env): IngestSourc
     if (!env.NORN_STUB_ECR_DIR) throw new Error('NORN_INGEST_SOURCE=stub needs NORN_STUB_ECR_DIR');
     return stubSource(env.NORN_STUB_ECR_DIR);
   }
-  if (kind === 'plm') throw new Error('the PLM source needs the PLM connector (claude/plm-connector), which is not merged into this branch yet; use NORN_INGEST_SOURCE=stub');
+  // The PLM is watched, not listed on every poll: runPlmIngest (level1/ingest-plm.ts) runs it, below.
+  if (kind === 'plm') throw new Error('NORN_INGEST_SOURCE=plm is a watcher rather than a list; the main below hands it to runPlmIngest');
   throw new Error(`unknown NORN_INGEST_SOURCE '${kind}' (expected plm or stub)`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const source = sourceFromEnv();
-  const pollMs = Number(process.env.NORN_INGEST_POLL_MS ?? 5000);
   const name = process.env.WORKER_NAME ?? 'ingest';
   const log = (m: string) => console.log(`${new Date().toISOString().slice(11, 23)} [${name}] ${m}`);
   const { R } = await connect({ kind: 'agent', name, origin: 'norn', spawnedBy: 'Norn' });
+  if ((process.env.NORN_INGEST_SOURCE ?? 'plm') === 'plm') {
+    const { runPlmIngest } = await import('./level1/ingest-plm.ts');
+    await runPlmIngest(R, log); // never returns
+  }
+  const source = sourceFromEnv();
+  const pollMs = Number(process.env.NORN_INGEST_POLL_MS ?? 5000);
   log(`ingesting from ${source.name}${source.name === 'stub' ? ' (a test feed, not the PLM)' : ''}, every ${pollMs} ms`);
   const sent = new Map<string, string>();
   for (;;) {

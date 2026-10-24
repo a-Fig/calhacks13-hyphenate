@@ -18,7 +18,7 @@ import type { DbConnection } from '@norn/bindings';
 import { connect, subscribe } from '../connect.ts';
 import { provenanceOf, type Inputs } from '../impact.ts';
 import { alreadyPublished, statementToPlmFields, type Formatted, type Provenance, type StatementDoc } from './format.ts';
-import { connectionFromEnv, plmFromConnection, type PlmApi } from './plm.ts';
+import { plmFromConnector, plmOptionsFromEnv, type PlmApi } from './plm.ts';
 import type { EcrRef } from './routing.ts';
 import { settingsFromEnv } from './settings.ts';
 
@@ -123,7 +123,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const log = (m: string) => console.log(`${new Date().toISOString().slice(11, 23)} [${name}] ${m}`);
   const settings = settingsFromEnv();
   const only = (process.env.NORN_PUBLISH_ECRS ?? '').split(',').map(s => s.trim()).filter(Boolean);
-  const plm = plmFromConnection(connectionFromEnv());
+  const plm = plmFromConnector(await plmOptionsFromEnv());
   const { conn } = await connect({ kind: 'agent', name, origin: 'norn', spawnedBy: 'Norn' });
   await subscribe(conn, [
     'SELECT * FROM pull_request',

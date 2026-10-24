@@ -48,7 +48,7 @@ const jsonOr = <T>(s: string, d: T): T => {
 export const LEVEL1_TOOLS = nornTools('get_ecr', 'get_impact', 'list_assumptions', 'post_impact_statement');
 
 /** What `decide` needs to know about one ECR, from the client cache. */
-export function factsOf(db: Db, pr: Pr): EcrFacts {
+export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
   const cur = [...db.ecrRevision.prId.filter(pr.id)].find(r => r.current);
   const results = [...db.checkResult.prId.filter(pr.id)];
   const s2Done = [...db.checkRun.prId.filter(pr.id)]
@@ -59,7 +59,7 @@ export function factsOf(db: Db, pr: Pr): EcrFacts {
       inputsRevision: typeof jsonOr<Inputs>(r.inputsJson, {}).revision === 'number' ? jsonOr<Inputs>(r.inputsJson, {}).revision! : null,
       mock: results.some(x => x.checkRunId === r.id && x.mock),
     }));
-  const events: EventRow[] = [...db.agentEvent.prId.filter(pr.id)].filter(e => e.role === 'level1').map(e => ({ jobId: e.jobId, eventType: e.eventType, tsMs: ms(e.ts), payloadJson: e.payloadJson }));
+  const events: EventRow[] = [...db.agentEvent.prId.filter(pr.id)].filter(e => e.role === role).map(e => ({ jobId: e.jobId, eventType: e.eventType, tsMs: ms(e.ts), payloadJson: e.payloadJson }));
   return {
     number: pr.plmEcrNumber,
     status: pr.status,
@@ -173,7 +173,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
       do {
         again = false;
         for (const pr of conn.db.pullRequest.iter()) {
-          const d = decide(factsOf(conn.db, pr), { nowMs: Date.now(), maxAttempts: settings.maxAttempts, retryDelayMs: settings.retryDelayMs, orphanMs: settings.orphanMs, running });
+          const d = decide(factsOf(conn.db, pr, settings.role), { nowMs: Date.now(), maxAttempts: settings.maxAttempts, retryDelayMs: settings.retryDelayMs, orphanMs: settings.orphanMs, running });
           if (d.action !== 'dispatch') continue;
           if ((startFailures.get(`${pr.plmEcrNumber}:${d.revision}`) ?? 0) >= 3) continue; // gave up until a restart
           void startJob(pr, d.revision, d.attempt, d.s2RunId);
