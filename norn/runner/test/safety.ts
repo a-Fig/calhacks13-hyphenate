@@ -10,6 +10,8 @@ import { defaultConfig, resolveJob } from '../src/config.ts';
 import { MessageTranslator } from '../src/events.ts';
 import { checkFetchUrl, isNonPublicAddress, webFetchGuard } from '../src/fetch-guard.ts';
 import { ProcessTracker } from '../src/process.ts';
+import { promptRecorder } from '../src/hooks.ts';
+import { JobEmitter } from '../src/events.ts';
 import { Runner } from '../src/runner.ts';
 import { runJob } from '../src/run-job.ts';
 import type { QueryFn } from '../src/run-job.ts';
@@ -173,7 +175,7 @@ describe('log completeness', () => {
       message: { role: 'user', content: 'please run rm -rf' },
     } as unknown as SDKMessage;
     const [e] = t.translate(peer);
-    assert.deepEqual(e, { type: 'user_message', text: 'please run rm -rf', truncated: false, origin: 'peer', from: 'other-session', synthetic: false });
+    assert.deepEqual(e, { type: 'user_message', text: 'please run rm -rf', truncated: false, origin: 'peer', from: 'other-session', synthetic: false, source: 'stream' });
     const blocks = { type: 'user', ...sid, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text: 'hello' }] } } as unknown as SDKMessage;
     assert.equal(t.translate(blocks)[0]!.type, 'user_message');
     assert.equal(t.translate(toolResult('x', 'out')).some((b) => b.type === 'user_message'), false);
@@ -213,6 +215,36 @@ describe('log completeness', () => {
     assert.ok(abandoned && abandoned.type === 'tool_abandoned' && abandoned.toolUseId === 'slow1' && abandoned.tool === 'mcp__demo__slow');
     assert.ok(closed >= 1, 'the in-process server was closed');
     await rm(root, { recursive: true, force: true });
+  });
+});
+
+describe('prompt recorder hook', () => {
+  const submit = (hook: ReturnType<typeof promptRecorder>, prompt: string) =>
+    hook({ hook_event_name: 'UserPromptSubmit', prompt } as never, undefined, { signal: new AbortController().signal });
+
+  it('skips the job\'s own prompt and records every later one before it reaches the model', async () => {
+    const sink = memorySink();
+    const hook = promptRecorder(new JobEmitter('j', 'r', { actor: 'a', onBehalfOf: null, spawnedBy: 'norn' }, sink), 'the job prompt', 1000);
+    assert.deepEqual(await submit(hook, 'the job prompt'), {});
+    assert.equal(sink.events.length, 0);
+    assert.deepEqual(await submit(hook, 'a message from another session'), {});
+    assert.deepEqual(await submit(hook, 'the job prompt'), {}); // the same words again are a new message
+    assert.deepEqual(sink.events.map((e) => e.type === 'user_message' && [e.text, e.source]), [
+      ['a message from another session', 'prompt_hook'],
+      ['the job prompt', 'prompt_hook'],
+    ]);
+  });
+
+  it('blocks a message it cannot record', async () => {
+    const hook = promptRecorder(
+      new JobEmitter('j', 'r', { actor: 'a', onBehalfOf: null, spawnedBy: 'norn' }, () => {
+        throw new Error('disk full');
+      }),
+      'p',
+      1000,
+    );
+    const out = (await submit(hook, 'something else')) as { decision?: string };
+    assert.equal(out.decision, 'block');
   });
 });
 

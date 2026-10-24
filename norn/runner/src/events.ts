@@ -296,6 +296,7 @@ export class MessageTranslator {
             origin: origin?.kind ?? null,
             from: origin?.kind === 'peer' ? (origin.name ?? origin.from) : origin?.kind === 'channel' ? origin.server : null,
             synthetic: msg.isSynthetic === true,
+            source: 'stream',
           });
         }
         break;
@@ -359,7 +360,11 @@ export class MessageTranslator {
         break;
       }
       default:
-        out.push({ type: 'sdk_notice', messageType: msg.type, subtype: 'subtype' in msg ? String(msg.subtype) : null });
+        out.push({
+          type: 'sdk_notice',
+          messageType: msg.type,
+          subtype: 'subtype' in msg ? String(msg.subtype) : 'state' in msg ? String((msg as { state: unknown }).state) : null,
+        });
     }
     return out;
   }

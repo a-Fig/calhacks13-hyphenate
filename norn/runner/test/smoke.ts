@@ -1,7 +1,9 @@
 // Live smoke test: real Claude Code sessions on the laptop's login, Haiku, short prompts.
 // Group "core": four sessions, a few turns each (six with the optional memory pair).
 // Group "stop": two sessions that are cut off mid-tool-call, by timeout and by cancel.
-// `npm run smoke` runs both; `npm run smoke -- stop` runs one.
+// Group "safety": the review fixes (smoke-safety.ts): env, AGENTS.md, inbound messages, WebFetch,
+// reads outside the work directory.
+// `npm run smoke` runs all three; `npm run smoke -- stop` runs one.
 //
 //   S1 level1-writeup  allowed MCP tool + a tool that is attached but not allowed + a request to
 //                      use Bash + a question about a CLAUDE.md that sits above the job's directory
@@ -26,6 +28,7 @@ import { CHEAP_MODEL, WEB_TOOLS } from '../src/config.ts';
 import { Runner } from '../src/runner.ts';
 import { runJob } from '../src/run-job.ts';
 import { jsonlFileSink, memorySink, teeSink } from '../src/sinks.ts';
+import { safety } from './smoke-safety.ts';
 import type { JobResult, JobSpec, NornEvent } from '../src/types.ts';
 
 const smokeRoot = join(tmpdir(), `norn-smoke-${Date.now()}`);
@@ -186,6 +189,7 @@ async function core(): Promise<JobResult[]> {
     e1.length > 0 && e1.every((e, i) => e.seq === i && e.jobId === 'smoke-l1' && e.identity.actor === s1.identity.actor && e.identity.onBehalfOf === 'person:tyler' && e.identity.spawnedBy === 'norn') && e1[0]!.type === 'job_queued' && e1.at(-1)!.type === 'job_finished',
     `${e1.length} events`,
   );
+  check('1e a normal run logs no user_message: the job prompt is in job_started, not echoed', of('smoke-l1', 'user_message').length === 0 && of('smoke-research', 'user_message').length === 0);
   const e2 = eventsOf('smoke-research');
   check('1d S2 events carry S2 identity, not S1 (spawnedBy is the parent job)', e2.length > 0 && e2.every((e) => e.identity.actor === s2.identity.actor && e.identity.spawnedBy === 'smoke-l1' && e.identity.onBehalfOf === null));
 
@@ -237,7 +241,7 @@ async function core(): Promise<JobResult[]> {
   // Web access for a research role, and clean outcomes.
   const fetchCall = of('smoke-research', 'tool_call').find((e) => e.tool === 'WebFetch');
   check('5 researcher used the web', !!fetchCall && r2.status === 'succeeded' && /example domain/i.test(r2.result ?? ''), `answer=${JSON.stringify(r2.result?.slice(0, 60))}`);
-  check('6 all core sessions ended cleanly', sessions.every((r) => r.status === 'succeeded'), sessions.map((r) => r.status).join(','));
+  check('6 all core sessions ended cleanly and their processes have exited', sessions.every((r) => r.status === 'succeeded' && processGone(r)), sessions.map((r) => `${r.status}/${r.processExit}`).join(','));
   return sessions;
 }
 
@@ -246,12 +250,23 @@ async function stop(): Promise<JobResult[]> {
   const workRoot = join(smokeRoot, 'jobs-stop');
   await mkdir(workRoot, { recursive: true });
   // A fresh server per session: one in-process server serves one session at a time.
-  const slowServer = () =>
+  // The handler honours its signal, as Norn's real tools should; `abortedAt` records when it fired.
+  const abortedAt: Record<string, number> = {};
+  const slowServer = (key: string) =>
     createSdkMcpServer({
       name: 'slow',
       tools: [
-        tool('slow_op', 'A slow operation. Call it once before you answer.', {}, async () => {
-          await new Promise((resolve) => setTimeout(resolve, 60_000).unref());
+        tool('slow_op', 'A slow operation. Call it once before you answer.', {}, async (_args, extra) => {
+          const signal = (extra as { signal?: AbortSignal } | undefined)?.signal;
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, 60_000);
+            timer.unref();
+            signal?.addEventListener('abort', () => {
+              abortedAt[key] = Date.now();
+              clearTimeout(timer);
+              resolve();
+            });
+          });
           return { content: [{ type: 'text', text: 'done' }] };
         }),
       ],
@@ -259,8 +274,8 @@ async function stop(): Promise<JobResult[]> {
   const base = { ...common, maxTurns: 4, allowedTools: ['mcp__slow__slow_op'], prompt: 'Call the slow_op tool, then reply with the word done.' };
   const timeoutMs = 14_000;
   const runner = new Runner({ sink, config: { concurrency: 2, workRoot } });
-  const ht = runner.submit({ ...base, id: 'smoke-timeout', role: 'post-check', timeoutMs, mcpServers: { slow: slowServer() }, identity: { actor: 'agent:norn/post-check/t1', onBehalfOf: null, spawnedBy: 'norn' } });
-  const hc = runner.submit({ ...base, id: 'smoke-cancel', role: 'post-check', mcpServers: { slow: slowServer() }, identity: { actor: 'agent:norn/post-check/t2', onBehalfOf: null, spawnedBy: 'norn' } });
+  const ht = runner.submit({ ...base, id: 'smoke-timeout', role: 'post-check', timeoutMs, mcpServers: { slow: slowServer('smoke-timeout') }, identity: { actor: 'agent:norn/post-check/t1', onBehalfOf: null, spawnedBy: 'norn' } });
+  const hc = runner.submit({ ...base, id: 'smoke-cancel', role: 'post-check', mcpServers: { slow: slowServer('smoke-cancel') }, identity: { actor: 'agent:norn/post-check/t2', onBehalfOf: null, spawnedBy: 'norn' } });
   // Cancel the second session as soon as it is inside the slow call.
   let cancelledAt = 0;
   const watcher = setInterval(() => {
@@ -287,9 +302,24 @@ async function stop(): Promise<JobResult[]> {
       const lag = done ? t(done) - cancelledAt : Infinity;
       check('7b cancel stops a session stuck in a tool call', res.status === 'cancelled' && res.error === null && stoppedMidCall && lag < 5000, `status=${res.status} stoppedMidCall=${stoppedMidCall} cancelToFinished=${lag}ms`);
     }
-    check(`7${label === 'timeout' ? 'c' : 'd'} ${label}: the Claude Code process has exited (its work directory could be removed) and job_finished is last`, gone && eventsOf(id).at(-1)?.type === 'job_finished', `workDirGone=${gone}`);
+    check(`7${label === 'timeout' ? 'c' : 'd'} ${label}: the Claude Code process has exited (its work directory could be removed) and job_finished is last`, gone && eventsOf(id).at(-1)?.type === 'job_finished' && processGone(res), `workDirGone=${gone} processExit=${res.processExit} pid=${res.pid}`);
+    const abandoned = of(id, 'tool_abandoned')[0];
+    const signalLag = done && abortedAt[id] !== undefined ? abortedAt[id]! - t(done) : Infinity;
+    check(`7${label === 'timeout' ? 'e' : 'f'} ${label}: the open call is closed in the log (tool_abandoned before job_finished) and the handler's signal fired`, !!abandoned && !!call && abandoned.toolUseId === call.toolUseId && !!done && abandoned.seq < done.seq && signalLag < 5000, `abandoned=${!!abandoned} handlerSignalAborted=${abortedAt[id] !== undefined} lagAfterFinished=${signalLag}ms`);
   }
   return [rt, rx];
+}
+
+/** The Claude Code process of a finished job is not running any more. */
+function processGone(r: JobResult): boolean {
+  if (r.processExit === 'leaked') return false;
+  if (r.pid === null) return r.processExit === 'none';
+  try {
+    process.kill(r.pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 function report(sessions: JobResult[]): void {
@@ -302,10 +332,12 @@ function report(sessions: JobResult[]): void {
 async function main(): Promise<void> {
   process.stdout.write(`event log: ${logPath}\nmodel: ${CHEAP_MODEL}\n\n`);
   const groups = process.argv.slice(2);
-  const want = (g: string) => groups.length === 0 || groups.includes(g);
+  const want = (g: string) => groups.length === 0 || groups.some((x) => x === g || x.startsWith(`${g}:`));
+  const safetyParts = groups.filter((x) => x.startsWith('safety:')).map((x) => x.slice('safety:'.length));
   const sessions: JobResult[] = [];
   if (want('core')) sessions.push(...(await core()));
   if (want('stop')) sessions.push(...(await stop()));
+  if (want('safety')) sessions.push(...(await safety({ sink, events: memory.events, smokeRoot, common, check, report, processGone }, groups.includes('safety') || safetyParts.length === 0 ? null : new Set(safetyParts))));
   await log.close();
 
   const turns = sessions.reduce((n, r) => n + r.numTurns, 0);

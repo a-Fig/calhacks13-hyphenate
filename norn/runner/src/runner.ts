@@ -133,7 +133,7 @@ export class Runner {
   private async finishUnstarted(entry: Entry): Promise<void> {
     const now = new Date().toISOString();
     try {
-      await entry.emitter.emit({ type: 'job_finished', status: 'cancelled', error: null, durationMs: 0, numTurns: 0 });
+      await entry.emitter.emit({ type: 'job_finished', status: 'cancelled', error: null, durationMs: 0, numTurns: 0, processExit: 'none', pid: null });
     } catch {
       // The sink is failing; the cancelled result still goes back to the caller.
     }
@@ -156,6 +156,8 @@ export class Runner {
       usedOverage: false,
       permissionDenials: [],
       eventCount: entry.emitter.count,
+      processExit: 'none',
+      pid: null,
     });
     if (this.running === 0 && this.queue.length === 0) {
       for (const resolve of this.idleWaiters.splice(0)) resolve();
@@ -182,6 +184,8 @@ export class Runner {
       usedOverage: false,
       permissionDenials: [],
       eventCount: entry.emitter.count,
+      processExit: 'none',
+      pid: null,
     };
   }
 }

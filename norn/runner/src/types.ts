@@ -135,7 +135,16 @@ export type EventBody =
    * A user-role message that arrived mid-session and is not a tool result: a message from another
    * session, a channel, or the CLI itself. The job's own prompt is in `job_started`, not here.
    */
-  | { type: 'user_message'; text: string; truncated: boolean; origin: string | null; from: string | null; synthetic: boolean }
+  | {
+      type: 'user_message';
+      text: string;
+      truncated: boolean;
+      origin: string | null;
+      from: string | null;
+      synthetic: boolean;
+      /** `stream`: the SDK message stream carried it. `prompt_hook`: recorded just before it reached the model. */
+      source: 'stream' | 'prompt_hook';
+    }
   | { type: 'tool_call'; toolUseId: string; tool: string; input: unknown; parentToolUseId: string | null }
   | {
       type: 'tool_result';
@@ -194,10 +203,16 @@ export type EventBody =
       error: JobError | null;
       durationMs: number;
       numTurns: number;
+      /** Whether the Claude Code process had exited when the job was reported finished, or had to be killed. */
+      processExit: ProcessExit;
+      pid: number | null;
     };
 
 export type NornEvent = EventBase & EventBody;
 export type EventType = EventBody['type'];
+
+/** What became of the Claude Code process: never started, exited by itself, had to be killed, or survived a kill. */
+export type ProcessExit = 'none' | 'exited' | 'killed' | 'leaked';
 
 /** Receives every event of every job, in order. May be async; the runner waits for it. */
 export type EventSink = (event: NornEvent) => void | Promise<void>;
@@ -256,4 +271,6 @@ export interface JobResult {
   usedOverage: boolean;
   permissionDenials: PermissionDenial[];
   eventCount: number;
+  processExit: ProcessExit;
+  pid: number | null;
 }

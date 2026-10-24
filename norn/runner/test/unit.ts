@@ -336,7 +336,7 @@ describe('runJob with a scripted session', () => {
 describe('Runner queue', () => {
   const fakeResult = (spec: JobSpec): JobResult => ({
     jobId: spec.id, role: spec.role, identity: spec.identity, status: 'succeeded', result: 'ok', error: null, sessionId: null,
-    model: 'm', numTurns: 1, durationMs: 1, startedAt: '', finishedAt: '', usage: null, estimatedCostUsd: null, usedOverage: false, permissionDenials: [], eventCount: 0,
+    model: 'm', numTurns: 1, durationMs: 1, startedAt: '', finishedAt: '', usage: null, estimatedCostUsd: null, usedOverage: false, permissionDenials: [], eventCount: 0, processExit: 'none', pid: null,
   });
 
   it('never runs more sessions than the limit, and starts them in submission order', async () => {

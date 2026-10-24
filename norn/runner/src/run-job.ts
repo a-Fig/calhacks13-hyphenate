@@ -5,7 +5,7 @@ import type { McpServerConfig, Options, SDKMessage } from '@anthropic-ai/claude-
 import { classifyFailure, overageStopError, scrub } from './classify.ts';
 import { resolveConfig, resolveJob } from './config.ts';
 import { JobEmitter, MessageTranslator, SinkError, usageOf } from './events.ts';
-import { webFetchGuard } from './fetch-guard.ts';
+import { buildJobHooks } from './hooks.ts';
 import { ProcessTracker } from './process.ts';
 import { buildSdkOptions, buildSessionEnv, builtinToolsOf, envNames } from './session.ts';
 import type { EventSink, JobError, JobResult, JobSpec, JobStatus, RunnerConfig } from './types.ts';
@@ -26,6 +26,8 @@ export interface RunJobOptions {
   env?: NodeJS.ProcessEnv;
   /** Replaces the SDK's `query()`. For tests. */
   queryFn?: QueryFn;
+  /** Sees every raw SDK message before it is translated. For tests and debugging; must not throw. */
+  onMessage?: (message: SDKMessage) => void;
   /** Merged over the options built from the spec. For tests that need a looser session; never for real jobs. */
   sdkOptionsOverride?: Partial<Options>;
 }
@@ -107,11 +109,12 @@ export async function runJob(spec: JobSpec, opts: RunJobOptions): Promise<JobRes
         abortController: abort,
         env: buildSessionEnv(opts.env ?? process.env),
         spawnClaudeCodeProcess: tracker.spawner,
-        hooks: {
-          PreToolUse: [
-            { matcher: 'WebFetch', timeout: 20, hooks: [webFetchGuard((id, reason) => translator.noteHookDenial(id, reason))] },
-          ],
-        },
+        hooks: buildJobHooks({
+          emitter,
+          jobPrompt: job.prompt,
+          maxChars: config.maxEventFieldChars,
+          onFetchDenied: (id, reason) => translator.noteHookDenial(id, reason),
+        }),
       }),
       ...opts.sdkOptionsOverride,
     };
@@ -134,6 +137,7 @@ export async function runJob(spec: JobSpec, opts: RunJobOptions): Promise<JobRes
     for await (const message of q) {
       // Nothing the session says after it was told to stop belongs in the log of what it did.
       if (stopReason) break;
+      opts.onMessage?.(message);
       const bodies = translator.translate(message);
       emitter.sessionId = translator.sessionId;
       for (const b of bodies) await emitter.emit(b);
@@ -213,6 +217,8 @@ export async function runJob(spec: JobSpec, opts: RunJobOptions): Promise<JobRes
       error,
       durationMs: finishedAt.getTime() - startedAt.getTime(),
       numTurns: result?.num_turns ?? 0,
+      processExit: exit,
+      pid: tracker.pid ?? null,
     });
   })();
   recordEnd.catch(() => {});
@@ -250,5 +256,7 @@ export async function runJob(spec: JobSpec, opts: RunJobOptions): Promise<JobRes
     usedOverage: translator.seen.overageUsed || (job.allowOverage === true && translator.seen.overage !== null),
     permissionDenials: (result?.permission_denials ?? []).map((d) => ({ tool: d.tool_name, toolUseId: d.tool_use_id, input: d.tool_input })),
     eventCount: emitter.count,
+    processExit: exit,
+    pid: tracker.pid ?? null,
   };
 }
