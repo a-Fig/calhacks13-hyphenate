@@ -1,0 +1,275 @@
+// readBaseline: the production baseline (the checks library's `Baseline`) read from ERPNext's REST API.
+//
+// One list request per doctype, all in parallel, with `fields` and no page limit. A company's own
+// names (price lists, warehouses, custom fields) come from the options. See NOTES.md for the mapping.
+
+import { createHash } from 'node:crypto';
+import type {
+  Baseline, BomLine, BuiltUnit, Item, ItemCode, Program, Sourcing, StockRow, VolumeRow, WorkCenter,
+} from './baseline.ts';
+import { ErpnextClient } from './client.ts';
+import type { ErpnextOptions, StockLocationKey } from './options.ts';
+
+/** Where a baseline part came from: ERPNext's own records, or the fallback passed in the options. */
+export type PartSource = 'erpnext' | 'fallback' | 'none';
+
+export interface ReadResult {
+  baseline: Baseline;
+  /** The date the baseline is as of (decides which price rows are current). */
+  asOf: string;
+  /** Content hash of the baseline alone (sha256, hex): equal hashes are equal baselines. Cache on this. */
+  hash: string;
+  meta: {
+    /** ISO timestamp of the read. */
+    readAt: string;
+    readMs: number;
+    requests: number;
+    counts: Record<keyof Baseline, number>;
+    sources: { volumePlan: PartSource; builtAircraft: PartSource };
+    /** Things a reader should look at: an item with no current standard cost, a program with no BOM, ... */
+    warnings: string[];
+  };
+}
+
+const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || 0);
+const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+export const today = () => new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD in local time
+
+/** True when a price row's validity window holds the date. Frappe omits null dates. */
+export function validOn(row: { valid_from?: string; valid_upto?: string }, date: string): boolean {
+  return (!row.valid_from || row.valid_from <= date) && (!row.valid_upto || row.valid_upto >= date);
+}
+
+/** JSON with object keys sorted at every depth, so equal data gives equal text. */
+export function canonicalJson(v: unknown): string {
+  const sort = (x: unknown): unknown =>
+    Array.isArray(x) ? x.map(sort)
+    : x && typeof x === 'object' ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => cmp(a, b)).map(([k, val]) => [k, sort(val)]))
+    : x;
+  return JSON.stringify(sort(v));
+}
+export const hashOf = (b: Baseline) => createHash('sha256').update(canonicalJson(b)).digest('hex');
+
+/** Units of each descendant per one unit of `top`, through the BOM lines. The top item itself is left out. */
+export function explodeQty(bom: BomLine[], top: ItemCode): Map<ItemCode, number> {
+  const kids = new Map<ItemCode, BomLine[]>();
+  for (const l of bom) kids.set(l.parent, [...(kids.get(l.parent) ?? []), l]);
+  const out = new Map<ItemCode, number>();
+  const walk = (code: ItemCode, mult: number, path: Set<ItemCode>) => {
+    for (const l of kids.get(code) ?? []) {
+      if (path.has(l.child)) throw new Error(`BOM cycle: ${[...path, l.child].join(' > ')}`);
+      out.set(l.child, (out.get(l.child) ?? 0) + mult * l.qty);
+      walk(l.child, mult * l.qty, new Set([...path, l.child]));
+    }
+  };
+  walk(top, 1, new Set([top]));
+  return out;
+}
+
+export async function readBaseline(opts: ErpnextOptions): Promise<ReadResult> {
+  const t0 = Date.now();
+  const c = new ErpnextClient(opts);
+  const asOf = opts.asOf ?? today();
+  const cf = opts.customFields ?? {};
+  const itemF = cf.item ?? {};
+  const quoteF = cf.quote ?? {};
+  const warnings: string[] = [];
+  const co = ['company', '=', opts.company] as [string, string, unknown];
+
+  const itemFields = ['name', 'item_name', 'item_group', 'disabled', 'is_stock_item', itemF.revision, itemF.status, itemF.programs].filter((f): f is string => !!f);
+  const quoteFields = ['name', 'item_code', 'price_list', 'supplier', 'price_list_rate', 'lead_time_days', 'valid_from', 'valid_upto',
+    quoteF.priceP10, quoteF.priceP90, quoteF.leadWeeksP10, quoteF.leadWeeksP90, quoteF.qualified, quoteF.primary, quoteF.allocation].filter((f): f is string => !!f);
+
+  const [items, itemDefaults, boms, bomItems, bomOps, stations, prices, bins, serials, schedule] = await Promise.all([
+    c.list('Item', { fields: itemFields }),
+    c.list('Item Default', { parent: 'Item', fields: ['parent', 'company', 'default_supplier'] }),
+    c.list('BOM', { filters: [co, ['docstatus', '=', 1], ['is_active', '=', 1], ['is_default', '=', 1]], fields: ['name', 'item', 'quantity'] }),
+    c.list('BOM Item', { parent: 'BOM', filters: [['docstatus', '=', 1]], fields: ['parent', 'item_code', 'stock_qty', 'qty', 'idx'] }),
+    c.list('BOM Operation', { parent: 'BOM', filters: [['docstatus', '=', 1]], fields: ['parent', 'workstation', 'time_in_mins', 'idx'] }),
+    c.list('Workstation', { fields: ['name', 'hour_rate'] }),
+    c.list('Item Price', { filters: [['price_list', 'in', [opts.standardCostPriceList, opts.supplierPriceList]]], fields: quoteFields }),
+    c.list('Bin', { fields: ['item_code', 'warehouse', 'actual_qty', 'ordered_qty'] }),
+    readSerials(c, opts),
+    readSchedule(c, opts),
+  ]);
+
+  // ---- items, programs, BOM -----------------------------------------------------------------
+  const itemRow = new Map<ItemCode, (typeof items)[number]>(items.map((i) => [i.name, i]));
+  const tops = items.filter((i) => i.item_group === opts.programItemGroup);
+
+  const bomOf = new Map<ItemCode, { name: string; quantity: number }>();
+  for (const b of boms) {
+    if (bomOf.has(b.item)) warnings.push(`${b.item} has more than one active default BOM; using ${bomOf.get(b.item)!.name}`);
+    else bomOf.set(b.item, { name: b.name, quantity: num(b.quantity) || 1 });
+  }
+  const bomByName = new Map([...bomOf].map(([item, b]) => [b.name, { item, quantity: b.quantity }]));
+
+  const bom: BomLine[] = [];
+  for (const l of bomItems) {
+    const parent = bomByName.get(l.parent);
+    if (!parent) continue; // a line of an inactive or superseded version
+    bom.push({ parent: parent.item, child: l.item_code, qty: r6(num(l.stock_qty ?? l.qty) / parent.quantity), seq: l.idx });
+  }
+
+  // Labor: the default BOM's operations. Hours per unit; the first operation's workstation is the item's work center.
+  const labor = new Map<ItemCode, { hours: number; workCenter?: string }>();
+  for (const o of [...bomOps].sort((a, b) => a.idx - b.idx)) {
+    const parent = bomByName.get(o.parent);
+    if (!parent) continue;
+    const cur = labor.get(parent.item) ?? { hours: 0 };
+    cur.hours += num(o.time_in_mins) / 60 / parent.quantity;
+    cur.workCenter ??= o.workstation || undefined;
+    labor.set(parent.item, cur);
+  }
+
+  const workCenters: WorkCenter[] = stations.map((w) => ({ id: w.name, laborRatePerHour: r6(num(w.hour_rate)) }));
+
+  // ---- prices: standard cost and supplier quotes ----------------------------------------------
+  const costRow = new Map<ItemCode, (typeof prices)[number]>();
+  for (const p of prices) {
+    if (p.price_list !== opts.standardCostPriceList || !validOn(p, asOf)) continue;
+    const cur = costRow.get(p.item_code);
+    if (!cur || (p.valid_from ?? '') > (cur.valid_from ?? '')) costRow.set(p.item_code, p);
+  }
+  const supplierOf = new Map<ItemCode, string>();
+  for (const d of itemDefaults) if (d.company === opts.company && d.default_supplier && !supplierOf.has(d.parent)) supplierOf.set(d.parent, d.default_supplier);
+
+  const baselineItems: Item[] = items.map((i) => {
+    const code: ItemCode = i.name;
+    const make = bomOf.has(code);
+    const cost = costRow.get(code);
+    if (!cost) warnings.push(`${code} has no ${opts.standardCostPriceList} price valid on ${asOf}`);
+    const status = itemF.status ? (i[itemF.status] === 'proposed' ? 'proposed' : 'released') : i.disabled ? 'proposed' : 'released';
+    const lab = labor.get(code);
+    const item: Item = {
+      code, name: i.item_name, rev: itemF.revision ? String(i[itemF.revision] ?? '') : '', makeBuy: make ? 'make' : 'buy', status,
+      standardCost: r6(num(cost?.price_list_rate)),
+    };
+    const sup = supplierOf.get(code);
+    if (sup) item.defaultSupplier = sup;
+    if (make && lab && lab.hours > 0) {
+      item.laborHours = r6(lab.hours);
+      if (lab.workCenter) item.workCenter = lab.workCenter;
+    }
+    return item;
+  });
+
+  const quoteRows = prices.filter((p) => p.price_list === opts.supplierPriceList && p.supplier && validOn(p, asOf));
+  const seenItem = new Set<ItemCode>();
+  const sourcing: Sourcing[] = quoteRows.map((q) => {
+    const rate = num(q.price_list_rate);
+    const weeks = num(q.lead_time_days) / 7;
+    const first = !seenItem.has(q.item_code);
+    seenItem.add(q.item_code);
+    const primary = quoteF.primary ? !!q[quoteF.primary] : first;
+    return {
+      item: q.item_code, supplier: q.supplier, primary,
+      allocation: r6(quoteF.allocation ? num(q[quoteF.allocation]) : primary ? 1 : 0),
+      unitPrice: { p10: r6(quoteF.priceP10 && q[quoteF.priceP10] != null ? num(q[quoteF.priceP10]) : rate), p50: r6(rate), p90: r6(quoteF.priceP90 && q[quoteF.priceP90] != null ? num(q[quoteF.priceP90]) : rate) },
+      leadTimeWeeks: { p10: r6(quoteF.leadWeeksP10 && q[quoteF.leadWeeksP10] != null ? num(q[quoteF.leadWeeksP10]) : weeks), p50: r6(weeks), p90: r6(quoteF.leadWeeksP90 && q[quoteF.leadWeeksP90] != null ? num(q[quoteF.leadWeeksP90]) : weeks) },
+      qualified: quoteF.qualified ? !!q[quoteF.qualified] : true,
+    };
+  });
+
+  // ---- programs: one per top item -------------------------------------------------------------
+  const programs: Program[] = tops.map((t) => ({
+    id: (itemF.programs ? String(t[itemF.programs] ?? '').split(',')[0].trim() : '') || t.name,
+    name: opts.programName ? opts.programName(t.item_name, t.name) : t.item_name,
+    topItem: t.name,
+  }));
+  const programOfTop = new Map(programs.map((p) => [p.topItem, p.id]));
+  for (const p of programs) if (!bomOf.has(p.topItem)) warnings.push(`program ${p.id}: top item ${p.topItem} has no active default BOM`);
+
+  // ---- built aircraft: Serial Nos of the top items, else the fallback ------------------------------
+  const serialOf = opts.serialNumber ?? ((s: string) => { const m = s.match(/(\d+)\s*$/); return m ? Number(m[1]) : undefined; });
+  let builtAircraft: BuiltUnit[] = [];
+  for (const s of serials) {
+    const program = programOfTop.get(s.item_code);
+    const serial = serialOf(s.serial_no);
+    if (!program || serial === undefined || !s.posting_date) { warnings.push(`Serial No ${s.name} skipped: no program, number or date`); continue; }
+    builtAircraft.push({ program, serial, completed: s.posting_date });
+  }
+  let builtSource: PartSource = builtAircraft.length ? 'erpnext' : 'none';
+  if (!builtAircraft.length && opts.fallback?.builtAircraft) { builtAircraft = opts.fallback.builtAircraft.map((b) => ({ ...b })); builtSource = 'fallback'; }
+  if (builtSource === 'none') warnings.push('no built aircraft in ERPNext (Serial No on the program items) and no fallback given');
+
+  // ---- volume plan: planned quantities of the top items in a Master Production Schedule, else the fallback
+  const months = new Map<string, VolumeRow>();
+  for (const r of schedule) {
+    const program = programOfTop.get(r.item_code);
+    if (!program || !r.delivery_date) continue;
+    const key = `${r.delivery_date.slice(0, 7)}|${program}`;
+    const row = months.get(key) ?? { month: r.delivery_date.slice(0, 7), program, units: 0 };
+    row.units = r6(row.units + num(r.planned_qty));
+    months.set(key, row);
+  }
+  let volumePlan = [...months.values()];
+  let volumeSource: PartSource = volumePlan.length ? 'erpnext' : 'none';
+  if (!volumePlan.length && opts.fallback?.volumePlan) { volumePlan = opts.fallback.volumePlan.map((v) => ({ month: v.month, program: v.program, units: v.units })); volumeSource = 'fallback'; }
+  if (volumeSource === 'none') warnings.push('no volume plan in ERPNext (Master Production Schedule) and no fallback given');
+
+  // ---- stock: bins by warehouse, on order from open POs, in field from built aircraft ---------------
+  const where = opts.warehouses;
+  const at = new Map<ItemCode, Record<StockLocationKey, number> & { ordered: number }>();
+  for (const b of bins) {
+    const row = at.get(b.item_code) ?? { stores: 0, wip: 0, finishedGoods: 0, supplierFinished: 0, ordered: 0 };
+    const loc = where[b.warehouse];
+    if (loc) row[loc] += num(b.actual_qty);
+    row.ordered += num(b.ordered_qty);
+    at.set(b.item_code, row);
+  }
+  const inField = new Map<ItemCode, number>();
+  for (const p of programs) {
+    const built = builtAircraft.filter((b) => b.program === p.id).length;
+    if (!built) continue;
+    for (const [code, q] of explodeQty(bom, p.topItem)) inField.set(code, (inField.get(code) ?? 0) + built * q);
+  }
+  const stock: StockRow[] = items.filter((i) => i.is_stock_item && !i.disabled).map((i) => {
+    const b = at.get(i.name);
+    const supplierFinished = b?.supplierFinished ?? 0;
+    return {
+      item: i.name, stores: r6(b?.stores ?? 0), wip: r6(b?.wip ?? 0), finishedGoods: r6(b?.finishedGoods ?? 0), supplierFinished: r6(supplierFinished),
+      // Quantity at a supplier is finished but still on its open PO, so it is not counted twice.
+      onOrder: r6(Math.max(0, (b?.ordered ?? 0) - supplierFinished)), inField: r6(inField.get(i.name) ?? 0),
+    };
+  });
+
+  // ---- deterministic order, then the hash --------------------------------------------------------------
+  const baseline: Baseline = {
+    programs: programs.sort((a, b) => cmp(a.id, b.id)),
+    workCenters: workCenters.sort((a, b) => cmp(a.id, b.id)),
+    items: baselineItems.sort((a, b) => cmp(a.code, b.code)),
+    bom: bom.sort((a, b) => cmp(a.parent, b.parent) || (a.seq ?? 0) - (b.seq ?? 0) || cmp(a.child, b.child)),
+    sourcing: sourcing.sort((a, b) => cmp(a.item, b.item) || cmp(a.supplier, b.supplier)),
+    stock: stock.sort((a, b) => cmp(a.item, b.item)),
+    volumePlan: volumePlan.sort((a, b) => cmp(a.month, b.month) || cmp(a.program, b.program)),
+    builtAircraft: builtAircraft.sort((a, b) => cmp(a.program, b.program) || a.serial - b.serial),
+  };
+  return {
+    baseline, asOf, hash: hashOf(baseline),
+    meta: {
+      readAt: new Date().toISOString(), readMs: Date.now() - t0, requests: c.requests,
+      counts: Object.fromEntries(Object.entries(baseline).map(([k, v]) => [k, v.length])) as Record<keyof Baseline, number>,
+      sources: { volumePlan: volumeSource, builtAircraft: builtSource }, warnings,
+    },
+  };
+}
+
+/** The planned rows of one Master Production Schedule: the named one, else the company's latest. */
+async function readSchedule(c: ErpnextClient, opts: ErpnextOptions): Promise<{ item_code: string; delivery_date: string; planned_qty: number }[]> {
+  let name = opts.productionSchedule;
+  if (!name) {
+    const [head] = await c.list('Master Production Schedule', { filters: [['company', '=', opts.company]], fields: ['name'], orderBy: 'modified desc', limit: 1 });
+    name = head?.name;
+  }
+  if (!name) return [];
+  return c.list('Master Production Schedule Item', { parent: 'Master Production Schedule', filters: [['parent', '=', name]], fields: ['item_code', 'delivery_date', 'planned_qty'] });
+}
+
+/** Serial Nos of the program top items. ERPNext leaves a Serial No's own item_group empty when it is created by API, so filter on the items. */
+async function readSerials(c: ErpnextClient, opts: ErpnextOptions): Promise<{ name: string; serial_no: string; item_code: string; posting_date?: string }[]> {
+  const tops = await c.list('Item', { filters: [['item_group', '=', opts.programItemGroup]], fields: ['name'] });
+  if (!tops.length) return [];
+  return c.list('Serial No', { filters: [['company', '=', opts.company], ['item_code', 'in', tops.map((t) => t.name)]], fields: ['name', 'serial_no', 'item_code', 'posting_date'] });
+}
