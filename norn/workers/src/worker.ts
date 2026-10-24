@@ -9,7 +9,8 @@
 //   NORN_BASELINE_POLL_MS                          how often to re-read the baseline (default 60000)
 import { BaselineStore, baselineSourceFromEnv } from './baseline.ts';
 import { classify, connect, subscribe, withRetry } from './connect.ts';
-import { impactHandlers } from './impact.ts';
+import { CHECKS_CODE_VERSION } from '../../checks/src/index.ts';
+import { REAL_STAGES, impactHandlers } from './impact.ts';
 import { sleep } from './sim.ts';
 import { AbortedError, FatalRunError, HANDLERS as MOCK_HANDLERS, type Result, type RunCtx } from './stages.ts';
 
@@ -44,7 +45,11 @@ await subscribe(conn, [
   'SELECT * FROM ecr_revision',
   'SELECT * FROM assumption',
   'SELECT * FROM baseline_snapshot',
+  'SELECT * FROM norn_config',
 ]);
+const configured = conn.db.nornConfig.key.find('code_version')?.value ?? 'checks-0.2.0';
+if (configured !== CHECKS_CODE_VERSION)
+  log(`WARNING: norn_config code_version is '${configured}' but the checks library is '${CHECKS_CODE_VERSION}': results of the old library still count as current. Set code_version to '${CHECKS_CODE_VERSION}'.`);
 
 type RunRow = NonNullable<ReturnType<typeof conn.db.checkRun.id.find>>;
 const active = new Map<bigint, number>(); // run id -> attempt we hold (0 while claiming)
@@ -52,10 +57,19 @@ const skipUntil = new Map<bigint, number>();
 let pumping = false;
 let dirty = false;
 
+// A real check needs the baseline its run names. A worker that cannot produce it leaves the run
+// for one that can, instead of failing it for everyone.
+function canServe(r: RunRow): boolean {
+  if (!REAL_STAGES.includes(r.stage)) return true;
+  const inputs = JSON.parse(r.inputsJson) as { revision?: number; erpBaseline?: string };
+  if (inputs.revision === undefined) return true; // no change request: the mock handler
+  return baselines.canProvide(inputs.erpBaseline);
+}
+
 function candidates() {
   const now = Date.now();
   return [...conn.db.checkRun.iter()]
-    .filter(r => r.status === 'queued' && handled.includes(r.stage) && !active.has(r.id) && (skipUntil.get(r.id) ?? 0) <= now)
+    .filter(r => r.status === 'queued' && handled.includes(r.stage) && !active.has(r.id) && (skipUntil.get(r.id) ?? 0) <= now && canServe(r))
     // requested (a person is waiting) before automatic; then oldest first
     .sort((a, b) => Number(a.trigger !== 'requested') - Number(b.trigger !== 'requested') || Number(a.id - b.id));
 }

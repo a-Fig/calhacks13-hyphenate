@@ -22,7 +22,7 @@ export type BaselineRead = {
 
 export type BaselineSource = { kind: 'erp' | 'file'; describe: string; read: () => Promise<BaselineRead> };
 
-const CACHE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '.cache', 'baselines');
+const CACHE_DIR = process.env.NORN_BASELINE_CACHE_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '.cache', 'baselines');
 
 const today = () => new Date().toISOString().slice(0, 10);
 const countsOf = (b: Baseline): Record<string, number> => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0]));
@@ -95,9 +95,17 @@ export class BaselineStore {
   async get(hash: string, log: (msg: string) => void): Promise<Baseline | undefined> {
     const cached = this.mem.get(hash) ?? this.fromDisk(hash);
     if (cached) return cached;
-    if (!this.source) throw new FatalRunError(`baseline ${hash.slice(0, 12)} is not cached on this worker and no baseline source is configured`);
+    // Another worker may have it: return the run to the queue rather than failing it (worker.ts
+    // does not claim such runs in the first place; see canServe).
+    if (!this.source) throw new Error(`baseline ${hash.slice(0, 12)} is not cached on this worker and no baseline source is configured`);
     const r = await this.refresh(log);
     return r.hash === hash ? r.baseline : undefined;
+  }
+
+  /** Whether this worker can produce the baseline with this hash: it has a source, or the baseline is cached. */
+  canProvide(hash: string | undefined): boolean {
+    if (this.source) return true;
+    return hash !== undefined && (this.mem.has(hash) || this.fromDisk(hash) !== undefined);
   }
 
   private put(hash: string, b: Baseline) {

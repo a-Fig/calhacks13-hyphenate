@@ -49,7 +49,8 @@ export function stubSource(dir: string): IngestSource {
 export async function ingestOnce(R: Client['R'], source: IngestSource, sent: Map<string, string>, log: (m: string) => void) {
   const out = { reported: 0, unchanged: 0, failed: 0 };
   for (const it of await source.list()) {
-    // As the source gives it: the checks read arrays in order, so the text is kept as it came.
+    // As the source gives it, so the stored change request reads as the PLM sent it. The digest only
+    // has to be stable for the same source output, which a deterministic connector gives.
     const changeRequestJson = JSON.stringify(it.changeRequest);
     const key = canonicalJson([it.title, it.description, changeRequestJson]);
     if (sent.get(it.plmEcrNumber) === key) {

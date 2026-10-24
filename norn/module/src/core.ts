@@ -72,8 +72,10 @@ export const CONFIG_DEFAULTS: Record<string, string> = {
   deep_review_limit: '2',
   max_attempts: '3',
   lease_default_ms: '15000',
-  // Part of every input hash: bump it when worker logic changes so old results go stale.
-  code_version: 'dev-1',
+  // Part of every input hash: bump it when worker logic changes so old results go stale. It names
+  // the checks library's version (CHECKS_CODE_VERSION in norn/checks), so a new library re-checks
+  // every open ECR; workers warn when the two disagree.
+  code_version: 'checks-0.2.0',
   seed: 'norn-seed-1',
 };
 
@@ -161,7 +163,10 @@ export type StageInputs = {
   // one, the ECR's id stands in for it, so two ECRs never share a hash.
   overlay?: string;
   revision?: number; // code stages: the ecr_revision seq the overlay digest belongs to
+  revisionSource?: string; // code stages: where that change request came from ('plm', or 'stub' for a test feed)
   erpBaseline?: string; // code stages: the hash of the current ERP baseline (baseline_snapshot)
+  erpBaselineSource?: string; // code stages: where that baseline came from ('erp', or 'file' for a test baseline)
+  erpBaselineAsOf?: string; // code stages: the date that baseline is as of
   assumptions?: { id: string; key: string; rev: number }[]; // code stages: the assumptions that feed it
   upstream?: Record<string, string>; // stage -> its hash, for the stages this one reads
 };
@@ -199,8 +204,13 @@ export function stageInfos(ctx: Ctx, pr: Pick<Pr, 'id' | 'baseVersion' | 'title'
       if (rev) {
         inputs.overlay = rev.digest;
         inputs.revision = rev.seq;
+        inputs.revisionSource = rev.source;
       }
-      if (erp) inputs.erpBaseline = erp.hash;
+      if (erp) {
+        inputs.erpBaseline = erp.hash;
+        inputs.erpBaselineSource = erp.source;
+        inputs.erpBaselineAsOf = erp.asOf;
+      }
       inputs.assumptions = assumptions
         .filter(a => a.affects.length === 0 || a.affects.includes(stage))
         .map(a => ({ id: String(a.id), key: a.key, rev: a.rev }))

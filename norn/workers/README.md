@@ -38,10 +38,21 @@ NORN_DB=norn-pipe npm run check:pipeline             # end to end on a scratch d
    - That includes the `detail` row (unit `json`), which holds every input the traces name.
      `get_impact` returns them.
    - An assumption the library can't take is reported in an `assumption_errors` row, not dropped.
+   - The trace names where the baseline and the change request came from (`ERPNext baseline 2c02958e,
+     as of 2026-10-24`, or `file baseline … (not the ERP)`). The run's inputs carry the same:
+     `erpBaselineSource`, `erpBaselineAsOf` and `revisionSource`.
+5. **Workers that can't serve a run.** A worker with no baseline source leaves s1 and s2 runs it
+   has no baseline for to a worker that has one, instead of failing them.
+6. **Code version.** `code_version` (default `checks-0.2.0`) is part of every hash. Set it to the
+   checks library's `CHECKS_CODE_VERSION` when the library changes. The worker warns when the two
+   disagree.
 
-**For whatever waits on the numbers (#42).** Wait for the ECR's current `s2_cost` run to be `done`:
-`inputHash` equal to the module's current hash, or `inputsJson.revision` equal to the current
-`ecr_revision.seq`. Then read that run's `check_result` rows.
+**For whatever waits on the numbers (#42).** Wait for the ECR's newest `s2_cost` run that isn't
+`stale` or `cancelled` to be `done`, then read that run's `check_result` rows. On an open ECR,
+`reconcile` makes every run stale the moment any of its inputs changes: the change request, the
+baseline, an assumption, the seed or the code version. So a run that is `done` and not stale is
+current. A matching `revision` alone isn't enough, because the baseline or an assumption may have
+moved under the same revision.
 - A conflicted ECR still finishes `done`, with `bomDelta.ok: false` in the detail row.
 - `failed` means the run can't succeed, and its `note` says why.
 
@@ -61,6 +72,7 @@ stated:
 | `NORN_ERP_SETTINGS` | worker | A module exporting the company's `erpnext` settings, for example `../bowman/norn-config/erpnext.ts`. The connection comes from `ERPNEXT_URL`, `ERPNEXT_API_KEY` and `ERPNEXT_API_SECRET` (the .env, or `ENV_FILE`). |
 | `NORN_BASELINE_FILE` | worker | A baseline JSON file instead of the ERP, for tests. Recorded with source `file`. |
 | `NORN_BASELINE_POLL_MS` | worker | How often to re-read the baseline. |
+| `NORN_BASELINE_CACHE_DIR` | worker | Where baselines are cached by hash (default `norn/workers/.cache/baselines`). |
 | `NORN_INGEST_SOURCE` | ingest | `plm`, which needs the PLM connector and isn't wired yet, or `stub`. |
 | `NORN_STUB_ECR_DIR` | ingest | For `stub`: a directory of change-request JSON files. A test feed, recorded with source `stub`. |
 | `NORN_DB`, `NORN_URI` | both | The database, and the server (default `ws://127.0.0.1:3000`). |

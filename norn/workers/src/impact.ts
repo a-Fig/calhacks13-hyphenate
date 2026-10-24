@@ -21,13 +21,27 @@ import type { BaselineStore } from './baseline.ts';
 import { AbortedError, FatalRunError, HANDLERS, type Result, type RunCtx } from './stages.ts';
 
 /** What the module puts in a code stage's inputsJson (core.ts StageInputs). */
-type Inputs = {
+export type Inputs = {
   seed?: string;
   overlay?: string;
   revision?: number;
+  revisionSource?: string;
   erpBaseline?: string;
+  erpBaselineSource?: string;
+  erpBaselineAsOf?: string;
   assumptions?: { id: string; key: string; rev: number }[];
 };
+
+/** The stages this file computes for real, on ECRs with a change request. */
+export const REAL_STAGES = ['s1_bom_delta', 's2_cost'];
+
+/** Where the run's baseline and change request came from, as the trace names them. Anything not from the ERP or the PLM says so. */
+export function provenanceOf(i: Inputs) {
+  const hash = i.erpBaseline?.slice(0, 8) ?? '?';
+  const baseline = i.erpBaselineSource === 'erp' ? `ERPNext baseline ${hash}, as of ${i.erpBaselineAsOf}` : `${i.erpBaselineSource ?? 'unknown'} baseline ${hash}, as of ${i.erpBaselineAsOf} (not the ERP)`;
+  const changeRequest = i.revisionSource === 'plm' ? `change request rev ${i.revision} from the PLM` : `change request rev ${i.revision} from ${i.revisionSource ?? 'an unknown source'} (not the PLM)`;
+  return { baseline, changeRequest };
+}
 
 const SOURCES: Source[] = ['given', 'default', 'agent_estimated'];
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
@@ -41,6 +55,14 @@ const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFi
  * may add replacesGiven: true to replace a number someone stated.
  */
 export function toOverride(row: { key: string; distJson: string; source: string; rationale: string }): AssumptionOverride | string {
+  try {
+    return readOverride(row);
+  } catch (e) {
+    return (e as Error).message; // e.g. lognormalFromQuantiles refusing quantiles out of order
+  }
+}
+
+function readOverride(row: { key: string; distJson: string; source: string; rationale: string }): AssumptionOverride | string {
   let o: any;
   try {
     o = JSON.parse(row.distJson);
@@ -123,7 +145,7 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
       if (!p) return HANDLERS.s2_cost!(ctx);
       const { overrides, problems } = assumptionsOf(p.inputs);
       const t0 = Date.now();
-      const r = costCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides });
+      const r = costCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs) });
       const rows = real(costCheckRows(r));
       // Assumptions the library could not be given are reported, never dropped silently.
       if (problems.length) {

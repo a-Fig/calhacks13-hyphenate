@@ -16,8 +16,9 @@ import { fileURLToPath } from 'node:url';
 import { bowman } from '../../../bowman/data/index.ts';
 import { bomDelta, bomDeltaRows, costCheck, costCheckRows, type AssumptionOverride, type Baseline, type ChangeRequest } from '../../checks/src/index.ts';
 import { slug } from '../../checks/src/cost.ts';
+import { hashOf } from '../../connectors/erpnext/src/index.ts';
 import { DB, connect, subscribe } from './connect.ts';
-import { toOverride } from './impact.ts';
+import { provenanceOf, toOverride, type Inputs } from './impact.ts';
 import { ingestOnce, stubSource } from './ingest.ts';
 import { TABLES, kit, recorder, rejects } from './testkit.ts';
 
@@ -55,6 +56,16 @@ const worker = spawn(process.execPath, ['--import', 'tsx', 'src/worker.ts'], {
 });
 worker.stdout.on('data', d => workerLog.push(String(d)));
 worker.stderr.on('data', d => workerLog.push(String(d)));
+// A second worker with no baseline source, as on another machine: it must leave real runs alone.
+const blindLog: string[] = [];
+const blind = spawn(process.execPath, ['--import', 'tsx', 'src/worker.ts'], {
+  cwd: join(here, '..'),
+  // Its own empty cache: on this machine it would otherwise read the baselines the first worker cached.
+  env: { ...process.env, NORN_DB: DB, WORKER_NAME: `pipe-blind-${stamp}`, NORN_BASELINE_FILE: '', NORN_ERP_SETTINGS: '', NORN_BASELINE_CACHE_DIR: join(tmp, 'blind-cache') },
+  stdio: ['ignore', 'pipe', 'pipe'],
+});
+blind.stdout.on('data', d => blindLog.push(String(d)));
+blind.stderr.on('data', d => blindLog.push(String(d)));
 
 const A = await connect({ kind: 'agent', name: 'check-pipeline', origin: 'norn', spawnedBy: 'Norn' }, { persistToken: false, quiet: true });
 await subscribe(A.conn, [...TABLES, 'SELECT * FROM ecr_revision', 'SELECT * FROM baseline_snapshot']);
@@ -80,8 +91,17 @@ const firstDiff = (stored: Row[], want: Row[]) => {
   const i = want.findIndex((w, k) => JSON.stringify(w) !== JSON.stringify({ key: stored[k]!.key, label: stored[k]!.label, unit: stored[k]!.unit, p10: stored[k]!.p10, p50: stored[k]!.p50, p90: stored[k]!.p90, detailJson: stored[k]!.detailJson }));
   return i < 0 ? '' : `first difference at ${want[i]!.key}`;
 };
-/** What the library gives for this ECR, as the worker reads it (the change request round-trips through JSON). */
-const expectS2 = (e: object, b: Baseline, assumptions: AssumptionOverride[] = []) => costCheckRows(costCheck(b, JSON.parse(JSON.stringify(e)), { seed: SEED, assumptions }));
+/**
+ * What the library gives for this ECR on this run's inputs, as the worker reads them: the change
+ * request round-trips through JSON, and the assumptions are the ones the run names (the baseline's
+ * included, whatever else has been recorded on this database).
+ */
+const assumptionsNamed = (runInputs: string): AssumptionOverride[] =>
+  ((JSON.parse(runInputs) as Inputs).assumptions ?? [])
+    .map(a => toOverride(db.assumption.id.find(BigInt(a.id))!))
+    .filter((o): o is AssumptionOverride => typeof o !== 'string');
+const expectS2 = (runInputs: string, e: object, b: Baseline) =>
+  costCheckRows(costCheck(b, JSON.parse(JSON.stringify(e)), { seed: SEED, assumptions: assumptionsNamed(runInputs), provenance: provenanceOf(JSON.parse(runInputs) as Inputs) }));
 const expectS1 = (e: object, b: Baseline) => bomDeltaRows(bomDelta(b, JSON.parse(JSON.stringify(e))));
 const source = stubSource(ecrDir);
 const sent = new Map<string, string>();
@@ -89,7 +109,8 @@ const log = (m: string) => console.log(`  ingest: ${m}`);
 
 try {
   // ---- the worker records the baseline it read --------------------------------------------------
-  const snap = await until(() => currentBaseline(), 30000, 'the worker to record a baseline');
+  // This run's file, not a baseline an earlier run left current.
+  const snap = await until(() => currentBaseline()?.hash === hashOf(baseline) && currentBaseline(), 30000, 'the worker to record this baseline');
   check('the worker reads the baseline and records it by hash, with its source and counts', snap.source === 'file' && snap.asOf === '2026-10-24' && JSON.parse(snap.countsJson).items === baseline.items.length, `${snap.hash.slice(0, 12)} ${snap.source} ${snap.countsJson}`);
 
   // ---- ingest: two ECRs from the source become Norn ECRs ------------------------------------------
@@ -104,13 +125,16 @@ try {
   const s2 = await doneRun(p417.id, 's2_cost');
   const inputs = JSON.parse(s2.inputsJson);
   check('the runs name the change request revision, the baseline hash and the seed they computed on', inputs.revision === 1 && inputs.overlay === rev1?.digest && inputs.erpBaseline === snap.hash && inputs.seed === SEED, s2.inputsJson.slice(0, 200));
+  check('and where they came from: a test file and a stub feed, never passed off as the ERP and the PLM', inputs.erpBaselineSource === 'file' && inputs.revisionSource === 'stub' && inputs.erpBaselineAsOf === '2026-10-24', `${inputs.erpBaselineSource} ${inputs.revisionSource}`);
   check('s1 stores bomDeltaRows unchanged, marked computed', same(results(s1.id), expectS1(e417, baseline)) && results(s1.id).every(r => !r.mock), firstDiff(results(s1.id), expectS1(e417, baseline)));
-  const want417 = expectS2(e417, baseline);
+  const want417 = expectS2(s2.inputsJson, e417, baseline);
   check('s2 stores costCheckRows unchanged, marked computed: every row, p10/p50/p90 and detail JSON', same(results(s2.id), want417) && results(s2.id).every(r => !r.mock), firstDiff(results(s2.id), want417));
   const detail = results(s2.id).find(r => r.key === 'detail');
   check('the detail row carries the inputs every trace points at', !!detail && JSON.parse(detail.detailJson).inputs.length > 10, `${detail?.detailJson.length} bytes`);
+  const itemsRef = detail ? JSON.parse(detail.detailJson).inputs.find((i: { id: string }) => i.id === 'baseline:items')?.ref ?? '' : '';
+  check('the trace says the baseline is a test file, not the ERP', /not the ERP/.test(itemsRef) && !detail!.detailJson.includes('ERP and PLM item master'), itemsRef);
   const s2b = await doneRun(p423.id, 's2_cost');
-  check('a second ECR runs too, on its own numbers', same(results(s2b.id), expectS2(e423, baseline)), firstDiff(results(s2b.id), expectS2(e423, baseline)));
+  check('a second ECR runs too, on its own numbers', same(results(s2b.id), expectS2(s2b.inputsJson, e423, baseline)), firstDiff(results(s2b.id), expectS2(s2b.inputsJson, e423, baseline)));
   const s3 = await until(() => current(p417.id, 's3_timeline')?.status === 'done' && current(p417.id, 's3_timeline'), 30000, 's3 to finish');
   check('stages without a real check stay mock and say so', results(s3.id).every(r => r.mock), results(s3.id).map(r => r.key).join(','));
 
@@ -132,7 +156,7 @@ try {
     return r && r.id !== s2.id && r.status === 'done' && results(r.id).length > 0 && r;
   }, 60000, 's2 on revision 2');
   const oneTime = (rows: Row[]) => rows.find(r => r.key === 'one_time_total')?.p50 ?? NaN;
-  check('a changed change request is revision 2: the old s2 run goes stale and a new one runs on it', run(s2.id).status === 'stale' && JSON.parse(s2r2.inputsJson).overlay === rev2.digest && same(results(s2r2.id), expectS2(e417, baseline)), `old ${run(s2.id).status}; ${firstDiff(results(s2r2.id), expectS2(e417, baseline))}`);
+  check('a changed change request is revision 2: the old s2 run goes stale and a new one runs on it', run(s2.id).status === 'stale' && JSON.parse(s2r2.inputsJson).overlay === rev2.digest && same(results(s2r2.id), expectS2(s2r2.inputsJson, e417, baseline)), `old ${run(s2.id).status}; ${firstDiff(results(s2r2.id), expectS2(s2r2.inputsJson, e417, baseline))}`);
   check('and its numbers move with it', Math.abs(oneTime(results(s2r2.id)) - oneTime(results(s2.id)) - 1000) < 60, `${oneTime(results(s2.id))} -> ${oneTime(results(s2r2.id))}`);
 
   // ---- an agent's estimate of a blank row lands through the assumptions -----------------------------
@@ -143,10 +167,10 @@ try {
     const r = current(p417.id, 's2_cost');
     return r && r.id !== s2r2.id && r.status === 'done' && results(r.id).length > 0 && r;
   }, 60000, 's2 with the assumption');
-  const ov = toOverride({ key: delayId, distJson, source: 'agent_estimated', rationale: 'check: four aircraft held two days' }) as AssumptionOverride;
-  const wantA = expectS2(e417, baseline, [ov]);
+  const named = (JSON.parse(s2a.inputsJson) as Inputs).assumptions ?? [];
+  const wantA = expectS2(s2a.inputsJson, e417, baseline);
   const delayRow = results(s2a.id).find(r => r.key === `line:${delayId}`);
-  check('an agent_estimated assumption replaces the blank row\'s $0 and the trace names it', same(results(s2a.id), wantA) && Math.abs((delayRow?.p50 ?? 0) - 20000) < 1500 && delayRow!.detailJson.includes('agent_estimated'), `${firstDiff(results(s2a.id), wantA)} delay p50 ${delayRow?.p50}`);
+  check('an agent_estimated assumption replaces the blank row\'s $0 and the trace names it', named.some(a => a.key === delayId) && same(results(s2a.id), wantA) && Math.abs((delayRow?.p50 ?? 0) - 20000) < 1500 && delayRow!.detailJson.includes('agent_estimated'), `${firstDiff(results(s2a.id), wantA)} delay p50 ${delayRow?.p50}`);
 
   // ---- an unreadable assumption is reported, not dropped ---------------------------------------------
   await R.recordAssumption({ prId: p423.id, key: 'recovery:BW-9440-030', distJson: JSON.stringify({ kind: 'weird' }), source: 'agent_estimated', rationale: 'check: a bad shape', affects: ['s2_cost'], expectedRev: 0 });
@@ -156,6 +180,14 @@ try {
   }, 60000, 's2 with the bad assumption');
   const errRow = results(s2bad.id).find(r => r.key === 'assumption_errors');
   check('an assumption the library cannot take is reported in its own row', !!errRow && errRow.detailJson.includes('unknown kind'), errRow?.detailJson);
+  // Quantiles out of order make the library throw: still a reported assumption, not a failed run.
+  await R.recordAssumption({ prId: p423.id, key: 'scrapRecovery-out-of-order', distJson: JSON.stringify({ kind: 'lognormal', p10: 9, p50: 5, p90: 7 }), source: 'agent_estimated', rationale: 'check: quantiles out of order', affects: ['s2_cost'], expectedRev: 0 });
+  const s2ooo = await until(() => {
+    const r = current(p423.id, 's2_cost');
+    return r && r.id !== s2bad.id && r.status === 'done' && results(r.id).length > 0 && r;
+  }, 60000, 's2 with quantiles out of order');
+  const ooo = results(s2ooo.id).find(r => r.key === 'assumption_errors');
+  check('quantiles out of order are reported with the others, and the run still finishes', !!ooo && JSON.parse(ooo.detailJson).problems.length === 2, ooo?.detailJson);
 
   // ---- a baseline change re-checks every open ECR ---------------------------------------------------
   const before = currentBaseline()!.hash;
@@ -168,9 +200,8 @@ try {
     const r = current(p423.id, 's2_cost');
     return r && JSON.parse(r.inputsJson).erpBaseline === snap2.hash && r.status === 'done' && results(r.id).length > 0 && r;
   }, 60000, 's2 on the new baseline');
-  const badOv = { key: 'recovery:BW-9440-030', distJson: JSON.stringify({ kind: 'weird' }) };
-  const wantN = [...expectS2(e423, baseline), { ...results(s2n.id).at(-1)! }].slice(0, results(s2n.id).length);
-  check('a new baseline is recorded and every open ECR is re-checked on it', run(s2bad.id).status === 'stale' && same(results(s2n.id).filter(r => r.key !== 'assumption_errors'), expectS2(e423, baseline)), `${badOv.key}; ${firstDiff(results(s2n.id).filter(r => r.key !== 'assumption_errors'), wantN.filter(r => r.key !== 'assumption_errors'))}`);
+  const wantN = expectS2(s2n.inputsJson, e423, baseline);
+  check('a new baseline is recorded and every open ECR is re-checked on it', run(s2ooo.id).status === 'stale' && same(results(s2n.id).filter(r => r.key !== 'assumption_errors'), wantN), firstDiff(results(s2n.id).filter(r => r.key !== 'assumption_errors'), wantN));
 
   // ---- an ECR with no change request keeps the mock handlers ----------------------------------------
   await R.createPr({ plmEcrNumber: '', title: `check pipeline: no change request ${stamp}`, description: 'check' });
@@ -183,6 +214,12 @@ try {
   const notObj = await rejects(R.ingestEcr({ plmEcrNumber: `ECR-X-${stamp}`, title: 'x', description: '', changeRequestJson: '[1,2]', source: 'stub', sourceRef: 'x' }));
   check('ingest refuses a change request for another ECR, or one that is not an object', wrong?.name === 'SenderError' && notObj?.name === 'SenderError' && !byNumber(`ECR-X-${stamp}`), `${wrong?.message} | ${notObj?.message}`);
 
+  // ---- the worker with no baseline source left every real run alone ---------------------------------
+  const ours = new Set([p417.id, p423.id]);
+  const failedRuns = [...db.checkRun.iter()].filter(r => ours.has(r.prId) && r.status === 'failed');
+  const blindClaims = blindLog.join('').split('\n').filter(l => /claimed run \d+ s[12]_/.test(l) && [...ours].some(id => l.includes(`(pr ${id},`)));
+  check('a worker with no baseline source never claims or fails a real run', failedRuns.length === 0 && blindClaims.length === 0 && blindLog.join('').includes('connected'), `${failedRuns.length} failed, ${blindClaims.length} claimed by the blind worker`);
+
   // Leave the scratch database tidy: close what this run opened.
   for (const p of [p417, p423, bare]) await R.setPrStatus({ prId: p.id, status: 'closed' }).catch(() => {});
 } catch (e) {
@@ -190,6 +227,7 @@ try {
   console.log(workerLog.join('').split('\n').slice(-40).join('\n'));
 } finally {
   worker.kill();
+  blind.kill();
   A.close();
   rmSync(tmp, { recursive: true, force: true });
 }
