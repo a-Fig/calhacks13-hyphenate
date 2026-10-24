@@ -38,17 +38,14 @@ const baselineFile = join(tmp, 'baseline.json');
 const SEED = 'norn-seed-1';
 const MEASURE = { horizonMonths: 12, savingsOffset: false };
 
-// ---- the configuration: Bowman's own, and Bowman's without the slip limit ----------------------------
-// ECR-0423 states no date for the change to be late against, so the timeline check gives it no slip, and
-// Bowman's fast track (which holds a 14-day p90 slip limit) cannot approve it. The second configuration
-// takes that one limit out so that the cost limit is what decides.
+// ---- the configuration: Bowman's own, unchanged ------------------------------------------------------
+// ECR-0423 states no production effectivity, so it has no deadline to slip against and the timeline check
+// puts its slip at 0; ECR-0417 is late by about 146 days. Bowman's fast track holds a 14-day p90 slip limit
+// and a 25,000 cost limit, so the same request is approved on one and recommended on the other.
 const loaded = await loadConfigFile(BOWMAN);
 if (!loaded.ok) throw new Error(`the example configuration is not valid: ${loaded.issues.map(i => i.message).join('; ')}`);
 const bowmanConfig: CompanyConfig = loaded.config;
-const noSlip: CompanyConfig = JSON.parse(canonicalJson(bowmanConfig));
-for (const a of noSlip.autonomy.actions) if (a.action === 'approve_fast_track_ecr') delete a.limits!.maxP90SlipDays;
 const bowmanText = canonicalJson(bowmanConfig);
-const noSlipText = canonicalJson(noSlip);
 const tierOf = (size: number) => {
   const i = bowmanConfig.approval.tiers.findIndex(t => t.upTo === null || size <= t.upTo);
   return bowmanConfig.approval.tiers[i]!.id;
@@ -181,21 +178,12 @@ try {
   }
   await until(() => [p423, p417, pDrawn].every(p => pr(p.id).status === 'review') || undefined, 5000, 'the ECRs to be in review');
 
-  // ---- Bowman as configured: no slip is known, so the fast track recommends on the small ECR -------------
+  // ---- Bowman's own configuration: the same request on a small and a large ECR -----------------------------
+  // ECR-0423's draw for the blind second check is fixed by the configuration's sample seed, its PLM number
+  // and the action: it falls at the value below, above the 0.2 rate, so it is not drawn and is approved.
+  const draw423 = sampleValue({ sampleSeed: bowmanConfig.autonomy.sampleSeed, ecrId: 'ECR-0423', action: 'approve_fast_track_ecr' });
+  check('(ECR-0423 is not drawn for the blind second check under the configured seed)', draw423 >= 0.2, `draw ${draw423}`);
   let m = mark();
-  await fastTrack(A, p423.id);
-  const rec1 = await until(() => logAfter(m, p423.id, 'request_fast_track_approval')[0], 5000, 'the fast-track request to be logged');
-  const g1 = gateOf(rec1);
-  check(
-    "Bowman as configured: the fast track cannot approve ECR-0423 while its slip is unknown (no stated date to be late against), so the agent's request is a recommendation, in review",
-    rec1.outcome === 'downgraded' && pr(p423.id).status === 'review' && !standing(p423.id) && g1?.outcome === 'recommend' && /slip/i.test(texts(g1)),
-    `${rec1.outcome} slip limit ${JSON.stringify(g1?.limits?.find((l: any) => l.limit === 'maxP90SlipDays'))} ${texts(g1).slice(0, 200)}`,
-  );
-
-  // ---- the same configuration without the slip limit: small approves, large recommends ---------------------
-  await R.setConfig({ key: COMPANY_CONFIG_KEY, value: noSlipText });
-  await until(() => db.nornConfig.key.find(COMPANY_CONFIG_KEY)?.value === noSlipText || undefined, 5000, 'the new configuration to show');
-  m = mark();
   await fastTrack(A, p423.id);
   await fastTrack(A, p417.id);
   const small = await until(() => logAfter(m, p423.id, 'request_fast_track_approval')[0], 5000, 'the log row for the small ECR');
@@ -203,17 +191,19 @@ try {
   const gs = gateOf(small);
   const gl = gateOf(large);
   const appr423 = standing(p423.id);
+  const slipOf = (g: any) => g?.limits?.find((l: any) => l.limit === 'maxP90SlipDays');
   check(
     'the same request from the same agent: approved on the small ECR, on the fast track, with its reasons stored',
     small.outcome === 'applied' && pr(p423.id).status === 'approved' && appr423?.kind === 'fast_track' && appr423.approverKind === 'agent' && appr423.tierId === 'technical_review'
-      && gs?.outcome === 'approve_sampled' && gs.sample?.sampled === false && gs.reasons.length > 0 && JSON.parse(appr423.decisionJson).reasons.length === gs.reasons.length && JSON.parse(appr423.answersJson).answers.length === answers.length,
+      && gs?.outcome === 'approve_sampled' && gs.sample?.sampled === false && gs.sample.value === draw423 && slipOf(gs)?.held === true && slipOf(gs).actual === 0
+      && gs.limits.every((l: any) => l.held) && gs.reasons.length > 0 && JSON.parse(appr423.decisionJson).reasons.length === gs.reasons.length && JSON.parse(appr423.answersJson).answers.length === answers.length,
     `${small.outcome} ${pr(p423.id).status} ${appr423?.kind}/${appr423?.approverKind}/${appr423?.tierId} gate ${gs?.outcome} reasons ${gs?.reasons?.length}/${appr423 && JSON.parse(appr423.decisionJson).reasons?.length} answers ${appr423?.answersJson.slice(0, 80)}`,
   );
   check(
     '...and "Norn recommends approval" on the large ECR, not approved, with the limit it passed and the roles who get it',
     large.outcome === 'downgraded' && pr(p417.id).status === 'review' && !standing(p417.id) && /recommends approval; not approved/.test(large.summary)
-      && gl?.outcome === 'recommend' && gl.limits.some((l: any) => l.limit === 'maxCost' && !l.held) && /maxCost/.test(gl.reasons.map((r: any) => r.rule).join(' ')) && gl.recipients.includes('cm_analyst'),
-    `${large.outcome} ${large.summary.slice(0, 120)} ${texts(gl).slice(0, 160)}`,
+      && gl?.outcome === 'recommend' && gl.limits.some((l: any) => l.limit === 'maxCost' && !l.held) && slipOf(gl)?.held === false && slipOf(gl).actual > 14 && /maxCost/.test(gl.reasons.map((r: any) => r.rule).join(' ')) && gl.recipients.includes('cm_analyst'),
+    `${large.outcome} ${large.summary.slice(0, 120)} slip ${slipOf(gl)?.actual} days, ${texts(gl).slice(0, 160)}`,
   );
   const r417 = recs(p417.id).at(-1);
   check(
@@ -223,7 +213,7 @@ try {
     JSON.stringify(r417 && { ...r417, id: String(r417.id), prId: String(r417.prId), sender: undefined, at: undefined }).slice(0, 300),
   );
   check(
-    'both decisions are in the action log with their reasons, and the two differ only by what the configuration says about their cost',
+    'both decisions are in the action log with their reasons, under the same configuration, each on the exact measured cost',
     gs.config === gl.config && gs.route.costSize === size423 && gl.route.costSize === size417 && gs.route.costBasis === gl.route.costBasis && gs.route.costBasis === 'measured',
     `${gs.route.costBasis}/${gl.route.costBasis}, sizes ${gs.route.costSize}, ${gl.route.costSize}`,
   );
