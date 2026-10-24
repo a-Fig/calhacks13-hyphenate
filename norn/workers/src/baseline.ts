@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { Baseline } from '../../checks/src/index.ts';
-import { connectionFromEnv, hashOf, loadEnvFile, readBaseline, type ErpnextSettings } from '../../connectors/erpnext/src/index.ts';
+import { connectionFromEnv, hashOf, loadEnvFile, readBaseline, type ErpnextConnection, type ErpnextSettings } from '../../connectors/erpnext/src/index.ts';
 import { FatalRunError } from './stages.ts';
 
 export type BaselineRead = {
@@ -20,7 +20,13 @@ export type BaselineRead = {
   warnings: string[];
 };
 
-export type BaselineSource = { kind: 'erp' | 'file'; describe: string; read: () => Promise<BaselineRead> };
+export type BaselineSource = {
+  kind: 'erp' | 'file';
+  describe: string;
+  read: () => Promise<BaselineRead>;
+  /** For an ERP source: the connection and the company's settings, which the change package also reads with. */
+  erp?: { connection: ErpnextConnection; settings: ErpnextSettings };
+};
 
 const CACHE_DIR = process.env.NORN_BASELINE_CACHE_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '.cache', 'baselines');
 
@@ -49,6 +55,7 @@ export async function baselineSourceFromEnv(env: NodeJS.ProcessEnv = process.env
     return {
       kind: 'erp',
       describe: `ERPNext, company ${settings.company}`,
+      erp: { connection, settings },
       read: async () => {
         const r = await readBaseline({ ...settings, ...connection });
         return { baseline: r.baseline, hash: r.hash, asOf: r.asOf, source: 'erp', counts: r.meta.counts, warnings: r.meta.warnings };

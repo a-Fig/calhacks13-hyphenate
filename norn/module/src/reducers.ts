@@ -330,6 +330,90 @@ export const recordBaseline = write(
   }
 );
 
+// The PLM has released the change order for this ECR (#72): its number, by the PLM's ECR number, as
+// the ingest loop reports it. A worker puts the ERP change package on it once the ECR is released in
+// Norn too (status merged).
+export const recordEcoRelease = write(
+  'record_eco_release',
+  { plmEcrNumber: t.string(), ecoNumber: t.string(), source: t.string(), sourceRef: t.string() },
+  (ctx, a) => {
+    const plm = nonEmpty(a.plmEcrNumber, 'plmEcrNumber', 64);
+    const found = ctx.db.pullRequest.plmEcrNumber.find(plm);
+    if (!found) throw new SenderError(`Norn has no ECR ${plm}`);
+    const pr = getPr(ctx, found.id);
+    const ecoNumber = nonEmpty(a.ecoNumber, 'ecoNumber', 64);
+    const source = nonEmpty(a.source, 'source', 32);
+    if (a.sourceRef.length > 200) throw new SenderError('sourceRef is too long (max 200 characters)');
+    if (pr.status === 'closed') throw new SenderError(`ECR ${pr.id} is closed; a closed ECR has no change order`);
+    const seen = ctx.db.ecoRelease.prId.find(pr.id);
+    if (seen?.ecoNumber === ecoNumber) return null;
+    if (seen) throw new SenderError(`ECR ${pr.id} was released as ${seen.ecoNumber}; a released change order keeps its number, so ${ecoNumber} is refused`);
+    ctx.db.ecoRelease.insert({ prId: pr.id, ecoNumber, source, sourceRef: a.sourceRef, recordedBy: ctx.sender, recordedAt: ctx.timestamp });
+    return { prId: pr.id, entity: `eco_release:${pr.id}`, summary: `change order ${ecoNumber} released (${source})` };
+  }
+);
+
+// The ERP change package on a released ECO (#72), from a worker: what a person enters in the ERP, with
+// each line's status on the ERP read named. Norn never writes to the ERP (#71). Recording the same
+// package again on a new ERP read only moves erpBaseline, and adds no log row.
+export const recordErpPackage = write(
+  'record_erp_package',
+  {
+    prId: t.u64(),
+    ecoNumber: t.string(),
+    s2RunId: t.u64(),
+    erpBaseline: t.string(),
+    releaseJson: t.string(),
+    packageJson: t.string(),
+    lines: t.u32(),
+    entered: t.u32(),
+    conflicts: t.u32(),
+    notesJson: t.string(),
+  },
+  (ctx, a) => {
+    const pr = getPr(ctx, a.prId);
+    if (pr.status !== 'merged') throw new SenderError(`ECR ${pr.id} is ${pr.status}; an ERP change package is for a released ECO`);
+    const eco = ctx.db.ecoRelease.prId.find(pr.id);
+    if (!eco) throw new SenderError(`ECR ${pr.id} has no change order number from the PLM yet`);
+    if (eco.ecoNumber !== a.ecoNumber) throw new SenderError(`ECR ${pr.id} was released as ${eco.ecoNumber}, not ${a.ecoNumber}`);
+    const run = ctx.db.checkRun.id.find(a.s2RunId);
+    if (!run || run.prId !== pr.id || run.stage !== 's2_cost' || run.status !== 'done')
+      throw new SenderError(`check run ${a.s2RunId} is not a finished s2_cost run of ECR ${pr.id}`);
+    const erpBaseline = nonEmpty(a.erpBaseline, 'erpBaseline', 128);
+    if (!ctx.db.baselineSnapshot.hash.find(erpBaseline)) throw new SenderError(`ERP baseline ${erpBaseline.slice(0, 12)} has not been recorded`);
+    for (const [what, v] of [['releaseJson', a.releaseJson], ['packageJson', a.packageJson], ['notesJson', a.notesJson]] as const) parseJson(v, what);
+    // A package lists every line of every BOM it versions, so a large assembly runs to a few hundred KB.
+    if (a.releaseJson.length + a.packageJson.length + a.notesJson.length > 2_000_000)
+      throw new SenderError('releaseJson, packageJson and notesJson are too long (max 2,000,000 characters together)');
+    if (a.entered + a.conflicts > a.lines) throw new SenderError(`${a.entered} entered and ${a.conflicts} in conflict is more than the ${a.lines} line(s)`);
+
+    const prev = ctx.db.erpPackage.prId.find(pr.id);
+    const row = {
+      prId: pr.id,
+      ecoNumber: a.ecoNumber,
+      s2RunId: a.s2RunId,
+      erpBaseline,
+      releaseJson: a.releaseJson,
+      packageJson: a.packageJson,
+      lines: a.lines,
+      entered: a.entered,
+      conflicts: a.conflicts,
+      notesJson: a.notesJson,
+      builtBy: ctx.sender,
+      updatedAt: ctx.timestamp,
+    };
+    if (prev) {
+      const same = prev.s2RunId === row.s2RunId && prev.releaseJson === row.releaseJson && prev.packageJson === row.packageJson && prev.notesJson === row.notesJson;
+      ctx.db.erpPackage.prId.update({ ...prev, ...row });
+      if (same) return null;
+    } else {
+      ctx.db.erpPackage.insert({ ...row, builtAt: ctx.timestamp });
+    }
+    const state = a.lines === 0 ? 'nothing to enter' : `${a.entered} of ${a.lines} line(s) entered${a.conflicts ? `, ${a.conflicts} in conflict` : ''}`;
+    return { prId: pr.id, entity: `erp_package:${pr.id}`, summary: `ERP change package for ${a.ecoNumber}: ${state} (ERP ${erpBaseline.slice(0, 12)})` };
+  }
+);
+
 // The ECR text is what the extraction stage reads, so an edit makes a finished extraction stale.
 export const editPrText = write('edit_pr_text', { prId: t.u64(), description: t.string() }, (ctx, a) => {
   const pr = getPr(ctx, a.prId);
@@ -535,7 +619,7 @@ export const postImpactStatement = write(
     assumptions: t.array(StatementAssumption),
     claims: t.array(StatementClaim),
   },
-  (ctx, a) => {
+  (ctx, a, call) => {
     const required = (v: string, what: string, max: number) => {
       try {
         return nonEmpty(v, what, max);
@@ -557,8 +641,22 @@ export const postImpactStatement = write(
       if (!EVIDENCE.includes(e)) throw new Refusal(`${what}: evidence must be one of ${EVIDENCE.join(', ')}`);
     };
 
+    // A session started by a check run ('norn:check_run:7') may post only while that run still stands:
+    // the ECR's inputs have not changed since it read them. A session left over from an earlier
+    // change-request revision (or baseline) is refused even if some of its numbers happen to match.
+    // spawnedBy comes from the signed credential, not from the agent.
+    let checkRunId = 0n;
+    const started = /(?:^|:)check_run:(\d+)$/.exec(call.spawnedBy);
+    if (started) {
+      const run = ctx.db.checkRun.id.find(BigInt(started[1]!));
+      if (!run || run.prId !== pr.id) throw new Refusal(`this session was started by check run ${started[1]}, which is not a check run of ${pr.plmEcrNumber}`);
+      if (run.status !== 'done')
+        throw new Refusal(`check run ${run.id}, which started this session, is ${run.status}: ${pr.plmEcrNumber}'s inputs changed after the session read them (a new change-request revision, baseline or assumption), so its numbers are out of date. Post nothing; Norn starts a new session on the current numbers`);
+      checkRunId = run.id;
+    }
+
     // The newest result per key among runs that are still current ('done'; a stale run's are not).
-    const current = new Map<string, { id: bigint; label: string; unit: string; p10: number; p50: number; p90: number }>();
+    const current = new Map<string, { id: bigint; checkRunId: bigint; label: string; unit: string; p10: number; p50: number; p90: number }>();
     for (const r of ctx.db.checkResult.prId.filter(pr.id)) {
       if (ctx.db.checkRun.id.find(r.checkRunId)?.status !== 'done') continue;
       const seen = current.get(r.key);
@@ -579,6 +677,7 @@ export const postImpactStatement = write(
           throw new Refusal(`${what} is marked computation, so it keeps the label and unit of check result '${n.resultKey}' ('${r.label}', '${r.unit}'), not '${n.label}', '${n.unit}'`);
         if (r.p10 !== n.p10 || r.p50 !== n.p50 || r.p90 !== n.p90)
           throw new Refusal(`${what} is marked computation but differs from check result '${n.resultKey}' (${r.p10} / ${r.p50} / ${r.p90}); quote it exactly or mark it judgment`);
+        if (checkRunId === 0n) checkRunId = r.checkRunId; // no session run named: the run its first computation number came from
       }
     }
     for (const c of [...a.drivers, ...a.claims]) {
@@ -599,6 +698,7 @@ export const postImpactStatement = write(
       prId: pr.id,
       level: a.level,
       prRevision: pr.revision,
+      checkRunId,
       changeClass,
       route,
       headline,
@@ -613,10 +713,57 @@ export const postImpactStatement = write(
       prId: pr.id,
       entity: `impact_statement:${row.id}`,
       summary: `posted Level ${a.level} impact statement on ${pr.plmEcrNumber} (revision ${pr.revision}): ${headline.slice(0, 100)}`,
-      detail: { level: a.level, numbers: a.numbers.length, drivers: a.drivers.length, assumptions: a.assumptions.length, claims: a.claims.length },
+      detail: { level: a.level, numbers: a.numbers.length, drivers: a.drivers.length, assumptions: a.assumptions.length, claims: a.claims.length, checkRunId },
     };
   }
 );
+
+// ---------------------------------------------------------------------------------------------
+// Publication lease (#42). The publisher writes a statement into the PLM, which cannot refuse a
+// second identical write, so the write is taken in turns: claim, read the PLM, write, release.
+// A lease that is not released (the holder died) ends by itself.
+// ---------------------------------------------------------------------------------------------
+
+// Only Norn's own agents publish. The module has no stronger notion of "Norn" than a registered
+// agent principal with origin 'norn' (register_actor does not prove it), so this keeps out people,
+// outside agents, unregistered connections and job-scoped agents (the scope rule already denies
+// those every reducer but comments, assumptions and statements).
+const isNornAgent = (a: { kind: string; origin: string }) => a.kind === 'agent' && a.origin === 'norn';
+
+export const claimPublication = write(
+  'claim_publication',
+  { prId: t.u64(), statementId: t.u64(), processId: t.string(), leaseMs: t.u32() },
+  (ctx, a, call) => {
+    if (!isNornAgent(call.actor)) throw new SenderError(`[forbidden] ${call.actor.name} is not one of Norn's own agents; only they publish to the PLM`);
+    const pr = getPr(ctx, a.prId);
+    if (!ctx.db.impactStatement.id.find(a.statementId)) throw new SenderError(`statement ${a.statementId} does not exist`);
+    const processId = nonEmpty(a.processId, 'processId', 64);
+    if (a.leaseMs < 1000 || a.leaseMs > 300_000) throw new SenderError('a publication lease lasts 1 to 300 seconds');
+    const held = ctx.db.publicationClaim.prId.find(pr.id);
+    const now = ctx.timestamp.microsSinceUnixEpoch;
+    const mine = held && held.holder.isEqual(ctx.sender) && held.processId === processId;
+    // A thrown SenderError is the answer "someone else is writing": the caller's call rejects, atomically.
+    if (held && !mine && held.expiresAt.microsSinceUnixEpoch > now)
+      throw new SenderError(`[held] ${pr.plmEcrNumber} is being published by another holder until ${held.expiresAt.toISOString()}`);
+    const row = { prId: pr.id, statementId: a.statementId, holder: ctx.sender, processId, expiresAt: plusMs(ctx.timestamp, a.leaseMs) };
+    if (held) ctx.db.publicationClaim.prId.update(row);
+    else ctx.db.publicationClaim.insert(row);
+    return { prId: pr.id, entity: `publication_claim:${pr.id}`, summary: `claimed publishing statement ${a.statementId} to the PLM for ${a.leaseMs} ms` };
+  }
+);
+
+// Released by the connection that took it (and the process that took it); anyone else's release does
+// nothing. A lease that has run out may be cleared by any of Norn's agents, though claiming over it
+// works without that.
+export const releasePublication = write('release_publication', { prId: t.u64(), processId: t.string() }, (ctx, a, call) => {
+  const held = ctx.db.publicationClaim.prId.find(a.prId);
+  if (!held) return null;
+  const mine = held.holder.isEqual(ctx.sender) && held.processId === a.processId;
+  const expired = held.expiresAt.microsSinceUnixEpoch <= ctx.timestamp.microsSinceUnixEpoch;
+  if (!mine && !(expired && isNornAgent(call.actor))) return null;
+  ctx.db.publicationClaim.prId.delete(a.prId);
+  return null;
+});
 
 // ---------------------------------------------------------------------------------------------
 // Baseline parts (the connectors fill this in; only the external key exists so far)

@@ -195,6 +195,16 @@ export const Comment = __t.object("Comment", {
 });
 export type Comment = __Infer<typeof Comment>;
 
+export const EcoRelease = __t.object("EcoRelease", {
+  prId: __t.u64(),
+  ecoNumber: __t.string(),
+  source: __t.string(),
+  sourceRef: __t.string(),
+  recordedBy: __t.identity(),
+  recordedAt: __t.timestamp(),
+});
+export type EcoRelease = __Infer<typeof EcoRelease>;
+
 export const EcrRevision = __t.object("EcrRevision", {
   id: __t.u64(),
   prId: __t.u64(),
@@ -209,6 +219,23 @@ export const EcrRevision = __t.object("EcrRevision", {
 });
 export type EcrRevision = __Infer<typeof EcrRevision>;
 
+export const ErpPackage = __t.object("ErpPackage", {
+  prId: __t.u64(),
+  ecoNumber: __t.string(),
+  s2RunId: __t.u64(),
+  erpBaseline: __t.string(),
+  releaseJson: __t.string(),
+  packageJson: __t.string(),
+  lines: __t.u32(),
+  entered: __t.u32(),
+  conflicts: __t.u32(),
+  notesJson: __t.string(),
+  builtBy: __t.identity(),
+  builtAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type ErpPackage = __Infer<typeof ErpPackage>;
+
 export const GateReason = __t.object("GateReason", {
   rule: __t.string(),
   text: __t.string(),
@@ -220,6 +247,7 @@ export const ImpactStatement = __t.object("ImpactStatement", {
   prId: __t.u64(),
   level: __t.u8(),
   prRevision: __t.u32(),
+  checkRunId: __t.u64(),
   changeClass: __t.string(),
   route: __t.string(),
   headline: __t.string(),
@@ -277,6 +305,15 @@ export const Principal = __t.object("Principal", {
   registeredAt: __t.timestamp(),
 });
 export type Principal = __Infer<typeof Principal>;
+
+export const PublicationClaim = __t.object("PublicationClaim", {
+  prId: __t.u64(),
+  statementId: __t.u64(),
+  holder: __t.identity(),
+  processId: __t.string(),
+  expiresAt: __t.timestamp(),
+});
+export type PublicationClaim = __Infer<typeof PublicationClaim>;
 
 export const PullRequest = __t.object("PullRequest", {
   id: __t.u64(),

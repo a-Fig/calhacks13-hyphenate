@@ -11,7 +11,8 @@
     "web",
     "mcp",
     "checks",
-    "connectors/erpnext"
+    "connectors/erpnext",
+    "runner"
   ],
   "engines": {
     "node": ">=22.12"
@@ -37,6 +38,7 @@
     "check:policy": "npm run check:policy -w @norn/workers",
     "ingest": "npm run ingest -w @norn/workers",
     "check:pipeline": "npm run check:pipeline -w @norn/workers",
+    "check:package": "npm run check:package -w @norn/workers",
     "check:config": "npm run check:config -w @norn/workers",
     "check:gate": "npm run check:gate -w @norn/workers",
     "test:workers": "npm run test -w @norn/workers"

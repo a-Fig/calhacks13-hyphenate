@@ -3,7 +3,7 @@ frappe.ui.form.on('Part', {
   refresh(frm) {
     if (frm.is_new()) return;
     frappe.db.exists('Engineering BOM', 'EBOM-' + frm.doc.name).then((has) => {
-      if (has) frm.add_custom_button(__('Bill of materials'), () => frappe.set_route('Form', 'Engineering BOM', 'EBOM-' + frm.doc.name));
+      if (has) frm.add_custom_button(__('Engineering BOM (EBOM)'), () => frappe.set_route('Form', 'Engineering BOM', 'EBOM-' + frm.doc.name));
     });
   },
 });

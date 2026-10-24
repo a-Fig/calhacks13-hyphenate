@@ -266,8 +266,12 @@ export const StatementAssumption = t.object('StatementAssumption', {
 });
 
 // A Level 1-3 impact statement (#42). Append-only: a newer one for the same ECR and level
-// supersedes an older one in the reader's eyes. prRevision is the ECR revision it was written
-// against, so a reader can tell it has since gone out of date.
+// supersedes an older one in the reader's eyes. prRevision is the ECR's own revision counter when
+// it was written, so a reader can tell it has since gone out of date. checkRunId is the check run
+// the statement was written from. post_impact_statement records it and the agent cannot set it: the
+// run that started the session when the call's spawnedBy names one ('...check_run:<id>'), else the
+// run its first 'computation' number was copied from, else 0. That run's inputs name the
+// change-request revision and the ERP baseline, so a reader never has to guess them from numbers.
 const impactStatement = table(
   { name: 'impact_statement', public: true },
   {
@@ -275,6 +279,7 @@ const impactStatement = table(
     prId: t.u64().index('btree'),
     level: t.u8(), // 1 | 2 | 3
     prRevision: t.u32(),
+    checkRunId: t.u64(), // 0: no check run behind it (judgment only, posted outside a session)
     changeClass: t.string(),
     route: t.string(), // the proposed approval route
     headline: t.string(),
@@ -284,6 +289,23 @@ const impactStatement = table(
     claims: t.array(StatementClaim),
     author: t.identity(),
     createdAt: t.timestamp(),
+  }
+);
+
+// A short lease on writing one ECR's impact statement to the PLM (#42). The PLM has no
+// compare-and-set, so two publishers that each read "not there yet" would both write. The one
+// atomic step is claim_publication: it refuses while another holder's unexpired lease stands.
+// The holder is the caller's identity (taken from the connection, never from the arguments), so only
+// it can renew or release. `processId` is a random id per publisher process, because processes of
+// one name share a saved identity and must still take turns.
+const publicationClaim = table(
+  { name: 'publication_claim', public: true },
+  {
+    prId: t.u64().primaryKey(),
+    statementId: t.u64(),
+    holder: t.identity(),
+    processId: t.string(),
+    expiresAt: t.timestamp(),
   }
 );
 
@@ -393,6 +415,43 @@ const recommendation = table(
   }
 );
 
+// The change order the PLM released for an ECR: its number, and where Norn learned it. One per ECR;
+// a released change order keeps its number.
+const ecoRelease = table(
+  { name: 'eco_release', public: true },
+  {
+    prId: t.u64().primaryKey(),
+    ecoNumber: t.string(), // the PLM's number, e.g. ECO-0319
+    source: t.string(), // 'plm', or 'stub' for a test feed
+    sourceRef: t.string(),
+    recordedBy: t.identity(),
+    recordedAt: t.timestamp(),
+  }
+);
+
+// The ERP change package on a released ECO (#72): every line a person enters in the ERP to carry the
+// change out, with the values, traced to the ECO and the assessment. Norn never writes to the ERP
+// (#71). A worker builds it from the ECR's assessment and the ERP as read, and checks it again on each
+// new ERP read, so every line's status (entered, to enter, conflict) follows what people have entered.
+const erpPackage = table(
+  { name: 'erp_package', public: true },
+  {
+    prId: t.u64().primaryKey(),
+    ecoNumber: t.string(),
+    s2RunId: t.u64(), // the s2_cost run the amounts come from
+    erpBaseline: t.string(), // hash of the ERP read the package was last checked against
+    releaseJson: t.string(), // what the ECO changes in the ERP, from the assessment (the connector's EcoRelease)
+    packageJson: t.string(), // the lines to enter and their status (the connector's change package)
+    lines: t.u32(),
+    entered: t.u32(),
+    conflicts: t.u32(),
+    notesJson: t.string(), // what the package leaves out and why, and anything that kept it from being complete
+    builtBy: t.identity(),
+    builtAt: t.timestamp(),
+    updatedAt: t.timestamp(),
+  }
+);
+
 // Drives reap_expired_leases. Private: clients have no use for it.
 const reaperSchedule = table(
   { name: 'reaper_schedule' },
@@ -417,10 +476,13 @@ const spacetimedb = schema({
   agentEvent,
   actorScope,
   impactStatement,
+  publicationClaim,
   ecrRevision,
   baselineSnapshot,
   approval,
   recommendation,
+  ecoRelease,
+  erpPackage,
   reaperSchedule,
 });
 

@@ -36,6 +36,7 @@ import {
 // Import all reducer arg schemas
 import AddCommentReducer from "./add_comment_reducer";
 import ClaimCheckReducer from "./claim_check_reducer";
+import ClaimPublicationReducer from "./claim_publication_reducer";
 import CompleteCheckReducer from "./complete_check_reducer";
 import CreatePrReducer from "./create_pr_reducer";
 import EditPrTextReducer from "./edit_pr_text_reducer";
@@ -48,7 +49,10 @@ import PostImpactStatementReducer from "./post_impact_statement_reducer";
 import RecordAgentEventsReducer from "./record_agent_events_reducer";
 import RecordAssumptionReducer from "./record_assumption_reducer";
 import RecordBaselineReducer from "./record_baseline_reducer";
+import RecordEcoReleaseReducer from "./record_eco_release_reducer";
+import RecordErpPackageReducer from "./record_erp_package_reducer";
 import RegisterActorReducer from "./register_actor_reducer";
+import ReleasePublicationReducer from "./release_publication_reducer";
 import ReportProgressReducer from "./report_progress_reducer";
 import RequestFastTrackApprovalReducer from "./request_fast_track_approval_reducer";
 import SetConfigReducer from "./set_config_reducer";
@@ -68,12 +72,15 @@ import CheckProgressRow from "./check_progress_table";
 import CheckResultRow from "./check_result_table";
 import CheckRunRow from "./check_run_table";
 import CommentRow from "./comment_table";
+import EcoReleaseRow from "./eco_release_table";
 import EcrRevisionRow from "./ecr_revision_table";
+import ErpPackageRow from "./erp_package_table";
 import ImpactStatementRow from "./impact_statement_table";
 import MainVersionRow from "./main_version_table";
 import NornConfigRow from "./norn_config_table";
 import PartRow from "./part_table";
 import PrincipalRow from "./principal_table";
+import PublicationClaimRow from "./publication_claim_table";
 import PullRequestRow from "./pull_request_table";
 import RecommendationRow from "./recommendation_table";
 
@@ -237,6 +244,17 @@ const tablesSchema = __schema({
       { name: 'comment_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, CommentRow),
+  ecoRelease: __table({
+    name: 'eco_release',
+    indexes: [
+      { accessor: 'prId', name: 'eco_release_pr_id_idx_btree', algorithm: 'btree', columns: [
+        'prId',
+      ] },
+    ],
+    constraints: [
+      { name: 'eco_release_pr_id_key', constraint: 'unique', columns: ['prId'] },
+    ],
+  }, EcoReleaseRow),
   ecrRevision: __table({
     name: 'ecr_revision',
     indexes: [
@@ -251,6 +269,17 @@ const tablesSchema = __schema({
       { name: 'ecr_revision_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, EcrRevisionRow),
+  erpPackage: __table({
+    name: 'erp_package',
+    indexes: [
+      { accessor: 'prId', name: 'erp_package_pr_id_idx_btree', algorithm: 'btree', columns: [
+        'prId',
+      ] },
+    ],
+    constraints: [
+      { name: 'erp_package_pr_id_key', constraint: 'unique', columns: ['prId'] },
+    ],
+  }, ErpPackageRow),
   impactStatement: __table({
     name: 'impact_statement',
     indexes: [
@@ -313,6 +342,17 @@ const tablesSchema = __schema({
       { name: 'principal_identity_key', constraint: 'unique', columns: ['identity'] },
     ],
   }, PrincipalRow),
+  publicationClaim: __table({
+    name: 'publication_claim',
+    indexes: [
+      { accessor: 'prId', name: 'publication_claim_pr_id_idx_btree', algorithm: 'btree', columns: [
+        'prId',
+      ] },
+    ],
+    constraints: [
+      { name: 'publication_claim_pr_id_key', constraint: 'unique', columns: ['prId'] },
+    ],
+  }, PublicationClaimRow),
   pullRequest: __table({
     name: 'pull_request',
     indexes: [
@@ -351,6 +391,7 @@ const tablesSchema = __schema({
 const reducersSchema = __reducers(
   __reducerSchema("add_comment", AddCommentReducer),
   __reducerSchema("claim_check", ClaimCheckReducer),
+  __reducerSchema("claim_publication", ClaimPublicationReducer),
   __reducerSchema("complete_check", CompleteCheckReducer),
   __reducerSchema("create_pr", CreatePrReducer),
   __reducerSchema("edit_pr_text", EditPrTextReducer),
@@ -363,7 +404,10 @@ const reducersSchema = __reducers(
   __reducerSchema("record_agent_events", RecordAgentEventsReducer),
   __reducerSchema("record_assumption", RecordAssumptionReducer),
   __reducerSchema("record_baseline", RecordBaselineReducer),
+  __reducerSchema("record_eco_release", RecordEcoReleaseReducer),
+  __reducerSchema("record_erp_package", RecordErpPackageReducer),
   __reducerSchema("register_actor", RegisterActorReducer),
+  __reducerSchema("release_publication", ReleasePublicationReducer),
   __reducerSchema("report_progress", ReportProgressReducer),
   __reducerSchema("request_fast_track_approval", RequestFastTrackApprovalReducer),
   __reducerSchema("set_config", SetConfigReducer),
