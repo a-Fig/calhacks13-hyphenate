@@ -6,8 +6,8 @@
 //
 // The PLM signs the body but sends no timestamp or nonce, so anyone who has seen a request can send the same
 // bytes again later and the signature still verifies. The payload is therefore a prompt, not a source of
-// truth: the handler reads the request's current state from the PLM and hands that to `onEvent`, and it
-// drops an event that is not newer than the last one it handled for the same document.
+// truth: the handler reads the request's current state from the PLM and hands that to `onEvent`. A replay
+// costs a repeat read, never an obsolete assessment; consumers stay idempotent on the request's content.
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -79,9 +79,11 @@ function ecrOf(e: WebhookEvent): string | undefined {
  *
  * Replays: a signed body can be sent again by anyone who captured it, and carries a document that may be
  * long out of date. So `onEvent(event, current)` gets, for an ECR or ECO event, `current`: the request as the
- * PLM holds it now, read by name. And an event whose `modified` is not newer than the last one handled
- * successfully for the same event and document is acknowledged (200) without calling `onEvent`. That memory
- * is per process; after a restart a replay is still harmless, because `current` is what `onEvent` assesses.
+ * PLM holds it now, read by name. A replay therefore only makes the consumer look at the current request
+ * again, which an idempotent consumer (Norn's ingest keys on the request's content) ignores. There is no
+ * "already seen" memory: one keyed on `modified` drops a real update that shares a timestamp, and races
+ * between concurrent requests. Consumers should assess `current`, never `event.doc`; an NCR event has no
+ * `current` and is only a hint to look.
  */
 export function createWebhookHandler(
   secret: string,
@@ -94,8 +96,6 @@ export function createWebhookHandler(
   const onError = o.onError ?? ((e) => console.error(`webhook handler: ${e instanceof Error ? e.message : String(e)}`));
   const eventHeader = (o.eventHeader ?? o.plm.webhook?.eventHeader)?.toLowerCase();
   const plm: PlmOptions = { ...o.plm, timeoutMs: o.plm.timeoutMs ?? 4000 };
-  /** `modified` of the newest event handled, by event and document. */
-  const handled = new Map<string, string>();
 
   return (req, res) => {
     if (req.method !== 'POST') return reply(res, 405, { error: 'POST only' }, { Allow: 'POST' });
@@ -127,13 +127,9 @@ export function createWebhookHandler(
         const header = eventHeader ? req.headers[eventHeader] : undefined;
         if (header !== undefined && header !== body.event) return reply(res, 400, { error: 'event header and body disagree' });
         const event = body as WebhookEvent;
-        const key = `${event.event}|${event.doctype}|${event.name}`;
-        const last = handled.get(key);
-        if (typeof event.modified === 'string' && last !== undefined && event.modified <= last) return reply(res, 200, { ok: true, ignored: 'not newer than the last one handled' });
         try {
           const ecr = ecrOf(event);
           await onEvent(event, ecr ? await readChangeRequest(plm, ecr) : undefined);
-          if (typeof event.modified === 'string' && (last === undefined || event.modified > last)) handled.set(key, event.modified);
         } catch (e) {
           onError(e);
           return reply(res, 500, { error: 'handler failed' });

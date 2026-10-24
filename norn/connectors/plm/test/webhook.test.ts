@@ -126,7 +126,7 @@ test('the event header must agree with the signed body; without the header the b
   const sig = { 'X-Frappe-Webhook-Signature': sign(body) };
   assert.equal((await send(body, { ...sig, 'X-Acme-Event': 'ecr.updated' })).status, 400);
   assert.equal((await send(body, { ...sig, 'X-Acme-Event': 'eco.released' })).status, 200);
-  const later = eventAt('2026-10-03 10:30:15.250000', 'Submitted', 'eco.released'); // a repeat of the same event would be ignored
+  const later = eventAt('2026-10-03 10:30:15.250000', 'Submitted', 'eco.released'); // a second ECO release on the same document
   assert.equal((await send(later, { 'X-Frappe-Webhook-Signature': sign(later) })).status, 200);
   assert.deepEqual(got, ['eco.released', 'eco.released']);
 });
@@ -169,26 +169,19 @@ test('an event gets the request as the PLM holds it now, not the document in the
   assert.equal(got[0].current?.modified, '2026-10-09 09:00:00.000000');
 });
 
-test('a replayed old event is not handled again, and one handled after a restart still sees only the current state', async () => {
+test('a replayed old event, and an update sharing a stamp, each reach onEvent with only the current state', async () => {
   const plm = plmNow();
   const got: { event: string; state: string; current: string | undefined }[] = [];
-  const handle = (e: WebhookEvent, current?: ReadResult) => { got.push({ event: e.modified!, state: e.workflow_state!, current: current?.record.workflowState }); };
-  const { send } = await serve(handle);
+  const { send } = await serve((e: WebhookEvent, current?: ReadResult) => { got.push({ event: e.modified!, state: e.workflow_state!, current: current?.record.workflowState }); });
   const old = eventAt('2026-10-02 10:30:15.250000', 'Submitted');
   const newer = eventAt('2026-10-05 08:00:00.000000', 'In CM Review');
+  const sameStamp = eventAt('2026-10-05 08:00:00.000000', 'Approved'); // a second real change in the same stamp is not dropped
   const h = (b: string) => ({ 'X-Frappe-Webhook-Signature': sign(b), 'X-Acme-Event': 'ecr.updated' });
-  assert.equal((await send(newer, h(newer))).status, 200);
-  const replay = await send(old, h(old));
-  assert.equal(replay.status, 200, 'acknowledged, so the sender sees nothing to retry');
-  assert.equal((replay.json as any).ignored !== undefined, true);
-  assert.equal((await send(newer, h(newer))).status, 200, 'the same event again (a lost 200 and a retry)');
-  assert.equal(got.length, 1, 'neither reached onEvent');
-  assert.equal(plm.reads.length, 1, 'and neither cost a read');
-  // the same replay against a handler that has never seen the document: handled, but with the current state
-  await new Promise((r) => server!.close(r));
-  const second = await serve(handle);
-  assert.equal((await second.send(old, h(old))).status, 200);
-  assert.deepEqual(got[1], { event: '2026-10-02 10:30:15.250000', state: 'Submitted', current: 'Approved' }, 'the body says Submitted; the PLM says Approved');
+  for (const b of [newer, old, sameStamp]) assert.equal((await send(b, h(b))).status, 200);
+  assert.equal(got.length, 3, 'nothing is dropped on its timestamp');
+  assert.equal(plm.reads.length, 3, 'each one re-reads the request');
+  assert.deepEqual(got[1], { event: '2026-10-02 10:30:15.250000', state: 'Submitted', current: 'Approved' }, 'the replay says Submitted; the PLM says Approved');
+  assert.ok(got.every((g) => g.current === 'Approved'), 'onEvent always sees the PLM as it is now');
 });
 
 test('an event is handled again after a failure, and a different event on the same document is its own', async () => {
