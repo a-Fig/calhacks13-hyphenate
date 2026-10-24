@@ -79,6 +79,22 @@ The point estimate (every input at its stated value) of a unit cost at base is t
 Its p50 is higher, because most price ranges lean upward: for Vesper the standard sits near p11.
 That is the S-curve doing its job, and the card should label it rather than call it a mismatch.
 
+## Cost measures, for approval rules
+
+`costCheck(baseline, ecr, { seed, measures: [{ horizonMonths: 12, savingsOffset: false }] })` also
+returns `measures`: the size of the change as a company's `approval.costMeasure` defines it, which
+the routing in `norn/config` (#85) acts on.
+
+- **Per draw, from the components.** The components are each cost-page row's one-time column, its
+  unit cost times quantity, each stock disposition, and each program's recurring change over the
+  window. In each draw, spend is the sum of the positive ones and saving the sum of the negative
+  ones' sizes. The size is the larger of the two, or `|spend - saving|` when savings offset spend.
+  `p50` and `p90` are of that per-draw size, so a row with a 200,000 one-time cost and a -190,000
+  unit cost counts as 200,000, not 10,000.
+- **Only on the check's window.** A horizon other than the window (12 months) comes back
+  `source: 'unavailable'` with the reason, and the routing then treats the cost as unmeasured.
+- **Same draws.** It uses the run's own draws, so it is deterministic on the seed like everything else.
+
 ## Traces
 
 Every number carries `trace: { formula, uses: [{ id, source }], evidence: 'computation' }`. Each
