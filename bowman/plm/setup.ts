@@ -68,7 +68,7 @@ function doctypeDoc(def: DocTypeDef, fields: Field[], withLinks: boolean): Field
     ...(autoname ? { autoname, naming_rule } : {}),
     fields: fields.map((x, i) => ({ ...x, idx: i + 1 })),
     permissions: def.permissions ?? [],
-    ...(withLinks ? { links: def.links ?? [] } : {}),
+    links: withLinks ? def.links ?? [] : [],
     ...(def.props ?? {}),
   };
 }
@@ -228,7 +228,6 @@ async function webhooks() {
   ];
   // Norn's own writes do not echo back to it: the hook skips updates made by the Norn user.
   const condition = `doc.modified_by != "${NORN_USER}"`;
-  const existing = await plm.list('Webhook', { fields: ['name', 'webhook_doctype', 'webhook_docevent', 'request_url'] });
   for (const s of specs) {
     const doc = {
       webhook_doctype: s.doctype,
@@ -244,10 +243,8 @@ async function webhooks() {
       timeout: 5,
       enabled,
     };
-    const hit = existing.find((w) => w.webhook_doctype === s.doctype && w.webhook_docevent === s.event && !w.request_url.includes('/api/resource/'));
-    if (hit) await plm.put(`/api/resource/Webhook/${enc(hit.name)}`, doc);
-    else await plm.post('/api/resource/Webhook', { doctype: 'Webhook', ...doc });
-    log(`  Webhook ${s.label}: ${hit ? 'updated' : 'created'}, ${enabled ? 'enabled' : 'disabled (set NORN_WEBHOOK_URL in .env and re-run setup)'}`);
+    const how = await plm.upsert('Webhook', s.label, doc);
+    log(`  Webhook ${s.label}: ${how}, ${enabled ? 'enabled' : 'disabled (set NORN_WEBHOOK_URL in .env and re-run setup)'}`);
   }
 
   // Release automation: when an ECR is approved, create its ECO through the PLM's own REST API.
@@ -290,10 +287,8 @@ async function webhooks() {
     timeout: 20,
     enabled: 1,
   };
-  const hit = existing.find((w) => w.request_url.includes('/api/resource/ECO'));
-  if (hit) await plm.put(`/api/resource/Webhook/${enc(hit.name)}`, rel);
-  else await plm.post('/api/resource/Webhook', { doctype: 'Webhook', ...rel });
-  log('  Webhook "release ECO on approval": ' + (hit ? 'updated' : 'created') + ' (bot key rotated, not shown)');
+  const how2 = await plm.upsert('Webhook', 'ecr.approved', rel);
+  log('  Webhook "ecr.approved" (release the ECO): ' + how2 + ' (bot key rotated, not shown)');
 }
 
 async function main() {

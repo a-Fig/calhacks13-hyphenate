@@ -255,8 +255,8 @@ const part: DocTypeDef = {
   props: { module: MODULE, track_changes: 1, sort_field: 'modified', sort_order: 'DESC', search_fields: 'part_name,program' },
   links: [
     { link_doctype: 'Engineering BOM', link_fieldname: 'part', group: 'Structure' },
-    { link_doctype: 'Engineering BOM', link_fieldname: 'part', parent_doctype: 'Engineering BOM', table_fieldname: 'lines', is_child_table: 1, group: 'Where used' },
-    { link_doctype: 'ECR', link_fieldname: 'part', parent_doctype: 'ECR', table_fieldname: 'affected_items', is_child_table: 1, group: 'Changes' },
+    { link_doctype: 'Engineering BOM Line', link_fieldname: 'part', parent_doctype: 'Engineering BOM', table_fieldname: 'lines', is_child_table: 1, group: 'Where used' },
+    { link_doctype: 'ECR Affected Item', link_fieldname: 'part', parent_doctype: 'ECR', table_fieldname: 'affected_items', is_child_table: 1, group: 'Changes' },
     { link_doctype: 'NCR', link_fieldname: 'part', group: 'Changes' },
   ],
 };
