@@ -22,6 +22,7 @@ node bowman/erp/bootstrap.mjs   # company, price list, Norn role and user (idemp
 node bowman/erp/verify.mjs      # the call sequence below, then removes its test documents
 node bowman/erp/seed.ts         # load bowman/data/bowman.json as Administrator (re-runnable; phases can be named)
 node bowman/erp/verify-seed.ts  # read the seed back as Norn and compare with the dataset
+node bowman/erp/seed-mbom.ts     # the manufacturing BOM: build stations under each aircraft (after seed.ts; re-runnable)
 node bowman/erp/seed-planning.ts # volume plan (Master Production Schedule), built aircraft (Serial Nos), and Norn's read grants for them
 ```
 
@@ -98,6 +99,16 @@ Mapping decisions:
 - **Volume plan and built aircraft** are loaded by `seed-planning.ts`, not `seed.ts`: the volume plan as one Master Production Schedule (`MPS26-000001`, planned units per month and program), and the ten built Vespers as Serial Nos `VESPER-001` to `-010` with the completion date as `posting_date` (no stock entry, so the reconciled stock is unchanged). Details in `norn/connectors/erpnext/NOTES.md`.
 - **Not loaded** (no natural ERPNext home, or Norn takes them from the PLM side): people, change-control policy, NCRs, ECRs, ECOs as documents, supplier constraints, rate factors, scenarios.
 - **GL side effects.** The receipts credit `Inventory Received But Not Billed` and nothing clears it, because no purchase invoices were created. Reconciliation differences sit in Cost of Goods Sold and Temporary Opening.
+
+## Manufacturing BOM (2026-10-24)
+
+The PLM keeps the engineering BOM (the dataset's `bom`); the ERP holds the manufacturing BOM, `mbom` in `bowman/data/mbom.ts`. Only each program's top level differs: every sub-assembly BOM, leaf part and exploded quantity is the same. `seed-mbom.ts` (phases `items stations tops`, as Administrator) adds:
+
+- Item group `Build stations` and 8 non-stock make items, `BW-0001-S10` to `S40` (Vesper) and `BW-M000-S10` to `S40` (Meridian): 10 structure join, 20 propulsion and energy install, 30 systems and avionics, 40 interior and final. Each has a `Standard Cost` price, a submitted BOM of the top-level children built there, and one operation: its share of the aircraft's own final-assembly hours (Vesper 120/200/220/100 = 640 h, Meridian 180/280/260/180 = 900 h).
+- A new default BOM per aircraft listing the four stations, with no operations of its own. The old top BOM is then set inactive (the aircraft has no parent BOM, so the replace-in-parents step does not apply).
+- ERPNext's own `total_cost` is unchanged: Vesper **2,800,019.00**, Meridian **5,007,356.80** (before and after, printed by the seed). The connector check expects the ERP as `erpnextCheck.view` in `bowman/norn-config/erpnext.ts` describes it (the dataset with `mbom` swapped in and no labor on the aircraft items); `bowman/data/check.ts` checks exploded leaf quantities and roll-ups against the engineering BOM.
+
+Check-versus-dataset differences that are not errors: the volume plan has 102 rows against the dataset's 130 (the dataset has one row per site, the Master Production Schedule one per month and program), and stock has 211 rows against 209 (the two aircraft items are stock items with no dataset stock row). The cost check's p50 on the ERP baseline can differ from the dataset's by about 0.1% (ECR-0417 per-Vesper delta 415.20 against 415.15): its Monte Carlo draws are keyed by the name of the correlation group (`supplier:Halden Precision` against `supplier:SUP-HALDEN`), so renaming a supplier re-rolls the draws. Other seeds on the dataset alone give 415.11 to 415.27. The ERP baseline names suppliers by their ERPNext names on purpose: the PLM connector maps the PLM's supplier names to them.
 
 ## Differences from the research doc
 

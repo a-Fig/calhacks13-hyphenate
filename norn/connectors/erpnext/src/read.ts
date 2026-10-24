@@ -87,9 +87,8 @@ export async function readBaseline(opts: ErpnextOptions): Promise<ReadResult> {
   const quoteFields = ['name', 'item_code', 'price_list', 'supplier', 'price_list_rate', 'lead_time_days', 'valid_from', 'valid_upto',
     quoteF.priceP10, quoteF.priceP90, quoteF.leadWeeksP10, quoteF.leadWeeksP90, quoteF.qualified, quoteF.primary, quoteF.allocation].filter((f): f is string => !!f);
 
-  const supF = cf.supplier?.externalId;
   const wcF = cf.workCenter?.externalId;
-  const [items, itemDefaults, boms, bomItems, bomOps, stations, prices, bins, serials, schedule, supplierRows] = await Promise.all([
+  const [items, itemDefaults, boms, bomItems, bomOps, stations, prices, bins, serials, schedule] = await Promise.all([
     c.list('Item', { fields: itemFields }),
     c.list('Item Default', { parent: 'Item', fields: ['parent', 'company', 'default_supplier'] }),
     c.list('BOM', { filters: [co, ['docstatus', '=', 1], ['is_active', '=', 1], ['is_default', '=', 1]], fields: ['name', 'item', 'quantity'] }),
@@ -100,12 +99,9 @@ export async function readBaseline(opts: ErpnextOptions): Promise<ReadResult> {
     c.list('Bin', { fields: ['item_code', 'warehouse', 'actual_qty', 'ordered_qty'] }),
     readSerials(c, opts),
     readSchedule(c, opts),
-    supF ? c.list('Supplier', { fields: ['name', supF] }) : Promise.resolve([] as Record<string, any>[]),
   ]);
 
-  // Ids the company's other systems use, when the ERP holds them; otherwise the ERPNext name.
-  const supplierId = new Map<string, string>(supplierRows.filter((s) => supF && s[supF]).map((s) => [s.name, String(s[supF!])]));
-  const sid = (name: string) => supplierId.get(name) ?? name;
+  // Work center ids the company's other systems use, when the ERP holds them; otherwise the ERPNext name.
   const centerId = new Map<string, string>(stations.filter((w) => wcF && w[wcF]).map((w) => [w.name, String(w[wcF!])]));
   const wid = (name: string) => centerId.get(name) ?? name;
 
@@ -148,7 +144,7 @@ export async function readBaseline(opts: ErpnextOptions): Promise<ReadResult> {
     if (!cur || (p.valid_from ?? '') > (cur.valid_from ?? '')) costRow.set(p.item_code, p);
   }
   const supplierOf = new Map<ItemCode, string>();
-  for (const d of itemDefaults) if (d.company === opts.company && d.default_supplier && !supplierOf.has(d.parent)) supplierOf.set(d.parent, sid(d.default_supplier));
+  for (const d of itemDefaults) if (d.company === opts.company && d.default_supplier && !supplierOf.has(d.parent)) supplierOf.set(d.parent, d.default_supplier);
 
   const baselineItems: Item[] = items.map((i) => {
     const code: ItemCode = i.name;
@@ -179,7 +175,7 @@ export async function readBaseline(opts: ErpnextOptions): Promise<ReadResult> {
     seenItem.add(q.item_code);
     const primary = quoteF.primary ? !!q[quoteF.primary] : first;
     return {
-      item: q.item_code, supplier: sid(q.supplier), primary,
+      item: q.item_code, supplier: q.supplier, primary,
       allocation: r6(quoteF.allocation ? num(q[quoteF.allocation]) : primary ? 1 : 0),
       unitPrice: { p10: r6(quoteF.priceP10 && q[quoteF.priceP10] != null ? num(q[quoteF.priceP10]) : rate), p50: r6(rate), p90: r6(quoteF.priceP90 && q[quoteF.priceP90] != null ? num(q[quoteF.priceP90]) : rate) },
       leadTimeWeeks: { p10: r6(quoteF.leadWeeksP10 && q[quoteF.leadWeeksP10] != null ? num(q[quoteF.leadWeeksP10]) : weeks), p50: r6(weeks), p90: r6(quoteF.leadWeeksP90 && q[quoteF.leadWeeksP90] != null ? num(q[quoteF.leadWeeksP90]) : weeks) },

@@ -40,7 +40,7 @@ Reading is 12 list requests issued together (`fields`, `limit_page_length=0`; ch
 |---|---|
 | items | `Item` (all, disabled included). `rev`, `status` from custom fields; `standardCost` is the item's row in the standard-cost price list valid on `asOf` (latest `valid_from` wins). `makeBuy` is `make` when the item has an active default submitted BOM. `defaultSupplier` is the `Item Default` for the company. Without a status field a disabled item is `proposed`. |
 | items: `laborHours`, `workCenter` | The default BOM's `BOM Operation` rows: minutes / 60 / BOM quantity, summed; the first operation's workstation. |
-| workCenters | `Workstation`: name as id, `hour_rate` as the labor rate. |
+| workCenters | `Workstation`: name as id (or the field named by `customFields.workCenter.externalId`), `hour_rate` as the labor rate. |
 | bom | `BOM Item` rows of default, active, submitted BOMs: `stock_qty` / BOM quantity per parent unit, `idx` as `seq`. |
 | sourcing | `Item Price` rows on the supplier price list that have a supplier and are valid on `asOf`. `unitPrice.p50` is the rate, `leadTimeWeeks.p50` is `lead_time_days / 7`; p10/p90, `qualified`, `primary` and `allocation` are custom fields (without them: p10 = p90 = p50, qualified, first row primary with allocation 1). |
 | stock | One row per enabled stock item. `Bin.actual_qty` by warehouse via the options' map. `onOrder` is `ordered_qty` summed over warehouses minus `supplierFinished`, because the quantity finished at a supplier is still on its open PO and the checks count it separately. |
@@ -49,7 +49,7 @@ Reading is 12 list requests issued together (`fields`, `limit_page_length=0`; ch
 | volumePlan | The planned quantities of the program top items in a `Master Production Schedule`; month is `delivery_date`'s first 7 characters, rows of one month and program are summed. Default: the company's latest MPS; `productionSchedule` names one. |
 | builtAircraft | `Serial No` of the program top items: `posting_date` is the completion date, the trailing digits of `serial_no` the serial (`serialNumber` overrides). |
 
-Work centers and suppliers are identified by their ERPNext names (`Structure assembly`, `Tarn Composites`), not by the dataset ids (`WC-STRUCT`, `SUP-TARN`). The check script maps them back.
+Suppliers are identified by their ERPNext names (`Tarn Composites`), not by the dataset ids (`SUP-TARN`): the PLM connector maps the PLM's supplier names to the same ERP names, so a quote links to its supplier's price index. The check script maps the dataset's supplier ids to names. A work center is its ERPNext name (`Structure assembly`) unless `customFields.workCenter.externalId` names a Workstation field holding another id; Bowman's holds the dataset id (`WC-STRUCT`), written by `seed.ts`.
 
 ## Volume plan and built aircraft: where they come from
 

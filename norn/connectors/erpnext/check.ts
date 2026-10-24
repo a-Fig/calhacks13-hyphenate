@@ -6,12 +6,15 @@
 // --config     a module exporting `erpnext` (ErpnextSettings) and, optionally, `erpnextCheck`:
 //              { reference: path of the dataset relative to the repo root, rollups: { topItem: expected roll-up cost } }
 //              optional `spot`: one item whose history reads are checked against fixed values (see Spot below).
+//              optional `view`: (dataset) => dataset, applied to the reference before comparing. For a company whose ERP holds a
+//              different structure from the reference (Bowman's ERP holds the manufacturing BOM, the dataset's `bom` is the
+//              engineering BOM), it returns the reference as the ERP should hold it.
 // --reference  overrides erpnextCheck.reference.
 // The reference is JSON holding the baseline's own arrays (programs, workCenters, items, bom, sourcing, stock,
 // volumePlan, builtAircraft). It may carry more fields (the checks only compare the ones the baseline has) and
-// Suppliers and work centers are compared by id, exactly as the reference has them: a baseline that names them by their
-// ERPNext names fails. (An earlier version mapped the reference ids to names first; that hid a baseline whose supplier
-// ids never equalled the ids on change requests, which shifted the cost check's correlated draws by about 0.1%.)
+// `suppliers` as {id, name}: ERPNext identifies a supplier by its name (the PLM connector maps its own supplier names to
+// those), so the reference's supplier ids are mapped to names. Work centers are compared by id, so the settings
+// must give the ERP's work center id field (customFields.workCenter).
 // Needs ERPNEXT_URL, ERPNEXT_API_KEY and ERPNEXT_API_SECRET in the environment or in ENV_FILE (default: the .env at the repo root).
 
 import { readFileSync } from 'node:fs';
@@ -42,10 +45,11 @@ if (!configFile) { console.error('usage: node check.ts --config <settings module
 const root = resolve(import.meta.dirname, '../../..');
 const mod = await import(pathToFileURL(resolve(configFile)).href);
 const settings: ErpnextSettings = mod.erpnext;
-const spec: { reference?: string; rollups?: Record<ItemCode, number>; spot?: Spot } = mod.erpnextCheck ?? {};
+const spec: { reference?: string; rollups?: Record<ItemCode, number>; spot?: Spot; view?: (dataset: any) => any } = mod.erpnextCheck ?? {};
 const refFile = arg('reference') ?? (spec.reference ? resolve(root, spec.reference) : undefined);
 if (!settings || !refFile) { console.error('the config module must export `erpnext`, and a reference dataset must be given'); process.exit(2); }
-const ref: Omit<Partial<Baseline>, 'workCenters'> & { suppliers?: { id: string; name: string }[]; workCenters?: { id: string; name?: string; laborRatePerHour: number }[] } = JSON.parse(readFileSync(refFile, 'utf8'));
+const dataset = JSON.parse(readFileSync(refFile, 'utf8'));
+const ref: Omit<Partial<Baseline>, 'workCenters'> & { suppliers?: { id: string; name: string }[]; workCenters?: { id: string; name?: string; laborRatePerHour: number }[] } = spec.view ? spec.view(dataset) : dataset;
 
 loadEnvFile();
 const opts = { ...settings, ...connectionFromEnv() };
@@ -66,7 +70,8 @@ function check(ok: boolean, what: string, detail = '') {
 const same = (what: string, n: number, diffs: string[]) => check(diffs.length === 0, `${what}: ${n - diffs.length} of ${n} match`, diffs.slice(0, 3).join('; '));
 const near = (a: number | undefined, c: number | undefined, tol = 1e-9) => Math.abs((a ?? 0) - (c ?? 0)) <= tol;
 
-const sup = (id?: string) => id;
+const supplierName = new Map((ref.suppliers ?? []).map((s) => [s.id, s.name]));
+const sup = (id?: string) => (id === undefined ? undefined : supplierName.get(id) ?? id);
 const wc = (id?: string) => id;
 
 // ---- counts ---------------------------------------------------------------------------------------

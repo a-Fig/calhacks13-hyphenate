@@ -43,14 +43,6 @@ export interface CustomFieldNames {
     /** The company's own PO number, when ERPNext's differs (history reads only). */
     externalId?: string;
   };
-  /**
-   * Ids other systems use for suppliers (change requests, the PLM). Without it the baseline names a supplier by
-   * its ERPNext name, which then never equals the id on a change request. Reads one extra list (Supplier).
-   */
-  supplier?: {
-    /** Field on Supplier holding the id. A supplier without a value keeps its ERPNext name. */
-    externalId?: string;
-  };
   /** Ids other systems use for work centers, held on the Workstation. A workstation without a value keeps its name. */
   workCenter?: {
     externalId?: string;
