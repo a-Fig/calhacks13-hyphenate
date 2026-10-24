@@ -24,6 +24,7 @@ import {
   type Range,
   type Route,
 } from '../../../config/src/index.ts';
+import { COST_BLOCKS } from '../../../checks/src/index.ts';
 
 export interface EcrRef {
   /** The ECR number as Norn holds it, e.g. ECR-0417. */
@@ -143,15 +144,29 @@ export function costCheckOf(rows: readonly ResultRow[]): CostCheckHeadline | und
   if (typeof months !== 'number' || !Number.isFinite(months)) return undefined;
 
   const blocks: NonNullable<CostCheckHeadline['blocks']> = {};
+  // Means add up, so each block's lines must add up to its stored subtotal: a missing line row would
+  // otherwise leave a gross forecast that is too small, even a measured zero.
+  const lineMeans = new Map<string, { sum: number; n: number }>();
   for (const r of rows) {
     if (!r.key.startsWith('line:')) continue;
     const d = jsonOr(r.detailJson);
     if (typeof d.block !== 'string') return undefined;
+    if (typeof d.mean !== 'number' || !Number.isFinite(d.mean)) return undefined;
+    const t = lineMeans.get(d.block) ?? { sum: 0, n: 0 };
+    lineMeans.set(d.block, { sum: t.sum + d.mean, n: t.n + 1 });
     const unit = isRange(d.unitCost) ? d.unitCost : null;
     const q = typeof d.quantity === 'number' ? d.quantity : 0;
     const extended = unit ? (q >= 0 ? { p10: unit.p10 * q, p50: unit.p50 * q, p90: unit.p90 * q } : { p10: unit.p90 * q, p50: unit.p50 * q, p90: unit.p10 * q }) : null;
     (blocks[d.block] ??= []).push({ id: r.key.slice('line:'.length), oneTime: isRange(d.oneTime) ? range(d.oneTime) : null, extended });
   }
+  const blockRows = rows.filter(r => r.key.startsWith('block:'));
+  if (COST_BLOCKS.some(b => !blockRows.some(r => r.key === `block:${b}`))) return undefined;
+  for (const b of blockRows) {
+    const mean = jsonOr(b.detailJson).mean;
+    const t = lineMeans.get(b.key.slice('block:'.length)) ?? { sum: 0, n: 0 };
+    if (typeof mean !== 'number' || Math.abs(t.sum - mean) > 0.01 * (t.n + 1)) return undefined;
+  }
+  if ([...lineMeans.keys()].some(k => !blockRows.some(b => b.key === `block:${k}`))) return undefined;
   const inventory = Array.isArray(detail.inventory)
     ? (detail.inventory as { rowId?: unknown; rows?: { cost?: unknown }[] }[]).map(l => ({
         rowId: String(l.rowId),
@@ -193,7 +208,8 @@ export function routeText(config: CompanyConfig, route: Route): string {
     reason = limit ? `${size}, ${limit}` : size;
   }
   // The field is short. If the long form does not fit, drop the other bodies, then the reason: the body is the route.
-  return [`${also} (${reason})`, `${alone} (${reason})`, alone].find(t => t.length <= ROUTE_MAX) ?? alone;
+  // A body name longer than the field is cut, so the publication is never refused for its length.
+  return [`${also} (${reason})`, `${alone} (${reason})`, alone].find(t => t.length <= ROUTE_MAX) ?? `${alone.slice(0, ROUTE_MAX - 1)}…`;
 }
 
 /**

@@ -247,3 +247,20 @@ test('the agent\'s conventions are read back strictly', () => {
   assert.equal(money(-1234.4), '($1,234)');
   assert.equal(money(415.2), '$415');
 });
+
+test('a stored run missing a cost line is not a forecast: the cost is unmeasured, not a smaller number', () => {
+  const rows = rowsOf('ECR-0423');
+  assert.ok(costCheckOf(rows), 'the whole run gives a forecast');
+  const missing = rows.filter(r => r.key !== 'line:recurring:vesper');
+  assert.equal(missing.length, rows.length - 1);
+  assert.equal(costCheckOf(missing), undefined);
+  assert.equal(costCheckOf(rows.filter(r => r.key !== 'block:retrofit')), undefined);
+});
+
+test('the route always fits the PLM field, even when a body name alone does not', async () => {
+  const config = structuredClone(await bowmanConfig());
+  for (const b of config.approval.bodies) b.name += 'B'.repeat(141);
+  const rows = rowsOf('ECR-0423');
+  const r = routeFor({ number: 'ECR-0423', title: 'x', revision: 1 }, { numbers: numbersOf(rows), costCheck: costCheckOf(rows) }, config);
+  assert.ok(r.route && r.route.length <= ROUTE_MAX, `${r.route?.length}`);
+});
