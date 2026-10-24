@@ -177,11 +177,13 @@ async function scripts() {
     ['ECR: Norn writes only the impact assessment', 'ECR', 'Before Validate', 'server-scripts/ecr-guard.py'],
     ['ECR: cost page totals', 'ECR', 'Before Save', 'server-scripts/ecr-totals.py'],
     ['NCR: title from number and part', 'NCR', 'Before Save', 'server-scripts/ncr-title.py'],
-    ...['Part', 'Engineering BOM', 'NCR', 'ECR', 'ECO'].flatMap((dt): [string, string, string, string][] => [
+    // Every DocType, child tables included: a child row inherits its parent's permissions, so Norn could discard or rename a row directly.
+    ...DOCTYPES.map((d) => d.name).flatMap((dt): [string, string, string, string][] => [
       [`${dt}: no discard`, dt, 'Before Discard', 'server-scripts/no-discard-or-rename.py'],
       [`${dt}: no rename`, dt, 'Before Rename', 'server-scripts/no-discard-or-rename.py'],
     ]),
     ['Norn: no files on change records', 'File', 'Before Insert', 'server-scripts/norn-no-attachments.py'],
+    ['Norn: no files moved onto change records', 'File', 'Before Save', 'server-scripts/norn-no-attachments.py'],
     ['Norn: no assignments on change records', 'ToDo', 'Before Insert', 'server-scripts/norn-no-assignments.py'],
     ['Norn: comments carry Norn as author', 'Comment', 'Before Insert', 'server-scripts/norn-comment-author.py'],
     ['Engineering BOM: component count', 'Engineering BOM', 'Before Save', 'server-scripts/bom-count.py'],
