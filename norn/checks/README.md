@@ -114,7 +114,14 @@ for, and S4 reports the shared supplier without a shift.
 - `peers` are the caller's to pass. The worker names them in the run's inputs (each open ECR's
   change request revision and digest), so a run is a function of them and filing, editing, closing
   or reopening a peer re-runs S4. The peer list, with a content hash of each peer's change request,
-  is in the `detail` row.
+  is in the `detail` row. A peer that cannot be read (no id, or a change request with missing
+  parts) is left out and named in an `unreadable_peer` flag; it never fails the ECR's own check.
+- One function decides which quote and which line apply to a part, and price, lead time, source and
+  qualification lot all use it: a quote whose `item` is the part comes first, then a quote with a
+  line naming the part. A quote that prices several parts therefore gives every part its lead time.
+- A bundle needs two different part numbers. Two ECRs that change the same part number earn no
+  bundle discount from each other. An ECR's own qualification lots take separate slots of an
+  exclusive-slot constraint, with or without peers.
 - Convergence is checked on the continuous results only. Serial numbers and probabilities are
   steps and are not.
 - The cumulative units a plan completes are interpolated through each month, so the serial that

@@ -133,3 +133,57 @@ test('the continuous outputs S4 reports are all in its convergence check', () =>
     assert.ok(keys.has(k), `${k} in ${[...keys].join()}`);
   }
 });
+
+// ---- round 2 (Sol's review of cfca174)
+
+test('an incomplete peer is skipped and named, and the own S4 of the ECR still runs', () => {
+  const alone = supplyCheck(baseline, ecr('ECR-0419'), { seed: SEED });
+  const peers = [{ id: 'ECR-DRAFT' }, ecr('ECR-0421'), {} , null] as unknown as ChangeRequest[];
+  const r = supplyCheck(baseline, ecr('ECR-0419'), { seed: SEED, peers });
+  assert.equal(r.parts.length, alone.parts.length, 'its own parts are unchanged');
+  assert.deepEqual(r.interaction!.peers.map((p) => p.ecr), ['ECR-0421'], 'the readable peer still counts');
+  const named = r.flags.filter((f) => f.kind === 'unreadable_peer');
+  assert.ok(named.some((f) => f.ref === 'ECR-DRAFT' && f.message.includes('ECR-DRAFT')), 'the flag names the peer');
+  assert.equal(named.length, 3, 'the empty object and null are named too');
+});
+
+test('one quote and one line decide the price, lead time and source alike', () => {
+  const r = supplyCheck(baseline, ecr('ECR-0409'), { seed: SEED });
+  const quote = ecr('ECR-0409').supplierQuotes[0];
+  assert.ok(r.parts.length >= 3);
+  for (const p of r.parts) {
+    assert.equal(p.leadFrom, 'quote', `${p.item} takes its lead time from the quote`);
+    assert.equal(p.quoteId, quote.id, `${p.item} is the part of the quote its lead time comes from`);
+    assert.equal(p.supplier, quote.supplier, `${p.item} has the quoting supplier as its source`);
+    assert.ok(Math.abs(p.leadWeeks.p50 - quote.leadTimeWeeks!) < 0.5, `${p.item} waits the quoted lead time, got ${p.leadWeeks.p50}`);
+  }
+});
+
+test('two ECRs that change the same part number earn no bundle discount from each other', () => {
+  const clone = ecr('ECR-0419');
+  clone.id = 'ECR-9419';
+  const r = supplyCheck(baseline, ecr('ECR-0419'), { seed: SEED, peers: [clone] });
+  assert.ok(r.interaction, 'the clone shares Orrin, so it is compared');
+  const total = r.interaction!.bundles.reduce((a, b) => a + b.ownSaving.point + b.pairSaving.point, 0);
+  assert.equal(total, 0, 'the same part qualified twice is one qualification, not a bundle');
+  // The real pair, on different parts, still earns it.
+  const pair = supplyCheck(baseline, ecr('ECR-0419'), { seed: SEED, peers: [ecr('ECR-0421')] });
+  assert.ok(pair.interaction!.bundles[0].pairSaving.point > 0);
+});
+
+test('the own lots of an ECR do not queue for one exclusive slot', () => {
+  // ECR-0419 changes one Orrin part. A second part number of the same assembly goes to Orrin too, and
+  // the slot constraint covers both part numbers.
+  const e = ecr('ECR-0419');
+  e.itemChanges.push({ item: 'BW-3125-100', op: 'revise', fromRev: 'A', toRev: 'B', changes: [{ field: 'unit_price_usd', from: 500, to: 520 }] } as never);
+  const q = structuredClone(e.supplierQuotes[0]);
+  e.supplierQuotes.push({ ...q, id: 'Q-OR-TEST', item: 'BW-3125-100', lines: [{ description: 'Second magnet part, UH grade', unitPrice: 520 }, { description: 'Qualification lot of 12 sets', oneTime: 40000 }] } as never);
+  const two: Baseline = {
+    ...baseline,
+    supplierConstraints: baseline.supplierConstraints!.map((c) => (c.id === 'CON-ORRIN-UH-SLOT' ? { ...c, items: [...c.items, 'BW-3125-100'] } : c)),
+  };
+  const alone = supplyCheck(two, e, { seed: SEED });
+  const slots = alone.parts.filter((p) => p.slot).map((p) => p.slot!.opens.p50);
+  assert.equal(slots.length, 2, 'two slot-constrained parts: ' + alone.parts.map((p) => p.item).join(', '));
+  assert.equal(new Set(slots).size, 2, 'a quarterly slot takes one lot, so the two lots take two quarters: ' + slots.join(', '));
+});

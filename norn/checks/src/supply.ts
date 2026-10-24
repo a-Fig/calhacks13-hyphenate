@@ -127,17 +127,27 @@ export function supplyCheck(baseline: Baseline, ecr: ChangeRequest, options: Sup
   const mine = suppliersOf(sched);
 
   // Peers that buy from a supplier this ECR buys from. A scratch book decides, so an unrelated peer registers no inputs.
-  const peerList = [...new Map((options.peers ?? []).filter((p) => p.id !== ecr.id).map((p) => [p.id, p])).values()].sort((a, b) => (a.id < b.id ? -1 : 1));
+  const named = (options.peers ?? []).filter((p) => {
+    if (p && typeof p === 'object' && typeof p.id === 'string') return p.id !== ecr.id;
+    book.flags.push({ kind: 'unreadable_peer', severity: 'warn', ref: '(no id)', message: 'An open change request with no id could not be read, so it is left out of the comparison.' });
+    return false;
+  });
+  const peerList = [...new Map(named.map((p) => [p.id, p])).values()].sort((a, b) => (a.id < b.id ? -1 : 1));
   const related: { ecr: ChangeRequest; sched: Schedule; shared: string[] }[] = [];
   const unrelatedPeers: string[] = [];
   for (const p of peerList) {
-    const probe = gatherSchedule(new Book([], D), baseline, p, { baseline: where.baseline, changeRequest: `the open change request ${p.id}` });
-    const shared = [...suppliersOf(probe)].filter((s) => mine.has(s)).sort();
-    if (shared.length === 0) {
-      unrelatedPeers.push(p.id);
-      continue;
+    // A peer that cannot be read (an ECR filed with no item changes yet, say) is skipped and named, never fatal to this ECR's own check.
+    try {
+      const probe = gatherSchedule(new Book([], D), baseline, p, { baseline: where.baseline, changeRequest: `the open change request ${p.id}` });
+      const shared = [...suppliersOf(probe)].filter((s) => mine.has(s)).sort();
+      if (shared.length === 0) {
+        unrelatedPeers.push(p.id);
+        continue;
+      }
+      related.push({ ecr: p, sched: gatherSchedule(book, baseline, p, { baseline: where.baseline, changeRequest: `the open change request ${p.id}` }), shared });
+    } catch (e) {
+      book.flags.push({ kind: 'unreadable_peer', severity: 'warn', ref: String(p?.id), message: `The open change request ${p?.id} could not be read (${(e as Error).message}), so it is left out of the comparison.` });
     }
-    related.push({ ecr: p, sched: gatherSchedule(book, baseline, p, { baseline: where.baseline, changeRequest: `the open change request ${p.id}` }), shared });
   }
   const group = [sched, ...related.map((r) => r.sched)];
 
@@ -221,6 +231,7 @@ export function supplyCheck(baseline: Baseline, ecr: ChangeRequest, options: Sup
     return total;
   };
   const capacityHolders = (c: (typeof capacityConstraints)[number]) => group.filter((s) => s === sched || s.items.some((it) => c.items.includes(it.item)));
+  const itemsAt = (g: number, cid: string) => new Set(group[g].items.filter((it) => it.slot?.constraintId === cid).map((it) => it.item));
   /** What a bundle saves one ECR in the group (index gi), given where each ECR's order is placed. */
   const savingOf = (spec: (typeof bundleSpecs)[number], gi: number, i: number, dd: Draws, tt: Timing[], raw: number): number => {
     const startOf = (g: number) => tt[g].placed[group[g].items.findIndex((it) => it.slot?.constraintId === spec.c.id)][i];
@@ -228,8 +239,10 @@ export function supplyCheck(baseline: Baseline, ecr: ChangeRequest, options: Sup
     const mine = startOf(gi);
     let near = false;
     let later = false;
+    // The terms reward a second part number: another ECR changing the same part number earns nothing.
+    const mineItems = itemsAt(gi, spec.c.id);
     for (const h of spec.holders) {
-      if (h.gi === gi) continue;
+      if (h.gi === gi || ![...itemsAt(h.gi, spec.c.id)].some((x) => !mineItems.has(x))) continue;
       const other = startOf(h.gi);
       if (Math.abs(other - mine) <= w) {
         near = true;

@@ -347,6 +347,13 @@ export function gatherSchedule(book: Book, baseline: Baseline, ecr: ChangeReques
   // A quote line prices the part whose code its description names, else the quote's own item (the cost check's rule).
   const knownCodes = [...new Set([...s.head.keys(), ...s.base.keys()])].sort((a, b) => b.length - a.length || (a < b ? -1 : 1));
   const lineItem = (q: ChangeRequest['supplierQuotes'][number], description: string) => knownCodes.find((c) => description.includes(c)) ?? q.item;
+  // The one rule for which quotes apply to a part, for its price, its lead time and its sources alike: a
+  // quote is for the part if it is the quote's own item or one of its lines names the part. The quotes
+  // for the part's own item come first, then the others in the order filed.
+  const quotesFor = (code: ItemCode) =>
+    ecr.supplierQuotes
+      .filter((q) => q.item === code || q.lines.some((l) => lineItem(q, l.description) === code))
+      .sort((a, b) => Number(b.item === code) - Number(a.item === code));
   const sourcingOf = (code: ItemCode) => baseline.sourcing.filter((x) => x.item === code);
   const allLeads = baseline.sourcing.map((x) => x.leadTimeWeeks?.p50).filter((x): x is number => Number.isFinite(x) && x > 0);
   const constraints = (baseline.supplierConstraints ?? []).filter((c) => c.kind === 'qualification_slot');
@@ -363,10 +370,11 @@ export function gatherSchedule(book: Book, baseline: Baseline, ecr: ChangeReques
     }
     const recs = sourcingOf(code);
     const src = recs.find((x) => x.primary) ?? recs[0];
-    const quote = ecr.supplierQuotes.find((q) => q.item === code && (q.leadTimeWeeks ?? 0) > 0);
+    const forPart = quotesFor(code);
+    const quote = forPart.find((q) => (q.leadTimeWeeks ?? 0) > 0);
     const supplier = quote?.supplier ?? src?.supplier ?? h.supplier;
     const groups = supplier ? [`supplier:${supplier}`] : [];
-    const sources = [...new Set([...recs.filter((x) => x.qualified).map((x) => x.supplier), ...ecr.supplierQuotes.filter((q) => q.item === code).map((q) => q.supplier)])].sort();
+    const sources = [...new Set([...recs.filter((x) => x.qualified).map((x) => x.supplier), ...forPart.map((q) => q.supplier)])].sort();
     const id = `lead:${ecr.id}:${code}`;
     let leadVar: string;
     let leadFrom: SupplyItem['leadFrom'];
@@ -433,13 +441,13 @@ export function gatherSchedule(book: Book, baseline: Baseline, ecr: ChangeReques
     // The qualification lot's cost, from the quote lines that name it, for the second-part-number discount.
     if (slot) {
       let q = 0;
-      for (const qq of ecr.supplierQuotes) if (qq.item === code) for (const l of qq.lines) if (l.oneTime !== undefined && /qualif/i.test(l.description)) q += l.oneTime;
+      for (const qq of forPart) for (const l of qq.lines) if (lineItem(qq, l.description) === code && l.oneTime !== undefined && /qualif/i.test(l.description)) q += l.oneTime;
       if (q > 0) qualification.set(code, q);
     }
     // The price is the quote line that names this part (a quote can price several parts), else the item master's.
     let priceQuote: SupplyItem['priceQuote'];
     let price: number | null = h.unitPrice ?? null;
-    outer: for (const qq of ecr.supplierQuotes) {
+    outer: for (const qq of forPart) {
       for (let li = 0; li < qq.lines.length; li++) {
         const l = qq.lines[li];
         if (lineItem(qq, l.description) !== code || l.unitPrice === undefined || l.oneTime !== undefined || /first lot|cancel/i.test(l.description)) continue;
@@ -580,7 +588,7 @@ const byFiling = (a: Schedule, b: Schedule) => (a.ecr.filedOn < b.ecr.filedOn ? 
 /**
  * Evaluate schedules on shared draws. With `contend`, one slot takes one lot: ECRs in the order they
  * were filed each take the first slot that opens after their decision and that no earlier one took, in
- * every draw. Without it, each schedule is alone.
+ * every draw. Without it, each schedule is alone, and still only its own lots exclude each other.
  */
 export function evaluateSchedules(scheds: Schedule[], d: Draws, contend: boolean): Timing[] {
   const order = scheds.map((_, i) => i).sort((a, b) => byFiling(scheds[a], scheds[b]));
@@ -592,10 +600,12 @@ export function evaluateSchedules(scheds: Schedule[], d: Draws, contend: boolean
   const lag = scheds.map((s) => d.values.get(s.decisionVar)!);
   const lead = scheds.map((s) => s.items.map((it) => d.values.get(it.leadVar)!));
   for (let i = 0; i < d.n; i++) {
-    const taken = new Map<string, Set<number>>();
+    const shared = new Map<string, Set<number>>();
     for (const si of order) {
       const s = scheds[si];
       const t = out[si];
+      // A slot takes one lot. Within one ECR its lots never share a slot; with `contend`, nor do different ECRs.
+      const taken = contend ? shared : new Map<string, Set<number>>();
       const decision = s.filedDay + WEEK * lag[si][i];
       t.decision[i] = decision;
       let parts = decision;
@@ -606,12 +616,10 @@ export function evaluateSchedules(scheds: Schedule[], d: Draws, contend: boolean
           const starts = it.slot.starts;
           let j = 0;
           while (j < starts.length - 1 && starts[j] < decision) j++;
-          if (contend) {
-            let used = taken.get(it.slot.constraintId);
-            if (!used) taken.set(it.slot.constraintId, (used = new Set()));
-            while (j < starts.length - 1 && used.has(j)) j++;
-            used.add(j);
-          }
+          let used = taken.get(it.slot.constraintId);
+          if (!used) taken.set(it.slot.constraintId, (used = new Set()));
+          while (j < starts.length - 1 && used.has(j)) j++;
+          used.add(j);
           t.slotIndex[k][i] = j;
           placed = starts[j];
         }
