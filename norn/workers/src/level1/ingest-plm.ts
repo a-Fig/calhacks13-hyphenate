@@ -81,10 +81,27 @@ export class RetryQueue {
   due(nowMs: number): string[] {
     return [...this.waiting].filter(([, w]) => w.dueMs <= nowMs).map(([n]) => n);
   }
+  has(name: string): boolean {
+    return this.waiting.has(name);
+  }
   get names(): string[] {
     return [...this.waiting.keys()];
   }
 }
+
+/** Runs one ECR's read and report at a time, so a retry and the watcher can never interleave and report older content last. */
+export type EcrLock = <T>(name: string, fn: () => Promise<T>) => Promise<T>;
+export function ecrLock(): EcrLock {
+  const tail = new Map<string, Promise<unknown>>();
+  return (name, fn) => {
+    const run = (tail.get(name) ?? Promise.resolve()).then(fn, fn);
+    const settled = run.catch(() => {});
+    tail.set(name, settled);
+    void settled.then(() => { if (tail.get(name) === settled) tail.delete(name); });
+    return run;
+  };
+}
+const noLock: EcrLock = (_name, fn) => fn();
 
 /**
  * Take in ECRs one at a time. One that cannot be mapped (a `PlmMappingError`) is logged by name and
@@ -98,12 +115,22 @@ export async function takeIn(
   report: (item: IngestItem) => Promise<void>,
   log: (m: string) => void,
   retry = new RetryQueue(),
-  now: () => number = Date.now
+  now: () => number = Date.now,
+  lock: EcrLock = noLock,
+  onlyQueued = false
 ): Promise<{ taken: string[]; skipped: string[]; retrying: string[] }> {
   const out = { taken: [] as string[], skipped: [] as string[], retrying: [] as string[] };
   for (const name of names) {
     try {
-      await report(await read(name));
+      // A retry whose ECR the watcher delivered meanwhile has nothing left to do. The check is inside the
+      // lock, so it sees the watcher's delivery if that ran first; if the retry runs first, the watcher's
+      // later read is of newer or equal content, so the newest is always reported last.
+      const did = await lock(name, async () => {
+        if (onlyQueued && !retry.has(name)) return false;
+        await report(await read(name));
+        return true;
+      });
+      if (!did) continue;
       retry.done(name);
       out.taken.push(name);
     } catch (e) {
@@ -122,8 +149,8 @@ export async function takeIn(
 }
 
 /** One tick: try again the ECRs that are due. */
-export const retryDue = (retry: RetryQueue, read: (name: string) => Promise<IngestItem>, report: (item: IngestItem) => Promise<void>, log: (m: string) => void, now: () => number = Date.now) =>
-  takeIn(retry.due(now()), read, report, log, retry, now);
+export const retryDue = (retry: RetryQueue, read: (name: string) => Promise<IngestItem>, report: (item: IngestItem) => Promise<void>, log: (m: string) => void, now: () => number = Date.now, lock: EcrLock = noLock) =>
+  takeIn(retry.due(now()), read, report, log, retry, now, lock, true);
 
 /** Run until the process ends. */
 export async function runPlmIngest(R: Client['R'], log: (m: string) => void, deps: { ingestOnce: typeof IngestOnce; itemOf: typeof ItemOf }, o = plmIngestOptionsFromEnv()): Promise<void> {
@@ -143,20 +170,23 @@ export async function runPlmIngest(R: Client['R'], log: (m: string) => void, dep
   log(`the PLM has ${all.length} ECR(s); ${take.length} to take in${o.only.length ? ` (only ${o.only.join(', ')})` : ''}: ${take.map(e => `${e.name} [${e.workflowState}]`).join(', ') || 'none'}`);
   const read = (name: string) => readItem(opts, name, deps.itemOf);
   const retry = new RetryQueue(o.intervalMs);
-  await takeIn(take.map(e => e.name), read, report, log, retry);
+  const lock = ecrLock();
+  await takeIn(take.map(e => e.name), read, report, log, retry, Date.now, lock);
   let retrying = false;
   setInterval(() => {
     if (retrying || retry.names.length === 0) return;
     retrying = true;
-    retryDue(retry, read, report, log).catch(e => log(`PLM retry: ${(e as Error).message}`)).finally(() => (retrying = false));
+    retryDue(retry, read, report, log, Date.now, lock).catch(e => log(`PLM retry: ${(e as Error).message}`)).finally(() => (retrying = false));
   }, o.intervalMs);
 
   const watcher = watchEcrs(
     opts,
     async change => {
       if (!wanted(o, change)) return;
-      await report(await readItem(opts, change.name, deps.itemOf));
-      retry.done(change.name); // delivered fresh by the watcher: nothing left to retry
+      await lock(change.name, async () => {
+        await report(await readItem(opts, change.name, deps.itemOf));
+        retry.done(change.name); // delivered fresh by the watcher: nothing left to retry
+      });
     },
     { intervalMs: o.intervalMs, since: mark, stateFile: o.stateFile, onError: e => log(`PLM watch: ${(e as Error).message}`) }
   );

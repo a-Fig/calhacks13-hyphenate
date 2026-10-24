@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { PlmMappingError } from '../../../connectors/plm/src/index.ts';
 import type { IngestItem } from '../ingest.ts';
-import { RetryQueue, retryDue, takeIn } from './ingest-plm.ts';
+import { RetryQueue, ecrLock, retryDue, takeIn } from './ingest-plm.ts';
 
 const item = (name: string) => ({ plmEcrNumber: name }) as unknown as IngestItem;
 
@@ -72,4 +72,33 @@ test('a failed report is retried too, and a malformed ECR never is', async () =>
   assert.deepEqual(retry.names, ['ECR-0001'], 'the malformed ECR waits for the watcher to deliver it after a fix');
   reportFails = false;
   assert.deepEqual((await retryDue(retry, read, report, m => logs.push(m), () => 5000)).taken, ['ECR-0001']);
+});
+
+test('a retry and the watcher never report one ECR out of order', async () => {
+  // Sol's round-4 case: the retry's read is slow and sees old content; the watcher sees newer content meanwhile.
+  const lock = ecrLock();
+  const retry = new RetryQueue(10);
+  retry.fail('ECR-0001', 0);
+  let plm = 'old';
+  let release!: () => void;
+  const held = new Promise<void>(r => (release = r));
+  const reported: string[] = [];
+  const report = async (i: IngestItem) => void reported.push((i as any).content);
+  const slowRead = async () => { const seen = plm; await held; return { plmEcrNumber: 'ECR-0001', content: seen } as unknown as IngestItem; };
+  const retrying = retryDue(retry, slowRead, report, () => {}, () => 1_000, lock);
+  await new Promise(r => setTimeout(r, 5));
+  plm = 'new';
+  const watcher = lock('ECR-0001', async () => { await report({ plmEcrNumber: 'ECR-0001', content: plm } as unknown as IngestItem); retry.done('ECR-0001'); });
+  release();
+  await Promise.all([retrying, watcher]);
+  assert.deepEqual(reported, ['old', 'new'], 'the watcher waits for the retry, so the newest is reported last');
+
+  // And when the watcher gets there first, the retry finds nothing left to do.
+  const r2 = new RetryQueue(10);
+  r2.fail('ECR-0002', 0);
+  const seen: string[] = [];
+  await lock('ECR-0002', async () => { seen.push('watcher'); r2.done('ECR-0002'); });
+  const out = await retryDue(r2, async () => { seen.push('retry read'); return item('ECR-0002'); }, async () => {}, () => {}, () => 1_000, lock);
+  assert.deepEqual(seen, ['watcher']);
+  assert.deepEqual(out.taken, []);
 });
