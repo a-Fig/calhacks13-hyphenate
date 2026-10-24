@@ -361,24 +361,29 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
   const versions: Row[] = affected.length
     ? await c.list('BOM', { filters: [['item', 'in', affected], ['company', '=', opts.company], ['docstatus', '<', 2]], fields: bomFields, orderBy: 'creation asc' })
     : [];
-  const bases = new Map<ItemCode, { base: Row; tagged?: Row }>();
+  // `base` is the BOM this ECO's version comes from. Before the ECO's version exists it is the active default. Once it exists
+  // it is the version made just before it: a later ECO's version must never become the source, or rechecking this ECO would
+  // tell a person to undo that one. `later` holds the submitted versions made after this ECO's.
+  const bases = new Map<ItemCode, { base: Row; tagged?: Row; later: Row[] }>();
   for (const item of affected) {
     const mine = versions.filter((v) => v.item === item);
     const tagged = [...mine].reverse().find((v) => v[t.bom.eco] === eco);
-    const base = tagged ? [...mine].reverse().find((v) => v !== tagged) : [...mine].reverse().find((v) => v.is_active && v.is_default);
+    const madeBefore = (v: Row) => !tagged!.creation || (v.creation ?? '') < tagged!.creation;
+    const base = tagged ? [...mine].reverse().find((v) => v !== tagged && v[t.bom.eco] !== eco && madeBefore(v)) : [...mine].reverse().find((v) => v.is_active && v.is_default);
     if (!base) { problems.push(`${item} has no active default BOM to version`); continue; }
-    bases.set(item, { base, tagged });
+    const later = tagged ? mine.filter((v) => v !== tagged && v.docstatus === 1 && v[t.bom.eco] !== eco && tagged.creation && (v.creation ?? '') > tagged.creation) : [];
+    bases.set(item, { base, tagged, later });
   }
   const baseLines: Row[] = bases.size
-    ? await c.list('BOM Item', { parent: 'BOM', filters: [['parent', 'in', [...bases.values()].map((b) => b.base.name)], ['docstatus', '=', 1]], fields: ['parent', 'item_code', 'qty', 'uom', 'rate', 'bom_no', 'idx'] })
+    ? await c.list('BOM Item', { parent: 'BOM', filters: [['parent', 'in', [...bases.values()].map((b) => b.base.name)], ['docstatus', '=', 1]], fields: ['parent', 'item_code', 'qty', 'uom', 'conversion_factor', 'rate', 'bom_no', 'idx'] })
     : [];
   // The lines of the BOM versions already entered for this ECO, to compare with the package's.
   const taggedNames = [...bases.values()].flatMap((b) => (b.tagged ? [b.tagged.name] : []));
   const taggedLines: Row[] = taggedNames.length
-    ? await c.list('BOM Item', { parent: 'BOM', filters: [['parent', 'in', taggedNames]], fields: ['parent', 'item_code', 'qty', 'bom_no'] })
+    ? await c.list('BOM Item', { parent: 'BOM', filters: [['parent', 'in', taggedNames]], fields: ['parent', 'item_code', 'qty', 'bom_no', 'conversion_factor'] })
     : [];
-  // The parents that use the old BOM (still to be switched) or the new one (already switched).
-  const bomNames = [...bases.values()].flatMap((b) => [b.base.name, ...(b.tagged ? [b.tagged.name] : [])]);
+  // The parents that use the old BOM (still to be switched), the new one (already switched) or a later one (superseded).
+  const bomNames = [...bases.values()].flatMap((b) => [b.base.name, ...(b.tagged ? [b.tagged.name] : []), ...b.later.map((v) => v.name as string)]);
   const refs: Row[] = bomNames.length
     ? await c.list('BOM Item', { parent: 'BOM', filters: [['bom_no', 'in', bomNames], ['docstatus', '=', 1]], fields: ['parent', 'bom_no'] })
     : [];
@@ -388,6 +393,9 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
   const activeParent = new Map(parentBoms.map((p) => [p.name, p.item as ItemCode]));
   const addCodes = uniq(lineChanges.filter((b) => b.op === 'add').map((b) => b.child));
   const addItems: Row[] = addCodes.length ? await c.list('Item', { filters: [['name', 'in', addCodes]], fields: ['name', 'stock_uom', 'default_bom'] }) : [];
+  // A changed quantity is in stock units, so its row is entered in the item's stock UOM.
+  const setCodes = uniq(lineChanges.filter((b) => b.op === 'set_qty').map((b) => b.child));
+  const setItems: Row[] = setCodes.length ? await c.list('Item', { filters: [['name', 'in', setCodes]], fields: ['name', 'stock_uom'] }) : [];
   for (const code of addCodes) if (!addItems.some((i) => i.name === code)) problems.push(`item ${code} does not exist in ERPNext`);
 
   // Children before parents, so a parent's new lines can point at its sub-assembly's new BOM.
@@ -401,7 +409,7 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
 
   const estimate = new Map<ItemCode, number>(); // new unit cost of an affected assembly
   for (const item of ordered) {
-    const { base, tagged } = bases.get(item)!;
+    const { base, tagged, later } = bases.get(item)!;
     const q = num(base.quantity) || 1; // the BOM makes q units of the item; its lines are quantities for q units
     const perBom = (perUnit: number) => Math.round(perUnit * q * 1e6) / 1e6; // a change's per-unit quantity as the BOM line holds it
     const baseRows = baseLines.filter((l) => l.parent === base.name).sort((a, b) => a.idx - b.idx);
@@ -412,31 +420,47 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
       ...(bases.has(code) ? [field('bom_no', 'BOM No', bases.get(code)!.tagged?.name ?? null, { from: `bom:${code}` })] : bomNo ? [field('bom_no', 'BOM No', bomNo)] : []),
     ];
     const rows: ErpField[][] = [];
+    const stockQty: number[] = []; // each row's quantity in the item's stock UOM: what is compared, whatever UOM a row is entered in
+    const merged = new Set<ItemCode>();
     let raw = 0;
     let known = true;
     for (const l of baseRows) {
       const ch = changes.find((b) => b.child === l.item_code);
       if (ch?.op === 'remove') continue;
-      const qty = ch?.op === 'set_qty' ? perBom(ch.qty!) : num(l.qty);
-      raw += qty * (newCost.get(l.item_code) ?? estimate.get(l.item_code) ?? num(l.rate));
-      rows.push(itemRow(l.item_code, qty, l.uom, l.bom_no));
+      const factor = num(l.conversion_factor) || 1; // stock units in one unit of the row's UOM
+      let qty = num(l.qty);
+      let uom: string | undefined = l.uom;
+      let stock = qty * factor;
+      if (ch?.op === 'set_qty') {
+        // The target is a total in stock units. Repeated rows of the component merge into the first, entered once at the
+        // target; the rest are left out (ERPNext adds repeated rows up, so the total is what counts).
+        if (merged.has(l.item_code)) continue;
+        merged.add(l.item_code);
+        stock = perBom(ch.qty!);
+        const stockUom = setItems.find((i) => i.name === l.item_code)?.stock_uom as string | undefined;
+        if (stockUom) { qty = stock; uom = stockUom; } else qty = Math.round((stock / factor) * 1e6) / 1e6;
+      }
+      raw += stock * (newCost.get(l.item_code) ?? estimate.get(l.item_code) ?? num(l.rate) / factor);
+      rows.push(itemRow(l.item_code, qty, uom, l.bom_no));
+      stockQty.push(stock);
     }
     for (const ch of changes) {
       if (ch.op === 'add') {
         known = false;
         const it = addItems.find((i) => i.name === ch.child);
         rows.push(itemRow(ch.child, perBom(ch.qty!), it?.stock_uom, it?.default_bom));
+        stockQty.push(perBom(ch.qty!));
       }
       if (ch.op !== 'add' && !baseRows.some((l) => l.item_code === ch.child)) problems.push(`${item}'s BOM ${base.name} has no line for ${ch.child} to ${ch.op === 'remove' ? 'remove' : 'change'}`);
       if (ch.op === 'add' && baseRows.some((l) => l.item_code === ch.child)) problems.push(`${item}'s BOM ${base.name} already has a line for ${ch.child}`);
     }
     // Entered lines against the package's: a missing item, a different quantity or an extra line is a conflict.
     const quantities = (xs: [string, number][]) => { const m = new Map<string, number>(); for (const [k, v] of xs) m.set(k, (m.get(k) ?? 0) + v); return m; };
-    const wanted = quantities(rows.map((row) => [row.find((f) => f.field === 'item_code')!.value as string, num(row.find((f) => f.field === 'qty')!.value)]));
+    const wanted = quantities(rows.map((row, i) => [row.find((f) => f.field === 'item_code')!.value as string, stockQty[i]]));
     const lineDiffs: string[] = [];
     if (tagged) {
       const taggedRows = taggedLines.filter((l) => l.parent === tagged.name);
-      const have = quantities(taggedRows.map((l) => [l.item_code as string, num(l.qty)]));
+      const have = quantities(taggedRows.map((l) => [l.item_code as string, num(l.qty) * (num(l.conversion_factor) || 1)]));
       // The lines are quantities for the BOM's output, so the output has to be the package's too.
       const output = num(tagged.quantity) || 1;
       if (Math.abs(output - q) > 1e-6) lineDiffs.push(`makes ${output} where the release says ${q}`);
@@ -454,8 +478,9 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
         if (f && !expectedBom.has(code)) expectedBom.set(code, f.value as string | null);
       }
       for (const [code, want] of expectedBom) {
-        for (const l of taggedRows.filter((x) => x.item_code === code && (x.bom_no || null) !== want)) {
-          lineDiffs.push(want ? `has ${code} on BOM ${l.bom_no || 'none'} where the release says ${want}` : `has ${code} on BOM ${l.bom_no} but the new ${code} BOM is not entered yet`);
+        // With no new sub-assembly BOM yet, any entered line is wrong: it cannot point at a BOM that does not exist.
+        for (const l of taggedRows.filter((x) => x.item_code === code && (want === null || (x.bom_no || null) !== want))) {
+          lineDiffs.push(want ? `has ${code} on BOM ${l.bom_no || 'none'} where the release says ${want}` : `has ${code} ${l.bom_no ? `on BOM ${l.bom_no}` : 'with no BOM'} but the new ${code} BOM is not entered yet`);
         }
       }
     }
@@ -466,6 +491,7 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
     if (tagged) { amounts.rawAfter = num(tagged.raw_material_cost); amounts.totalAfter = num(tagged.total_cost); } else if (known) { amounts.rawAfter = r2(raw); amounts.totalAfter = afterTotal!; }
     const touched = baseRows.filter((l) => newCost.has(l.item_code)).map((l) => label(l.item_code));
     const why = [...touched.map((x) => `${x} repriced`), ...changes.map((b) => `${b.op} ${b.child}${b.qty ? ` x${b.qty}${q === 1 ? '' : ` per unit (x${perBom(b.qty)} for ${q})`}` : ''}`)].join(', ');
+    const supersededBy = later.length ? later.map((v) => v[t.bom.eco] ? `${v.name} (${v[t.bom.eco]})` : v.name).join(', ') : '';
     const cost = `total cost ${money(num(base.total_cost))} -> ${tagged ? money(num(tagged.total_cost)) : known ? money(afterTotal!) : 'recalculated by ERPNext'}`;
 
     add({
@@ -483,21 +509,22 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
       amounts,
       status: lineDiffs.length ? 'conflict' : tagged?.docstatus === 1 ? 'entered' : 'to-enter',
       ...(tagged ? { found: ref('BOM', tagged.name) } : {}),
-      ...(tagged && lineDiffs.length ? { note: `${tagged.name} ${lineDiffs.join(' and ')}` } : tagged && tagged.docstatus !== 1 ? { note: `${tagged.name} is saved but not submitted; submit it` } : {}),
+      ...(tagged && lineDiffs.length ? { note: `${tagged.name} ${lineDiffs.join(' and ')}` } : tagged && tagged.docstatus !== 1 ? { note: `${tagged.name} is saved but not submitted; submit it` } : supersededBy ? { note: `${tagged!.name} is superseded by ${supersededBy}; nothing to undo` } : {}),
     });
 
     const parentsOf = (name: string | undefined) => uniq(refs.filter((r) => r.bom_no === name && activeParent.has(r.parent)).map((r) => r.parent)).sort();
     const stillOld = parentsOf(base.name);
     const switched = tagged ? parentsOf(tagged.name) : [];
-    if (stillOld.length || switched.length) {
-      const names = stillOld.length ? stillOld : switched;
+    const movedOn = later.flatMap((v) => parentsOf(v.name as string)).sort();
+    if (stillOld.length || switched.length || movedOn.length) {
+      const names = stillOld.length ? stillOld : switched.length ? switched : movedOn;
       add({
         id: `bom-replace:${item}`, kind: 'bom-replace', title: `Replace ${base.name} in its parent BOMs`, enteredBy: 'manufacturing engineer',
         doctype: 'BOM Update Tool', mode: 'tool', path: '/app/bom-update-tool',
         instruction: `In the BOM Update Tool, use Replace BOM to replace ${base.name} with the new ${item} BOM in ${plural(names.length, 'parent BOM')} (${uniq(names.map((n) => activeParent.get(n))).join(', ')}). ERPNext recosts the assemblies above.`,
         fields: [field('current_bom', 'Current BOM', base.name), field('new_bom', 'New BOM', tagged?.name ?? null, { from: `bom:${item}` })],
         amounts: {}, status: stillOld.length ? 'to-enter' : 'entered',
-        ...(stillOld.length && switched.length ? { note: `${plural(stillOld.length, 'parent BOM')} still use ${base.name}: ${stillOld.join(', ')}` } : {}),
+        ...(stillOld.length && switched.length ? { note: `${plural(stillOld.length, 'parent BOM')} still use ${base.name}: ${stillOld.join(', ')}` } : !stillOld.length && !switched.length && movedOn.length ? { note: `superseded: the parent BOMs already use ${supersededBy}` } : {}),
       });
     }
     add({
@@ -548,7 +575,10 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
     };
     for (const j of journals) {
       const total = r2(j.lines.reduce((s, l) => s + l.amount, 0));
-      const have = existing.find((e) => e[t.je.entry] === j.key);
+      // The key is a tag a person types, not a unique name: more than one entry with it means the books may carry the loss twice.
+      const matches = existing.filter((e) => e[t.je.entry] === j.key).sort((a, b) => b.docstatus - a.docstatus);
+      const have = matches[0];
+      const duplicate = matches.length > 1 ? `${matches.map((m) => m.name).join(' and ')} all carry ${eco} entry '${j.key}' where the release has one entry; cancel or delete the extra ones` : '';
       const wantRows = sides(j.lines.flatMap((l) => [
         { account: accounts[l.debit] ?? l.debit, debit: r2(l.amount), credit: 0 }, { account: accounts[l.credit] ?? l.credit, debit: 0, credit: r2(l.amount) },
       ]));
@@ -582,9 +612,11 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
         ],
         tables: [{ table: 'accounts', label: 'Accounting Entries', rows: j.lines.flatMap((l) => [entryRow(l.debit, 'debit', l.amount, l.memo), entryRow(l.credit, 'credit', l.amount, l.memo)]) }],
         amounts: { debit: total, credit: total },
-        status: diffs.length || rowDiffs.length ? 'conflict' : have?.docstatus === 1 ? 'entered' : 'to-enter',
+        status: duplicate || diffs.length || rowDiffs.length ? 'conflict' : have?.docstatus === 1 ? 'entered' : 'to-enter',
         ...(have ? { found: ref('Journal Entry', have.name) } : {}),
-        ...(have && (diffs.length || rowDiffs.length) ? { note: `${have.name} ${[...(diffs.length ? [`is ${diffs.join(' and ')}`] : []), ...rowDiffs].join(' and ')}` } : have && have.docstatus !== 1 ? { note: `${have.name} is saved as a draft; submit it to post` } : {}),
+        ...(have && (duplicate || diffs.length || rowDiffs.length)
+          ? { note: [duplicate, ...(diffs.length || rowDiffs.length ? [`${have.name} ${[...(diffs.length ? [`is ${diffs.join(' and ')}`] : []), ...rowDiffs].join(' and ')}`] : [])].filter(Boolean).join('; ') }
+          : have && have.docstatus !== 1 ? { note: `${have.name} is saved as a draft; submit it to post` } : {}),
       });
     }
     for (const e of existing) if (!journals.some((j) => j.key === e[t.je.entry])) warnings.push(`${e.name} carries ${eco} but is not in this release (entry '${e[t.je.entry] ?? ''}')`);

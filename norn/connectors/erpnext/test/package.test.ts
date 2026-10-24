@@ -510,3 +510,105 @@ test('the journal form asks for no hidden field: no Title, and no matching depen
   enterJournals();
   assert.ok((await build()).lines.filter((x) => x.kind === 'journal-entry').every((l) => l.status === 'entered'));
 });
+
+// ---- review round 2: superseded ECOs, repeated rows, UOMs, missing child BOMs, duplicate journals ----------------------
+
+test('rechecking an ECO that a later ECO has superseded keeps its own source BOM and never says to undo the later one', async () => {
+  const r: EcoRelease = { ...release, items: [], journals: [], bomChanges: [{ parent: 'A', op: 'set_qty', child: 'P', qty: 4 }] };
+  // ECO-9 entered in full: BOM-A2 (4 P, 1 Q) replaces BOM-A and BOM-A is retired.
+  db.BOM.find((b) => b.name === 'BOM-A')!.is_default = 0;
+  db.BOM.find((b) => b.name === 'BOM-A')!.is_active = 0;
+  db.BOM.push({ name: 'BOM-A2', item: 'A', company: 'Co', docstatus: 1, is_active: 1, is_default: 1, quantity: 1, raw_material_cost: 45, operating_cost: 40, total_cost: 85, creation: '2026-06-01', eco: 'ECO-9' });
+  db['BOM Item'].push({ parent: 'BOM-A2', item_code: 'P', qty: 4, stock_qty: 4, uom: 'Nos', docstatus: 1 }, { parent: 'BOM-A2', item_code: 'Q', qty: 1, stock_qty: 1, uom: 'Nos', docstatus: 1 });
+  db['BOM Item'].find((l) => l.parent === 'BOM-T')!.bom_no = 'BOM-A2';
+  let pkg = await build(r);
+  assert.deepEqual(statuses(pkg), { 'bom:A': 'entered', 'bom-replace:A': 'entered', 'bom-retire:A': 'entered' });
+  assert.equal(line(pkg, 'bom:A').note, undefined);
+
+  // ECO-10 then makes BOM-A3 from BOM-A2 and replaces it in the parent BOM.
+  db.BOM.find((b) => b.name === 'BOM-A2')!.is_default = 0;
+  db.BOM.find((b) => b.name === 'BOM-A2')!.is_active = 0;
+  db.BOM.push({ name: 'BOM-A3', item: 'A', company: 'Co', docstatus: 1, is_active: 1, is_default: 1, quantity: 1, raw_material_cost: 50, operating_cost: 40, total_cost: 90, creation: '2026-07-01', eco: 'ECO-10' });
+  db['BOM Item'].push({ parent: 'BOM-A3', item_code: 'P', qty: 4, stock_qty: 4, uom: 'Nos', docstatus: 1 }, { parent: 'BOM-A3', item_code: 'Q', qty: 2, stock_qty: 2, uom: 'Nos', docstatus: 1 });
+  db['BOM Item'].find((l) => l.parent === 'BOM-T')!.bom_no = 'BOM-A3';
+  pkg = await build(r);
+  assert.deepEqual(pkg.problems, []);
+  assert.deepEqual(statuses(pkg), { 'bom:A': 'entered', 'bom-replace:A': 'entered', 'bom-retire:A': 'entered' });
+  assert.deepEqual(line(pkg, 'bom:A').document, { doctype: 'BOM', name: 'BOM-A' }, 'still duplicated from the ECO\'s own source');
+  assert.deepEqual(line(pkg, 'bom:A').found, { doctype: 'BOM', name: 'BOM-A2' });
+  assert.equal(line(pkg, 'bom:A').note, 'BOM-A2 is superseded by BOM-A3 (ECO-10); nothing to undo');
+  assert.deepEqual(values(line(pkg, 'bom-replace:A')), { current_bom: 'BOM-A', new_bom: 'BOM-A2' });
+  assert.match(line(pkg, 'bom-replace:A').note!, /superseded/);
+  assert.deepEqual(line(pkg, 'bom-retire:A').document, { doctype: 'BOM', name: 'BOM-A' });
+  assert.equal(pkg.lines.some((l) => l.document?.name === 'BOM-A3' || values(l).current_bom === 'BOM-A2'), false, 'nothing touches the later ECO\'s BOM');
+});
+
+test('set_qty is a total: repeated rows of the component become one row at the target', async () => {
+  db['BOM Item'].find((l) => l.parent === 'BOM-A' && l.item_code === 'P')!.qty = 1;
+  db['BOM Item'].find((l) => l.parent === 'BOM-A' && l.item_code === 'P')!.stock_qty = 1;
+  db['BOM Item'].push({ parent: 'BOM-A', item_code: 'P', qty: 2, stock_qty: 2, uom: 'Nos', rate: 10, docstatus: 1, idx: 3 });
+  const r: EcoRelease = { ...release, items: [], journals: [], bomChanges: [{ parent: 'A', op: 'set_qty', child: 'P', qty: 4 }] };
+  const pkg = await build(r);
+  const rows = line(pkg, 'bom:A').tables[0].rows.map((row) => values({ fields: row }));
+  assert.deepEqual(rows.map((x) => [x.item_code, x.qty]), [['P', 4], ['Q', 1]]);
+  assert.deepEqual(line(pkg, 'bom:A').amounts, { rawBefore: 35, totalBefore: 75, rawAfter: 45, totalAfter: 85 });
+  // Entered as one row of 4, or as 1 + 3, it is the same total.
+  db.BOM.push({ name: 'BOM-A2', item: 'A', company: 'Co', docstatus: 1, is_active: 1, is_default: 0, quantity: 1, raw_material_cost: 45, operating_cost: 40, total_cost: 85, creation: '2026-06-01', eco: 'ECO-9' });
+  db['BOM Item'].push({ parent: 'BOM-A2', item_code: 'P', qty: 1, docstatus: 1 }, { parent: 'BOM-A2', item_code: 'P', qty: 3, docstatus: 1 }, { parent: 'BOM-A2', item_code: 'Q', qty: 1, docstatus: 1 });
+  assert.equal(line(await build(r), 'bom:A').status, 'entered');
+});
+
+test('quantities are stock units whatever UOM a BOM row uses: written, compared and costed alike', async () => {
+  // Three Box of 10 units each: 30 units. Bought at 10 a Box, so 1 a unit.
+  Object.assign(db['BOM Item'].find((l) => l.parent === 'BOM-A' && l.item_code === 'P')!, { qty: 3, stock_qty: 30, uom: 'Box', conversion_factor: 10 });
+  const change: EcoRelease = { ...release, items: [], journals: [], bomChanges: [{ parent: 'A', op: 'set_qty', child: 'P', qty: 4 }] };
+  let pkg = await build(change);
+  assert.deepEqual(line(pkg, 'bom:A').tables[0].rows.map((row) => values({ fields: row })).slice(0, 1), [{ item_code: 'P', qty: 4, uom: 'Nos' }], '4 units, not 4 Box');
+  assert.equal(line(pkg, 'bom:A').amounts.rawAfter, 4 * 1 + 5);
+
+  // A row nobody changes keeps its Box; its cost and comparison are per unit.
+  const reprice: EcoRelease = { ...release, items: [{ item: 'Q', standardCost: 6 }], journals: [] };
+  pkg = await build(reprice);
+  assert.deepEqual(line(pkg, 'bom:A').tables[0].rows.map((row) => values({ fields: row })), [{ item_code: 'P', qty: 3, uom: 'Box' }, { item_code: 'Q', qty: 1, uom: 'Nos' }]);
+  assert.equal(line(pkg, 'bom:A').amounts.rawAfter, 30 * 1 + 6);
+  db.BOM.push({ name: 'BOM-A2', item: 'A', company: 'Co', docstatus: 1, is_active: 1, is_default: 0, quantity: 1, raw_material_cost: 36, operating_cost: 40, total_cost: 76, creation: '2026-06-01', eco: 'ECO-9' });
+  db['BOM Item'].push({ parent: 'BOM-A2', item_code: 'P', qty: 30, uom: 'Nos', docstatus: 1 }, { parent: 'BOM-A2', item_code: 'Q', qty: 1, docstatus: 1 });
+  assert.equal(line(await build(reprice), 'bom:A').status, 'entered', '30 units is 3 Box');
+  const p = db['BOM Item'].find((l) => l.parent === 'BOM-A2' && l.item_code === 'P')!;
+  Object.assign(p, { qty: 3, uom: 'Box', conversion_factor: 10 });
+  assert.equal(line(await build(reprice), 'bom:A').status, 'entered');
+  Object.assign(p, { qty: 3, uom: 'Nos', conversion_factor: 1 });
+  assert.equal(line(await build(reprice), 'bom:A').note, 'BOM-A2 has P x3 where the release says x30');
+});
+
+test('a parent BOM entered before the new BOM of its sub-assembly exists is not entered', async () => {
+  const r: EcoRelease = { ...release, items: [], journals: [], bomChanges: [{ parent: 'A', op: 'set_qty', child: 'P', qty: 4 }, { parent: 'T-1', op: 'set_qty', child: 'A', qty: 1 }] };
+  db.BOM.find((b) => b.name === 'BOM-T')!.is_default = 0;
+  db.BOM.push({ name: 'BOM-T2', item: 'T-1', company: 'Co', docstatus: 1, is_active: 1, is_default: 1, quantity: 1, raw_material_cost: 85, operating_cost: 0, total_cost: 85, creation: '2026-06-01', eco: 'ECO-9' });
+  db['BOM Item'].push({ parent: 'BOM-T2', item_code: 'A', qty: 1, stock_qty: 1, uom: 'Nos', docstatus: 1 });
+  let pkg = await build(r);
+  assert.equal(line(pkg, 'bom:A').status, 'to-enter');
+  assert.equal(line(pkg, 'bom:T-1').status, 'conflict');
+  assert.equal(line(pkg, 'bom:T-1').note, 'BOM-T2 has A with no BOM but the new A BOM is not entered yet');
+  // Once the sub-assembly's BOM exists and the parent line names it, the parent reads entered.
+  enterBom();
+  db['BOM Item'].find((l) => l.parent === 'BOM-T2')!.bom_no = 'BOM-A2';
+  pkg = await build(r);
+  assert.equal(line(pkg, 'bom:T-1').status, 'entered');
+});
+
+test('two entries with the same ECO and key are a conflict, not an entry', async () => {
+  const one: EcoRelease = { ...release, items: [], journals: release.journals!.slice(0, 1) };
+  for (const name of ['JV-1', 'JV-2']) {
+    db['Journal Entry'].push({ name, docstatus: 1, eco: 'ECO-9', entry: 'scrap', total_debit: 140.5, posting_date: '2026-01-01' });
+    (db['Journal Entry Account'] ??= []).push(
+      { parent: name, account: '51900 - Shrink - CO', debit_in_account_currency: 140.5 }, { parent: name, account: '11420 - Reserve - CO', credit_in_account_currency: 140.5 });
+  }
+  const pkg = await build(one);
+  assert.equal(line(pkg, 'journal-entry:scrap').status, 'conflict');
+  assert.match(line(pkg, 'journal-entry:scrap').note!, /^JV-1 and JV-2 all carry ECO-9 entry 'scrap' where the release has one entry/);
+  assert.equal(pkg.counts.conflict, 1);
+  // One of them gone, the other reads as entered.
+  db['Journal Entry'].pop();
+  assert.equal(line(await build(one), 'journal-entry:scrap').status, 'entered');
+});
