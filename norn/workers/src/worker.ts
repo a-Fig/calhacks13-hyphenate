@@ -43,11 +43,12 @@ await subscribe(conn, [
   "SELECT * FROM check_run WHERE status = 'running'",
   // What the real checks read: the change requests, the assumptions a run names, the baselines recorded.
   'SELECT * FROM ecr_revision',
+  'SELECT * FROM pull_request', // which other ECRs are open: s4 reads them as peers
   'SELECT * FROM assumption',
   'SELECT * FROM baseline_snapshot',
   'SELECT * FROM norn_config',
 ]);
-const configured = conn.db.nornConfig.key.find('code_version')?.value ?? 'checks-0.2.0';
+const configured = conn.db.nornConfig.key.find('code_version')?.value ?? 'checks-0.3.0';
 if (configured !== CHECKS_CODE_VERSION)
   log(`WARNING: norn_config code_version is '${configured}' but the checks library is '${CHECKS_CODE_VERSION}': results of the old library still count as current. Set code_version to '${CHECKS_CODE_VERSION}'.`);
 

@@ -75,7 +75,7 @@ export const CONFIG_DEFAULTS: Record<string, string> = {
   // Part of every input hash: bump it when worker logic changes so old results go stale. It names
   // the checks library's version (CHECKS_CODE_VERSION in norn/checks), so a new library re-checks
   // every open ECR; workers warn when the two disagree.
-  code_version: 'checks-0.2.0',
+  code_version: 'checks-0.3.0',
   seed: 'norn-seed-1',
 };
 

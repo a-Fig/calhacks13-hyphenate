@@ -5,5 +5,10 @@ export { applyOverlay, bomDelta, changedRows, explode, type BomDeltaResult, type
 export { costCheck, COST_DEFAULTS, type CostCheckOptions, type CostCheckResult, type CostDefaults, type CostRow, type Money } from './cost.ts';
 export { drawAll, evaluate, pairedDelta, summarize, type Expr, type Variable } from './sim.ts';
 export { serialsByMonth, unitsAfterCutIn } from './volume.ts';
+export { timelineCheck, type DateRange, type PathResult, type TimelineResult } from './timeline.ts';
+export {
+  supplyCheck, type BundleResult, type CapacityResult, type Interaction, type PeerRef, type SupplyCheckOptions, type SupplyPart, type SupplyResult,
+} from './supply.ts';
+export { PLAN_DEFAULTS, type PlanDefaults, type PlanOptions, type Stat } from './plan.ts';
 export { formatMoney, formatUsd, renderCostPage } from './format.ts';
-export { bomDeltaRows, costCheckRows, type CheckResultRow } from './rows.ts';
+export { bomDeltaRows, costCheckRows, supplyCheckRows, timelineRows, type CheckResultRow } from './rows.ts';

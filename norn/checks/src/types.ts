@@ -92,6 +92,31 @@ export interface BuiltUnit {
   completed: DateStr;
 }
 
+/**
+ * A supplier-side limit that changes can compete for: a qualification slot or a capacity. Only the
+ * fields the checks read are named. The ERP holds none of this, so a baseline carries it only when
+ * the company's configuration or its data supplies it; the checks run without it.
+ */
+export interface SupplierConstraint {
+  id: string;
+  supplier: SupplierId;
+  kind: 'qualification_slot' | 'capacity';
+  items: ItemCode[];
+  /** Capacity per year in the items' unit, for a capacity constraint. */
+  capacityPerYear?: number;
+  /** When it applies. For a qualification slot, the first slot opens at `from` and the last opens by `to`. */
+  window?: { from: DateStr; to: DateStr };
+  description?: string;
+  /** Qualification slot: months between slot openings, one lot per slot. Unset: read from the description, else 3. */
+  slotCadenceMonths?: number;
+  /**
+   * Qualification slot: a second part number qualified within this many weeks of the first costs this share
+   * less, and ordering two part numbers inside the window earns this price break on the raw material.
+   * Unset: read from the description when it states them.
+   */
+  bundle?: { withinWeeks: number; secondQualificationDiscount?: number; priceBreak?: number };
+}
+
 export interface Baseline {
   programs: Program[];
   workCenters: WorkCenter[];
@@ -101,6 +126,8 @@ export interface Baseline {
   stock: StockRow[];
   volumePlan: VolumeRow[];
   builtAircraft: BuiltUnit[];
+  /** Supplier limits the supply check looks for conflicts between open changes in. Optional: the ERP does not hold them. */
+  supplierConstraints?: SupplierConstraint[];
 }
 
 // ---------------------------------------------------------------- one change request (an ECR)
@@ -191,6 +218,8 @@ export interface ChangeRequest {
   id: string;
   program: ProgramId;
   filedOn: DateStr;
+  /** `urgent` changes are decided faster than `routine` ones. Unset: routine. */
+  priority?: string;
   itemChanges: ItemChange[];
   bomChanges: BomChange[];
   supplierQuotes: SupplierQuote[];
@@ -256,4 +285,4 @@ export interface Flag {
   ref?: string;
 }
 
-export const CHECKS_CODE_VERSION = 'checks-0.2.0';
+export const CHECKS_CODE_VERSION = 'checks-0.3.0';

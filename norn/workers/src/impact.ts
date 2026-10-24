@@ -1,4 +1,4 @@
-// The real s1 and s2 handlers: Norn's impact checks (norn/checks) on the ECR's change request and
+// The real s1 to s4 handlers: Norn's impact checks (norn/checks) on the ECR's change request and
 // on the ERP baseline the run's inputs name, with the run's seed and assumptions. The rows the
 // library returns are stored unchanged (mock: false), so get_impact returns their traces. An ECR the
 // PLM has sent no change request for keeps the mock handlers in stages.ts, labelled mock.
@@ -11,6 +11,10 @@ import {
   lognormal,
   lognormalFromQuantiles,
   point,
+  supplyCheck,
+  supplyCheckRows,
+  timelineCheck,
+  timelineRows,
   type AssumptionOverride,
   type ChangeRequest,
   type CheckResultRow,
@@ -33,7 +37,10 @@ export type Inputs = {
 };
 
 /** The stages this file computes for real, on ECRs with a change request. */
-export const REAL_STAGES = ['s1_bom_delta', 's2_cost'];
+export const REAL_STAGES = ['s1_bom_delta', 's2_cost', 's3_timeline', 's4_supply'];
+
+/** The statuses of an ECR that is still open (module core.ts OPEN_PR). */
+const OPEN = ['draft', 'review', 'approved'];
 
 /** Where the run's baseline and change request came from, as the trace names them. Anything not from the ERP or the PLM says so. */
 export function provenanceOf(i: Inputs) {
@@ -132,6 +139,35 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
     return { overrides, problems };
   }
 
+  /**
+   * The other open ECRs' current change requests, the peers s4 reads for the interaction. Read from
+   * the cache when the stage runs: the run's inputs do not name them (see the README), so a peer
+   * filed or edited later changes the interaction only when s4 next runs.
+   */
+  function peersOf(prId: bigint): ChangeRequest[] {
+    const peers: ChangeRequest[] = [];
+    for (const rev of conn.db.ecrRevision.iter()) {
+      if (!rev.current || rev.prId === prId) continue;
+      const pr = conn.db.pullRequest.id.find(rev.prId);
+      if (!pr || pr.kind !== 'ecr' || !OPEN.includes(pr.status)) continue;
+      try {
+        const cr = JSON.parse(rev.changeRequestJson) as ChangeRequest;
+        if (cr && typeof cr === 'object' && typeof cr.id === 'string') peers.push(cr);
+      } catch {
+        // A change request that does not parse is the PLM connector's to report, not a peer.
+      }
+    }
+    return peers;
+  }
+
+  /** The reported-not-dropped row for assumptions the library could not be given. */
+  const withProblems = (rows: Result[], problems: { key: string; id: string; problem: string }[]) => {
+    if (problems.length) {
+      rows.push({ key: 'assumption_errors', label: 'Assumptions that could not be read', unit: 'count', p10: problems.length, p50: problems.length, p90: problems.length, detailJson: JSON.stringify({ problems }), mock: false });
+    }
+    return rows;
+  };
+
   return {
     s1_bom_delta: async (ctx: RunCtx): Promise<Result[]> => {
       const p = await prepare(ctx);
@@ -146,12 +182,30 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
       const { overrides, problems } = assumptionsOf(p.inputs);
       const t0 = Date.now();
       const r = costCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs) });
-      const rows = real(costCheckRows(r));
       // Assumptions the library could not be given are reported, never dropped silently.
-      if (problems.length) {
-        rows.push({ key: 'assumption_errors', label: 'Assumptions that could not be read', unit: 'count', p10: problems.length, p50: problems.length, p90: problems.length, detailJson: JSON.stringify({ problems }), mock: false });
-      }
+      const rows = withProblems(real(costCheckRows(r)), problems);
       ctx.log(`s2 on ${p.ecr.id} rev ${p.inputs.revision}: ${r.draws} draws in ${Date.now() - t0} ms, converged ${r.convergence.converged}, ${overrides.length} assumption(s)${problems.length ? `, ${problems.length} unreadable` : ''}`);
+      return rows;
+    },
+    s3_timeline: async (ctx: RunCtx): Promise<Result[]> => {
+      const p = await prepare(ctx);
+      if (!p) return HANDLERS.s3_timeline!(ctx);
+      const { overrides, problems } = assumptionsOf(p.inputs);
+      const t0 = Date.now();
+      const r = timelineCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs) });
+      const rows = withProblems(real(timelineRows(r)), problems);
+      ctx.log(`s3 on ${p.ecr.id} rev ${p.inputs.revision}: ${r.draws} draws in ${Date.now() - t0} ms, converged ${r.convergence.converged}, ${overrides.length} assumption(s)${problems.length ? `, ${problems.length} unreadable` : ''}`);
+      return rows;
+    },
+    s4_supply: async (ctx: RunCtx): Promise<Result[]> => {
+      const p = await prepare(ctx);
+      if (!p) return HANDLERS.s4_supply!(ctx);
+      const { overrides, problems } = assumptionsOf(p.inputs);
+      const peers = peersOf(ctx.prId);
+      const t0 = Date.now();
+      const r = supplyCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs), peers });
+      const rows = withProblems(real(supplyCheckRows(r)), problems);
+      ctx.log(`s4 on ${p.ecr.id} rev ${p.inputs.revision}: ${r.draws} draws in ${Date.now() - t0} ms, converged ${r.convergence.converged}, ${peers.length} open peer(s), ${r.interaction ? r.interaction.peers.length : 0} sharing a supplier${problems.length ? `, ${problems.length} unreadable` : ''}`);
       return rows;
     },
   };
