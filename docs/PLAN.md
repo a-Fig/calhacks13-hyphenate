@@ -180,8 +180,6 @@ Ideas past these milestones keep their `priority: if time` label: SAP's Engineer
 - Can a Level 1 report trigger fast-track approval, or only Level 3? (#26)
 - What does a typical fast-tracked ECR at Bowman look like, and what are its limits? (#22)
 - How do engineers come to file an ECR, and who is involved? (#7)
-- Which tech the PLM stand-in uses: a second Frappe site, as #21 suggests, or a small app of our
-  own. Settled when that work starts.
 - The colours for the evidence classes, and whether the T/V/R/C letters are adopted.
 - Whether Ankit can approve what the workflow says Tyler approves.
 - Code-freeze time, the video deadline, and who records it.

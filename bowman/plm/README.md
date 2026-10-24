@@ -26,9 +26,11 @@ Teamcenter. We build the features Bowman's change process uses, and stop there.
 
 ## Tech
 
-Open until the work starts (#21). The starting idea is a second Frappe site, ERPNext's own
-framework, with custom record types, Frappe's workflow engine and its webhooks, kept separate
-from the ERPNext site. The other option is a small TypeScript app of our own. It runs next to
-ERPNext on Tyler's home server (`../erp/`).
+Frappe, ERPNext's own framework, as its own stack with only the framework installed (decided
+2026-10-24, #21). It has custom record types, Frappe's workflow engine and roles, and webhooks,
+and it's branded "Bowman PLM" so it doesn't look like the ERP. Frappe brings a mature enterprise
+UI with forms, list views, workflow buttons, comments and version history, so we copy proven
+screens instead of designing them (#50). It runs next to ERPNext on Tyler's home server, on port
+8082.
 
 Issues: label `area: plm`.
