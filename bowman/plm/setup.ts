@@ -53,6 +53,9 @@ async function ensure(doctype: string, name: string, doc: Field, update = false)
   log(`  ${doctype} "${name}": created`);
 }
 
+/** DocPerm defaults write, create and delete to 1 when a key is absent, so every right is spelled out. */
+const PERM_OFF = { read: 0, write: 0, create: 0, delete: 0, submit: 0, cancel: 0, amend: 0, report: 0, export: 0, import: 0, print: 0, email: 0, share: 0, if_owner: 0, permlevel: 0 };
+
 const NAMING_RULE: Record<string, string> = { field: 'By fieldname', format: 'Expression' };
 
 function doctypeDoc(def: DocTypeDef, fields: Field[], withLinks: boolean): Field {
@@ -67,7 +70,7 @@ function doctypeDoc(def: DocTypeDef, fields: Field[], withLinks: boolean): Field
     editable_grid: def.istable ? 1 : 0,
     ...(autoname ? { autoname, naming_rule } : {}),
     fields: fields.map((x, i) => ({ ...x, idx: i + 1 })),
-    permissions: def.permissions ?? [],
+    permissions: (def.permissions ?? []).map((p) => ({ ...PERM_OFF, ...p })),
     links: withLinks ? def.links ?? [] : [],
     ...(def.props ?? {}),
   };
@@ -138,6 +141,8 @@ async function doctypes() {
 async function workflow() {
   for (const s of WORKFLOW.states) await ensure('Workflow State', s.state, { workflow_state_name: s.state, style: s.style }, true);
   for (const t of WORKFLOW.transitions) await ensure('Workflow Action Master', t.action, { workflow_action_name: t.action });
+  // Approval releases the ECO: the ecr.approved webhook is attached to the approving transitions as a workflow task.
+  await ensure('Workflow Transition Tasks', 'Release ECO', { tasks: [{ task: 'Webhook', link: 'ecr.approved', enabled: 1, asynchronous: 1 }] }, true);
   const doc = {
     workflow_name: WORKFLOW.name,
     document_type: 'ECR',
@@ -157,6 +162,7 @@ async function workflow() {
       next_state: t.next,
       allowed: t.allowed,
       allow_self_approval: t.self ?? 0,
+      ...(t.next === 'Approved' ? { transition_tasks: 'Release ECO' } : {}),
       ...(t.condition ? { condition: t.condition } : {}),
     })),
   };
@@ -291,17 +297,29 @@ async function webhooks() {
   log('  Webhook "ecr.approved" (release the ECO): ' + how2 + ' (bot key rotated, not shown)');
 }
 
+/** Norn reads comments and the version history, and adds comments. Built-in DocTypes take rights through the Role Permissions Manager (it copies the stock rows first). */
+async function nornBuiltins() {
+  const pm = '/api/method/frappe.core.page.permission_manager.permission_manager';
+  const grants: Record<string, string[]> = { Comment: ['read', 'create'], Version: ['read'] };
+  for (const [doctype, ptypes] of Object.entries(grants)) {
+    await plm.post(`${pm}.add`, { parent: doctype, role: ROLES.norn, permlevel: 0 }, { allow: true });
+    for (const ptype of ptypes) await plm.post(`${pm}.update`, { doctype, role: ROLES.norn, permlevel: 0, ptype, value: '1' });
+    log(`  ${doctype}: Norn Integration may ${ptypes.join(' and ')}`);
+  }
+}
+
 async function main() {
   await waitForSite();
   await plm.login('Administrator', env.PLM_ADMIN_PASSWORD);
   log('1. System settings'); await systemSettings();
   log('2. Roles'); await roles();
   log('3. DocTypes'); await doctypes();
-  log('4. ECR workflow'); await workflow();
-  log('5. Scripts'); await scripts();
-  log('6. Integration users'); await integrationUsers();
+  log('4. Scripts'); await scripts();
+  log('5. Integration users'); await integrationUsers();
   ensureSecret('PLM_USER_PASSWORD');
-  log('7. Webhooks'); await webhooks();
+  log('6. Webhooks'); await webhooks();
+  log('7. ECR workflow'); await workflow();
+  log('7b. Norn rights on built-in DocTypes'); await nornBuiltins();
   log('8. Branding and home'); await applyBranding(plm, log); await applyWorkspace(plm, log);
   log('Done.');
 }

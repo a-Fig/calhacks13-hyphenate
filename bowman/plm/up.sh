@@ -84,7 +84,7 @@ case "$cmd" in
       state="$(rssh "$REMOTE_PATH; cd $REMOTE_DIR && docker inspect -f '{{.State.Status}}:{{.State.ExitCode}}' \$(docker compose -p $PROJECT ps -aq create-site)" 2>/dev/null || true)"
       if [ "$state" = "exited:0" ] && [ "$(rssh "curl -s -m 5 http://127.0.0.1:$PORT/api/method/ping" 2>/dev/null)" = '{"message":"pong"}' ]; then
         brand
-        echo "Up. Open the tunnel with: $0 tunnel   then browse http://127.0.0.1:$PORT"
+        echo "Up. Open the tunnel with: $0 tunnel   then browse http://localhost:$PORT (localhost, not 127.0.0.1: the ERP uses that host for its cookie)"
         exit 0
       fi
       case "$state" in

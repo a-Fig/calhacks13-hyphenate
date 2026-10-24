@@ -332,7 +332,7 @@ const ecr: DocTypeDef = {
     tab('Request'),
     sec('Identification'),
     f('Data', 'title', 'Title', { reqd: 1, in_list_view: 1, bold: 1, length: 240 }),
-    f('Select', 'program', 'Program', { options: opts(PROGRAMS), reqd: 1, in_list_view: 1, in_standard_filter: 1 }),
+    f('Select', 'program', 'Program', { options: opts(PROGRAMS), reqd: 1, in_standard_filter: 1 }),
     f('Link', 'originating_ncr', 'Originating NCR', { options: 'NCR' }),
     col(),
     f('Link', 'originator', 'Originator', { options: 'User', reqd: 1, default: '__user', in_standard_filter: 1 }),

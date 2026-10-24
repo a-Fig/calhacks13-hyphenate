@@ -94,6 +94,7 @@ export async function applyWorkspace(plm: Plm, log: Log) {
     { label: 'NCRs', type: 'Link', link_type: 'DocType', link_to: 'NCR', icon: 'triangle-alert' },
     { label: 'ECRs', type: 'Link', link_type: 'DocType', link_to: 'ECR', icon: 'file-pen-line' },
     { label: 'ECOs', type: 'Link', link_type: 'DocType', link_to: 'ECO', icon: 'badge-check' },
+    { label: 'Review Function', type: 'Link', link_type: 'DocType', link_to: 'Review Function', hidden: 1 },
   ];
   // v16: a site changes a module's sidebar with a Custom Sidebar, not by editing the Sidebar record.
   const custom = { module: 'Bowman PLM', label: 'Bowman PLM', sidebar_items: items };
