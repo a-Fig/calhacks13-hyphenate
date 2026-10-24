@@ -94,7 +94,7 @@ export function buildSummary(s: Snapshot, pr: PrRow): EcrSummary {
     lastActivityBy: latest ? latest.summary.slice(0, 60) : 'Opened',
     originator: personOf(cr.originator),
     filedOn: cr.filedOn ?? iso(pr.createdAt).slice(0, 10),
-    flag: need > 0 ? `${need} cost line${need > 1 ? 's' : ''} need an estimate` : d?.bomDelta?.ok === false ? 'Conflicts with the baseline' : undefined,
+    flag: need > 0 ? `${need} cost line${need > 1 ? 's need' : ' needs'} an estimate` : d?.bomDelta?.ok === false ? 'Conflicts with the baseline' : undefined,
     comments: nComments,
     checks,
     change: mainItem ? `${mainItem.item}${mainItem.fromRev ? ` from Rev ${mainItem.fromRev} to Rev ${mainItem.toRev}` : ''}` : undefined,
@@ -231,7 +231,7 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
     },
     {
       id: 'cost', name: 'Cost', state: costRun && costRun.status !== 'done' ? runState(costRun) : need > 0 ? 'attention' : 'passed',
-      summary: `Net ${v.headline.year1.point !== undefined ? `$${Math.round(v.headline.year1.point).toLocaleString('en-US')}` : ''} in ${v.cost.window.label}${need ? `; ${need} line${need > 1 ? 's' : ''} need an estimate` : ''}`,
+      summary: `Net ${v.headline.year1.point !== undefined ? `$${Math.round(v.headline.year1.point).toLocaleString('en-US')}` : ''} in ${v.cost.window.label}${need ? `; ${need} line${need > 1 ? 's need' : ' needs'} an estimate` : ''}`,
       by: 'Norn cost check',
     },
     {
