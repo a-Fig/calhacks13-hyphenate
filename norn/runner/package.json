@@ -1,0 +1,24 @@
+{
+  "name": "@norn/runner",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Norn agent runner: runs one job as one Claude Code session through the Claude Agent SDK",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test:unit": "node --test test/unit.ts",
+    "smoke": "node test/smoke.ts",
+    "job": "node src/cli.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.310",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}
