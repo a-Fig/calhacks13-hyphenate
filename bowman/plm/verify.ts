@@ -258,6 +258,27 @@ async function main() {
     log('  probe ECR and ECO deleted; naming series restored (next ECR-0424, ECO-0319)');
   }
 
+  log('10. Document.discard is refused (throwaway ECR and ECO made as Administrator, removed afterwards)');
+  const d10 = (await admin.post('/api/resource/ECR', { doctype: 'ECR', title: 'Discard probe ECR (deleted after the test)', program: 'Vesper V4', priority: 'Routine', justification_code: 'D', company_class: 'Class I', faa_class: 'Minor', description: 'probe', need: 'probe' })).body.data;
+  try {
+    const eco10 = (await admin.post('/api/resource/ECO', { doctype: 'ECO', ecr: d10.name, title: 'Discard probe (deleted after the test)', status: 'Released' })).body.data;
+    // discard needs only write permission, skips Before Validate and the workflow, and sets docstatus 2 (cancelled).
+    const discard = (who: Plm, doc: any) => who.post('/api/method/run_doc_method', { docs: JSON.stringify(doc), method: 'discard' }, { allow: true });
+    const asNorn = await discard(norn, (await norn.get(`/api/resource/ECR/${d10.name}`)).body.data);
+    const asCm = await discard(dana, (await dana.get(`/api/resource/ECO/${eco10.name}`)).body.data);
+    const ecrDoc = (await admin.get(`/api/resource/ECR/${d10.name}`)).body.data;
+    const ecoDoc = (await admin.get(`/api/resource/ECO/${eco10.name}`)).body.data;
+    log(`  run_doc_method discard: ECR ${d10.name} as Norn -> ${refusal(asNorn)}; ECO ${eco10.name} as the CM analyst -> ${refusal(asCm)}; docstatus afterwards ${ecrDoc.docstatus} and ${ecoDoc.docstatus}`);
+    check(asNorn.status >= 400 && ecrDoc.docstatus === 0, 'Norn cannot discard an ECR');
+    check(asCm.status >= 400 && ecoDoc.docstatus === 0, 'a CM analyst cannot discard an ECO');
+  } finally {
+    for (const x of await admin.list('ECO', { fields: ['name'], filters: [['ecr', '=', d10.name]] })) await admin.del(`/api/resource/ECO/${x.name}`, { allow: true });
+    await admin.del(`/api/resource/ECR/${d10.name}`, { allow: true });
+    await setSeries('ECR-', 424);
+    await setSeries('ECO-', 319);
+    log('  probe ECR and ECO deleted; naming series restored (next ECR-0424, ECO-0319)');
+  }
+
   log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed. ECR-0417 now carries the test impact assessment; run with --clear to remove it.');
   process.exit(failures ? 1 : 0);
 }

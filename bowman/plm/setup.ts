@@ -177,6 +177,8 @@ async function scripts() {
     ['ECR: Norn writes only the impact assessment', 'ECR', 'Before Validate', 'server-scripts/ecr-guard.py'],
     ['ECR: cost page totals', 'ECR', 'Before Save', 'server-scripts/ecr-totals.py'],
     ['NCR: title from number and part', 'NCR', 'Before Save', 'server-scripts/ncr-title.py'],
+    ['ECR: no discard', 'ECR', 'Before Discard', 'server-scripts/no-discard.py'],
+    ['ECO: no discard', 'ECO', 'Before Discard', 'server-scripts/no-discard.py'],
     ['Norn: no files on change records', 'File', 'Before Insert', 'server-scripts/norn-no-attachments.py'],
     ['Norn: no assignments on change records', 'ToDo', 'Before Insert', 'server-scripts/norn-no-assignments.py'],
     ['Norn: comments carry Norn as author', 'Comment', 'Before Insert', 'server-scripts/norn-comment-author.py'],
