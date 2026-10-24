@@ -166,6 +166,9 @@ Tyler, whether Ankit can also approve is open.
 - Everything a person sees is visual, pretty and easy for a human to understand, not an agent.
   This is non-negotiable (Tyler, 2026-10-24, #50). Copy designs and practices that already work
   everywhere we can, and invent only where it counts.
+- Norn's own screens copy GitHub's pull request pages and list, built on Primer, GitHub's
+  open-source design system, with business words in place of Git ones (Tyler, 2026-10-24: "Can we
+  steal GitHub's UI").
 - Demo screens summarise rather than enumerate. Use few words on buttons, and no UI text explaining
   what the app just did (2026-10-18).
 
