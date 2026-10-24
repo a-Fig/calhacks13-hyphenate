@@ -51,6 +51,19 @@ async function tryClaim(id: bigint) {
     await withRetry(() => conn.reducers.claimCheck({ checkRunId: id, leaseMs }), { label: `claim_check ${id}` });
   } catch (e) {
     const c = classify(e);
+    if (c.name === 'UnknownCallResultError') {
+      // The connection dropped mid-call: the claim may have landed. Ask the cache before giving up,
+      // otherwise the lease would sit unused until it expires.
+      await sleep(500);
+      const r = conn.db.checkRun.id.find(id);
+      if (r?.status === 'running' && r.claimedBy?.isEqual(identity)) {
+        log(`claim of run ${id} had landed despite ${c.name}`);
+        const run = await waitForClaim(id);
+        active.set(id, run.attempts);
+        void execute(run);
+        return;
+      }
+    }
     active.delete(id);
     // Lost the race, or waiting on a dependency stage: look again later, quietly.
     skipUntil.set(id, Date.now() + (c.message.includes('waiting for') ? 1500 : 5000));

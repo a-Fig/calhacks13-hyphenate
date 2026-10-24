@@ -64,11 +64,13 @@ export const HANDLERS: Record<string, (ctx: RunCtx) => Promise<Result[]>> = {
     const lo = 700;
     const hi = 2600;
     let n = 0;
+    const rtts: number[] = []; // how long the server took to accept each progress report
     while (n < total) {
       const started = Date.now();
       const end = Math.min(total, n + per);
       for (; n < end; n++) draws[n] = drawCostAtRisk(rand);
       const sorted = draws.slice(0, n).sort();
+      const sent = performance.now();
       await ctx.progress({
         done: n,
         total,
@@ -77,8 +79,11 @@ export const HANDLERS: Record<string, (ctx: RunCtx) => Promise<Result[]>> = {
         histMin: lo,
         histMax: hi,
       });
+      rtts.push(performance.now() - sent);
       await sleep(Math.max(0, tickMs - (Date.now() - started)));
     }
+    rtts.sort((a, b) => a - b);
+    ctx.log(`s4 run ${ctx.runId}: ${rtts.length} progress reports, round trip p50 ${rtts[Math.floor(rtts.length * 0.5)]!.toFixed(1)} ms, p95 ${rtts[Math.floor(rtts.length * 0.95)]!.toFixed(1)} ms, max ${rtts[rtts.length - 1]!.toFixed(1)} ms`);
     const missed = draws.reduce((k, x) => k + (x > 1900 ? 1 : 0), 0) / total;
     return [
       summarize('cost_at_risk', 'Cost at risk per unit', 'USD', draws),

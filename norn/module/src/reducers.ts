@@ -42,7 +42,8 @@ import {
 
 type Body<P extends RowObj> = (ctx: Ctx, args: InferTypeOfRow<P>, actor: Actor) => Logged | null;
 
-// Return null from a body that turned out not to write anything (an idempotent no-op).
+// Return null from a body that wrote nothing worth recording: an idempotent no-op, or ephemeral
+// state written many times a second (lease extensions, progress ticks).
 function write<P extends RowObj>(name: string, params: P, body: Body<P>): ReducerExport<any, any> {
   return spacetimedb.reducer({ name }, params as any, ((ctx: Ctx, args: InferTypeOfRow<P>) => {
     const policy = authorize(ctx, resolveActor(ctx), name, args);
@@ -405,7 +406,7 @@ export const heartbeatCheck = write(
     const run = ownRun(ctx, a.checkRunId, a.attempt);
     const leaseMs = Math.min(Math.max(a.leaseMs || cfgInt(ctx, 'lease_default_ms'), 1000), 300000);
     ctx.db.checkRun.id.update({ ...run, leaseExpiresAt: plusMs(ctx.timestamp, leaseMs) });
-    return { prId: run.prId, entity: `check_run:${run.id}`, summary: `lease extended ${leaseMs} ms` };
+    return null; // ephemeral: claim_check and complete_check already say who held the run
   }
 );
 
@@ -440,9 +441,12 @@ export const reportProgress = write(
       histMax: a.histMax,
       updatedAt: ctx.timestamp,
     };
-    if (ctx.db.checkProgress.checkRunId.find(run.id)) ctx.db.checkProgress.checkRunId.update(row);
-    else ctx.db.checkProgress.insert(row);
-    return { prId: run.prId, entity: `check_run:${run.id}`, summary: `progress ${a.done}/${a.total}` };
+    if (ctx.db.checkProgress.checkRunId.find(run.id)) {
+      ctx.db.checkProgress.checkRunId.update(row);
+      return null; // ephemeral and 2 per second: only the first report of a run is logged
+    }
+    ctx.db.checkProgress.insert(row);
+    return { prId: run.prId, entity: `check_run:${run.id}`, summary: `started reporting progress (${a.done}/${a.total})` };
   }
 );
 
