@@ -6,4 +6,4 @@ export { costCheck, COST_DEFAULTS, type CostCheckOptions, type CostCheckResult, 
 export { drawAll, evaluate, pairedDelta, summarize, type Expr, type Variable } from './sim.ts';
 export { serialsByMonth, unitsAfterCutIn } from './volume.ts';
 export { formatMoney, formatUsd, renderCostPage } from './format.ts';
-export { bomDeltaRows, costCheckRows, type CheckResultRow } from './rows.ts';
+export { bomDeltaRows, costCheckRows, costMeasureKey, type CheckResultRow } from './rows.ts';

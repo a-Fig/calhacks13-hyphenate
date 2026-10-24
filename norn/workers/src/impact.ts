@@ -30,6 +30,8 @@ export type Inputs = {
   erpBaselineSource?: string;
   erpBaselineAsOf?: string;
   assumptions?: { id: string; key: string; rev: number }[];
+  /** s2: the cost measure the company's approval rule asks for, which the check computes exactly. Absent without a company configuration. */
+  costMeasure?: { horizonMonths: number; savingsOffset: boolean };
 };
 
 /** The stages this file computes for real, on ECRs with a change request. */
@@ -145,7 +147,8 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
       if (!p) return HANDLERS.s2_cost!(ctx);
       const { overrides, problems } = assumptionsOf(p.inputs);
       const t0 = Date.now();
-      const r = costCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs) });
+      const measures = p.inputs.costMeasure ? [p.inputs.costMeasure] : [];
+      const r = costCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs), measures });
       const rows = real(costCheckRows(r));
       // Assumptions the library could not be given are reported, never dropped silently.
       if (problems.length) {
