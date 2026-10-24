@@ -183,6 +183,8 @@ async function boms() {
 
 // ---------------------------------------------------------------- change records
 
+/** The dataset has no firmness field: a quote is budgetary where its own note says so (ECR-0409's Halvorsen quote), firm otherwise. */
+const firmnessOf = (q: any) => (/^budgetary/i.test(q.note ?? '') ? 'Budgetary' : 'Firm');
 const affected = (changes: any[]) => changes.map((c) => ({ part: c.item, change_type: OP[c.op], from_revision: c.fromRev ?? '', to_revision: c.toRev ?? '' }));
 const redlines = (changes: any[]) => changes.flatMap((c) => (c.changes ?? []).map((x: any) => ({ part: c.item, field: x.field, from_value: fv(x.from), to_value: fv(x.to) })));
 const money = (c: any) => ({ label: c.label, basis: COST_BASIS[c.basis], one_time: c.oneTime ?? 0, unit_cost: c.unitCost ?? 0, quantity: c.quantity ?? 0, note: c.note ?? '' });
@@ -218,6 +220,11 @@ async function toState(name: string, originator: string, target: string, fast = 
   throw new Error(`${name} did not reach ${target}`);
 }
 
+async function linkEco(h: any) {
+  const cur = (await admin.get(`/api/resource/ECR/${enc(h.ecr)}`)).body.data;
+  if (cur.released_eco !== h.id) await admin.put(`/api/resource/ECR/${enc(h.ecr)}`, { released_eco: h.id });
+}
+
 /** The ten released ECOs, each with a stub ECR in Approved: the dataset keeps only the ECO's own facts. */
 async function history() {
   let made = 0;
@@ -234,7 +241,7 @@ async function history() {
     }
     await toState(h.ecr, who, 'Approved', h.decidedBy === 'fast_track');
     await admin.put(`/api/resource/ECR/${enc(h.ecr)}`, { decided_on: h.approvedOn });
-    if (await admin.exists('ECO', h.id)) continue;
+    if (await admin.exists('ECO', h.id)) { await linkEco(h); continue; }
     const serial = h.actual.cutInSerial;
     await createWithId('ECO', 'ECO-', h.id, admin, {
       ecr: h.ecr, title: h.title, program: prog, status: 'Released', released_on: h.releasedOn,
@@ -249,9 +256,20 @@ async function history() {
       actual_unit_cost_delta: h.actual.unitCostDeltaUsd, actual_one_time_cost: h.actual.oneTimeCostUsd,
       actual_cut_in_date: h.actual.cutInDate, actual_cut_in_serial: serial ?? null, variance: h.actual.variance,
     });
+    await linkEco(h);
     made++;
   }
   log(`  released ECOs: ${data.history.length} (${made} created), each with its Approved ECR`);
+}
+
+/** An ECR seeded before the firmness field existed: set it on the rows that should differ, and touch nothing else. */
+async function fixFirmness(e: any) {
+  const want = new Map<string, string>(e.supplierQuotes.map((q: any) => [q.id, firmnessOf(q)]));
+  const cur = (await admin.get(`/api/resource/ECR/${enc(e.id)}`)).body.data;
+  const rows = cur.supplier_quotes ?? [];
+  if (rows.every((r: any) => r.firmness === (want.get(r.quote_id) ?? 'Firm'))) return;
+  for (const r of rows) r.firmness = want.get(r.quote_id) ?? 'Firm';
+  await admin.put(`/api/resource/ECR/${enc(e.id)}`, { supplier_quotes: rows });
 }
 
 const STATE: Record<string, string> = { draft: 'Draft', submitted: 'Submitted', in_review: 'In CM Review' };
@@ -261,11 +279,12 @@ async function openEcrs() {
   for (const e of data.ecrs) {
     if ((only.size && !only.has(e.id)) || skip.has(e.id)) continue;
     const who = emailOf(e.originator);
-    if (await admin.exists('ECR', e.id)) { await toState(e.id, who, STATE[e.status]); filed.push(`${e.id} (exists)`); continue; }
+    if (await admin.exists('ECR', e.id)) { await toState(e.id, who, STATE[e.status]); await fixFirmness(e); filed.push(`${e.id} (exists)`); continue; }
     const quotes = e.supplierQuotes.flatMap((q: any) => q.lines.map((l: any, i: number) => ({
       quote_id: q.id, supplier: supplierName.get(q.supplier) ?? q.supplier, part: q.item, received_on: q.receivedOn, valid_until: q.validUntil ?? null,
       lead_time_weeks: q.leadTimeWeeks ?? null, note: i === 0 ? (q.note ?? '') : '',
       description: l.description, unit_price: l.unitPrice ?? 0, qty: l.qty ?? 0, one_time: l.oneTime ?? 0,
+      firmness: firmnessOf(q),
     })));
     const eff = e.effectivity;
     await createWithId('ECR', 'ECR-', e.id, await as(who), {
@@ -308,6 +327,7 @@ async function withWebhooksPaused<T>(fn: () => Promise<T>): Promise<T> {
 
 async function wipeChanges() {
   for (const dt of ['ECO', 'ECR', 'NCR']) {
+    if (dt === 'ECO') for (const r of await admin.list('ECR', { fields: ['name'], filters: [['released_eco', 'is', 'set']] })) await admin.put(`/api/resource/ECR/${enc(r.name)}`, { released_eco: null });
     if (dt === 'ECR') for (const n of await admin.list('NCR', { fields: ['name'] })) await admin.put(`/api/resource/NCR/${enc(n.name)}`, { linked_ecr: null });
     for (const r of await admin.list(dt, { fields: ['name'] })) await admin.del(`/api/resource/${enc(dt)}/${enc(r.name)}`);
   }

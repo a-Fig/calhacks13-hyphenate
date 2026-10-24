@@ -63,7 +63,7 @@ export async function applyWorkspace(plm: Plm, log: Log) {
   });
 
   const shortcuts = [
-    ['Parts', 'Part'], ['Engineering BOMs', 'Engineering BOM'], ['NCRs', 'NCR'], ['ECRs', 'ECR'], ['ECOs', 'ECO'],
+    ['Parts', 'Part'], ['Engineering BOM (EBOM)', 'Engineering BOM'], ['NCRs', 'NCR'], ['ECRs', 'ECR'], ['ECOs', 'ECO'],
   ].map(([label, link_to]) => ({ label, type: 'DocType', link_to, doc_view: 'List' }));
 
   const block = (type: string, data: Record<string, unknown>, id: string) => ({ id, type, data });
@@ -90,7 +90,7 @@ export async function applyWorkspace(plm: Plm, log: Log) {
   const items = [
     { label: 'Home', type: 'Link', link_type: 'Workspace', link_to: 'Bowman PLM', icon: 'home', is_default_module: 1 },
     { label: 'Parts', type: 'Link', link_type: 'DocType', link_to: 'Part', icon: 'package' },
-    { label: 'Engineering BOMs', type: 'Link', link_type: 'DocType', link_to: 'Engineering BOM', icon: 'list-tree' },
+    { label: 'Engineering BOM (EBOM)', type: 'Link', link_type: 'DocType', link_to: 'Engineering BOM', icon: 'list-tree' },
     { label: 'NCRs', type: 'Link', link_type: 'DocType', link_to: 'NCR', icon: 'triangle-alert' },
     { label: 'ECRs', type: 'Link', link_type: 'DocType', link_to: 'ECR', icon: 'file-pen-line' },
     { label: 'ECOs', type: 'Link', link_type: 'DocType', link_to: 'ECO', icon: 'badge-check' },

@@ -90,7 +90,10 @@ finds the ref on its next 15 s sweep. A write that outlasts the lease could stil
 
 Lists the PLM's ECRs once and takes in every one in a wanted state (`NORN_PLM_STATES`, default
 Submitted, In CM Review, CCB Review; `NORN_PLM_ECRS` limits it), one at a time: an ECR that cannot be read
-or mapped (a `PlmMappingError`) is logged by name and skipped, and the rest are still taken in. Then it watches the PLM
+or mapped (a `PlmMappingError`) is logged by name and skipped (the watcher delivers it again once it is fixed),
+and the rest are still taken in. An ECR that fails for any other reason (network, timeout, 5xx, a failed
+report) goes to a retry queue and is tried again every watch interval with a doubling wait (up to 60 s)
+until it is taken in, because the watcher only reports ECRs changed after the first listing. Then it watches the PLM
 (`NORN_PLM_INTERVAL_MS`, default 1000) and reports each changed ECR. Norn's own writes to the PLM
 are not offered back by the watcher. `ingest.ts` hands `ingestOnce` and `itemOf` in, because it is
 the entry module and importing it back would deadlock on its top-level await.
