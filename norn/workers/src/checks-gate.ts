@@ -39,9 +39,9 @@ const SEED = 'norn-seed-1';
 const MEASURE = { horizonMonths: 12, savingsOffset: false };
 
 // ---- the configuration: Bowman's own, and Bowman's without the slip limit ----------------------------
-// The timeline check is still a stand-in, so no slip is ever known, and Bowman's fast track (which holds
-// a 14-day p90 slip limit) recommends on every ECR. The second configuration takes that one limit out so
-// that the cost limit is what decides.
+// ECR-0423 states no date for the change to be late against, so the timeline check gives it no slip, and
+// Bowman's fast track (which holds a 14-day p90 slip limit) cannot approve it. The second configuration
+// takes that one limit out so that the cost limit is what decides.
 const loaded = await loadConfigFile(BOWMAN);
 if (!loaded.ok) throw new Error(`the example configuration is not valid: ${loaded.issues.map(i => i.message).join('; ')}`);
 const bowmanConfig: CompanyConfig = loaded.config;
@@ -187,9 +187,9 @@ try {
   const rec1 = await until(() => logAfter(m, p423.id, 'request_fast_track_approval')[0], 5000, 'the fast-track request to be logged');
   const g1 = gateOf(rec1);
   check(
-    "Bowman's fast track will not approve while no cost-and-schedule read of the slip exists: the agent's request becomes a recommendation, in review",
+    "Bowman as configured: the fast track cannot approve ECR-0423 while its slip is unknown (no stated date to be late against), so the agent's request is a recommendation, in review",
     rec1.outcome === 'downgraded' && pr(p423.id).status === 'review' && !standing(p423.id) && g1?.outcome === 'recommend' && /slip/i.test(texts(g1)),
-    `${rec1.outcome} ${texts(g1).slice(0, 200)}`,
+    `${rec1.outcome} slip limit ${JSON.stringify(g1?.limits?.find((l: any) => l.limit === 'maxP90SlipDays'))} ${texts(g1).slice(0, 200)}`,
   );
 
   // ---- the same configuration without the slip limit: small approves, large recommends ---------------------
