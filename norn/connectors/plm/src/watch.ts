@@ -75,9 +75,10 @@ export class EcrWatcher {
   #ready?: Promise<void>;
 
   constructor(opts: PlmOptions, onChange: EcrChangeHandler, w: WatchOptions = {}) {
-    this.#opts = opts;
-    this.#onChange = onChange;
     this.#interval = w.intervalMs ?? 2000;
+    // A request that hangs (a dropped tunnel) should cost a few passes, not half a minute.
+    this.#opts = { ...opts, timeoutMs: opts.timeoutMs ?? Math.max(5000, this.#interval * 3) };
+    this.#onChange = onChange;
     this.#overlap = w.overlapMs ?? 5000;
     this.#maxAttempts = w.maxAttempts ?? 3;
     this.#stateFile = w.stateFile;
