@@ -9,7 +9,9 @@
     "bindings",
     "workers",
     "web",
-    "mcp"
+    "mcp",
+    "checks",
+    "connectors/erpnext"
   ],
   "engines": {
     "node": ">=22.12"
@@ -32,6 +34,8 @@
     "spike:streaming": "node web/spike/streaming.mjs",
     "test-db:publish": "npm run typecheck -w @norn/module-test --silent && spacetime publish norn-test --no-config --module-path module-test --server local --delete-data=always --yes",
     "test-db:generate": "npm run typecheck -w @norn/module-test --silent && spacetime generate --no-config --lang typescript --module-path module-test --out-dir module-test/bindings/src --yes",
-    "check:policy": "npm run check:policy -w @norn/workers"
+    "check:policy": "npm run check:policy -w @norn/workers",
+    "ingest": "npm run ingest -w @norn/workers",
+    "check:pipeline": "npm run check:pipeline -w @norn/workers"
   }
 }

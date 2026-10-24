@@ -157,15 +157,33 @@ export type StageInputs = {
   seed?: string;
   text?: string; // s0: digest of the ECR text
   bomVersion?: number; // s1: the baseline's bill of materials
-  overlay?: string; // s1: stands in for the ECR's edits until Change/Commit tables exist
+  // Code stages: the digest of the ECR's current change request (ecr_revision). Until an ECR has
+  // one, the ECR's id stands in for it, so two ECRs never share a hash.
+  overlay?: string;
+  revision?: number; // code stages: the ecr_revision seq the overlay digest belongs to
+  erpBaseline?: string; // code stages: the hash of the current ERP baseline (baseline_snapshot)
   assumptions?: { id: string; key: string; rev: number }[]; // code stages: the assumptions that feed it
   upstream?: Record<string, string>; // stage -> its hash, for the stages this one reads
 };
 export type StageInfo = { hash: string; inputs: StageInputs };
 
+// The ECR's current change request, if the PLM has sent one.
+export function currentRevision(ctx: Ctx, prId: bigint) {
+  for (const r of ctx.db.ecrRevision.prId.filter(prId)) if (r.current) return r;
+  return undefined;
+}
+
+// The latest ERP baseline a worker recorded, if any.
+export function currentBaseline(ctx: Ctx) {
+  for (const b of ctx.db.baselineSnapshot.iter()) if (b.current) return b;
+  return undefined;
+}
+
 export function stageInfos(ctx: Ctx, pr: Pick<Pr, 'id' | 'baseVersion' | 'title' | 'description'>): Record<string, StageInfo> {
   const out: Record<string, StageInfo> = {};
   const assumptions = effectiveAssumptions(ctx, pr.id);
+  const rev = currentRevision(ctx, pr.id);
+  const erp = currentBaseline(ctx);
   for (const stage of STAGE_ORDER) {
     const def = STAGES[stage]!;
     const inputs: StageInputs = { stage, codeVersion: cfg(ctx, 'code_version') };
@@ -173,11 +191,16 @@ export function stageInfos(ctx: Ctx, pr: Pick<Pr, 'id' | 'baseVersion' | 'title'
     if (stage === 's0_extract') inputs.text = fnv1a64(`${pr.title}\n${pr.description}`);
     if (stage === 's1_bom_delta') {
       inputs.bomVersion = bomVersion(ctx, pr.baseVersion);
-      // The overlay is not modelled yet: the ECR's id stands in for it, so two ECRs never share a
-      // hash. When Change/Commit tables exist, the ECR's head commit id replaces it.
-      inputs.overlay = String(pr.id);
+      if (!rev) inputs.overlay = String(pr.id);
     }
     if (def.tier === 'code') {
+      // Every code stage reads the change request and the ERP baseline, so it names them itself:
+      // a worker computes on exactly what the run's inputs say.
+      if (rev) {
+        inputs.overlay = rev.digest;
+        inputs.revision = rev.seq;
+      }
+      if (erp) inputs.erpBaseline = erp.hash;
       inputs.assumptions = assumptions
         .filter(a => a.affects.length === 0 || a.affects.includes(stage))
         .map(a => ({ id: String(a.id), key: a.key, rev: a.rev }))

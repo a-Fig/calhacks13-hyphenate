@@ -286,6 +286,44 @@ const impactStatement = table(
   }
 );
 
+// What the ECR proposes, as the checks read it: the PLM connector's change request (the checks
+// library's `ChangeRequest`), one row per revision. Append-only: a new revision clears `current` on
+// the previous one. The current row's digest is an input of the code stages, so a new revision
+// makes their runs stale and queues fresh ones (core.ts stageInfos).
+const ecrRevision = table(
+  { name: 'ecr_revision', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    prId: t.u64().index('btree'),
+    seq: t.u32(), // 1, 2, ... per ECR
+    changeRequestJson: t.string(),
+    digest: t.string(), // fnv1a64 of changeRequestJson
+    source: t.string(), // where it came from: 'plm', or 'stub' for a test feed
+    sourceRef: t.string(), // the source's own version marker, e.g. the PLM document's modified time
+    current: t.bool(),
+    createdBy: t.identity(),
+    createdAt: t.timestamp(),
+  }
+);
+
+// The production baseline as read from the ERP, by content hash. The JSON itself stays with the
+// workers (cached by hash); the module records which baseline the checks ran on, so a result
+// points at exact data, and a new hash re-checks every open ECR. `current` marks the latest read.
+const baselineSnapshot = table(
+  { name: 'baseline_snapshot', public: true },
+  {
+    hash: t.string().primaryKey(), // the connector's content hash (sha256 hex)
+    asOf: t.string(), // the date the baseline is as of, 'YYYY-MM-DD'
+    source: t.string(), // 'erp', or 'file' for a test baseline
+    countsJson: t.string(), // rows per part of the baseline
+    warningsJson: t.string(), // the connector's warnings for this read
+    current: t.bool(),
+    firstReadAt: t.timestamp(),
+    lastReadAt: t.timestamp(),
+    recordedBy: t.identity(),
+  }
+);
+
 // Drives reap_expired_leases. Private: clients have no use for it.
 const reaperSchedule = table(
   { name: 'reaper_schedule' },
@@ -310,6 +348,8 @@ const spacetimedb = schema({
   agentEvent,
   actorScope,
   impactStatement,
+  ecrRevision,
+  baselineSnapshot,
   reaperSchedule,
 });
 
