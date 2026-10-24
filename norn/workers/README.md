@@ -7,7 +7,10 @@ Processes that do Norn's work outside the database, through its reducers. Writte
     request from the PLM.
   - Every other stage, and every ECR with no change request, is mock compute. Its results say
     `mock: true`.
-- **The ingest loop** (`src/ingest.ts`) reports the ECRs a change-request source has to Norn.
+- **The ingest loop** (`src/ingest.ts`) reports the ECRs a change-request source has to Norn, and the
+  change order number once the PLM releases one.
+- **The ERP change package** (`src/package.ts`, in the worker) puts on each released ECO what a person
+  enters in the ERP to carry it out. Norn never writes to the ERP (#71, #72).
 - **The company config** (`src/config.ts`): at start-up the worker loads and validates the file in
   `NORN_COMPANY_CONFIG`, refuses to start on a malformed one, and stores the config through
   `set_config` when it differs from what is stored. How it works and what the module checks are in
@@ -17,6 +20,7 @@ Processes that do Norn's work outside the database, through its reducers. Writte
 npm run worker                                       # from norn/: the worker, on the database NORN_DB (default norn)
 npm run ingest                                       # the ingest loop (needs NORN_INGEST_SOURCE)
 NORN_DB=norn-pipe npm run check:pipeline             # end to end on a scratch database: ingest, real checks, revisions, assumptions, baseline change
+NORN_DB=norn-pipe npm run check:package              # the ERP change package on a released ECO, with a planner of its own instead of ERPNext
 npm run test:workers                                 # offline tests of the start-up config and of the module's company_config checks
 NORN_DB=norn-cfg npm run check:config                # end to end on a scratch database you named: start-up config stored once, a re-run stores nothing, a malformed file stops the worker
 ```
@@ -62,6 +66,37 @@ moved under the same revision.
 - A conflicted ECR still finishes `done`, with `bomDelta.ok: false` in the detail row.
 - `failed` means the run can't succeed, and its `note` says why.
 
+## The ERP change package (#72)
+
+When an ECR is released in Norn (status `merged`) and the PLM has given its change order number
+(`record_eco_release`, which ingest calls when a change request carries `eco`), a worker that reads the
+ERP builds the package and records it with `record_erp_package`, in `erp_package`.
+
+1. **What changes** (`src/release.ts`) comes from the ECR's newest finished `s2_cost` run, computed
+   again on exactly the inputs it names, and compared with its stored totals.
+   - **Standard costs.** Each item whose price the ECR changes gets its new price, at its new revision.
+   - **BOM lines.** The ECR's BOM changes.
+   - **Journal entries**, from the old stock's disposition, at the assessment's point values:
+     - stock on hand written down to scrap value (expense against the inventory reserve);
+     - units finished at the supplier, and the cancellation charge on units not started (expense
+       against accrued liabilities).
+   - The account roles are `scrapExpense`, `inventoryReserve` and `accruedLiability`, which the
+     company's ERP settings map to accounts.
+   - **What the package leaves out** is in its notes, with the reason. Units on built aircraft are
+     booked when the retrofit removes them. Undecided dispositions get no entry until decided.
+     Rework is booked as it is done.
+2. **The lines** come from the ERPNext connector's planner, which reads the ERP and writes nothing. It
+   turns the release into lines a person enters, each with a status.
+3. **On each new ERP read** the worker checks the package again, so each line shows whether it has been
+   entered. The amounts stay the assessment's: an entered standard cost does not change what was decided.
+
+For ECR-0417 the package gives BW-5120-210's new standard cost of 221.00 at Rev C from 2026-11-01. Its
+journal entries are 17,620.62 and 8,810.31 on hand, 11,012.88 at the supplier, and a 1,118.40
+cancellation charge.
+- #66 had 26,431.20 and 11,013.00 for the first two, from the answer key, rounding the scrap value to
+  2.85 per bracket first.
+- The 120 brackets on built aircraft (22,025.77) are left to the retrofit.
+
 **Assumptions.** An assumption's `key` is the checks library's input id, such as
 `cost:<ECR>:other:<row slug>`, `recovery:<item>` or `effectivity:<ECR>:<program>`. Its `distJson`
 takes one of these shapes, any of which may add `replacesGiven: true` to replace a number someone
@@ -81,5 +116,7 @@ stated:
 | `NORN_BASELINE_POLL_MS` | worker | How often to re-read the baseline. |
 | `NORN_BASELINE_CACHE_DIR` | worker | Where baselines are cached by hash (default `norn/workers/.cache/baselines`). |
 | `NORN_INGEST_SOURCE` | ingest | `plm`, which needs the PLM connector and isn't wired yet, or `stub`. |
-| `NORN_STUB_ECR_DIR` | ingest | For `stub`: a directory of change-request JSON files. A test feed, recorded with source `stub`. |
+| `NORN_STUB_ECR_DIR` | ingest | For `stub`: a directory of change-request JSON files. A test feed, recorded with source `stub`. A file's `eco` field is the released change order's number. |
+| `NORN_WEB_URL` | worker | Where Norn's ECR pages are (default `http://localhost:5173`): the trace on every package line links there. |
+| `NORN_PACKAGE_POLL_MS` | worker | How often a worker that reads the ERP looks for packages to build or check (default 15 s). |
 | `NORN_DB`, `NORN_URI` | both | The database, and the server (default `ws://127.0.0.1:3000`). |

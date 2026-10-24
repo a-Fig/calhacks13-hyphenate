@@ -326,6 +326,90 @@ export const recordBaseline = write(
   }
 );
 
+// The PLM has released the change order for this ECR (#72): its number, by the PLM's ECR number, as
+// the ingest loop reports it. A worker puts the ERP change package on it once the ECR is released in
+// Norn too (status merged).
+export const recordEcoRelease = write(
+  'record_eco_release',
+  { plmEcrNumber: t.string(), ecoNumber: t.string(), source: t.string(), sourceRef: t.string() },
+  (ctx, a) => {
+    const plm = nonEmpty(a.plmEcrNumber, 'plmEcrNumber', 64);
+    const found = ctx.db.pullRequest.plmEcrNumber.find(plm);
+    if (!found) throw new SenderError(`Norn has no ECR ${plm}`);
+    const pr = getPr(ctx, found.id);
+    const ecoNumber = nonEmpty(a.ecoNumber, 'ecoNumber', 64);
+    const source = nonEmpty(a.source, 'source', 32);
+    if (a.sourceRef.length > 200) throw new SenderError('sourceRef is too long (max 200 characters)');
+    if (pr.status === 'closed') throw new SenderError(`ECR ${pr.id} is closed; a closed ECR has no change order`);
+    const seen = ctx.db.ecoRelease.prId.find(pr.id);
+    if (seen?.ecoNumber === ecoNumber) return null;
+    if (seen) throw new SenderError(`ECR ${pr.id} was released as ${seen.ecoNumber}; a released change order keeps its number, so ${ecoNumber} is refused`);
+    ctx.db.ecoRelease.insert({ prId: pr.id, ecoNumber, source, sourceRef: a.sourceRef, recordedBy: ctx.sender, recordedAt: ctx.timestamp });
+    return { prId: pr.id, entity: `eco_release:${pr.id}`, summary: `change order ${ecoNumber} released (${source})` };
+  }
+);
+
+// The ERP change package on a released ECO (#72), from a worker: what a person enters in the ERP, with
+// each line's status on the ERP read named. Norn never writes to the ERP (#71). Recording the same
+// package again on a new ERP read only moves erpBaseline, and adds no log row.
+export const recordErpPackage = write(
+  'record_erp_package',
+  {
+    prId: t.u64(),
+    ecoNumber: t.string(),
+    s2RunId: t.u64(),
+    erpBaseline: t.string(),
+    releaseJson: t.string(),
+    packageJson: t.string(),
+    lines: t.u32(),
+    entered: t.u32(),
+    conflicts: t.u32(),
+    notesJson: t.string(),
+  },
+  (ctx, a) => {
+    const pr = getPr(ctx, a.prId);
+    if (pr.status !== 'merged') throw new SenderError(`ECR ${pr.id} is ${pr.status}; an ERP change package is for a released ECO`);
+    const eco = ctx.db.ecoRelease.prId.find(pr.id);
+    if (!eco) throw new SenderError(`ECR ${pr.id} has no change order number from the PLM yet`);
+    if (eco.ecoNumber !== a.ecoNumber) throw new SenderError(`ECR ${pr.id} was released as ${eco.ecoNumber}, not ${a.ecoNumber}`);
+    const run = ctx.db.checkRun.id.find(a.s2RunId);
+    if (!run || run.prId !== pr.id || run.stage !== 's2_cost' || run.status !== 'done')
+      throw new SenderError(`check run ${a.s2RunId} is not a finished s2_cost run of ECR ${pr.id}`);
+    const erpBaseline = nonEmpty(a.erpBaseline, 'erpBaseline', 128);
+    if (!ctx.db.baselineSnapshot.hash.find(erpBaseline)) throw new SenderError(`ERP baseline ${erpBaseline.slice(0, 12)} has not been recorded`);
+    for (const [what, v] of [['releaseJson', a.releaseJson], ['packageJson', a.packageJson], ['notesJson', a.notesJson]] as const) parseJson(v, what);
+    // A package lists every line of every BOM it versions, so a large assembly runs to a few hundred KB.
+    if (a.releaseJson.length + a.packageJson.length + a.notesJson.length > 2_000_000)
+      throw new SenderError('releaseJson, packageJson and notesJson are too long (max 2,000,000 characters together)');
+    if (a.entered + a.conflicts > a.lines) throw new SenderError(`${a.entered} entered and ${a.conflicts} in conflict is more than the ${a.lines} line(s)`);
+
+    const prev = ctx.db.erpPackage.prId.find(pr.id);
+    const row = {
+      prId: pr.id,
+      ecoNumber: a.ecoNumber,
+      s2RunId: a.s2RunId,
+      erpBaseline,
+      releaseJson: a.releaseJson,
+      packageJson: a.packageJson,
+      lines: a.lines,
+      entered: a.entered,
+      conflicts: a.conflicts,
+      notesJson: a.notesJson,
+      builtBy: ctx.sender,
+      updatedAt: ctx.timestamp,
+    };
+    if (prev) {
+      const same = prev.s2RunId === row.s2RunId && prev.releaseJson === row.releaseJson && prev.packageJson === row.packageJson && prev.notesJson === row.notesJson;
+      ctx.db.erpPackage.prId.update({ ...prev, ...row });
+      if (same) return null;
+    } else {
+      ctx.db.erpPackage.insert({ ...row, builtAt: ctx.timestamp });
+    }
+    const state = a.lines === 0 ? 'nothing to enter' : `${a.entered} of ${a.lines} line(s) entered${a.conflicts ? `, ${a.conflicts} in conflict` : ''}`;
+    return { prId: pr.id, entity: `erp_package:${pr.id}`, summary: `ERP change package for ${a.ecoNumber}: ${state} (ERP ${erpBaseline.slice(0, 12)})` };
+  }
+);
+
 // The ECR text is what the extraction stage reads, so an edit makes a finished extraction stale.
 export const editPrText = write('edit_pr_text', { prId: t.u64(), description: t.string() }, (ctx, a) => {
   const pr = getPr(ctx, a.prId);
