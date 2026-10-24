@@ -1,3 +1,5 @@
+Raw copies of everything below are in [sources/](../sources/README.md).
+
 # Sources
 
 All checked Oct 23, 2026, unless noted.
