@@ -94,14 +94,14 @@ Approval releases the ECO: the transition runs the `ecr.approved` webhook as a w
 
 `norn@bowman-aviation.example`, role Norn Integration, token auth: `Authorization: token <PLM_API_KEY>:<PLM_API_SECRET>`.
 
-- Reads Part, Engineering BOM, NCR, ECR, ECO, comments and version history.
-- Writes only the seven impact fields on an ECR, and adds comments. It cannot create, delete or transition anything, and cannot write any other DocType.
-- Frappe needs document-level write for the PUT to be accepted, so a Server Script ("ECR: Norn writes only the impact assessment", `server-scripts/ecr-guard.py`) compares the saved and incoming document and refuses any other change with 403. People are limited by permission level, not by that script.
+- Reads Part, Engineering BOM, NCR, ECR, ECO and comments. It does not read the CCB's decision note or meeting date on the ECR (permission level 2), nor the version history, which would show them.
+- Writes only the seven impact fields on an ECR, and adds comments. It cannot create, delete, rename, attach files to, assign or transition anything, and cannot write any other DocType.
+- Frappe needs document-level write for the PUT to be accepted, so a Server Script ("ECR: Norn writes only the impact assessment", `server-scripts/ecr-guard.py`) compares the saved and incoming document and refuses any other change with 403. People are limited by permission level, not by that script. Operations that need only the write right, not a save, are closed separately: `allow_rename` is off on every PLM DocType, and Before Insert Server Scripts refuse Norn's File and ToDo rows against change records (403) and overwrite the author of Norn's comments with Norn (and refuse comments of any type but Comment), so a spoofed `comment_by` lands as Norn.
 - Norn's own writes do not fire the ECR webhook back at it (the hook's condition skips `modified_by` = Norn). `impact_updated_on` is stamped by the server when Norn does not send it.
 
 ## Webhooks
 
-Five, named by their `X-Bowman-PLM-Event` header: `ncr.inserted`, `ncr.updated`, `ecr.inserted`, `ecr.updated`, `eco.released`. **They are disabled until `NORN_WEBHOOK_URL` is set in `.env` and `setup.ts` is re-run** (Norn's receiver does not exist yet). Delivery: `POST`, `Content-Type: application/json`, header `X-Frappe-Webhook-Signature` = base64 HMAC-SHA256 of the raw body with `PLM_WEBHOOK_SECRET`, three tries over about 5 seconds. Body:
+Five, named by their `X-Bowman-PLM-Event` header: `ncr.inserted`, `ncr.updated`, `ecr.inserted`, `ecr.updated`, `eco.released`. **They are disabled until `NORN_WEBHOOK_URL` is set in `.env` and `setup.ts` is re-run** (Norn's receiver does not exist yet). Delivery: `POST`, `Content-Type: application/json`, header `X-Frappe-Webhook-Signature` = base64 HMAC-SHA256 of the raw body with `PLM_WEBHOOK_SECRET`, three tries over about 5 seconds. Body (the ECR's document leaves out `decision_note` and `ccb_meeting`):
 
 ```
 { "event": "ecr.updated", "doctype": "ECR", "name": "ECR-0417", "modified": "...", "modified_by": "dana.okafor@...",
@@ -110,7 +110,7 @@ Five, named by their `X-Bowman-PLM-Event` header: `ncr.inserted`, `ncr.updated`,
 
 Filing an ECR sends `ecr.inserted` (state Draft) and then `ecr.updated` for each workflow step, so Norn learns "Submitted" from an `ecr.updated` with `workflow_state: "Submitted"`. Failed deliveries are in the desk under Webhook Request Log.
 
-## Verified calls (`verify.ts`, 18 checks, 2026-10-24, all passed)
+## Verified calls (`verify.ts`, 26 checks, 2026-10-24, all passed)
 
 As Norn:
 
@@ -121,6 +121,7 @@ As Norn:
 5. `POST /api/resource/Comment {comment_type: "Comment", reference_doctype: "ECR", reference_name: "ECR-0417", content}` returned 200.
 6. Webhook: with the hooks pointed at a throwaway receiver on the Mac's PLM network (`webhook-sink.mjs`), Dana's edit of ECR-0417 delivered `ecr.updated` with a valid signature; Norn's own `PUT` delivered nothing.
 7. Approval: a temporary ECR went Draft to Approved through four people; ECO-0319 appeared, released by Rafael. ECR and ECO were deleted and the naming series put back.
+8. Holes an Opus review found, each reproduced with the Norn token and now refused (on a throwaway ECR made as Administrator): `rename_doc` (417), `upload_file` against the ECR (403), `assign_to.add` (403), a comment sent as another user (stored as Norn), a comment of type Edit (refused), a read of `decision_note` and `ccb_meeting` (absent), and the version history (403).
 
 Screenshots in `screenshots/`, taken as Rafael through the tunnel: `before-*` (ECR-0417 with no assessment) and `after-*` (after the Norn write above): `ecr-list`, `ecr-0417-request`, `-impact`, `-affected`, `-cost`, plus `home`, `part-list`, `part-bracket`, `ebom-vesper`, `ncr-list`, `eco-list`.
 

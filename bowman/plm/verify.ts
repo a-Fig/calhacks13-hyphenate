@@ -139,6 +139,7 @@ async function main() {
       log(`  POST ${hit.url} headers {content-type: ${hit.headers['content-type']}, x-bowman-plm-event: ${hit.headers['x-bowman-plm-event']}, x-frappe-webhook-signature: <${hit.headers['x-frappe-webhook-signature']?.length} chars>}`);
       log(`  body keys: ${Object.keys(p).join(', ')}; name ${p.name}, modified_by ${p.modified_by}, doc has ${Object.keys(p.doc).length} fields incl. ${['affected_items', 'cost_production', 'impact_statement'].filter((k) => k in p.doc).join(', ')}`);
       check(p.name === 'ECR-0417' && p.doctype === 'ECR' && sig === hit.headers['x-frappe-webhook-signature'], 'ecr.updated delivered with a valid HMAC signature');
+      check(!('ccb_meeting' in p.doc) && !('decision_note' in p.doc), "the webhook's document leaves out the CCB's private fields (ccb_meeting, decision_note)");
     } else check(false, 'ecr.updated delivered');
     check(lines.filter((l) => l.headers['x-bowman-plm-event'] === 'ecr.updated').length === 1, "Norn's own write did not echo back (one ecr.updated, from the person's edit)");
     await dana.put('/api/resource/ECR/ECR-0417', { ccb_meeting: null }); // leave the demo record as found
@@ -163,6 +164,52 @@ async function main() {
   await setSeries('ECR-', 424);
   await setSeries('ECO-', 319);
   log('  test ECR and ECO deleted; naming series restored (next ECR-0424, ECO-0319)');
+
+  log('8. Holes a review found, now closed (throwaway ECR made as Administrator, deleted afterwards)');
+  const probe = (await admin.post('/api/resource/ECR', { doctype: 'ECR', title: 'Permission probe (deleted after the test)', program: 'Vesper V4', priority: 'Routine', justification_code: 'D', company_class: 'Class I', faa_class: 'Minor', description: 'probe', need: 'probe', decision_note: 'CCB private deliberation (test)', ccb_meeting: '2026-11-12' })).body.data;
+  const refusal = (r: { status: number; body: any }) => {
+    let msg = '';
+    try { msg = JSON.parse(r.body._server_messages ?? '[]').map((m: string) => JSON.parse(m).message).join(' ').replace(/<[^>]+>/g, ''); } catch { /* none */ }
+    return `${r.status} ${r.body.exc_type ?? ''} ${msg.slice(0, 110)}`;
+  };
+  try {
+    const rn = await norn.post('/api/method/frappe.client.rename_doc', { doctype: 'ECR', old_name: probe.name, new_name: 'ECR-9999' }, { allow: true });
+    log(`  rename_doc -> ${refusal(rn)}`);
+    check(rn.status >= 400 && (await admin.exists('ECR', probe.name)) && !(await admin.exists('ECR', 'ECR-9999')), 'rename refused, the ECR keeps its number');
+
+    const form = new FormData();
+    form.append('file', new Blob(['probe'], { type: 'text/plain' }), 'probe.txt');
+    form.append('is_private', '1'); form.append('doctype', 'ECR'); form.append('docname', probe.name);
+    const up = await norn.req('POST', '/api/method/upload_file', { form, allow: true });
+    log(`  upload_file against the ECR -> ${refusal(up)}`);
+    check(up.status >= 400 && (await admin.list('File', { fields: ['name'], filters: [['attached_to_name', '=', probe.name]] })).length === 0, 'attaching a file refused, no File row');
+
+    const as = await norn.post('/api/method/frappe.desk.form.assign_to.add', { doctype: 'ECR', name: probe.name, assign_to: JSON.stringify(['dana.okafor@bowman-aviation.example']), description: 'probe' }, { allow: true });
+    log(`  assign_to.add -> ${refusal(as)}`);
+    check(as.status >= 400 && (await admin.list('ToDo', { fields: ['name'], filters: [['reference_name', '=', probe.name]] })).length === 0, 'assignment refused, no ToDo');
+
+    const sp = await norn.post('/api/resource/Comment', { doctype: 'Comment', comment_type: 'Comment', reference_doctype: 'ECR', reference_name: probe.name, content: 'Spoof probe (not a Norn result).', comment_by: 'Rafael Quintero', comment_email: 'rafael.quintero@bowman-aviation.example' }, { allow: true });
+    const stored = sp.status === 200 ? (await admin.get(`/api/resource/Comment/${enc(sp.body.data.name)}`)).body.data : {};
+    log(`  Comment sent as Rafael Quintero -> ${sp.status}; stored author "${stored.comment_by}" <${stored.comment_email}>`);
+    check(sp.status === 200 && stored.comment_email === 'norn@bowman-aviation.example' && stored.comment_by !== 'Rafael Quintero', 'a spoofed comment author lands as Norn');
+    const odd = await norn.post('/api/resource/Comment', { doctype: 'Comment', comment_type: 'Edit', reference_doctype: 'ECR', reference_name: probe.name, content: 'x' }, { allow: true });
+    check(odd.status >= 400, 'a comment of another type (Edit) refused');
+
+    const g = (await norn.get(`/api/resource/ECR/${probe.name}`)).body.data;
+    const gl = await norn.get('/api/resource/ECR', { fields: ['name', 'decision_note'], filters: [['name', '=', probe.name]] }, { allow: true });
+    log(`  GET ECR as Norn: decision_note ${'decision_note' in g ? 'present' : 'absent'}, ccb_meeting ${'ccb_meeting' in g ? 'present' : 'absent'}; list with fields=[decision_note] -> ${gl.status}`);
+    check(!('decision_note' in g) && !('ccb_meeting' in g) && (gl.status >= 400 || !('decision_note' in (gl.body.data?.[0] ?? {}))), "Norn cannot read the CCB's decision note or meeting date");
+    await admin.put(`/api/resource/ECR/${probe.name}`, { decision_note: 'revised private note (test)' });
+    const vers = await norn.get('/api/resource/Version', { fields: ['name', 'data'], filters: [['ref_doctype', '=', 'ECR'], ['docname', '=', probe.name]] }, { allow: true });
+    const leak = vers.status === 200 && JSON.stringify(vers.body.data).includes('decision_note');
+    log(`  Version history as Norn -> ${vers.status}, ${leak ? 'shows decision_note' : 'no decision_note'}`);
+    check(!leak, "the version history does not show the CCB's decision note to Norn");
+  } finally {
+    for (const c of await admin.list('Comment', { fields: ['name'], filters: [['reference_name', '=', probe.name]] })) await admin.del(`/api/resource/Comment/${c.name}`, { allow: true });
+    await admin.del(`/api/resource/ECR/${probe.name}`, { allow: true });
+    await setSeries('ECR-', 424);
+    log('  probe ECR deleted; naming series restored (next ECR-0424)');
+  }
 
   log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed. ECR-0417 now carries the test impact assessment; run with --clear to remove it.');
   process.exit(failures ? 1 : 0);

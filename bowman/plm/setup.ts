@@ -67,6 +67,8 @@ function doctypeDoc(def: DocTypeDef, fields: Field[], withLinks: boolean): Field
     module: MODULE,
     custom: 1,
     istable: def.istable ? 1 : 0,
+    allow_rename: 0, // renaming only needs write, which Norn holds on the ECR
+
     editable_grid: def.istable ? 1 : 0,
     ...(autoname ? { autoname, naming_rule } : {}),
     fields: fields.map((x, i) => ({ ...x, idx: i + 1 })),
@@ -175,6 +177,9 @@ async function scripts() {
     ['ECR: Norn writes only the impact assessment', 'ECR', 'Before Validate', 'server-scripts/ecr-guard.py'],
     ['ECR: cost page totals', 'ECR', 'Before Save', 'server-scripts/ecr-totals.py'],
     ['NCR: title from number and part', 'NCR', 'Before Save', 'server-scripts/ncr-title.py'],
+    ['Norn: no files on change records', 'File', 'Before Insert', 'server-scripts/norn-no-attachments.py'],
+    ['Norn: no assignments on change records', 'ToDo', 'Before Insert', 'server-scripts/norn-no-assignments.py'],
+    ['Norn: comments carry Norn as author', 'Comment', 'Before Insert', 'server-scripts/norn-comment-author.py'],
     ['Engineering BOM: component count', 'Engineering BOM', 'Before Save', 'server-scripts/bom-count.py'],
   ];
   for (const [name, dt, event, file] of server) {
@@ -230,14 +235,20 @@ async function webhooks() {
   const key = ensureSecret('PLM_WEBHOOK_SECRET');
   const url = norn || 'http://norn.invalid/plm-webhook'; // placeholder keeps the hooks defined but disabled until a URL is set
   const enabled = norn ? 1 : 0;
-  const payload = (event: string) => `{
+  // The CCB's deliberation (permission level 2 on the ECR) is not Norn's to read, so it is not in the payload either.
+  const PRIVATE = ['decision_note', 'ccb_meeting'];
+  const docJson = (doctype: string) =>
+    doctype === 'ECR'
+      ? `{ {% for k, v in doc.items() if k not in ${JSON.stringify(PRIVATE).replace(/"/g, "'")} %}{{ k | tojson }}: {{ v | tojson }}{% if not loop.last %}, {% endif %}{% endfor %} }`
+      : '{{ doc | tojson }}';
+  const payload = (event: string, doctype: string) => `{
   "event": "${event}",
   "doctype": "{{ doc.doctype }}",
   "name": "{{ doc.name }}",
   "modified": "{{ doc.modified }}",
   "modified_by": "{{ doc.modified_by }}",
   "workflow_state": {{ (doc.workflow_state or "") | tojson }},
-  "doc": {{ doc | tojson }}
+  "doc": ${docJson(doctype)}
 }`;
   const specs = [
     { doctype: 'NCR', event: 'after_insert', label: 'ncr.inserted' },
@@ -256,7 +267,7 @@ async function webhooks() {
       request_url: url,
       request_method: 'POST',
       request_structure: 'JSON',
-      webhook_json: payload(s.label),
+      webhook_json: payload(s.label, s.doctype),
       webhook_headers: [{ key: 'Content-Type', value: 'application/json' }, { key: 'X-Bowman-PLM-Event', value: s.label }],
       enable_security: 1,
       webhook_secret: key,
@@ -311,15 +322,18 @@ async function webhooks() {
   log('  Webhook "ecr.approved" (release the ECO): ' + how2 + ' (bot key rotated, not shown)');
 }
 
-/** Norn reads comments and the version history, and adds comments. Built-in DocTypes take rights through the Role Permissions Manager (it copies the stock rows first). */
+/** Norn reads comments and adds comments. It gets no version history: a Version row of an ECR shows the CCB's decision note, which Norn may not read. Built-in DocTypes take rights through the Role Permissions Manager (it copies the stock rows first). */
 async function nornBuiltins() {
   const pm = '/api/method/frappe.core.page.permission_manager.permission_manager';
-  const grants: Record<string, string[]> = { Comment: ['read', 'create'], Version: ['read'] };
+  const grants: Record<string, string[]> = { Comment: ['read', 'create'] };
   for (const [doctype, ptypes] of Object.entries(grants)) {
     await plm.post(`${pm}.add`, { parent: doctype, role: ROLES.norn, permlevel: 0 }, { allow: true });
     for (const ptype of ptypes) await plm.post(`${pm}.update`, { doctype, role: ROLES.norn, permlevel: 0, ptype, value: '1' });
     log(`  ${doctype}: Norn Integration may ${ptypes.join(' and ')}`);
   }
+  // An earlier version also granted Version read; take it back.
+  await plm.post(`${pm}.remove`, { doctype: 'Version', role: ROLES.norn, permlevel: 0, if_owner: 0 }, { allow: true });
+  log('  Version: no rights for Norn Integration');
 }
 
 async function main() {

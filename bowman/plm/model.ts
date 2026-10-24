@@ -421,7 +421,7 @@ const ecr: DocTypeDef = {
     f('Text', 'decision_note', 'Decision and conditions', { permlevel: 2 }),
   ]),
   permissions: [
-    // Everyone reads every field. Only the Norn integration writes permlevel 1; the CM analyst and chair write permlevel 2.
+    // People read every field; Norn reads all but permlevel 2 (the CCB's decision notes). Only Norn writes permlevel 1; the CM analyst and chair write permlevel 2.
     { role: ROLES.designer, ...R },
     { role: ROLES.designer, read: 1, write: 1, create: 1, if_owner: 1 },
     { role: ROLES.cm, ...RWC },
@@ -432,7 +432,7 @@ const ecr: DocTypeDef = {
     { role: ROLES.releaser, read: 1 },
     ...[ROLES.designer, ROLES.cm, ROLES.member, ROLES.chair, ROLES.viewer].map((role) => ({ role, permlevel: 1, read: 1 }) as PermRow),
     { role: ROLES.norn, permlevel: 1, read: 1, write: 1 },
-    ...[ROLES.designer, ROLES.member, ROLES.viewer, ROLES.norn].map((role) => ({ role, permlevel: 2, read: 1 }) as PermRow),
+    ...[ROLES.designer, ROLES.member, ROLES.viewer].map((role) => ({ role, permlevel: 2, read: 1 }) as PermRow), // not Norn: the CCB's deliberation is private
     { role: ROLES.cm, permlevel: 2, read: 1, write: 1 },
     { role: ROLES.chair, permlevel: 2, read: 1, write: 1 },
     sysman,
