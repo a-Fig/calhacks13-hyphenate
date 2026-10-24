@@ -7,7 +7,7 @@
 // Undo with bowman/erp/reset-eco.ts. Needs the tunnel and ERPNEXT_URL / ERPNEXT_API_KEY / ERPNEXT_API_SECRET (ENV_FILE or the repo-root .env).
 import { erpnext } from '../norn-config/erpnext.ts';
 import {
-  applyEcoRelease, bomVersions, connectionFromEnv, formatPlan, loadEnvFile, planEcoRelease, priceHistory, readBaseline,
+  applyEcoRelease, bomVersions, connectionFromEnv, formatPlan, loadEnvFile, planEcoRelease, priceHistory, readBaseline, today,
 } from '../../norn/connectors/erpnext/src/index.ts';
 import { ecr0417Release } from './ecr-0417-release.ts';
 
@@ -16,7 +16,7 @@ const money = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 
 
 loadEnvFile();
 const conn = connectionFromEnv();
-const effectiveDate = arg('effective') ?? new Date().toLocaleDateString('sv-SE');
+const effectiveDate = arg('effective') ?? today(erpnext.timeZone); // Pacific, per the settings
 const { release, notes } = ecr0417Release({ effectiveDate, decisionUrl: arg('decision-url'), eco: arg('eco') });
 
 const plan = await planEcoRelease(conn, erpnext, release);

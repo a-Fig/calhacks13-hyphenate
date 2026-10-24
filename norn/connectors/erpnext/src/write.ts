@@ -238,7 +238,7 @@ export async function planEcoRelease(conn: ErpnextConnection, opts: ErpnextSetti
   const newCost = new Map(release.items.map((i) => [i.item, r2(i.standardCost)]));
   const label = (item: ItemCode) => { const rev = release.items.find((i) => i.item === item)?.rev; return rev ? `${item} Rev ${rev}` : item; };
 
-  if (effectiveDate > today()) warnings.push(`the effective date ${effectiveDate} is after today: ERPNext costs a new BOM at the price valid today, so the new BOMs show the old cost until then`);
+  if (effectiveDate > today(opts.timeZone)) warnings.push(`the effective date ${effectiveDate} is after today: ERPNext costs a new BOM at the price valid today, so the new BOMs show the old cost until then`);
 
   // -- standard cost -------------------------------------------------------------------------------------------------
   const oldCost = new Map<ItemCode, number>();

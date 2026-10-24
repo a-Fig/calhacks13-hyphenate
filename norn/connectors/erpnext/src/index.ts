@@ -13,7 +13,7 @@ export type { ApplyOptions, ApplyResult, BomLineChange, EcoJournal, EcoPlan, Eco
 export type { BomVersion, DocRef, LeadTime, OpenOrder, PricePoint } from './history.ts';
 export { ErpnextError } from './client.ts';
 export { connectionFromEnv, loadEnvFile } from './env.ts';
-export { canonicalJson, explodeQty, hashOf, readBaseline, validOn } from './read.ts';
+export { canonicalJson, explodeQty, hashOf, readBaseline, today, validOn } from './read.ts';
 export { bomVersions, openOrders, priceHistory, realisedLeadTimes } from './history.ts';
 export { EcoApplyError, EcoPlanError, applyEcoRelease, formatPlan, planEcoRelease } from './write.ts';
 
