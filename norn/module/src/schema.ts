@@ -187,7 +187,7 @@ const actionLog = table(
     prId: t.u64().index('btree'), // 0 when the action is not about one ECR
     requestId: t.string().index('btree'), // the caller's id for this call; matches a call to its outcome
     reducer: t.string(),
-    outcome: t.string(), // applied | denied | downgraded
+    outcome: t.string(), // applied | denied | downgraded | rejected (a job-scoped agent's validation failure)
     entity: t.string(), // what was written, e.g. 'check_run:7'
     summary: t.string(),
     detailJson: t.string(),
@@ -227,6 +227,104 @@ const agentEvent = table(
   }
 );
 
+// What a credential lets an agent write to. Norn's MCP server verifies a job's (or a person's
+// agent's) signed token, then records the scope it names here for that agent's own identity, and
+// the policy gate (scope.ts) checks every write against it. Absent for workers and the UI.
+// Self-declared by the connection, like register_actor: see mcp/NOTES.md for what that does and
+// does not protect against.
+const actorScope = table(
+  { name: 'actor_scope', public: true },
+  {
+    identity: t.identity().primaryKey(),
+    jobId: t.string(), // the job (or credential) the grant is for
+    anyEcr: t.bool(), // true: any ECR (a person's agent); the baseline is never writable
+    prIds: t.array(t.u64()), // the ECRs it may write to
+    maxLevel: t.u8(), // the highest impact-statement level it may post (0: none); derived from the job's role and origin
+    expiresAt: t.timestamp(),
+    grantedAt: t.timestamp(),
+  }
+);
+
+// The structured parts of an impact statement. 'evidence' is one of fact | assumption |
+// computation | judgment (docs/GLOSSARY.md). A 'computation' number must equal a current
+// check_result of the ECR, key and p10/p50/p90 (post_impact_statement checks it).
+export const StatementNumber = t.object('StatementNumber', {
+  key: t.string(),
+  label: t.string(),
+  unit: t.string(),
+  p10: t.f64(),
+  p50: t.f64(),
+  p90: t.f64(),
+  evidence: t.string(),
+  resultKey: t.string(), // the check_result key it comes from; required for 'computation', else may be empty
+});
+export const StatementClaim = t.object('StatementClaim', { text: t.string(), evidence: t.string() });
+export const StatementAssumption = t.object('StatementAssumption', {
+  key: t.string(), // an assumption the ECR sees
+  source: t.string(), // given | default | agent_estimated; must match the assumption's own source
+  note: t.string(), // how the statement leans on it
+});
+
+// A Level 1-3 impact statement (#42). Append-only: a newer one for the same ECR and level
+// supersedes an older one in the reader's eyes. prRevision is the ECR revision it was written
+// against, so a reader can tell it has since gone out of date.
+const impactStatement = table(
+  { name: 'impact_statement', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    prId: t.u64().index('btree'),
+    level: t.u8(), // 1 | 2 | 3
+    prRevision: t.u32(),
+    changeClass: t.string(),
+    route: t.string(), // the proposed approval route
+    headline: t.string(),
+    numbers: t.array(StatementNumber),
+    drivers: t.array(StatementClaim),
+    assumptions: t.array(StatementAssumption),
+    claims: t.array(StatementClaim),
+    author: t.identity(),
+    createdAt: t.timestamp(),
+  }
+);
+
+// What the ECR proposes, as the checks read it: the PLM connector's change request (the checks
+// library's `ChangeRequest`), one row per revision. Append-only: a new revision clears `current` on
+// the previous one. The current row's digest is an input of the code stages, so a new revision
+// makes their runs stale and queues fresh ones (core.ts stageInfos).
+const ecrRevision = table(
+  { name: 'ecr_revision', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    prId: t.u64().index('btree'),
+    seq: t.u32(), // 1, 2, ... per ECR
+    changeRequestJson: t.string(),
+    digest: t.string(), // fnv1a64 of changeRequestJson
+    source: t.string(), // where it came from: 'plm', or 'stub' for a test feed
+    sourceRef: t.string(), // the source's own version marker, e.g. the PLM document's modified time
+    current: t.bool(),
+    createdBy: t.identity(),
+    createdAt: t.timestamp(),
+  }
+);
+
+// The production baseline as read from the ERP, by content hash. The JSON itself stays with the
+// workers (cached by hash); the module records which baseline the checks ran on, so a result
+// points at exact data, and a new hash re-checks every open ECR. `current` marks the latest read.
+const baselineSnapshot = table(
+  { name: 'baseline_snapshot', public: true },
+  {
+    hash: t.string().primaryKey(), // the connector's content hash (sha256 hex)
+    asOf: t.string(), // the date the baseline is as of, 'YYYY-MM-DD'
+    source: t.string(), // 'erp', or 'file' for a test baseline
+    countsJson: t.string(), // rows per part of the baseline
+    warningsJson: t.string(), // the connector's warnings for this read
+    current: t.bool(),
+    firstReadAt: t.timestamp(),
+    lastReadAt: t.timestamp(),
+    recordedBy: t.identity(),
+  }
+);
+
 // Drives reap_expired_leases. Private: clients have no use for it.
 const reaperSchedule = table(
   { name: 'reaper_schedule' },
@@ -249,6 +347,10 @@ const spacetimedb = schema({
   comment,
   actionLog,
   agentEvent,
+  actorScope,
+  impactStatement,
+  ecrRevision,
+  baselineSnapshot,
   reaperSchedule,
 });
 
