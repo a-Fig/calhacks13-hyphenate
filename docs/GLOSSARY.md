@@ -61,6 +61,18 @@ Detail on how these fit together, and who does what, is in `CHANGE-CONTROL.md`.
   - **ECR**: a change is requested.
   - **ECO**: the change is approved and released. Releasing the ECO notifies downstream teams;
     Bowman issues no separate change notice (ECN).
+- **CMII and Teamcenter equivalents.** Bowman keeps the classic, more widely known terms (Tyler,
+  2026-10-24). CMII and Teamcenter call the same objects:
+  - Change Request (ECR);
+  - Change Review Board (CCB);
+  - Change Notice (ECO).
+
+  Bowman follows CMII's process all the same: closed-loop change, effectivity on the release, and a
+  fast track for small changes. Avoid "ECN": CMII and classic usage give it opposite meanings.
+  Sources: `research/change-terminology.md`.
+- **Fast track.** Approval of a small, low-risk ECR without convening the full CCB. CMII puts it at
+  75-85% of changes. Our agent can approve these, or recommend approval, depending on how Bowman
+  configures it (#22).
 - **PLM / ERP / MRP.**
   - Product lifecycle management holds the design and the BOM.
   - Enterprise resource planning holds finance, purchasing and inventory.
@@ -91,10 +103,50 @@ Detail on how these fit together, and who does what, is in `CHANGE-CONTROL.md`.
 - **Assumption source.** Each assumption is `given` (a stated fact), `default` (a category
   default) or `agent_estimated` (proposed by an agent, with a rationale).
 
+## How Norn marks evidence
+
+The audit trail (#25) is described in `research/trust-patterns-human.md`.
+
+- **Evidence class, shown as colour** (Tyler, 2026-10-24). Every number and claim is one of four
+  classes, so anyone can tell at a glance what it rests on:
+  - **Fact:** read from a source, such as the ERP, the PLM or a quote.
+  - **Assumption:** supposed, in order to frame or support the analysis.
+  - **Computation:** calculated by code from other values.
+  - **Judgment:** the agent's conclusion.
+
+  The colours themselves are not chosen yet.
+- **Verification marks** *(proposed)*. These are letters borrowed from audit tick marks, so finance
+  readers recognise them. They show how a value was checked:
+  - **T**, traced: followed from the source forward;
+  - **V**, vouched: followed from the record back to the source;
+  - **R**, recomputed: calculated again independently;
+  - **C**, confirmed: confirmed with a third party, such as a supplier.
+
+  Clicking a mark shows exactly where the value came from. No universal tick-mark standard exists;
+  each audit firm defines a legend, and so do we.
+- **Likelihood words** (Tyler, 2026-10-24: standard). Norn uses the intelligence community's fixed
+  scale (ODNI ICD 203). Each word has a fixed range:
+
+  | Word | Probability |
+  |---|---|
+  | almost no chance | 1-5% |
+  | very unlikely | 5-20% |
+  | unlikely | 20-45% |
+  | roughly even | 45-55% |
+  | likely | 55-80% |
+  | very likely | 80-95% |
+  | almost certain | 95-99% |
+
+  Likelihood (how probable an event is) and confidence (how solid the basis for that judgment is)
+  are stated separately, and never in the same sentence.
+
 ## Overloaded words
 
 - **Agent.** Either the product's agents (ECR extraction, assumption proposals, the narration of the
   impact statement) or a coding agent working on this repo.
+- **Norn.** Our product's name (Tyler, 2026-10-24). The Norns of Norse myth know the past, the
+  present and the future. Norn reads a company's history to forecast what a change will do.
+  Orrery was second. The candidates are in `research/naming.md`.
 - **Bowman.** Our fictional, Archer-like electric-aircraft maker (#3).
 
 The accounting basics (double-entry, general ledger, journal entry and so on) are already defined in
