@@ -107,6 +107,9 @@ Detail on how these fit together, and who does what, is in `CHANGE-CONTROL.md`.
 
 - **Agent.** Either the product's agents (ECR extraction, assumption proposals, the narration of the
   impact statement) or a coding agent working on this repo.
+- **Norn.** Our product's name (Tyler, 2026-10-24). The Norns of Norse myth know the past, the
+  present and the future. Norn reads a company's history to forecast what a change will do.
+  Orrery was second. The candidates are in `research/naming.md`.
 - **Bowman.** Our fictional, Archer-like electric-aircraft maker (#3).
 
 The accounting basics (double-entry, general ledger, journal entry and so on) are already defined in
