@@ -9,6 +9,14 @@ Drafted 2026-10-24 for CalHacks 13; rewritten the same day around a Git-style br
 - SpacetimeDB facts in §9 come from its docs, read on 2026-10-24, and from an independent review of the docs and release notes the same day. The docs are marketing-heavy in places and several limits are unstated, so unverified items are marked. Nothing in §9 has been run.
 - The PLM/ECO process facts in §2 come from vendor blogs and ERP/PLM documentation, not independent studies.
 
+**Direction from Tyler, 2026-10-24, not yet folded into this spec.** Issues #3–#10 track it:
+- **The company.** It is Bowman, a fake Archer (#3). Bowman runs concrete software we choose: PLM, ERP and accounting (#4). It has planes in development and in production, built from real data where possible (#5).
+- **ECRs.** They get a strict structure (#6) and a filing path engineers will actually use (#7).
+- **Issues.** Issues join the Git model: a problem found on a plane becomes an issue, then an ECR (#8). Both can be opened by voice or text (#9).
+- **Review in tiers** (#10):
+  - Cheap code checks always run automatically.
+  - Deep agent review runs on demand, once or at most twice per ECR. This changes the automatic enqueueing in §8.
+
 ---
 
 ## 1. Problem and users
