@@ -14,7 +14,7 @@ Every mature profession converged on the same small set of ideas, and our archit
 4. **The record is written by someone other than the person being checked, and sign-offs bind a specific version.** Flight recorders, FAA conformity statements (read, search result), return-to-service signatures (read), audit sign-offs.
 5. **The recurring failure is not missing logs, it is logs nobody reads and reviewers who stop checking.** Alert override rates of 49-96% (snippet), surgical checklists that helped in one study and not in another, automation complacency, and the 737 MAX delegation findings. Design the trail so the exceptions come first and so that reviewers are periodically tested.
 
-What we are missing today, judged against `docs/ARCHITECTURE.md`: no approval-limit matrix (only a vague "agents sometimes approve small changes"), no record of what was searched and not found, no independent second read for auto-approvals, no human sign-off record bound to a forecast hash, no cumulative-limit logic to stop splitting, and nothing that tracks spawned researchers as accountable seats (issue #25).
+What we are missing today, judged against `norn/ARCHITECTURE.md`: no approval-limit matrix (only a vague "agents sometimes approve small changes"), no record of what was searched and not found, no independent second read for auto-approvals, no human sign-off record bound to a forecast hash, no cumulative-limit logic to stop splitting, and nothing that tracks spawned researchers as accountable seats (issue #25).
 
 ## 2. Patterns by field
 
@@ -147,4 +147,4 @@ What we are missing today, judged against `docs/ARCHITECTURE.md`: no approval-li
 - Starmer et al., NEJM 2014;371:1803-1812 (I-PASS), doi:10.1056/NEJMsa1405556. Haynes et al., NEJM 2009 (WHO checklist); Urbach et al., NEJM 2014 (Ontario). English double reading study: Radiology 2018, doi:10.1148/radiol.2018171010.
 - Parasuraman and Manzey, Human Factors 2010, doi:10.1177/0018720810376055. Peng, Science 2011, doi:10.1126/science.1213847. Joint Commission Sentinel Event Alert 50 (2013).
 - Mata v. Avianca, Inc. (S.D.N.Y. 2023), summary: https://en.wikipedia.org/wiki/Mata_v._Avianca,_Inc.
-- Repo context: `docs/hyphenate-track.md`, `docs/ARCHITECTURE.md` (§3, §4, §8, §11).
+- Repo context: `docs/hyphenate-track.md`, `norn/ARCHITECTURE.md` (§3, §4, §8, §11).

@@ -1,6 +1,6 @@
-# Architecture: ECRs as branches, ECOs as merged PRs
+# Norn's architecture: ECRs as branches, ECOs as merged PRs
 
-Drafted 2026-10-24 for CalHacks 13; rewritten the same day around a Git-style branch/PR model. The repo had no code when this was written, so nothing here describes existing code.
+The design of Norn's engine: its internal model, checks, data and state layer. Drafted 2026-10-24 for CalHacks 13, rewritten the same day around a Git-style branch/PR model, and moved here from `docs/` the same day. The repo had no code when this was written, so nothing here describes existing code. Where Norn sits among Bowman's systems, the demo and the milestones are in `docs/PLAN.md`; what Norn is responsible for is `README.md` in this folder.
 
 **Scope.** Loop 1 (forecast production impact) is the goal. Loop 2 (benchmark forecasts against actuals, self-improve) is deferred; only a few cheap hooks are reserved (§11).
 
@@ -9,13 +9,11 @@ Drafted 2026-10-24 for CalHacks 13; rewritten the same day around a Git-style br
 - SpacetimeDB facts in §9 come from its docs, read on 2026-10-24, and from an independent review of the docs and release notes the same day. The docs are marketing-heavy in places and several limits are unstated, so unverified items are marked. Nothing in §9 has been run.
 - The PLM/ECO process facts in §2 come from vendor blogs and ERP/PLM documentation, not independent studies.
 
-**Direction from Tyler, 2026-10-24, not yet folded into this spec.** Issues #3–#10 track it:
-- **The company.** It is Bowman, a fake Archer (#3). Bowman runs concrete software we choose: PLM, ERP and accounting (#4). It has planes in development and in production, built from real data where possible (#5).
-- **ECRs.** They get a strict structure (#6) and a filing path engineers will actually use (#7).
-- **Issues.** Issues join the Git model: a problem found on a plane becomes an issue, then an ECR (#8). Both can be opened by voice or text (#9).
-- **Review in tiers** (#10):
-  - Cheap code checks always run automatically.
-  - Deep agent review runs on demand, once or at most twice per ECR. This changes the automatic enqueueing in §8.
+**Decided since the first draft** (Tyler, 2026-10-24; `docs/PLAN.md` has the whole picture):
+- **The company and its systems.** Norn is deployed at Bowman Aviation, a fake Archer (`bowman/`). Bowman's PLM is a stand-in for Teamcenter and its ERP is ERPNext, standing in for SAP. Norn reads both and writes its results back into both.
+- **ECRs** follow Bowman's form, modelled on the defense ECP (#6). An NCR, the problem found, comes before the ECR, like an issue before a PR (#8).
+- **Review in tiers** (#10, #26). The impact screen (code checks plus one cheap agent pass) runs automatically and publishes Level 1. The full impact assessment (research agents, adversarial review) runs on demand, once or at most twice per ECR, and publishes Levels 2 and 3. §8 is updated for this.
+- **Identity and policy** (#34). Every write records its actor, on whose behalf, what spawned it, and the policy check that allowed it. Autonomy limits come from the company's configuration.
 
 ---
 
@@ -62,7 +60,7 @@ What this buys us:
 - **Effectivity.** A merged ECO does not change every unit. Arena's ECO template carries a material effectivity date and an inventory disposition per affected item, and PLM guidance stresses handling in-flight stock and work in progress. So `main` is closer to a timeline than a single state, and "when does the merged change take effect" is an output of our timeline stage (§5), not metadata. See §7.
 - **Hidden coupling.** Two ECRs can merge cleanly and still interact physically (a weight change alters range, which alters battery sizing). We can detect shared-entity conflicts; we cannot detect physics. Interaction flags are best-effort.
 - **Vocabulary.** Settled for Bowman: NCR → ECR → ECO, with no separate ECN. `GLOSSARY.md` maps each Git term to its business term, and anything a judge or user sees uses the business term.
-- **We mirror, not replace.** The system reads ECRs and baseline data from Bowman's PLM and ERP (#4); it does not become the system of record.
+- **We mirror, not replace.** Norn reads ECRs and baseline data from Bowman's PLM and ERP, and writes its results back into them; it does not become the system of record (#19, `docs/PLAN.md` §2).
 - **Prior art.** The idea already exists in PLM: Onshape markets branch-and-merge as ECO-style change isolation, and PLM systems keep "redlined" pending BOMs. We are not inventing the concept, we are attaching a production-cost-and-risk forecast to it.
 
 ### What we don't build
@@ -146,7 +144,7 @@ Minimum viable version: one effectivity date per ECO and a simple inventory burn
 ## 8. Execution model
 
 - **Workers** claim a pending check run whose dependencies are done, run it, and write results. Claiming is atomic (one worker wins), and each claim has a lease so a crashed worker's run is retried.
-- **Invalidation is a reconcile loop.** When `main` advances, or a branch gets a new commit, the expected `input_hash` for each check changes. Any check without a matching completed run is enqueued. Because the hash is a pure function of inputs, this stays correct even if enqueueing is not atomic with the change.
+- **Invalidation is a reconcile loop.** When `main` advances, or a branch gets a new commit, the expected `input_hash` for each check changes. Any code check without a matching completed run is enqueued. Agent-heavy deep review is not re-run automatically: it runs when someone asks, or when the company's configuration says so, and a stale one is marked stale rather than recomputed (#10). Because the hash is a pure function of inputs, this stays correct even if enqueueing is not atomic with the change.
 - **Idempotency.** A check's output is keyed by `(branch, stage, input_hash)`. Re-running a completed key is a no-op. The hash covers canonical JSON of everything that affects the result: `main` version, overlay, assumptions, seed, and code/worker version.
 - **Edit bursts and approvals.** Assumption edits are debounced so a reviewer typing doesn't trigger a burst of recomputes. A new revision of a PR dismisses approvals given on the previous one.
 - **Determinism.** Seeds and code version are in the hash. Only S0, gap-filling, and S5 involve an LLM; their outputs are stored, not re-derived.
@@ -239,14 +237,7 @@ All writes go through a narrow API (`enqueue_check`, `claim_check`, `complete_ch
 
 ## 10. Components
 
-SpacetimeDB is the one confirmed part of the stack; the rest is open. The architecture implies four pieces:
-
-1. **State + coordination layer** (§9): the tables in §4 and the narrow API.
-2. **Workers**:
-   - *Agent workers*: S0 extraction, assumption proposals, S5 narration (LLM calls).
-   - *Compute workers*: S1 diff, S2 cost, S3 timeline, S4 Monte Carlo. TypeScript for now; the simulation is the one place a faster language might later pay off (see below).
-3. **UI**: backlog list, PR page (diff, impact card, streaming check status, assumption inspector with inline editing, comments, reviews), integration-branch builder with reorder/toggle and conflict flags, S0 confirmation screen.
-4. **Data generator** (§12).
+Norn's parts (state layer, workers, connectors, web, MCP server) and their folders are listed in `README.md`. The first draft's data generator is now Bowman's dataset, `bowman/data/`. The web UI's first-draft scope still holds: backlog list, PR page (diff, impact card, streaming check status, assumption inspector with inline editing, comments, reviews), integration-branch builder with reorder/toggle and conflict flags, and the S0 confirmation screen.
 
 **Language policy (decided 2026-10-24): TypeScript by default; another language only where it clearly earns its place.** The team has no language preference beyond that. Concretely: the SpacetimeDB module, UI, agent workers and compute workers are all TypeScript, sharing types through the generated bindings. The reducers are small claim/CRUD/transaction logic with no performance demand, so a TypeScript module costs nothing in speed.
 
@@ -266,13 +257,13 @@ Done now because it's nearly free and hard to retrofit:
 
 Deferred: `Actual`, `Variance`, `Attribution` tables; scheduled revisits (post-merge review); prior updates; a backtest harness; a "why were we wrong" agent.
 
-## 12. Fake data (not yet, but constrain the design)
+## 12. Fake data
 
-Data will be generated and synthetic. When built it needs: a baseline BOM of a plausible electric aircraft (tens of parts is enough for a demo), suppliers with regions and lead-time distributions, a volume ramp, and a set of ECRs written as realistic prose with varied clarity, including one pair that conflicts textually and one pair that interacts through a shared supplier. If Loop 2 gets built, the generator should also emit a hidden ground truth so "actuals" can be produced for a backtest.
+Now Bowman's dataset: `bowman/data/README.md`. It keeps this section's constraints: a plausible electric-aircraft BOM, suppliers with lead-time distributions, a volume ramp, ECRs written as realistic prose of varied clarity, one pair that conflicts textually, one pair that interacts through a shared supplier, and past changes with their actual outcomes.
 
 ## 13. Suggested build order
 
-Ordered by dependency, not time. The line after step 7 is the minimum credible demo.
+The milestones in `docs/PLAN.md` §7 supersede this list across all three layers. It's kept as the order of work inside Norn.
 
 1. SpacetimeDB spike (§9): stand up a module, a worker, and two live browsers, and surface problems early.
 2. Schema + narrow API + check-run queue running end to end with a dummy check.
@@ -287,7 +278,7 @@ Ordered by dependency, not time. The line after step 7 is the minimum credible d
 
 ## 14. Open questions
 
-- What does an ECR look like at Bowman: structured form, PDF, PLM export? S0 is only as good as this definition (#6).
+- What does an ECR look like at Bowman? Decided: a structured form in the PLM, modelled on the defense ECP, with free-text description and justification (#6). S0 extracts from the text and checks it against the fields.
 - Is "production" cost the full aircraft or per subsystem? This sets BOM depth.
 - Who confirms S0 output in practice: the filing engineer, or finance?
 - How does finance want ranges shown (p10/p50/p90, probability of exceeding a threshold, scenario table)?
