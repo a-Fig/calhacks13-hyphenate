@@ -1,4 +1,4 @@
-// Read-only visual audit of the saved-run demo. Needs Edge and `npm run web -- --port 5186`.
+// Read-only visual audit of the saved-run demo. Needs Edge and `npm run dev -w @norn/web -- --port 5186`.
 // node web/screenshots/capture-identity.mjs before C:/path/to/media
 // node web/screenshots/capture-identity.mjs after C:/path/to/media --gif
 import assert from 'node:assert/strict';
@@ -20,6 +20,9 @@ const errors = [];
 page.on('pageerror', e => errors.push(e.message));
 const screenshots = [];
 const shot = async name => {
+  if (phase === 'after') {
+    assert.equal(await page.locator('svg[class*="octicon-git-"], svg[class*="octicon-repo"], svg.octicon-file-diff').count(), 0, `${name}: Git icon remains`);
+  }
   const file = join(out, `${phase}-${name}.png`);
   await page.screenshot({ path: file, fullPage: true });
   screenshots.push(file);
@@ -67,8 +70,6 @@ try {
     await page.getByRole('button', { name: /^Expand/ }).first().click();
     await page.getByRole('link', { name: /^Impact/ }).first().click();
     await page.locator('.nx-check-pane').waitFor();
-    assert.equal(await page.locator('[data-component="StateLabel"] svg.octicon').count(), 0);
-    assert.equal(await page.locator('svg.octicon-git-pull-request, svg.octicon-git-merge, svg.octicon-git-commit, svg.octicon-file-diff, svg.octicon-repo').count(), 0);
     await page.setViewportSize({ width: 390, height: 844 });
     await open('/', '[data-testid="ecr-table"]');
     await shot('mobile-list');
