@@ -1,0 +1,31 @@
+{
+  "name": "@norn/mcp",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Norn's MCP server: the one set of tools every agent works through, and nornMcpFor() for whoever builds a runner job.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc -p .",
+    "test:unit": "tsx --test test/unit.ts",
+    "key:ensure": "node scripts/ensure-key.mjs",
+    "token:person": "tsx scripts/mint-person-token.ts",
+    "db:publish": "npm run typecheck -w @norn/module --silent && spacetime publish norn-mcp --no-config --module-path ../module --server local --delete-data=always --yes",
+    "check:gate": "tsx test/gate.ts",
+    "e2e": "tsx test/e2e.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@norn/bindings": "*",
+    "spacetimedb": "2.13.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

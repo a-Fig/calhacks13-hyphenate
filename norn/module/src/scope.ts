@@ -35,7 +35,7 @@ export const scopeRule: PolicyRule = (ctx, actor, reducer, args) => {
     if (!live) return null;
     const widens = (args.anyEcr && !s.anyEcr) || (!s.anyEcr && (args.prIds as bigint[]).some(id => !s.prIds.includes(id)));
     if (args.jobId !== s.jobId || widens)
-      return deny(`${actor.name} holds a live grant from job ${s.jobId} (${scopeText(ctx, s)}); it cannot be changed to job ${args.jobId} or widened until it expires`);
+      return deny(`${actor.name} holds a live grant from job ${s.jobId} (${scopeText(ctx, s)}); it cannot be given to another job or widened until it expires`);
     return null;
   }
 
