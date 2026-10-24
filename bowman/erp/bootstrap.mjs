@@ -1,5 +1,5 @@
 // One-time (idempotent) setup of Bowman's ERPNext over REST: company, fiscal years, item groups,
-// the Standard Cost price list, the Norn Agent role and permissions, and the Norn API user.
+// the Standard Cost price list, the Norn Agent role (read-only) and the Norn API user.
 //
 //   node bowman/erp/bootstrap.mjs            (tunnel to 127.0.0.1:8081 must be open; see NOTES.md)
 //
@@ -16,27 +16,29 @@ const ABBR = "BWA";
 const NORN_USER = "norn@bowman.example";
 const NORN_ROLE = "Norn Agent";
 
-// What the Norn Agent role may do. Keep in step with NOTES.md.
+// What the Norn Agent role may do: read, and nothing else. Norn never writes to the ERP (issue #71): a released ECO
+// carries an ERP change package, and a person enters its lines in ERPNext (norn/connectors/erpnext/src/package.ts).
+// Keep in step with NOTES.md.
 export const GRANTS = {
   Item: ["read"],
-  BOM: ["read", "write", "create", "submit"],
-  "Item Price": ["read", "write", "create"],
+  BOM: ["read"],
+  "Item Price": ["read"],
   Supplier: ["read"],
   "Supplier Quotation": ["read"],
   "Purchase Order": ["read"],
   Bin: ["read"],
   "Stock Ledger Entry": ["read"],
   "GL Entry": ["read"],
-  "Journal Entry": ["read", "create"], // draft only: no write, submit, cancel or amend
+  "Journal Entry": ["read"],
   Version: ["read"],
   Company: ["read"],
   Warehouse: ["read"],
   "Price List": ["read"],
-  // Beyond the list Tyler gave. Both were needed by calls verify.mjs makes:
-  "BOM Update Log": ["read", "create", "submit"], // enqueue_replace_bom and enqueue_update_cost create and submit one
-  Account: ["read"], // to pick accounts for a draft Journal Entry
+  Account: ["read"], // to check the accounts a change package names
   "Purchase Receipt": ["read"], // receipt date minus PO date is the realised lead time (research section 5)
 };
+// Every permission type that changes data. A role that holds any of these on a doctype is turned back to read-only.
+const WRITE_PTYPES = ["write", "create", "submit", "cancel", "amend", "delete"];
 
 const log = (...a) => console.log(...a);
 const erp = new Erp(base);
@@ -121,6 +123,22 @@ async function main() {
     }
   }
   log(`Role "${NORN_ROLE}": permissions applied for ${Object.keys(GRANTS).length} doctypes`);
+  // Earlier versions of this script granted write, create and submit on BOM, Item Price, Journal Entry and BOM Update Log.
+  // Adding grants never takes one away, so turn off every data-changing permission the role still holds (read is left as is).
+  const held = (await erp.get("/api/resource/Custom DocPerm", {
+    filters: [["role", "=", NORN_ROLE]],
+    fields: ["parent", "permlevel", ...WRITE_PTYPES],
+    limit_page_length: 0,
+  })).body.data;
+  let revoked = 0;
+  for (const row of held) {
+    for (const ptype of WRITE_PTYPES.filter((k) => row[k])) {
+      await erp.post(`${pm}.update`, { doctype: row.parent, role: NORN_ROLE, permlevel: row.permlevel, ptype, value: "0" });
+      log(`  ${row.parent}: ${ptype} turned off`);
+      revoked++;
+    }
+  }
+  log(`Role "${NORN_ROLE}": ${revoked} write-type permissions turned off`);
 
   // 6. The API user and its key pair (only if .env has none yet; regenerating rotates the secret).
   await ensure("User", NORN_USER, {
