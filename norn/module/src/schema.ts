@@ -1,0 +1,256 @@
+// Norn state layer: tables only. Reducers live in reducers.ts, shared logic in core.ts.
+//
+// Naming: TypeScript keys are camelCase; SpacetimeDB stores columns as snake_case
+// (`prId` -> `pr_id`), which is what SQL subscriptions use.
+//
+// Strings stand in for enums on purpose: they read plainly in `spacetime sql` and in
+// subscription filters, where tagged unions are awkward. The reducers validate them.
+//
+// Who did something is stored as an Identity (the connection the server vouches for), never as a
+// display name: names live in `principal` and can change, the audit trail cannot.
+import { schema, table, t } from 'spacetimedb/server';
+
+// Who is connected. Self-declared via register_actor until real auth lands (#34); `kind` and
+// `origin` are fixed at first registration. Keyed by the connection's Identity, which the server
+// vouches for; the name and the on-behalf-of person are claims.
+const principal = table(
+  { name: 'principal', public: true },
+  {
+    identity: t.identity().primaryKey(),
+    kind: t.string(), // 'person' | 'agent'
+    name: t.string(),
+    origin: t.string(), // 'human' | 'norn' (Norn's own agent) | 'external' (a person's own agent)
+    onBehalfOf: t.option(t.string()), // the person an agent acts for
+    registeredAt: t.timestamp(),
+  }
+);
+
+// Append-only history of the production baseline. The current version is the highest row.
+// `cause` says why it moved: 'initial', 'eco' (an ECR was released) or 'assumption' (a baseline
+// assumption was edited). Only 'initial' and 'eco' change the bill of materials.
+const mainVersion = table(
+  { name: 'main_version', public: true },
+  {
+    version: t.u32().primaryKey(),
+    parent: t.u32(), // 0 for the first
+    cause: t.string(),
+    mergedPrId: t.u64(), // the released ECR, 0 when none
+    effectivity: t.option(t.timestamp()), // when the change reaches the line; set from the timeline stage later
+    at: t.timestamp(),
+    by: t.identity(),
+    note: t.string(),
+  }
+);
+
+// Policy knobs and the code version that goes into every input hash.
+const nornConfig = table(
+  { name: 'norn_config', public: true },
+  {
+    key: t.string().primaryKey(),
+    value: t.string(),
+  }
+);
+
+// An ECR. Internally a pull request: a base pointer into `main` plus (later) an overlay.
+const pullRequest = table(
+  { name: 'pull_request', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    kind: t.string(), // 'ecr' | 'integration' (the backlog roll-up, not built yet)
+    plmEcrNumber: t.string().unique(), // the PLM's ECR number; 'NORN-<id>' until the PLM assigns one
+    title: t.string(),
+    description: t.string(), // the ECR text
+    status: t.string().index('btree'), // draft | review | approved | merged | closed
+    baseVersion: t.u32(), // main_version this ECR was last checked against
+    revision: t.u32(), // bumped whenever the inputs to its checks change
+    inputsDigest: t.string(), // digest of everything that feeds any check
+    createdBy: t.identity(),
+    createdAt: t.timestamp(),
+    updatedAt: t.timestamp(),
+    mergedVersion: t.option(t.u32()), // main_version produced by the ECO, once released
+  }
+);
+
+// Baseline part list; only the key the connectors will match on exists so far.
+const part = table(
+  { name: 'part', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    partNumber: t.string().unique(), // the PLM/ERP item number
+    name: t.string(),
+    category: t.string(),
+    specJson: t.string(),
+    updatedAt: t.timestamp(),
+  }
+);
+
+// Versioned: an edit appends a row and clears `current` on the previous one.
+// prId 0 is the production baseline; a row with the same key on a PR overrides it.
+const assumption = table(
+  { name: 'assumption', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    prId: t.u64().index('btree'),
+    key: t.string(),
+    distJson: t.string(), // value or distribution, JSON
+    source: t.string(), // given | default | agent_estimated
+    rationale: t.string(),
+    rev: t.u32(), // 1, 2, ... per (prId, key)
+    current: t.bool(),
+    affects: t.array(t.string()), // stages that read this assumption; empty = all
+    createdBy: t.identity(),
+    createdAt: t.timestamp(),
+  }
+);
+
+// The work queue and its history. Rows are never deleted; a superseded run becomes 'stale'.
+const checkRun = table(
+  { name: 'check_run', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    prId: t.u64().index('btree'),
+    stage: t.string(),
+    tier: t.string(), // code (cheap, automatic) | deep (agent-heavy, on request)
+    trigger: t.string(), // automatic | requested
+    inputHash: t.string(),
+    // What the hash was computed from: base version, code version, seed, the assumption ids and
+    // revisions, and the hashes of the stages it reads (ARCHITECTURE.md section 11).
+    inputsJson: t.string(),
+    // queued | running | done | failed | stale | cancelled | blocked (an upstream stage failed)
+    status: t.string().index('btree'),
+    attempts: t.u32(),
+    maxAttempts: t.u32(),
+    claimedBy: t.option(t.identity()),
+    leaseExpiresAt: t.option(t.timestamp()),
+    requestedBy: t.identity(),
+    note: t.string(),
+    createdAt: t.timestamp(),
+    startedAt: t.option(t.timestamp()),
+    finishedAt: t.option(t.timestamp()),
+  }
+);
+
+// Live progress of a running check. One row per run, updated in place, removed when the run ends.
+const checkProgress = table(
+  { name: 'check_progress', public: true },
+  {
+    checkRunId: t.u64().primaryKey(),
+    prId: t.u64().index('btree'),
+    done: t.u32(),
+    total: t.u32(),
+    percentiles: t.array(t.f64()), // p05 p10 p25 p50 p75 p90 p95 of the metric so far
+    histogram: t.array(t.u32()),
+    histMin: t.f64(),
+    histMax: t.f64(),
+    updatedAt: t.timestamp(),
+  }
+);
+
+// Summary statistics, never raw samples (ARCHITECTURE.md section 4).
+const checkResult = table(
+  { name: 'check_result', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    checkRunId: t.u64().index('btree'),
+    prId: t.u64().index('btree'),
+    key: t.string(),
+    label: t.string(),
+    unit: t.string(),
+    p10: t.f64(),
+    p50: t.f64(),
+    p90: t.f64(),
+    detailJson: t.string(),
+    createdAt: t.timestamp(),
+    mock: t.bool(), // true until a worker computes something real
+  }
+);
+
+const comment = table(
+  { name: 'comment', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    prId: t.u64().index('btree'),
+    author: t.identity(),
+    anchor: t.string(), // what it is about, e.g. 'assumption:12' or 'check_run:7'; empty = the ECR
+    body: t.string(),
+    createdAt: t.timestamp(),
+  }
+);
+
+// Append-only: nothing in the module updates or deletes rows here. Every reducer writes it
+// through logAction() in core.ts (#34).
+const actionLog = table(
+  { name: 'action_log', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    at: t.timestamp(),
+    prId: t.u64().index('btree'), // 0 when the action is not about one ECR
+    requestId: t.string().index('btree'), // the caller's id for this call; matches a call to its outcome
+    reducer: t.string(),
+    outcome: t.string(), // applied | denied | downgraded
+    entity: t.string(), // what was written, e.g. 'check_run:7'
+    summary: t.string(),
+    detailJson: t.string(),
+    sender: t.identity(), // the authenticated connection
+    actorKind: t.string(), // person | agent | unknown
+    actorName: t.string(),
+    actorOrigin: t.string(),
+    onBehalfOf: t.option(t.string()),
+    spawnedBy: t.string(), // 'Norn', a parent agent run, or 'check_run:<id>' for a worker's calls on that run
+    policy: t.string(), // the policy decision that allowed (or refused) it
+  }
+);
+
+// The agent runner's event stream (norn/runner, PR #53): one row per event, keyed by
+// (jobId, seq). `eventKey` is that pair as a string so the database enforces it is unique
+// (SpacetimeDB constraints are single-column). Rows are written in batches and are not
+// mirrored into action_log: each row names its actor, and the batch's sender is stored.
+const agentEvent = table(
+  { name: 'agent_event', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    eventKey: t.string().unique(), // '<jobId>#<seq>'
+    jobId: t.string().index('btree'), // a check run ('check_run:12') or any runner job id
+    seq: t.u32(),
+    checkRunId: t.u64().index('btree'), // 0 when the job is not a check run
+    prId: t.u64().index('btree'), // 0 when unknown
+    ts: t.timestamp(), // when the runner saw the event
+    role: t.string(),
+    actor: t.string(), // the runner's identity.actor, e.g. 'agent:norn/level1/ECR-0417'
+    onBehalfOf: t.option(t.string()),
+    spawnedBy: t.string(),
+    sessionId: t.option(t.string()),
+    eventType: t.string(), // the runner's `type`
+    payloadJson: t.string(), // the rest of the event
+    sender: t.identity(),
+    recordedAt: t.timestamp(),
+  }
+);
+
+// Drives reap_expired_leases. Private: clients have no use for it.
+const reaperSchedule = table(
+  { name: 'reaper_schedule' },
+  {
+    scheduledId: t.u64().primaryKey().autoInc(),
+    scheduledAt: t.scheduleAt(),
+  }
+);
+
+const spacetimedb = schema({
+  principal,
+  mainVersion,
+  nornConfig,
+  pullRequest,
+  part,
+  assumption,
+  checkRun,
+  checkProgress,
+  checkResult,
+  comment,
+  actionLog,
+  agentEvent,
+  reaperSchedule,
+});
+
+export default spacetimedb;
+export { reaperSchedule };

@@ -1,0 +1,24 @@
+{
+  "name": "@norn/workers",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/worker.ts",
+    "seed": "tsx src/seed.ts",
+    "typecheck": "tsc -p .",
+    "check:module": "tsx src/checks.ts",
+    "spike:errors": "tsx src/spike/s1-errors.ts",
+    "spike:crash": "tsx src/spike/s4-crash.ts",
+    "check:policy": "tsx src/checks-policy.ts"
+  },
+  "dependencies": {
+    "@norn/bindings": "*",
+    "spacetimedb": "2.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

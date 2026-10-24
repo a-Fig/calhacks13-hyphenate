@@ -1,0 +1,20 @@
+{
+  "name": "@norn/module-test",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The real module plus reducers and policy rules that exist only to exercise failure paths. Published as the database norn-test; never as norn.",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "exports": {
+    "./bindings": "./bindings/src/index.ts",
+    "./bindings/types": "./bindings/src/types.ts"
+  },
+  "dependencies": {
+    "spacetimedb": "2.13.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

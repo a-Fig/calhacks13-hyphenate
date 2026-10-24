@@ -1,0 +1,4 @@
+# Per-developer SpacetimeDB identities; never commit.
+.tokens/
+# Spike artifacts (screenshots, timings) are summarised in NOTES.md instead.
+spike-out/
