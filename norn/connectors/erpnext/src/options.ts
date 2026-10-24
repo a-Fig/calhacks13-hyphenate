@@ -34,10 +34,28 @@ export interface CustomFieldNames {
     allocation?: string;
   };
   bom?: {
-    /** Name of the change order that released this BOM version (history reads only). */
+    /** Name of the change order that released this BOM version. History reads, and the change package's tag. */
     changeOrder?: string;
-    /** Date the version was released (history reads only). Default: its creation date. */
+    /** Date the version was released. History reads, and the change package asks for it. Default: its creation date. */
     releasedOn?: string;
+    /** Link to the Norn decision that caused the version. Change package only; a BOM has no free-text field to fall back on. */
+    decision?: string;
+  };
+  /** Change package: tags a person enters on the Item Price rows of an ECO. Norn reads them to recognise the entry. */
+  itemPrice?: {
+    /** Change order that caused the row. Required for a change package: it is how Norn finds the row once it is entered. */
+    changeOrder?: string;
+    /** Link to the Norn decision (the row's `note` also says it in words). */
+    decision?: string;
+  };
+  /** Change package: tags a person enters on the Journal Entries of an ECO. Norn reads them to recognise the entry. */
+  journalEntry?: {
+    /** Change order that caused the entry. Required for a change package. */
+    changeOrder?: string;
+    /** Which of the release's entries this is (its `key`). Required for a change package: with the change order it identifies the entry. */
+    entry?: string;
+    /** Link to the Norn decision. */
+    decision?: string;
   };
   purchaseOrder?: {
     /** The company's own PO number, when ERPNext's differs (history reads only). */
@@ -49,6 +67,17 @@ export interface CustomFieldNames {
 export interface Fallback {
   volumePlan?: VolumeRow[];
   builtAircraft?: BuiltUnit[];
+}
+
+/** What the ERP change package needs beyond the read settings. */
+export interface PackageSettings {
+  /**
+   * ERPNext account for each role a release's journal lines name (for example scrapExpense, inventoryReserve,
+   * accruedLiability). The roles are the company's to define; the connector only looks them up.
+   */
+  accounts: Record<string, string>;
+  /** Cost center for the profit-and-loss rows. Default: ERPNext fills the company's default. */
+  costCenter?: string;
 }
 
 export interface ErpnextSettings {
@@ -75,6 +104,8 @@ export interface ErpnextSettings {
   /** Serial No to the integer serial the checks use. Default: the trailing digits of the serial number. */
   serialNumber?: (serialNo: string) => number | undefined;
   customFields?: CustomFieldNames;
+  /** Only needed to build the ERP change package of a released ECO (package.ts). */
+  changePackage?: PackageSettings;
   /**
    * Master Production Schedule to read the volume plan from. Default: the company's most recently
    * modified one.

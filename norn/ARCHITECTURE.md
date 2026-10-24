@@ -10,7 +10,7 @@ The design of Norn's engine: its internal model, checks, data and state layer. D
 - The PLM/ECO process facts in §2 come from vendor blogs and ERP/PLM documentation, not independent studies.
 
 **Decided since the first draft** (Tyler, 2026-10-24; `docs/PLAN.md` has the whole picture):
-- **The company and its systems.** Norn is deployed at Bowman Aviation, a fake Archer (`bowman/`). Bowman's PLM is a stand-in for Teamcenter and its ERP is ERPNext, standing in for SAP. Norn reads both and writes its results back into both.
+- **The company and its systems.** Norn is deployed at Bowman Aviation, a fake Archer (`bowman/`). Bowman's PLM is a stand-in for Teamcenter and its ERP is ERPNext, standing in for SAP. Norn reads both. It posts its results into the PLM, and never writes to the ERP: a released ECO carries the ERP change package for people to enter (#71, #72).
 - **ECRs** follow Bowman's form, modelled on the defense ECP (#6). An NCR, the problem found, comes before the ECR, like an issue before a PR (#8).
 - **Review in tiers** (#10, #26). The impact screen (code checks plus one cheap agent pass) runs automatically and publishes Level 1. The full impact assessment (research agents, adversarial review) runs on demand, once or at most twice per ECR, and publishes Levels 2 and 3. §8 is updated for this.
 - **Identity and policy** (#34). Every write records its actor, on whose behalf, what spawned it, and the policy check that allowed it. Autonomy limits come from the company's configuration.
@@ -60,7 +60,7 @@ What this buys us:
 - **Effectivity.** A merged ECO does not change every unit. Arena's ECO template carries a material effectivity date and an inventory disposition per affected item, and PLM guidance stresses handling in-flight stock and work in progress. So `main` is closer to a timeline than a single state, and "when does the merged change take effect" is an output of our timeline stage (§5), not metadata. See §7.
 - **Hidden coupling.** Two ECRs can merge cleanly and still interact physically (a weight change alters range, which alters battery sizing). We can detect shared-entity conflicts; we cannot detect physics. Interaction flags are best-effort.
 - **Vocabulary.** Settled for Bowman: NCR → ECR → ECO, with no separate ECN. `GLOSSARY.md` maps each Git term to its business term, and anything a judge or user sees uses the business term.
-- **We mirror, not replace.** Norn reads ECRs and baseline data from Bowman's PLM and ERP, and writes its results back into them; it does not become the system of record (#19, `docs/PLAN.md` §2).
+- **We mirror, not replace.** Norn reads ECRs and baseline data from Bowman's PLM and ERP, and posts its results on the PLM's ECRs. In the ERP it writes nothing; people enter the change package (#71). It does not become the system of record (#19, `docs/PLAN.md` §2).
 - **Prior art.** The idea already exists in PLM: Onshape markets branch-and-merge as ECO-style change isolation, and PLM systems keep "redlined" pending BOMs. We are not inventing the concept, we are attaching a production-cost-and-risk forecast to it.
 
 ### What we don't build
