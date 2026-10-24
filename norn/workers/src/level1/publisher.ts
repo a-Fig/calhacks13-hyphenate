@@ -29,7 +29,7 @@ import { randomUUID } from 'node:crypto';
 import { provenanceOf } from '../impact.ts';
 import { alreadyPublished, statementToPlmFields, type Formatted, type Provenance, type StatementDoc } from './format.ts';
 import { plmFromConnector, plmOptionsFromEnv, type PlmApi } from './plm.ts';
-import type { EcrRef } from './routing.ts';
+import { costCheckOf, storedCompanyConfig, type EcrRef } from './routing.ts';
 import { statementIsFor } from './plan.ts';
 import { settingsFromEnv } from './settings.ts';
 import { crSeqOfRun, jsonOr, runInputs } from './source.ts';
@@ -182,7 +182,7 @@ export function gather(db: DbConnection['db'], pr: Row<'pullRequest'>): { statem
   return {
     statement: doc,
     ecr: { number: pr.plmEcrNumber, title: pr.title, revision: crSeq },
-    prov: { baseline: p.baseline, changeRequest: p.changeRequest, codeVersion: detail.codeVersion, draws: detail.draws, s2RunId: run ? Number(run.id) : undefined, formulas, mock: matched.some(r => r.mock) },
+    prov: { baseline: p.baseline, changeRequest: p.changeRequest, codeVersion: detail.codeVersion, draws: detail.draws, s2RunId: run ? Number(run.id) : undefined, formulas, mock: matched.some(r => r.mock), costCheck: run ? costCheckOf(results.filter(r => r.checkRunId === run.id)) : undefined },
   };
 }
 
@@ -216,6 +216,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     'SELECT * FROM check_run',
     'SELECT * FROM check_result',
     'SELECT * FROM ecr_revision',
+    'SELECT * FROM norn_config',
   ]);
   const missingUntil = new Map<string, number>();
   let running = false;
@@ -236,11 +237,12 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
           const g = gather(conn.db, pr);
           if (!g) continue;
           try {
-            const f = statementToPlmFields(g.statement, g.ecr, g.prov, { nornBaseUrl: settings.webBaseUrl });
+            const config = storedCompanyConfig(conn.db);
+            const f = statementToPlmFields(g.statement, g.ecr, g.prov, { nornBaseUrl: settings.webBaseUrl, config });
             // After the lease is ours: the newest statement again, from the freshest cache.
             const latest = (): Publication | null => {
               const g2 = gather(conn.db, conn.db.pullRequest.id.find(pr.id) ?? pr);
-              return g2 ? { f: statementToPlmFields(g2.statement, g2.ecr, g2.prov, { nornBaseUrl: settings.webBaseUrl }), prov: g2.prov } : null;
+              return g2 ? { f: statementToPlmFields(g2.statement, g2.ecr, g2.prov, { nornBaseUrl: settings.webBaseUrl, config: storedCompanyConfig(conn.db) }), prov: g2.prov } : null;
             };
             const r = await publishStatement({ plm, lease: leaseFor(pr.id), comment: settings.publishComment, log }, pr.plmEcrNumber, f, g.prov, latest);
             if (r === 'written') log(`${pr.plmEcrNumber}: wrote Level ${g.statement.level} statement ${g.statement.id} to the PLM (ref ${f.ref}${f.recommendation ? `, ${f.recommendation}` : ''})`);

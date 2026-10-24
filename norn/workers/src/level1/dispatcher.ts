@@ -29,7 +29,7 @@ import { provenanceOf, type Inputs } from '../impact.ts';
 import { agentEventWriter } from './agent-events.ts';
 import { actorFor, decide, jobIdFor, jobsFromEvents, spawnedByFor, supersededJobs, type EcrFacts, type EventRow } from './plan.ts';
 import { SYSTEM_PROMPT, jobPrompt, screenDetail, type Detail, type HeadlineKey } from './prompt.ts';
-import { routeFor } from './routing.ts';
+import { costCheckOf, routeFor, storedCompanyConfig } from './routing.ts';
 import { settingsFromEnv, type Level1Settings } from './settings.ts';
 import { crSeqOfRun } from './source.ts';
 
@@ -88,7 +88,8 @@ export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
   const screened = screenDetail(detail, year ? year.p90 - year.p10 : 0);
   const routing = routeFor(
     { number: pr.plmEcrNumber, title: pr.title, revision },
-    { numbers: Object.fromEntries(rows.filter(r => r.key !== 'detail').map(r => [r.key, { p10: r.p10, p50: r.p50, p90: r.p90, unit: r.unit }])) }
+    { numbers: Object.fromEntries(rows.filter(r => r.key !== 'detail').map(r => [r.key, { p10: r.p10, p50: r.p50, p90: r.p90, unit: r.unit }])), costCheck: costCheckOf(rows) },
+    storedCompanyConfig(db)
   );
   return { ecr: pr.plmEcrNumber, title: pr.title, revision, s2RunId, baseline: p.baseline, changeRequest: p.changeRequest, numbers, screened, routing };
 }
@@ -124,6 +125,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     'SELECT * FROM check_run',
     'SELECT * FROM check_result',
     'SELECT * FROM impact_statement',
+    'SELECT * FROM norn_config',
   ]);
   // Only the events that mark a session's life, for Level 1 sessions: not every tool call of every job.
   const markers = ['job_queued', 'job_started', 'job_finished'].map(t => `SELECT * FROM agent_event WHERE role = '${settings.role}' AND event_type = '${t}'`);
