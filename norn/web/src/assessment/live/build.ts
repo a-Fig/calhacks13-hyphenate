@@ -120,6 +120,13 @@ export function plainSummary(text: string): string {
     .replace(/ -> /g, ' to ');
 }
 
+// The module's action names, in the words a person at Bowman would use.
+const ACTION_WORD: Record<string, string> = {
+  ingest_ecr: 'take in the ECR', complete_check: 'record a check result', record_assumption: 'record an assumption',
+  set_pr_status: 'change the ECR status', post_impact_statement: 'post an impact statement', set_config: 'change the company config',
+  edit_pr_text: 'edit the ECR text',
+};
+
 const principalName = (s: Snapshot, id: Id) => s.principals.find(p => p.identity.toHexString() === id.toHexString())?.name ?? id.toHexString().slice(0, 8);
 
 // ---------------------------------------------------------------- the list
@@ -388,7 +395,7 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
   });
   for (const a of s.actions.filter(x => x.prId === pr.id)) {
     const base = { id: `log:${a.id}`, at: iso(a.at), actor: a.actorName, actorKind: actorKind(a), onBehalfOf: a.onBehalfOf, spawnedBy: a.spawnedBy };
-    const why = `${allowed(a.policy)} · ${a.reducer}${a.outcome !== 'applied' ? `, ${a.outcome}` : ''}`;
+    const why = `${allowed(a.policy)} · ${ACTION_WORD[a.reducer] ?? a.reducer.replace(/_/g, ' ')}${a.outcome !== 'applied' ? `, ${a.outcome}` : ''}`;
     if (a.reducer === 'ingest_ecr') events.push({ ...base, kind: 'policy', text: 'opened the ECR in Norn from the feed', detail: `${plainSummary(a.summary)}. ${why}` });
     else if (a.reducer === 'complete_check' && /^s[12]_/.test(a.summary)) {
       // A run an input change has since replaced is not shown: the timeline keeps the checks that stand.
