@@ -73,7 +73,7 @@ export const ecr0409Summary: EcrSummary = {
 };
 
 export const ecr0409: ImpactAssessment = {
-  ecr: ecr0409Summary, level: 1,
+  ecr: ecr0409Summary, source: 'saved', level: 1,
   headline: v.headline, cost: v.cost, cutIn: v.cutIn, sCurve: v.sCurve, drivers: v.drivers,
   scenarios: [],
   changeClass: { company: 'I', companyWhy: 'Not interchangeable with the 2-blade assembly', faa: 'major', faaWhy: 'Reopens 23 of 797 compliance items', evidence: 'judgment', traceId: 'class' },

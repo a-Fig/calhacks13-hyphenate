@@ -3,7 +3,7 @@ import {
   AlertFillIcon, CheckCircleFillIcon, CheckIcon, ChecklistIcon, CircleIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, CommentIcon,
   DotFillIcon, EyeIcon, FileDiffIcon, GitMergeIcon, GraphIcon, NoteIcon, PackageIcon, SearchIcon, ShieldCheckIcon, TagIcon,
 } from '@primer/octicons-react';
-import { AvatarStack, Button, Checkbox, Label, PageLayout, ProgressBar, Timeline } from '@primer/react';
+import { AvatarStack, Button, Checkbox, Label, PageLayout, ProgressBar, Spinner, Timeline } from '@primer/react';
 import type { ActivityEvent, ErpPackage, EventKind, ImpactAssessment, RiskLevel, StepState } from '../assessment/types.ts';
 import { monthLabel } from '../assessment/adapter.ts';
 import { DiffTable } from './Changes.tsx';
@@ -11,6 +11,7 @@ import { CheckStateIcon, LevelLabel, MockTag, Person, SavedRun } from '../ui/Bit
 import { Glyph, Mark, Num } from '../ui/Evidence.tsx';
 import { ago, dateTime, dayLabel, dateShort, range as rangeText, usdK } from '../ui/fmt.ts';
 import { Link } from '../router.tsx';
+import type { AgentRun, StatementView } from '../assessment/types.ts';
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 const kindOf = (e: ActivityEvent) => (e.actorKind === 'norn' ? 'norn' : e.actorKind === 'person_agent' ? 'agent' : 'person');
@@ -82,13 +83,14 @@ const RISK: Record<RiskLevel, 'success' | 'attention' | 'severe'> = { low: 'succ
 
 /** Norn's impact statement, as a bot comment in the manner of Vercel and Codecov. */
 function BotComment({ a }: { a: ImpactAssessment }) {
+  if (a.statement) return <StatementComment a={a} />;
   const h = a.headline;
   const report = [...a.activity].reverse().find(e => e.kind === 'report');
   return (
     <Timeline.Item className="nx-t-comment">
       <div className="nx-av-col"><Person name="Norn" kind="norn" size={40} /></div>
       <Timeline.Body className="nx-t-body">
-        <CommentBox name="norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? ''} edited right={<LevelLabel level={a.level} long />}>
+        <CommentBox name="norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? ''} edited right={a.level ? <LevelLabel level={a.level} long /> : undefined}>
           <h3 className="nx-h3">Impact assessment <SavedRun /></h3>
           <table className="nx-bot-table">
             <thead>
@@ -233,6 +235,7 @@ function EventItem({ e }: { e: ActivityEvent }) {
           </span>
         </div>
         {e.detail && <div className="nx-ev-detail">{e.detail}</div>}
+        {e.run && <AgentLog run={e.run} />}
       </Timeline.Body>
     </Timeline.Item>
   );
@@ -270,7 +273,8 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
   const decided = a.ecr.status === 'Approved' || a.ecr.status === 'ECO released';
   const bad = a.checks.filter(c => c.state === 'attention').length;
   const ok = a.checks.filter(c => c.state === 'passed').length;
-  const waiting = a.recommendation.verdict === 'wait';
+  const waiting = a.recommendation.verdict === 'wait' || a.recommendation.verdict === 'none';
+  const noStatement = a.recommendation.verdict === 'none' && !a.statement;
 
   return (
     <section className="nx-merge" aria-label="Approval">
@@ -311,8 +315,8 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
 
       <MergeRow
         icon={waiting ? <ClockIcon size={24} className="nx-fg-attention" /> : <ShieldCheckIcon size={24} className="nx-fg-success" />}
-        title={<><Mark ev="judgment" id={a.recommendation.traceId}>{a.recommendation.headline}</Mark> <MockTag on={a.mock.includes('recommendation')} /></>}
-        sub={a.recommendation.reasons[0]?.text}
+        title={noStatement ? 'Waiting for Norn\u2019s impact statement' : <><Mark ev="judgment" id={a.recommendation.traceId}>{a.recommendation.headline}</Mark> <MockTag on={a.mock.includes('recommendation')} /></>}
+        sub={a.statement ? a.statement.headline : a.recommendation.reasons[0]?.text}
       />
 
       {!decided && (
@@ -439,5 +443,120 @@ function ErpCard({ pkg, mock }: { pkg: ErpPackage; mock: boolean }) {
         </div>
       ))}
     </section>
+  );
+}
+
+// ---------------------------------------------------------------- a live impact statement
+
+const fmtNumber = (n: StatementView['numbers'][number], x: number) =>
+  n.unit === 'USD' ? (Math.abs(x) >= 1000 ? usdK(x) : `$${x.toFixed(2)}`) : `${Math.round(x * 100) / 100}${n.unit ? ` ${n.unit}` : ''}`;
+
+/** Norn's newest impact statement, as posted: the agent narrates, every number carries how it is known. */
+function StatementComment({ a }: { a: ImpactAssessment }) {
+  const st = a.statement!;
+  return (
+    <Timeline.Item className="nx-t-comment">
+      <div className="nx-av-col"><Person name="Norn" kind="norn" size={40} /></div>
+      <Timeline.Body className="nx-t-body">
+        <CommentBox name={st.author} kind="norn" time={st.at} right={<LevelLabel level={st.level} long />}>
+          <h3 className="nx-h3">
+            Impact assessment <SavedRun source={a.source} />
+            {st.outdated && <> <Label variant="attention" size="small">Out of date: the ECR has changed since</Label></>}
+          </h3>
+          <p className="nx-stmt-headline">{st.headline}</p>
+          <table className="nx-bot-table">
+            <thead>
+              <tr><th /><th>Median</th><th>P10 &ndash; P90</th><th>Basis</th></tr>
+            </thead>
+            <tbody>
+              {st.numbers.map(n => (
+                <tr key={n.key}>
+                  <td>{n.label}</td>
+                  <td className="num">{n.traceId ? <Mark ev={n.evidence} id={n.traceId}>{fmtNumber(n, n.p50)}</Mark> : fmtNumber(n, n.p50)}</td>
+                  <td className="num nx-fg-muted">{n.p10 !== n.p90 ? `${fmtNumber(n, n.p10)} \u2013 ${fmtNumber(n, n.p90)}` : 'exact'}</td>
+                  <td className="nx-fg-muted"><Glyph ev={n.evidence} /> {cap(n.evidence)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="nx-stmt-line">
+            <b>Change class</b> <Mark ev="judgment" id="stmt-class">{st.changeClass}</Mark>
+            <span className="nx-fg-muted"> &middot; route: {st.route}</span>
+          </div>
+          {st.drivers.length > 0 && (
+            <>
+              <h4 className="nx-h4">What moves it most</h4>
+              <ul className="nx-reasons">
+                {st.drivers.map((d, i) => (
+                  <li key={i}><Glyph ev={d.evidence} /><Mark ev={d.evidence} id={d.traceId!} claim>{d.text}</Mark></li>
+                ))}
+              </ul>
+            </>
+          )}
+          {st.claims.length > 0 && (
+            <>
+              <h4 className="nx-h4">What Norn concludes</h4>
+              <ul className="nx-reasons">
+                {st.claims.map((c, i) => (
+                  <li key={i}><Glyph ev={c.evidence} /><Mark ev={c.evidence} id={c.traceId!} claim>{c.text}</Mark></li>
+                ))}
+              </ul>
+            </>
+          )}
+          {st.assumptions.length > 0 && (
+            <>
+              <h4 className="nx-h4">Assumptions it rests on</h4>
+              <ul className="nx-reasons">
+                {st.assumptions.map(x => (
+                  <li key={x.key}>
+                    <Glyph ev="assumption" />
+                    <span>
+                      {x.traceId ? <Mark ev="assumption" id={x.traceId} claim>{x.label}</Mark> : x.label}
+                      <span className="nx-fg-muted"> &middot; {x.source === 'agent_estimated' ? 'agent estimate' : x.source}. {x.note}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <p className="nx-fg-muted nx-small">
+            Posted by {st.author}. <Link to={`/ecr/${a.ecr.id}/impact`}>See the impact checks</Link>
+          </p>
+        </CommentBox>
+      </Timeline.Body>
+    </Timeline.Item>
+  );
+}
+
+// ---------------------------------------------------------------- a Norn agent at work
+
+const LOG_ICON = { start: '\u25b6', text: '\u00b7', tool: '\u203a', result: '\u2713', end: '\u25a0' } as const;
+
+/** An agent's steps as the runner reports them, laid out like a build log: open while it runs. */
+function AgentLog({ run }: { run: AgentRun }) {
+  const elapsed = (iso: string) => {
+    const t = Math.max(0, (Date.parse(iso) - Date.parse(run.startedAt)) / 1000);
+    return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  };
+  return (
+    <details className="nx-log" open={run.state === 'running'}>
+      <summary>
+        {run.state === 'running' ? <Spinner size="small" /> : run.state === 'done' ? <CheckCircleFillIcon size={14} className="nx-fg-success" /> : <AlertFillIcon size={14} className="nx-fg-danger" />}
+        <b>{run.title}</b>
+        <span className="nx-fg-muted">{run.state === 'running' ? 'running' : run.state === 'done' ? 'finished' : 'stopped'} &middot; {run.lines.length} steps</span>
+      </summary>
+      <ol className="nx-log-lines">
+        {run.lines.map((l, i) => (
+          <li key={i} className={`${l.kind} ${l.error ? 'err' : ''}`}>
+            <span className="t">{elapsed(l.at)}</span>
+            <span className="i">{l.error ? '\u2715' : LOG_ICON[l.kind]}</span>
+            <span className="x">{l.text}</span>
+          </li>
+        ))}
+        {run.state === 'running' && (
+          <li className="run"><span className="t" /><span className="i"><Spinner size="small" /></span><span className="x">working</span></li>
+        )}
+      </ol>
+    </details>
   );
 }

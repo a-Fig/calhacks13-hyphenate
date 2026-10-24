@@ -91,7 +91,7 @@ export const ecr0423Summary: EcrSummary = {
 };
 
 export const ecr0423: ImpactAssessment = {
-  ecr: ecr0423Summary, level: 3,
+  ecr: ecr0423Summary, source: 'saved', level: 3,
   headline: { ...v.headline, unitCost: v.headline.unitCost.map(u => ({ ...u, note: `${usd(unit.point ?? unit.p50, { cents: true })} per aircraft at the stated price` })) },
   cost: v.cost, cutIn: v.cutIn, sCurve: v.sCurve, drivers: v.drivers, scenarios: [],
   changeClass: { company: 'II', companyWhy: 'Colour only, same supplier', faa: 'minor', faaWhy: 'Non-structural, not a flame barrier', evidence: 'judgment', traceId: 'class' },

@@ -326,3 +326,19 @@ button.nx-merge-head:hover { background: var(--bgColor-muted); }
 .nx-erp-line:first-of-type { border-top: 0; }
 .nx-erp-line-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bgColor-muted); border-bottom: 1px solid var(--borderColor-muted); }
 .nx-pr-sub .nx-mock { margin-left: 0; }
+
+/* ---------- a live statement, and an agent's build log ---------- */
+.nx-stmt-headline { margin: 0 0 12px; font-size: 14px; }
+.nx-stmt-line { margin-top: 12px; }
+.nx-log { margin-top: 8px; border: 1px solid var(--borderColor-default); border-radius: 6px; background: var(--bgColor-default); overflow: hidden; }
+.nx-log summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; background: var(--bgColor-muted); list-style: none; font-size: 13px; }
+.nx-log summary::-webkit-details-marker { display: none; }
+.nx-log-lines { list-style: none; margin: 0; padding: 8px 0; font-family: var(--fontStack-monospace); font-size: 12px; line-height: 20px; max-height: 320px; overflow-y: auto; border-top: 1px solid var(--borderColor-muted); }
+.nx-log-lines li { display: flex; gap: 10px; padding: 0 12px; }
+.nx-log-lines li .t { flex: none; width: 40px; color: var(--fgColor-muted); }
+.nx-log-lines li .i { flex: none; width: 14px; text-align: center; color: var(--fgColor-muted); }
+.nx-log-lines li .x { min-width: 0; overflow-wrap: anywhere; }
+.nx-log-lines li.tool .x { color: var(--fgColor-accent); }
+.nx-log-lines li.text .x { color: var(--fgColor-default); }
+.nx-log-lines li.err .x, .nx-log-lines li.err .i { color: var(--fgColor-danger); }
+.nx-log-lines li.end .x { font-weight: 600; }

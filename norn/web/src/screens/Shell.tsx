@@ -19,11 +19,9 @@ export function Shell({ children }: { children: ReactNode }) {
         <nav className="nx-gh-crumbs" aria-label="Breadcrumb">
           <Link to="/">bowman-aviation</Link>
           <span>/</span>
-          <Link to="/"><b>vesper</b></Link>
+          <Link to="/"><b>engineering-changes</b></Link>
         </nav>
         <span className="nx-sp" />
-        {/* A plain link, not in-app: the spike page opens its own database connection. */}
-        <a href="/spike" className="nx-gh-link">Spike</a>
         <Person name="Helen Castellanos" size={24} />
       </header>
       {children}

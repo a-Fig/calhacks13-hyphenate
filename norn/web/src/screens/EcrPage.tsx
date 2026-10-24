@@ -17,7 +17,8 @@ import { RepoHeader } from './Shell.tsx';
 export type Tab = 'conversation' | 'impact' | 'changes' | 'revisions';
 
 export function EcrPage({ id, tab, check }: { id: string; tab: Tab; check?: string }) {
-  const { assessment: a, summary, loading } = useAssessment(id);
+  const { assessment: a, summary, loading, error } = useAssessment(id);
+  if (error) return <div className="nx-container nx-tabbody"><p className="nx-fg-danger">{error}</p></div>;
   if (loading) return <div className="nx-container nx-tabbody"><p className="nx-fg-muted">Loading</p></div>;
   if (!summary) return <div className="nx-container nx-tabbody"><p>No ECR {id}.</p></div>;
   if (!a) return <SummaryOnly e={summary} />;
@@ -54,7 +55,7 @@ function AssessmentView({ a, tab, check }: { a: ImpactAssessment; tab: Tab; chec
                   <b>{e.originator}</b> wants to change <code className="nx-chip-code">{e.change ?? e.partNumber ?? 'the design'}</code>
                   {' '}&middot; filed {dayLabel(e.filedOn + 'T12:00:00-07:00')}
                 </span>
-                <LevelLabel level={a.level} long />
+                {a.level && <LevelLabel level={a.level} long />}
               </div>
             </PageHeader.Description>
             <PageHeader.Navigation>

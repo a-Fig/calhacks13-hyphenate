@@ -175,7 +175,8 @@ export interface RouteStep {
 }
 
 export interface Recommendation {
-  verdict: 'approve' | 'approve_with_conditions' | 'wait' | 'reject';
+  /** `none`: no impact statement yet, or one that gives no verdict. */
+  verdict: 'approve' | 'approve_with_conditions' | 'wait' | 'reject' | 'none';
   headline: string;
   reasons: { text: string; evidence: Evidence; traceId?: string }[];
   traceId: string;
@@ -218,8 +219,21 @@ export interface ActivityEvent {
   /** A report that was published by this step. */
   level?: ReportLevel;
   state?: 'done' | 'running';
+  /** A Norn agent's live steps, shown like a build log while it runs. */
+  run?: AgentRun;
   /** Labelled "reported by agent" until Norn can fetch the source itself. */
   reportedByAgent?: boolean;
+}
+
+/** A Norn agent's session: the steps the runner reports, from agent_event rows. */
+export interface AgentRun {
+  id: string;
+  title: string;
+  actor: string;
+  onBehalfOf?: string;
+  startedAt: string;
+  state: 'running' | 'done' | 'failed';
+  lines: { at: string; kind: 'start' | 'text' | 'tool' | 'result' | 'end'; text: string; error?: boolean }[];
 }
 
 export type SourceSystem = 'PLM' | 'ERP' | 'Quote' | 'Norn' | 'Policy' | 'History';
@@ -267,8 +281,10 @@ export interface Trace {
 export interface Check {
   id: 'bom' | 'cost' | 'timeline' | 'supply' | 'class';
   name: string;
-  /** `pending`: the check does not exist yet or has not run. */
-  state: 'passed' | 'attention' | 'running' | 'pending' | 'skipped';
+  /** `pending`: the check does not exist yet or has not run; `queued`: it is waiting for a worker. */
+  state: 'passed' | 'attention' | 'running' | 'queued' | 'pending' | 'skipped';
+  /** This check's result is a mock stand-in, not Norn's real check. */
+  mock?: boolean;
   summary: string;
   took?: string;
   by?: string;
@@ -368,10 +384,33 @@ export interface EcrSummary {
   hasAssessment: boolean;
 }
 
+/** An impact statement as posted: the agent narrates, and every number is marked with how it is known. */
+export interface StatementView {
+  id: string;
+  level: ReportLevel;
+  at: string;
+  author: string;
+  authorKind: ActorKind;
+  headline: string;
+  changeClass: string;
+  route: string;
+  numbers: { key: string; label: string; unit: string; p10: number; p50: number; p90: number; evidence: Evidence; traceId?: string }[];
+  drivers: { text: string; evidence: Evidence; traceId?: string }[];
+  claims: { text: string; evidence: Evidence; traceId?: string }[];
+  assumptions: { key: string; label: string; source: Origin; note: string; traceId?: string }[];
+  /** Written against an older revision of the ECR than the current one. */
+  outdated: boolean;
+}
+
 /** The impact assessment a CFO or CCB member reads. */
 export interface ImpactAssessment {
   ecr: EcrSummary;
-  level: ReportLevel;
+  /** Where the numbers come from: a saved run of the checks, or Norn's live database. */
+  source: 'saved' | 'live';
+  /** The level of the newest impact statement; absent until there is one. */
+  level?: ReportLevel;
+  /** The newest impact statement, when the ECR has one; it becomes Norn's bot comment. */
+  statement?: StatementView;
   headline: Headline;
   cost: CostSection;
   cutIn: CutIn;

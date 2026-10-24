@@ -16,7 +16,7 @@ function reviewText(e: EcrSummary): string {
   if (e.status === 'ECO released') return 'Released';
   if (e.status === 'Approved') return 'Approved';
   const r = e.reviewers ?? [];
-  if (!r.length) return 'No reviewers';
+  if (!r.length) return 'Review required';
   const done = r.filter(x => x.state === 'approved').length;
   return done ? `Review required · ${done} of ${r.length} approved` : 'Review required';
 }
@@ -47,7 +47,7 @@ const LEVELS = ['Level 1', 'Level 2', 'Level 3'];
 const APPROVALS = ['Review required', 'Approved'];
 
 export function EcrList() {
-  const { data: loaded } = useEcrList();
+  const { data: loaded, error } = useEcrList();
   const all = useMemo(() => loaded ?? [], [loaded]);
   const [query, setQuery] = useState('is:open');
   const [who, setWho] = useState<Pick1>(null);
@@ -181,7 +181,7 @@ export function EcrList() {
                 </div>
               </li>
             ))}
-            {rows.length === 0 && <li className="nx-empty">No ECRs match this search.</li>}
+            {rows.length === 0 && <li className="nx-empty">{error ?? (loaded ? 'No ECRs match this search.' : 'Loading')}</li>}
           </ul>
         </div>
       </main>

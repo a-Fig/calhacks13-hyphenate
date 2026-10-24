@@ -27,7 +27,7 @@ export function Impact({ a, check }: { a: ImpactAssessment; check?: string }) {
   const bad = a.checks.filter(c => c.state === 'attention').length;
   const pending = a.checks.filter(c => c.state === 'pending').length;
   const passed = a.checks.filter(c => c.state === 'passed').length;
-  const stateWord = { passed: 'Passed', attention: 'Needs attention', running: 'Running', pending: 'Not assessed yet', skipped: 'Skipped' }[current.state];
+  const stateWord = { passed: 'Passed', attention: 'Needs attention', running: 'Running', queued: 'Queued', pending: 'Not assessed yet', skipped: 'Skipped' }[current.state];
 
   return (
     <div className="nx-checks">
@@ -42,8 +42,8 @@ export function Impact({ a, check }: { a: ImpactAssessment; check?: string }) {
           {a.checks.map(c => (
             <ActionList.Item key={c.id} active={c.id === current.id} onSelect={() => navigate(`${base}/${c.id}`)}>
               <ActionList.LeadingVisual><CheckStateIcon state={c.state} /></ActionList.LeadingVisual>
-              {c.name}
-              <ActionList.Description>{c.state === 'pending' ? 'Not assessed yet' : c.took ?? ''}</ActionList.Description>
+              {c.name} <MockTag on={!!c.mock} />
+              <ActionList.Description>{c.state === 'pending' ? 'Not assessed yet' : c.state === 'queued' ? 'Queued' : c.state === 'running' ? 'Running' : c.took ?? ''}</ActionList.Description>
             </ActionList.Item>
           ))}
         </ActionList>
@@ -53,7 +53,7 @@ export function Impact({ a, check }: { a: ImpactAssessment; check?: string }) {
         <header className="nx-check-head">
           <CheckStateIcon state={current.state} size={20} />
           <div>
-            <h2>{current.name}</h2>
+            <h2>{current.name} <MockTag on={!!current.mock} /></h2>
             <div className="nx-fg-muted">
               {stateWord}{current.by ? ` · ${current.by}` : ''}
             </div>
@@ -85,7 +85,7 @@ function CostCheck({ a }: { a: ImpactAssessment }) {
       )}
       <div className="nx-box">
         <div className="nx-box-title">
-          Cost page <SavedRun /> <span className="nx-fg-muted">&middot; {a.cost.window.label}, point estimates, savings in parentheses</span>
+          Cost page <SavedRun source={a.source} /> <span className="nx-fg-muted">&middot; {a.cost.window.label}, point estimates, savings in parentheses</span>
         </div>
         <CostTable a={a} />
         <div className="nx-foot">
