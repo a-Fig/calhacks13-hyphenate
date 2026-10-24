@@ -25,7 +25,7 @@ export function StateIcon({ status, size = 16 }: { status: Status; size?: number
 
 /** A title-block cell uses the request's known number, without inventing a part revision. */
 export function RequestNumber({ id }: { id: string }) {
-  return <span className="nx-request-number"><span>ECR</span><b>{id.replace(/^ECR-/, '')}</b></span>;
+  return <span className="nx-request-number" role="img" aria-label={id}><span aria-hidden="true">ECR</span><span className="nx-vh" aria-hidden="true">-</span><b aria-hidden="true">{id.replace(/^ECR-/, '')}</b></span>;
 }
 
 export function LevelLabel({ level, long = false }: { level: ReportLevel; long?: boolean }) {

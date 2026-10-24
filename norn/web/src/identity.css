@@ -20,6 +20,8 @@
 .nx-tenant { color: #57635d; font-size: 13px; font-weight: 600; }
 .nx-skip { position: absolute; left: 16px; top: -60px; padding: 8px 16px; z-index: 100; background: white; border: 2px solid var(--fgColor-accent); }
 .nx-skip:focus { top: 8px; }
+#main-content:focus { outline: none; }
+.nx-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 .nx-request-number { display: inline-flex; align-items: stretch; white-space: nowrap; font-family: var(--fontStack-monospace); border: 1px solid #b4c4bb; border-radius: 3px; font-size: 12px; line-height: 22px; color: var(--norn-ink); background: #f7faf7; vertical-align: middle; }
 .nx-request-number > span { padding: 0 5px; border-right: 1px solid #b4c4bb; font-size: 10px; letter-spacing: .05em; }
