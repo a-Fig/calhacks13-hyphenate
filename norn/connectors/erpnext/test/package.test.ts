@@ -132,6 +132,12 @@ const enterJournals = (docstatus = 1) => {
     { name: 'ACC-JV-1', docstatus, eco: 'ECO-9', entry: 'scrap', total_debit: 140.5, posting_date: '2026-01-01' },
     { name: 'ACC-JV-2', docstatus, eco: 'ECO-9', entry: 'cancel', total_debit: 18.64, posting_date: '2026-01-01' },
   );
+  const dr = (parent: string, account: string, amount: number) => ({ parent, account, debit_in_account_currency: amount, credit_in_account_currency: 0 });
+  const cr = (parent: string, account: string, amount: number) => ({ parent, account, debit_in_account_currency: 0, credit_in_account_currency: amount });
+  db['Journal Entry Account'] = [
+    dr('ACC-JV-1', '51900 - Shrink - CO', 100.5), cr('ACC-JV-1', '11420 - Reserve - CO', 100.5), dr('ACC-JV-1', '51900 - Shrink - CO', 40), cr('ACC-JV-1', '11420 - Reserve - CO', 40),
+    dr('ACC-JV-2', '51900 - Shrink - CO', 18.64), cr('ACC-JV-2', '21210 - Accrued - CO', 18.64),
+  ];
 };
 const enterAll = () => { enterCostChange(); enterBom(); enterReplace(); enterRetire(); enterJournals(); };
 
@@ -190,7 +196,7 @@ test('the package lists every line a person enters, in the verified order, with 
   assert.deepEqual(scrap.amounts, { debit: 140.5, credit: 140.5 });
   assert.match(scrap.instruction, /140\.50 Dr 51900 \/ Cr 11420 \(2 lines\)/, 'accounts by number, the two lines added up');
   assert.deepEqual(values(scrap), {
-    voucher_type: 'Journal Entry', company: 'Co', posting_date: '2026-01-01', title: 'ECO-9: Write down old stock', eco: 'ECO-9', entry: 'scrap', decision: DECISION,
+    voucher_type: 'Journal Entry', company: 'Co', posting_date: '2026-01-01', eco: 'ECO-9', entry: 'scrap', decision: DECISION,
   });
   assert.deepEqual(scrap.tables[0].rows.map((r) => values({ fields: r })), [
     { account: '51900 - Shrink - CO', debit_in_account_currency: 100.5, user_remark: 'Stores 5' },
@@ -414,4 +420,93 @@ test('the markdown reads as a to-do list for a person, in business words', async
   assert.match(done, /Entered\. Manufacturing engineer\. Open BOM BOM-A: /);
   assert.match(done, /Found in ERPNext: Item Price ip-p2\./);
   assert.match(done, /\| New BOM \(new_bom\) \| BOM-A2 \|/);
+});
+
+// ---- review fixes: the journal's accounts, the BOM's output, the quantity basis, hidden fields -------------------------
+
+const resetJournals = () => { db['Journal Entry'] = []; db['Journal Entry Account'] = []; enterJournals(); };
+
+test('a journal posted to the wrong accounts is a conflict, though its total and date match', async () => {
+  enterJournals();
+  assert.equal(line(await build(), 'journal-entry:scrap').status, 'entered');
+  // Debit and credit swapped: the same total on the same date, the money going the other way.
+  for (const r of db['Journal Entry Account'].filter((x) => x.parent === 'ACC-JV-1')) [r.debit_in_account_currency, r.credit_in_account_currency] = [r.credit_in_account_currency, r.debit_in_account_currency];
+  let pkg = await build();
+  const swapped = line(pkg, 'journal-entry:scrap');
+  assert.equal(swapped.status, 'conflict');
+  assert.equal(swapped.note, 'ACC-JV-1 has no debit of 140.50 on 51900 - Shrink - CO and has no credit of 140.50 on 11420 - Reserve - CO'
+    + ' and has a credit of 140.50 on 51900 - Shrink - CO that the release does not and has a debit of 140.50 on 11420 - Reserve - CO that the release does not');
+  assert.equal(line(pkg, 'journal-entry:cancel').status, 'entered');
+  assert.ok(calls.some((c) => c.path.endsWith('/Journal Entry Account')), 'the accounting rows are read');
+
+  // The right side on a wrong account, and a wrong amount on a right one.
+  resetJournals();
+  db['Journal Entry Account'].find((x) => x.parent === 'ACC-JV-2' && x.credit_in_account_currency)!.account = '11420 - Reserve - CO';
+  pkg = await build();
+  assert.equal(line(pkg, 'journal-entry:cancel').status, 'conflict');
+  assert.equal(line(pkg, 'journal-entry:cancel').note, 'ACC-JV-2 has no credit of 18.64 on 21210 - Accrued - CO and has a credit of 18.64 on 11420 - Reserve - CO that the release does not');
+  resetJournals();
+  db['Journal Entry Account'].find((x) => x.parent === 'ACC-JV-2' && x.debit_in_account_currency)!.debit_in_account_currency = 17.64;
+  assert.equal(line(await build(), 'journal-entry:cancel').note, 'ACC-JV-2 has a debit of 17.64 on 51900 - Shrink - CO where the release says 18.64');
+
+  // Layout and rounding are not differences: two lines on one account entered as one row, and noise under half a cent.
+  resetJournals();
+  db['Journal Entry Account'].splice(0, 4,
+    { parent: 'ACC-JV-1', account: '51900 - Shrink - CO', debit_in_account_currency: 140.5000001, credit_in_account_currency: 0 },
+    { parent: 'ACC-JV-1', account: '11420 - Reserve - CO', debit_in_account_currency: 0, credit_in_account_currency: 140.5 });
+  assert.equal(line(await build(), 'journal-entry:scrap').status, 'entered');
+});
+
+test('a BOM entered with another output quantity, or another sub-assembly BOM, is a conflict', async () => {
+  enterCostChange();
+  enterBom();
+  db.BOM.find((b) => b.name === 'BOM-A2')!.quantity = 2;
+  let pkg = await build();
+  assert.deepEqual([line(pkg, 'bom:A').status, line(pkg, 'bom:A').note], ['conflict', 'BOM-A2 makes 2 where the release says 1']);
+  db.BOM.find((b) => b.name === 'BOM-A2')!.quantity = 1;
+  assert.equal(line(await build(), 'bom:A').status, 'entered');
+
+  // T-1's BOM holds A, which this release also versions: that line has to point at A's new BOM, not the old one.
+  const r: EcoRelease = { ...release, journals: [], bomChanges: [{ parent: 'T-1', op: 'set_qty', child: 'A', qty: 1 }] };
+  db.BOM.push({ name: 'BOM-T2', item: 'T-1', company: 'Co', docstatus: 1, is_active: 1, is_default: 0, quantity: 1, raw_material_cost: 81, operating_cost: 0, total_cost: 81, creation: '2026-06-02', eco: 'ECO-9' });
+  db['BOM Item'].push({ parent: 'BOM-T2', item_code: 'A', qty: 1, bom_no: 'BOM-A', idx: 1, docstatus: 1 });
+  pkg = await build(r);
+  assert.deepEqual([line(pkg, 'bom:T-1').status, line(pkg, 'bom:T-1').note], ['conflict', 'BOM-T2 has A on BOM BOM-A where the release says BOM-A2']);
+  db['BOM Item'].find((l) => l.parent === 'BOM-T2')!.bom_no = 'BOM-A2';
+  assert.equal(line(await build(r), 'bom:T-1').status, 'entered');
+});
+
+test('BomLineChange.qty is per one unit of the parent: a BOM that makes 10 is entered and compared at 10 times', async () => {
+  Object.assign(db.BOM.find((b) => b.name === 'BOM-A')!, { quantity: 10, raw_material_cost: 350, total_cost: 390 });
+  for (const l of db['BOM Item'].filter((x) => x.parent === 'BOM-A')) { l.qty *= 10; l.stock_qty *= 10; }
+  const set: EcoRelease = { ...release, journals: [], items: [], bomChanges: [{ parent: 'A', op: 'set_qty', child: 'P', qty: 4 }] };
+  const both: EcoRelease = { ...set, bomChanges: [...set.bomChanges!, { parent: 'A', op: 'add', child: 'T-1', qty: 0.5 }] };
+  const pkg = await build(both);
+  assert.deepEqual(pkg.problems, []);
+  const bom = line(pkg, 'bom:A');
+  assert.equal(values(bom).quantity, 10);
+  assert.deepEqual(bom.tables[0].rows.map((row) => values({ fields: row })), [
+    { item_code: 'P', qty: 40, uom: 'Nos' }, { item_code: 'Q', qty: 10, uom: 'Nos' }, { item_code: 'T-1', qty: 5, uom: 'Nos' },
+  ]);
+  assert.match(bom.instruction, /set_qty P x4 per unit \(x40 for 10\), add T-1 x0\.5 per unit \(x5 for 10\)/);
+  // The estimate scales too: 40 P at 10 and 10 Q at 5 make 450 raw, plus the 40 of operations.
+  assert.deepEqual(line(await build(set), 'bom:A').amounts, { rawBefore: 350, totalBefore: 390, rawAfter: 450, totalAfter: 490 });
+  // Entered at 40 it matches; entered at the per-unit 4 it does not.
+  db.BOM.push({ name: 'BOM-A2', item: 'A', company: 'Co', docstatus: 1, is_active: 1, is_default: 0, quantity: 10, raw_material_cost: 450, operating_cost: 40, total_cost: 490, creation: '2026-06-01', eco: 'ECO-9' });
+  db['BOM Item'].push({ parent: 'BOM-A2', item_code: 'P', qty: 40, idx: 1, docstatus: 1 }, { parent: 'BOM-A2', item_code: 'Q', qty: 10, idx: 2, docstatus: 1 });
+  assert.equal(line(await build(set), 'bom:A').status, 'entered');
+  db['BOM Item'].find((l) => l.parent === 'BOM-A2' && l.item_code === 'P')!.qty = 4;
+  assert.equal(line(await build(set), 'bom:A').note, 'BOM-A2 has P x4 where the release says x40');
+});
+
+test('the journal form asks for no hidden field: no Title, and no matching depends on one', async () => {
+  const pkg = await build();
+  for (const l of pkg.lines.filter((x) => x.kind === 'journal-entry')) {
+    assert.deepEqual(l.fields.map((f) => f.field), ['voucher_type', 'company', 'posting_date', 'eco', 'entry', 'decision']);
+    assert.match(l.instruction, /Enter the journal entry '(Write down old stock|Cancellation charge)'/, 'the title still reads in the instruction');
+  }
+  assert.doesNotMatch(formatErpChangePackage(pkg), /\(title\)/);
+  // Entered with no title at all, the entries read as entered.
+  enterJournals();
+  assert.ok((await build()).lines.filter((x) => x.kind === 'journal-entry').every((l) => l.status === 'entered'));
 });

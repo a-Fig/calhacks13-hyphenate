@@ -29,7 +29,11 @@ export interface BomLineChange {
   parent: ItemCode;
   op: 'add' | 'remove' | 'set_qty';
   child: ItemCode;
-  /** The line's new quantity per BOM quantity (`add`, `set_qty`). */
+  /**
+   * The line's new quantity per ONE unit of the parent item (`add`, `set_qty`), as Norn's assessment counts it. The package
+   * scales it by the BOM's own `quantity` where it writes and compares the lines: for a BOM that makes 10 assemblies, a qty
+   * of 4 is entered as 40.
+   */
   qty?: number;
 }
 
@@ -371,7 +375,7 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
   // The lines of the BOM versions already entered for this ECO, to compare with the package's.
   const taggedNames = [...bases.values()].flatMap((b) => (b.tagged ? [b.tagged.name] : []));
   const taggedLines: Row[] = taggedNames.length
-    ? await c.list('BOM Item', { parent: 'BOM', filters: [['parent', 'in', taggedNames]], fields: ['parent', 'item_code', 'qty'] })
+    ? await c.list('BOM Item', { parent: 'BOM', filters: [['parent', 'in', taggedNames]], fields: ['parent', 'item_code', 'qty', 'bom_no'] })
     : [];
   // The parents that use the old BOM (still to be switched) or the new one (already switched).
   const bomNames = [...bases.values()].flatMap((b) => [b.base.name, ...(b.tagged ? [b.tagged.name] : [])]);
@@ -398,7 +402,8 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
   const estimate = new Map<ItemCode, number>(); // new unit cost of an affected assembly
   for (const item of ordered) {
     const { base, tagged } = bases.get(item)!;
-    const q = num(base.quantity) || 1;
+    const q = num(base.quantity) || 1; // the BOM makes q units of the item; its lines are quantities for q units
+    const perBom = (perUnit: number) => Math.round(perUnit * q * 1e6) / 1e6; // a change's per-unit quantity as the BOM line holds it
     const baseRows = baseLines.filter((l) => l.parent === base.name).sort((a, b) => a.idx - b.idx);
     const changes = lineChanges.filter((b) => b.parent === item);
     // A line for a sub-assembly that this release also versions points at that sub-assembly's new BOM.
@@ -412,7 +417,7 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
     for (const l of baseRows) {
       const ch = changes.find((b) => b.child === l.item_code);
       if (ch?.op === 'remove') continue;
-      const qty = ch?.op === 'set_qty' ? ch.qty! : num(l.qty);
+      const qty = ch?.op === 'set_qty' ? perBom(ch.qty!) : num(l.qty);
       raw += qty * (newCost.get(l.item_code) ?? estimate.get(l.item_code) ?? num(l.rate));
       rows.push(itemRow(l.item_code, qty, l.uom, l.bom_no));
     }
@@ -420,7 +425,7 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
       if (ch.op === 'add') {
         known = false;
         const it = addItems.find((i) => i.name === ch.child);
-        rows.push(itemRow(ch.child, ch.qty!, it?.stock_uom, it?.default_bom));
+        rows.push(itemRow(ch.child, perBom(ch.qty!), it?.stock_uom, it?.default_bom));
       }
       if (ch.op !== 'add' && !baseRows.some((l) => l.item_code === ch.child)) problems.push(`${item}'s BOM ${base.name} has no line for ${ch.child} to ${ch.op === 'remove' ? 'remove' : 'change'}`);
       if (ch.op === 'add' && baseRows.some((l) => l.item_code === ch.child)) problems.push(`${item}'s BOM ${base.name} already has a line for ${ch.child}`);
@@ -430,20 +435,37 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
     const wanted = quantities(rows.map((row) => [row.find((f) => f.field === 'item_code')!.value as string, num(row.find((f) => f.field === 'qty')!.value)]));
     const lineDiffs: string[] = [];
     if (tagged) {
-      const have = quantities(taggedLines.filter((l) => l.parent === tagged.name).map((l) => [l.item_code as string, num(l.qty)]));
+      const taggedRows = taggedLines.filter((l) => l.parent === tagged.name);
+      const have = quantities(taggedRows.map((l) => [l.item_code as string, num(l.qty)]));
+      // The lines are quantities for the BOM's output, so the output has to be the package's too.
+      const output = num(tagged.quantity) || 1;
+      if (Math.abs(output - q) > 1e-6) lineDiffs.push(`makes ${output} where the release says ${q}`);
       for (const [code, qty] of wanted) {
         if (!have.has(code)) lineDiffs.push(`has no line for ${code}`);
         else if (Math.abs(have.get(code)! - qty) > 1e-6) lineDiffs.push(`has ${code} x${have.get(code)} where the release says x${qty}`);
       }
       for (const code of have.keys()) if (!wanted.has(code)) lineDiffs.push(`has a line for ${code} that the release does not`);
+      // A sub-assembly line has to use the BOM the package names: the new version when this release versions it (null until
+      // that BOM exists, and then no BOM can be the right one yet), the existing one otherwise.
+      const expectedBom = new Map<string, string | null>();
+      for (const row of rows) {
+        const f = row.find((x) => x.field === 'bom_no');
+        const code = row.find((x) => x.field === 'item_code')!.value as string;
+        if (f && !expectedBom.has(code)) expectedBom.set(code, f.value as string | null);
+      }
+      for (const [code, want] of expectedBom) {
+        for (const l of taggedRows.filter((x) => x.item_code === code && (x.bom_no || null) !== want)) {
+          lineDiffs.push(want ? `has ${code} on BOM ${l.bom_no || 'none'} where the release says ${want}` : `has ${code} on BOM ${l.bom_no} but the new ${code} BOM is not entered yet`);
+        }
+      }
     }
     const operating = num(base.operating_cost);
     const afterTotal = tagged ? num(tagged.total_cost) : known ? r2(raw + operating) : undefined;
-    if (afterTotal !== undefined) estimate.set(item, afterTotal / q);
+    if (afterTotal !== undefined) estimate.set(item, afterTotal / (tagged ? num(tagged.quantity) || 1 : q));
     const amounts: Record<string, number> = { rawBefore: num(base.raw_material_cost), totalBefore: num(base.total_cost) };
     if (tagged) { amounts.rawAfter = num(tagged.raw_material_cost); amounts.totalAfter = num(tagged.total_cost); } else if (known) { amounts.rawAfter = r2(raw); amounts.totalAfter = afterTotal!; }
     const touched = baseRows.filter((l) => newCost.has(l.item_code)).map((l) => label(l.item_code));
-    const why = [...touched.map((x) => `${x} repriced`), ...changes.map((b) => `${b.op} ${b.child}${b.qty ? ` x${b.qty}` : ''}`)].join(', ');
+    const why = [...touched.map((x) => `${x} repriced`), ...changes.map((b) => `${b.op} ${b.child}${b.qty ? ` x${b.qty}${q === 1 ? '' : ` per unit (x${perBom(b.qty)} for ${q})`}` : ''}`)].join(', ');
     const cost = `total cost ${money(num(base.total_cost))} -> ${tagged ? money(num(tagged.total_cost)) : known ? money(afterTotal!) : 'recalculated by ERPNext'}`;
 
     add({
@@ -507,9 +529,39 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
     const existing: Row[] = await c.list('Journal Entry', { filters: [[t.je.eco, '=', eco], ['docstatus', '<', 2]], fields: ['name', 'docstatus', 'posting_date', 'total_debit', t.je.entry] });
     const posting = release.postingDate ?? effectiveDate;
     const cc = opts.changePackage?.costCenter;
+    // The accounting rows of the entries already entered: a total and a date can match while the money goes to other accounts.
+    const wantedKeys = new Set(journals.map((j) => j.key));
+    const enteredNames = existing.filter((e) => wantedKeys.has(e[t.je.entry])).map((e) => e.name as string);
+    const entryRows: Row[] = enteredNames.length
+      ? await c.list('Journal Entry Account', { parent: 'Journal Entry', filters: [['parent', 'in', enteredNames]], fields: ['parent', 'account', 'debit_in_account_currency', 'credit_in_account_currency'] })
+      : [];
+    /** Debits and credits added up per account (cents): lines on one account combine, because that is how the books see them. */
+    const sides = (xs: { account: string; debit: number; credit: number }[]) => {
+      const m = new Map<string, { account: string; side: 'debit' | 'credit'; amount: number }>();
+      for (const x of xs) for (const side of ['debit', 'credit'] as const) {
+        if (!x[side]) continue;
+        const e = m.get(`${side}|${x.account}`) ?? { account: x.account, side, amount: 0 };
+        e.amount = r2(e.amount + x[side]);
+        m.set(`${side}|${x.account}`, e);
+      }
+      return m;
+    };
     for (const j of journals) {
       const total = r2(j.lines.reduce((s, l) => s + l.amount, 0));
       const have = existing.find((e) => e[t.je.entry] === j.key);
+      const wantRows = sides(j.lines.flatMap((l) => [
+        { account: accounts[l.debit] ?? l.debit, debit: r2(l.amount), credit: 0 }, { account: accounts[l.credit] ?? l.credit, debit: 0, credit: r2(l.amount) },
+      ]));
+      const haveRows = sides(entryRows.filter((r) => r.parent === have?.name).map((r) => ({ account: String(r.account ?? ''), debit: num(r.debit_in_account_currency), credit: num(r.credit_in_account_currency) })));
+      const rowDiffs: string[] = [];
+      if (have) {
+        for (const [k, w] of wantRows) {
+          const h = haveRows.get(k);
+          if (!h) rowDiffs.push(`has no ${w.side} of ${money(w.amount)} on ${w.account}`);
+          else if (Math.abs(h.amount - w.amount) >= 0.005) rowDiffs.push(`has a ${w.side} of ${money(h.amount)} on ${w.account} where the release says ${money(w.amount)}`);
+        }
+        for (const [k, h] of haveRows) if (!wantRows.has(k)) rowDiffs.push(`has a ${h.side} of ${money(h.amount)} on ${h.account} that the release does not`);
+      }
       const diffs = have ? [
         ...(Math.abs(num(have.total_debit) - total) < 0.005 ? [] : [`for ${money(num(have.total_debit))} where the release says ${money(total)}`]),
         ...(!have.posting_date || have.posting_date === posting ? [] : [`dated ${have.posting_date} where the release says ${posting}`]),
@@ -525,15 +577,14 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
         instruction: `Enter the journal entry '${j.title}' dated ${posting}: ${pairs(j, accounts)}. Save it, check the accounting entries against the table, and submit it to post.`,
         fields: [
           field('voucher_type', 'Entry Type', 'Journal Entry'), field('company', 'Company', opts.company), field('posting_date', 'Posting Date', posting),
-          field('title', 'Title', sentence(`${eco}: ${j.title}`).slice(0, 140)),
           field(t.je.eco, 'Released by ECO', eco), field(t.je.entry, 'ECO entry', j.key),
           ...(t.je.decision ? [field(t.je.decision, 'Norn decision', release.decision.url)] : []),
         ],
         tables: [{ table: 'accounts', label: 'Accounting Entries', rows: j.lines.flatMap((l) => [entryRow(l.debit, 'debit', l.amount, l.memo), entryRow(l.credit, 'credit', l.amount, l.memo)]) }],
         amounts: { debit: total, credit: total },
-        status: diffs.length ? 'conflict' : have?.docstatus === 1 ? 'entered' : 'to-enter',
+        status: diffs.length || rowDiffs.length ? 'conflict' : have?.docstatus === 1 ? 'entered' : 'to-enter',
         ...(have ? { found: ref('Journal Entry', have.name) } : {}),
-        ...(have && diffs.length ? { note: `${have.name} is ${diffs.join(' and ')}` } : have && have.docstatus !== 1 ? { note: `${have.name} is saved as a draft; submit it to post` } : {}),
+        ...(have && (diffs.length || rowDiffs.length) ? { note: `${have.name} ${[...(diffs.length ? [`is ${diffs.join(' and ')}`] : []), ...rowDiffs].join(' and ')}` } : have && have.docstatus !== 1 ? { note: `${have.name} is saved as a draft; submit it to post` } : {}),
       });
     }
     for (const e of existing) if (!journals.some((j) => j.key === e[t.je.entry])) warnings.push(`${e.name} carries ${eco} but is not in this release (entry '${e[t.je.entry] ?? ''}')`);
