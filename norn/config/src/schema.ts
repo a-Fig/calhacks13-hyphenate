@@ -18,7 +18,14 @@ export const SCHEMA_VERSION = 1;
 // exactly these levels and checks exactly these standards. A company chooses among them; it does
 // not add to them.
 
-/** Kinds of action the policy gate decides on, for people and for agents alike. */
+/**
+ * Kinds of action the policy gate decides on, for people and for agents alike.
+ *
+ * `release_eco`, `write_bom`, `update_standard_cost`, `draft_journal_entry` and `post_journal_entry`
+ * follow a decision. Each needs an approved ECR before it can be taken at all, whatever its autonomy
+ * level: approved by the body of its tier, or approved on the fast track. A level and its limits say
+ * how much of the work an agent does once that holds. They never stand in for the approval.
+ */
 export const ACTIONS = {
   file_ecr: 'File an ECR, or revise a draft',
   review_ecr: 'Record concurrence or non-concurrence on an ECR',
@@ -37,9 +44,10 @@ export type ActionId = keyof typeof ACTIONS;
 export const ACTION_IDS = Object.keys(ACTIONS) as ActionId[];
 
 /**
- * Actions that carry out the decision of an approval body, and so can hold their level past their
- * cost limits once it has decided. Only these can be set to `carriesOutApproval`. Posting a
- * journal entry is deliberately not here: the ledger keeps its human step whatever was approved.
+ * The follow-on actions (see ACTIONS) that carry out the decision of an approval body, and so can hold
+ * their level past their cost limits while that decision still covers the change. Only these can be
+ * set to `carriesOutApproval`. Posting a journal entry is deliberately not here: the ledger keeps its
+ * human step whatever was approved.
  */
 export const FOLLOWS_APPROVAL: readonly ActionId[] = ['release_eco', 'update_standard_cost'];
 
@@ -48,8 +56,8 @@ export const FOLLOWS_APPROVAL: readonly ActionId[] = ['release_eco', 'update_sta
  *
  * - `approve_sampled`: for the share of actions chosen by the rule's `sampleRate`, a second agent
  *   recomputes the result blind, without seeing the first agent's output, and the action waits for
- *   that check. The sample is drawn deterministically from `autonomy.sampleSeed`, the ECR id and the
- *   action (`isSampled` in sample.ts), so the same ECR is always or never sampled.
+ *   that check. The sample is drawn deterministically from `autonomy.sampleSeed`, the ECR's PLM number
+ *   and the action (`isSampled` in sample.ts), so the same ECR is always or never sampled.
  * - `recommend`: the recommendation goes to the role or roles whose `can` holds the action.
  */
 export const AUTONOMY_LEVELS = {
@@ -323,12 +331,17 @@ const approvalTier = obj({
  * spend: the tiers and the autonomy limits both compare it, and a change that saves 3 million is
  * routed and limited as a 3 million change.
  *
- * The amount is built from two parts over the first `horizonMonths` of production, read at
- * `percentile` of Norn's forecast: the spend (one-time cost plus recurring cost increases) and the
- * saving (a lower recurring cost, a credit for old stock). With `savingsOffset: true` they net and
- * the size is that difference. With `false` they do not net: the size is the larger of the spend
- * and the saving. A change that spends 1.8 million on tooling and saves 1 million is 1.8 million,
- * and one that only saves 3 million is 3 million, so a saving never makes a big change look small.
+ * It is worked out for each draw of Norn's forecast, and then `percentile` is taken across the draws.
+ * In one draw, over the first `horizonMonths` of production, the change has a spend (one-time cost
+ * plus recurring cost increases) and a saving (a lower recurring cost, a credit for old stock). Its
+ * size in that draw is |spend - saving| when `savingsOffset` is true, and the larger of the spend and
+ * the saving when it is false. A change that spends 1.8 million on tooling and saves 1 million is 1.8
+ * million, and one that only saves 3 million is 3 million, so a saving never makes a big change look
+ * small. The percentile is of that size, not of a signed cost: with savings as negative numbers the
+ * p90 would be the smallest saving, the opposite of the pessimistic reading it is meant to give.
+ *
+ * It is the change's current cost. It moves when the forecast's inputs move, such as a supplier
+ * re-quote, and is not frozen at the time of an approval.
  */
 const costMeasure = obj({
   percentile: oneOf(['p50', 'p90']),
@@ -412,13 +425,20 @@ const actionRule = obj({
   otherwise: opt(oneOf(LEVEL_IDS)),
   /**
    * Carrying out a decision that has already been made. Only for the actions in FOLLOWS_APPROVAL, and
-   * only with `limits`. When an approval body whose tier covers the change has approved the ECR,
-   * Norn may take the action at `level` whatever the `limits` say: the body's decision carried the
-   * authority and this action only carries it out. The cost that decides which tier covers the change
-   * is the one the body approved, by `approval.costMeasure` on that revision of the ECR. A revision
-   * filed after the approval needs a new approval, and until it has one the limits apply. They apply
-   * too when no such approval exists, as when a change took the fast track. `escalateOn` triggers
-   * still apply either way.
+   * only with `limits`. When an approval body has approved the ECR and still covers the change, Norn
+   * may take the action at `level` whatever the `limits` say: the body's decision carried the
+   * authority and this action only carries it out.
+   *
+   * A body covers a change when its tier is the tier of the change's cost or a tier above it, so the
+   * top tier's approval of a middle-tier change counts and the bottom tier's approval of it does not.
+   * The cost is the change's current one, `approval.costMeasure` as it stands when the action is
+   * taken, not as it stood at the approval. If a supplier re-quote lifts a change approved at 140,000
+   * to 3 million, the approving body no longer covers it, and the limits apply again with no new
+   * revision of the ECR needed. A revision filed after the approval still needs a new approval.
+   *
+   * Where the limits apply, because the ECR was approved another way (on the fast track) or the
+   * approving body no longer covers the change, Norn takes the action only within them and a person
+   * does it past them. `escalateOn` triggers still apply either way.
    */
   carriesOutApproval: opt(bool()),
   /**
@@ -450,6 +470,11 @@ const autonomy = obj({
    * from the forecast `seed` the state layer keeps on purpose: changing that seed re-checks every
    * open ECR's forecast inputs, and this one must not move with it. Changing this seed re-draws
    * every sample, so a change to it is a governance change, recorded like any other config change.
+   *
+   * The ECR id in the draw is the ECR's number in the PLM, such as ECR-0417, the one people see. An
+   * ECR that Norn opened before the PLM numbered it is held under a placeholder, NORN-<id>. Nothing
+   * is drawn under the placeholder, because the draw would change when the PLM assigned the number:
+   * an action that samples waits for the PLM number.
    */
   sampleSeed: str(),
   prov: opt(provenance),

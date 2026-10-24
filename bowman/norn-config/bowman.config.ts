@@ -77,7 +77,6 @@ const fastTrackApprovers = policy.fastTrackApprover
     expectShape(approver !== undefined, `the fast-track approvers include "${phrase.trim()}", which this file has no role for`);
     return approver!;
   });
-expectShape(fastTrackApprovers.length >= 1, 'the fast-track approver text should name who signs');
 
 /** The never-fast-track rule that mentions `word`. */
 const neverFastTrackRule = (word: string): string => findOne(policy.neverFastTrack, word, 'bowman/data/company.ts changeControl.neverFastTrack');
@@ -91,8 +90,8 @@ fastTrackCriterion('pre-authorized', 'obsolescence', 'documentation');
 
 // The Technical Review Committee is named in the tier-1 approver text, in brackets, as seats:
 // "Technical Review Committee (engineering director, quality, certification, CM analyst); ...".
-// The data names no chair. This file makes it the director of engineering, who is also the first
-// seat listed, and refuses to load if the data stops listing that seat.
+// The data names no chair. This file makes it the director of engineering, and refuses to load if the
+// data stops listing that seat.
 const TRC_CHAIR = 'engineering_director';
 const SEAT_FOR_PHRASE: Record<string, string> = {
   'engineering director': 'engineering_director',
@@ -338,7 +337,7 @@ const config = {
         name: 'Technical Review Committee',
         chairRole: TRC_CHAIR,
         memberRoles: trcSeats.filter((seat) => seat !== TRC_CHAIR),
-        prov: src('bowman/data/company.ts changeControl.approvalTiers', 'The members are the seats the dataset lists for the committee. It names no chair; the director of engineering, the seat listed first, is taken as chair.'),
+        prov: src('bowman/data/company.ts changeControl.approvalTiers', 'The members are the seats the dataset lists for the committee. It names no chair; this file takes the director of engineering as chair.'),
       },
       {
         id: 'ccb',
@@ -460,10 +459,11 @@ const config = {
         level: 'approve',
         limits: { maxCost: 25_000 },
         otherwise: 'recommend',
-        // Proposed, for Tyler to confirm: once the body for the change's tier has approved it, releasing
-        // is carrying out its decision, so Norn releases whatever the change costs.
+        // Proposed, for Tyler to confirm: once a body has approved the ECR, releasing is carrying out its
+        // decision, so Norn releases whatever the change costs, for as long as that body's tier still
+        // covers the change at today's cost. If a re-quote lifts it past the tier, the limits apply again.
         carriesOutApproval: true,
-        why: 'Releasing carries out an approval that already had authority. Once the body for the change\'s tier has approved it, Norn releases at any cost. With no such approval, as on the fast track, it releases within 25,000 and the CM analyst does above.',
+        why: 'Releasing carries out an approval that already had authority. While the body that approved the ECR still covers the change at today\'s cost, Norn releases at any cost. If the ECR was approved another way, as on the fast track, or a re-quote has lifted the cost past that body\'s tier, it releases within 25,000 and the CM analyst does above.',
       },
       {
         action: 'write_bom',
@@ -478,10 +478,11 @@ const config = {
         limits: { maxCost: 150_000 },
         otherwise: 'recommend',
         // Proposed, for Tyler to confirm: as with release_eco, an approved change's cost update is
-        // carrying out the decision. The ledger keeps its human step below: Norn drafts the journal
-        // entry and the cost accountant posts it.
+        // carrying out the decision, for as long as the approving body's tier still covers today's cost.
+        // The ledger keeps its human step below: Norn drafts the journal entry and the cost accountant
+        // posts it.
         carriesOutApproval: true,
-        why: 'Standard cost drives the books. Once the body for the change\'s tier has approved it, Norn updates the cost at any size and half get a blind recompute. With no such approval it updates within 150,000 and the cost accountant decides above.',
+        why: 'Standard cost drives the books. While the body that approved the ECR still covers the change at today\'s cost, Norn updates the cost at any size and half get a blind recompute. If the ECR was approved another way, as on the fast track, or a re-quote has lifted the cost past that body\'s tier, it updates within 150,000 and the cost accountant decides above.',
       },
       {
         action: 'draft_journal_entry',
@@ -513,9 +514,10 @@ const config = {
 
   // -------------------------------------------------------------- materiality (#30)
   // The restraint of a good analyst in front of the CFO: no nitpicks, no inflating. The relative
-  // bar is a share of the end item's standard cost: one finished Vesper aircraft, about $2.8M, never
-  // the changed part's. So 0.01 percent is about $280 per aircraft, and ECR-0423's saving of $11.40
-  // an aircraft is well under both bars.
+  // bar is a share of the end item's standard cost, never the changed part's. A finished Vesper
+  // aircraft is about $2.8M, so 0.01 percent is $280. A Meridian is $5M, so it is $500. Either bar
+  // raises a change, so the $250 absolute bar is the one that binds for both aircraft. ECR-0423's saving
+  // of $11.40 an aircraft is well under it.
   materiality: {
     unitCost: { absolute: 250, relativePct: 0.01 },
     oneTimeCost: 10_000,

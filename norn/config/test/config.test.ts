@@ -640,6 +640,15 @@ describe('a malformed file is rejected with the path of the bad field', () => {
     assertOne((c) => (c.approval.bodies[ccb].name = 'Board of Review'), 'people[' + first + '].ccbRole', 'expected exactly one approval body named "Change Control Board" (vocabulary.terms.board)');
   });
 
+  it('a board seat when two approval bodies share the board\'s name', () => {
+    const first = good.people.findIndex((p) => p.ccbRole !== undefined);
+    assertOne(
+      (c) => (c.approval.bodies[bodyIndex('pmc')].name = 'Change Control Board'),
+      'people[' + first + '].ccbRole',
+      'expected exactly one approval body named "Change Control Board" (vocabulary.terms.board), because people sit on it, got 2'
+    );
+  });
+
   it('reports every error, not only the first', () => {
     const found = problems((c) => {
       delete c.approval;
@@ -823,6 +832,29 @@ describe("when the dataset's wording changes", () => {
 
   it('refuses a committee that no longer lists the seat the file makes its chair', async () => {
     await refuses((s) => s.replace('(engineering director, quality,', '(quality,'), 'engineering_director');
+  });
+
+  it('refuses a dataset with a different number of tiers, criteria or never-fast-track rules', async () => {
+    await refuses((s) => s.replace(/\r?\n\s*\{ upToUsd: Number\.MAX_SAFE_INTEGER[^\n]*/, ''), 'expected 3 approval tiers');
+    await refuses((s) => s.replace(/\r?\n\s*'Same supplier, no tooling change[^\n]*/, ''), 'expected 4 fast-track criteria');
+    await refuses((s) => s.replace(/\r?\n\s*'Retrofit of built or delivered aircraft',/, ''), 'expected 5 never-fast-track rules');
+  });
+
+  it('refuses a dataset with two board chairs', async () => {
+    await refuses((s) => s.replace("ccbRole: 'member'", "ccbRole: 'chair'"), 'expected exactly one CCB chair');
+  });
+
+  it('refuses a top tier that the CFO no longer chairs', async () => {
+    await refuses((s) => s.replace('Program Management Committee (CFO and executive team)', 'Program Management Committee (executive team)'), 'should be chaired by the CFO');
+  });
+
+  it('refuses a board tier that no longer says who chairs it', async () => {
+    await refuses((s) => s.replace('(chaired by the Vesper program manager)', '(the Vesper program manager)'), 'the Change Control Board tier should say who chairs it');
+  });
+
+  it('refuses a committee with a seat the file has no role for, or with too few seats', async () => {
+    await refuses((s) => s.replace('(engineering director, quality, certification, CM analyst)', '(engineering director, quality, finance)'), 'lists "finance", which this file has no role for');
+    await refuses((s) => s.replace('(engineering director, quality, certification, CM analyst)', '(engineering director)'), 'should list a chair and members in brackets');
   });
 });
 

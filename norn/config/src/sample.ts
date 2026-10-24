@@ -4,6 +4,10 @@
 // The seed is the config's own, not the state layer's forecast `seed`: re-seeding forecasts must not
 // change which actions get a second check.
 //
+// The ECR id is the number the PLM gave the ECR, such as ECR-0417. An ECR that Norn opened before the
+// PLM numbered it is held under a placeholder, NORN-<id>, and is never drawn under that: the draw
+// would change when the number arrived. The caller draws once it has the PLM number.
+//
 // The algorithm is written out so any other implementation, such as the state-layer module, can
 // reproduce it exactly and be checked against the pinned values in test/sample.test.ts:
 //   1. text  = JSON.stringify([sampleSeed, ecrId, action])
@@ -32,6 +36,7 @@ export function hash32(text: string): number {
 export interface SampleKey {
   /** The config's `autonomy.sampleSeed`. */
   sampleSeed: string;
+  /** The ECR's number in the PLM, never the NORN-<id> placeholder. */
   ecrId: string;
   /** The action id, such as 'approve_fast_track_ecr'. */
   action: string;
