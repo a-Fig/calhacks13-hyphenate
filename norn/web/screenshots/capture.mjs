@@ -1,8 +1,9 @@
-// Screenshots and the GIF frames for the ECR screens. Needs the Vite dev server (npm run web) and Edge.
+// Screenshots and the flow GIF for the ECR screens. Needs the Vite dev server (npm run web) and Edge.
 //   node web/screenshots/capture.mjs            # PNGs only
 //   node web/screenshots/capture.mjs --gif      # also records the flow and writes ecr-flow.gif
+//   node web/screenshots/capture.mjs --only=impact   # only the shots whose name contains "impact"
 import { chromium } from 'playwright-core';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -24,36 +25,50 @@ const shot = async (name, opts = {}) => {
   await page.screenshot({ path: join(here, `${name}.png`), ...opts });
   console.log('wrote', name);
 };
+const open = async (path, ready) => {
+  await page.goto(`${BASE}${path}`);
+  await page.waitForSelector(ready);
+  await page.waitForTimeout(350);
+};
 
-await page.goto(`${BASE}/`);
-await page.waitForSelector('[data-testid="ecr-table"]');
+// The list, then ECR-0417 on each tab.
+await open('/', '[data-testid="ecr-table"]');
 await shot('ecr-list');
 
-await page.click('[data-testid="row-ECR-0417"]');
-await page.waitForSelector('.nx-tiles');
-await page.waitForTimeout(300);
+await open('/ecr/ECR-0417', '.nx-thread');
 await shot('ecr-page');
 await shot('ecr-page-full', { fullPage: true });
 
-// Open the drawer on the hold cost, the line most worth questioning.
-const hold = page.locator('tr.row', { hasText: 'Hold on S/N 011' }).locator('.nx-mark-btn').first();
+await open('/ecr/ECR-0417/impact/cost', '.nx-checks');
+await shot('ecr-impact');
+await shot('ecr-impact-full', { fullPage: true });
+
+await open('/ecr/ECR-0417/changes', '.nx-diff');
+await shot('ecr-changes');
+
+await open('/ecr/ECR-0417/revisions', '.nx-rev-list');
+await shot('ecr-revisions');
+
+// The "why" panel on the hold cost, the line most worth questioning.
+await open('/ecr/ECR-0417/impact/cost', '.nx-checks');
+const hold = page.locator('tr', { hasText: 'Hold on S/N 011' }).locator('.nx-mark').first();
 await hold.scrollIntoViewIfNeeded();
-await page.mouse.wheel(0, 200);
-await page.waitForTimeout(150);
 await hold.click();
-await page.waitForSelector('[data-testid="why-drawer"]');
-await page.waitForTimeout(450);
+await page.waitForSelector('[data-testid="why-panel"]');
+await page.waitForTimeout(500);
 await shot('why-drawer');
 
 // The other two full pages: a provisional Level 1 that waits, and a fast-track approval.
 for (const id of ['ECR-0409', 'ECR-0423']) {
-  await page.goto(`${BASE}/ecr/${id}`);
-  await page.waitForSelector('.nx-tiles');
-  await page.waitForTimeout(300);
+  await open(`/ecr/${id}`, '.nx-thread');
   await shot(`${id.toLowerCase()}-full`, { fullPage: true });
 }
+await open('/', '[data-testid="ecr-table"]');
+await page.getByRole('button', { name: /Closed/ }).first().click();
+await page.waitForTimeout(250);
+await shot('ecr-list-closed');
 
-// The flow GIF: list, open ECR-0417, click a number, drill one level into its inputs.
+// The flow GIF: list, open ECR-0417, Impact tab, click a number, drill one level into its inputs.
 if (process.argv.includes('--gif')) {
   const dir = mkdtempSync(join(tmpdir(), 'norn-gif-'));
   const gctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
@@ -62,7 +77,7 @@ if (process.argv.includes('--gif')) {
     addEventListener('DOMContentLoaded', () => {
       const c = document.createElement('div');
       c.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483647;pointer-events:none;width:22px;height:22px;transform:translate(-100px,-100px)';
-      c.innerHTML = '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 2l14 8.2-6.2 1.6L8 18z" fill="#1b1a17" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+      c.innerHTML = '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 2l14 8.2-6.2 1.6L8 18z" fill="#1f2328" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>';
       document.body.appendChild(c);
       addEventListener('mousemove', e => { c.style.transform = `translate(${e.clientX - 3}px,${e.clientY - 2}px)`; }, true);
     });
@@ -86,34 +101,39 @@ if (process.argv.includes('--gif')) {
   await g.goto(`${BASE}/`);
   await g.waitForSelector('[data-testid="ecr-table"]');
   await g.mouse.move(900, 130);
-  await g.waitForTimeout(250);
-  await frame(1100);
+  await g.waitForTimeout(300);
+  await frame(1200);
   const row = g.locator('[data-testid="row-ECR-0417"]');
   await glide(row, -200);
-  await frame(700);
+  await frame(600);
   await row.click();
-  await g.waitForSelector('.nx-tiles');
-  await g.waitForTimeout(350);
+  await g.waitForSelector('.nx-thread');
+  await g.waitForTimeout(400);
   await frame(2200);
-  await g.mouse.wheel(0, 380);
-  await g.waitForTimeout(350);
-  await frame(1300);
-  const hold = g.locator('tr.row', { hasText: 'Hold on S/N 011' }).locator('.nx-mark-btn').first();
+  const tab = g.locator('.nx-pr-head a', { hasText: 'Impact' }).first();
+  await glide(tab);
+  await frame(500);
+  await tab.click();
+  await g.waitForSelector('.nx-checks');
+  await g.waitForTimeout(400);
+  await frame(1800);
+  const hold = g.locator('tr', { hasText: 'Hold on S/N 011' }).locator('.nx-mark').first();
   await hold.scrollIntoViewIfNeeded();
   await g.waitForTimeout(250);
+  await frame(900);
   await glide(hold);
   await frame(600);
   await hold.click();
-  await g.waitForSelector('[data-testid="why-drawer"]');
+  await g.waitForSelector('[data-testid="why-panel"]');
   await g.waitForTimeout(500);
-  await frame(2600);
-  const input = g.locator('.nx-drawer button.go', { hasText: 'Cost of capital' });
+  await frame(2800);
+  const input = g.locator('[data-testid="why-panel"] li', { hasText: 'Cost of capital' }).first();
   await glide(input);
   await frame(500);
   await input.click();
   await g.waitForTimeout(450);
   await frame(2400);
-  const back = g.locator('.nx-drawer .back');
+  const back = g.getByRole('button', { name: /^Back to/ });
   await glide(back);
   await back.click();
   await g.waitForTimeout(400);

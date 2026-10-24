@@ -1,361 +1,311 @@
-/* Norn's ECR screens. Everything is scoped under .nx so the spike page's styles.css cannot reach it.
-   Chrome is warm grey and ink. Hue is reserved for the four evidence classes (validated for
-   colour-blind separation with the dataviz validator, light surface) and a muted green check. */
+/* Norn's ECR screens, laid out the way GitHub lays out its pull requests. Everything here reads Primer's
+   design tokens (@primer/primitives, light theme); the components are Primer's. This file holds only
+   what Primer does not ship: GitHub's page chrome, comment boxes, the approval box and the diff. */
+
+body { margin: 0; }
 
 .nx {
-  --bg: #f6f5f2;
-  --card: #ffffff;
-  --ink: #1b1a17;
-  --ink2: #4d4a43;
-  --mute: #86827a;
-  --line: #e6e3dc;
-  --line2: #efede8;
-  --hover: #faf9f6;
-
-  /* Evidence classes. Fact, assumption, computation, judgment. */
-  --ev-fact: #1a55a3;
-  --ev-assumption: #d9822b;
-  --ev-computation: #1b9a86;
-  --ev-judgment: #b06ee0;
-
-  --good: #2e7d4f;
-  --radius: 10px;
-
   min-height: 100vh;
-  background: var(--bg);
-  color: var(--ink);
-  font: 14px/1.5 'Segoe UI Variable Text', 'Segoe UI', Inter, system-ui, -apple-system, sans-serif;
-  -webkit-font-smoothing: antialiased;
+  background: var(--bgColor-default);
+  color: var(--fgColor-default);
+  font-family: var(--fontStack-system);
+  font-size: 14px;
+  line-height: 1.5;
 }
-body { margin: 0; }
 .nx *, .nx *::before, .nx *::after { box-sizing: border-box; }
-.nx button { font: inherit; color: inherit; cursor: pointer; }
-.nx a { color: inherit; text-decoration: none; }
-.nx h1, .nx h2, .nx h3, .nx p { margin: 0; }
+.nx a { color: var(--fgColor-accent); text-decoration: none; }
+.nx a:hover { text-decoration: underline; }
+.nx h1, .nx h2, .nx h3, .nx h4, .nx p, .nx ul, .nx ol { margin: 0; }
+.nx code, .nx .mono { font-family: var(--fontStack-monospace); font-size: 12px; }
 .nx .num { font-variant-numeric: tabular-nums; }
-.nx .mono { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 12px; }
-.nx .mute { color: var(--mute); }
-.nx .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
-/* ---------- shell ---------- */
-.nx-bar {
-  position: sticky; top: 0; z-index: 20;
-  display: flex; align-items: center; gap: 14px;
-  height: 52px; padding: 0 28px;
-  background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--line);
-}
-.nx-brand { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: 0.01em; font-size: 15px; }
-.nx-mark { width: 22px; height: 22px; border-radius: 6px; background: var(--ink); display: grid; place-items: center; }
-.nx-crumbs { display: flex; align-items: center; gap: 8px; color: var(--mute); font-size: 13px; }
-.nx-crumbs a:hover { color: var(--ink); }
-.nx-crumbs .cur { color: var(--ink); font-weight: 500; }
+.nx-fg-muted { color: var(--fgColor-muted); }
+.nx-fg-open { color: var(--fgColor-open, var(--fgColor-success)); }
+.nx-fg-success { color: var(--fgColor-success); }
+.nx-fg-done { color: var(--fgColor-done); }
+.nx-fg-danger { color: var(--fgColor-danger); }
+.nx-fg-attention { color: var(--fgColor-attention); }
 .nx-sp { flex: 1; }
-.nx-mock {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 3px 10px 3px 8px; border-radius: 999px;
-  background: #f4efe3; color: #6d5a2a; font-size: 12px; font-weight: 550;
-  border: 1px solid #eadfc2;
-}
-.nx-mock i { width: 6px; height: 6px; border-radius: 50%; background: #c9a24a; }
-.nx-spike { font-size: 12.5px; color: var(--mute); padding: 5px 8px; border-radius: 7px; }
-.nx-spike:hover { background: var(--line2); color: var(--ink); }
-.nx-nav { display: flex; gap: 4px; }
-.nx-nav a { padding: 5px 10px; border-radius: 7px; font-size: 13px; color: var(--ink2); }
-.nx-nav a:hover { background: var(--line2); }
-.nx-nav a.on { color: var(--ink); background: var(--line2); font-weight: 550; }
+.nx-small { font-size: 12px; }
+.nx-trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
-.nx-wrap { max-width: 1360px; margin: 0 auto; padding: 24px 28px 80px; }
+.nx-container { max-width: 1280px; margin: 0 auto; padding: 0 32px; }
 
-/* ---------- chips and badges ---------- */
-.nx-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: 24px; padding: 0 9px; border-radius: 999px;
-  border: 1px solid var(--line); background: #fff;
-  font-size: 12.5px; font-weight: 500; color: var(--ink2); white-space: nowrap;
-}
-.nx-chip.plain { border-color: transparent; background: var(--line2); }
-.nx-chip.urgent { background: #fbf1e6; border-color: #f1dcc3; color: #8a4f12; }
-.nx-chip.good { background: #eaf4ee; border-color: #cfe6d8; color: #26663f; }
-.nx-chip .dot { width: 8px; height: 8px; border-radius: 50%; }
-
-.nx-level {
-  display: inline-flex; align-items: center; gap: 8px;
-  height: 30px; padding: 0 12px 0 10px; border-radius: 8px;
-  font-size: 13px; font-weight: 600; white-space: nowrap;
-}
-.nx-level.final { background: var(--ink); color: #fff; }
-.nx-level.mid { background: #fff; color: var(--ink); border: 1px solid var(--ink); }
-.nx-level.prov { background: #fff; color: var(--ink2); border: 1px dashed #aaa69c; font-weight: 550; }
-.nx-level small { font-size: 12px; font-weight: 450; opacity: 0.8; }
-.nx-lv {
-  display: inline-grid; place-items: center; min-width: 26px; height: 22px; padding: 0 6px;
-  border-radius: 6px; font-size: 12px; font-weight: 650;
-}
-.nx-lv.l3 { background: var(--ink); color: #fff; }
-.nx-lv.l2 { border: 1px solid var(--ink); color: var(--ink); }
-.nx-lv.l1 { border: 1px dashed #aaa69c; color: var(--ink2); }
-
-.nx-av {
-  display: inline-grid; place-items: center; flex: none;
-  width: 24px; height: 24px; border-radius: 50%;
-  background: #e9e6df; color: var(--ink2); font-size: 10.5px; font-weight: 650;
-}
-.nx-av.norn { background: var(--ink); color: #fff; }
-.nx-av.agent { background: #fff; border: 1.5px solid var(--ink2); color: var(--ink2); }
-
-/* ---------- evidence marks ---------- */
+/* Evidence classes: Primer's functional colours. Fact is accent blue, assumption severe orange,
+   computation success green, judgment sponsors pink. */
+:root, [data-color-mode] { --ev-fact: var(--fgColor-accent); --ev-assumption: var(--fgColor-severe); --ev-computation: var(--fgColor-success); --ev-judgment: var(--fgColor-sponsors); }
 .nx-ev-fact { --c: var(--ev-fact); }
 .nx-ev-assumption { --c: var(--ev-assumption); }
 .nx-ev-computation { --c: var(--ev-computation); }
 .nx-ev-judgment { --c: var(--ev-judgment); }
-
-/* A claim in a sentence: the glyph before it carries the class; the underline shows on hover. */
-.nx-mark-btn.claim, .nx-mark-btn.claim.open { background: none; padding: 0; margin: 0; text-decoration: none; text-align: left; box-shadow: none; }
-.nx-mark-btn.claim:hover, .nx-mark-btn.claim.open { text-decoration: underline; text-decoration-color: var(--c); text-decoration-thickness: 2px; text-underline-offset: 3px; }
-
-/* A marked number or claim: ink text on a faint tint, with an underline whose style also says the class
-   (solid fact, dashed assumption, dotted computation, double judgment). */
-.nx-mark-btn {
-  appearance: none; border: 0; background: color-mix(in srgb, var(--c) 11%, transparent);
-  padding: 0 4px; margin: 0 -4px; border-radius: 4px;
-  text-decoration-line: underline; text-decoration-color: var(--c); text-decoration-thickness: 2px;
-  text-underline-offset: 4px; text-decoration-skip-ink: none;
-  font: inherit; color: inherit; text-align: inherit; line-height: inherit;
-  transition: background 0.12s;
-}
-.nx-ev-fact.nx-mark-btn { text-decoration-style: solid; }
-.nx-ev-assumption.nx-mark-btn { text-decoration-style: dashed; }
-.nx-ev-computation.nx-mark-btn { text-decoration-style: dotted; }
-.nx-ev-judgment.nx-mark-btn { text-decoration-style: double; text-decoration-thickness: 3px; text-underline-offset: 5px; }
-.nx-mark-btn:hover, .nx-mark-btn.open { background: color-mix(in srgb, var(--c) 24%, transparent); }
-.nx-mark-btn:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
-.nx-mark-btn.open { box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 45%, transparent); }
-
 .nx-glyph { flex: none; display: inline-block; vertical-align: -1px; }
 
-.nx-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink2); }
-.nx-legend .k { display: inline-flex; align-items: center; gap: 7px; }
-.nx-legend .ul { display: inline-block; width: 22px; height: 0; border-top: 2px solid var(--c); }
-.nx-legend .ul.dashed { border-top-style: dashed; }
-.nx-legend .ul.dotted { border-top-style: dotted; }
-.nx-legend .ul.double { border-top-style: double; border-top-width: 4px; }
-.nx-mix { display: inline-flex; height: 8px; width: 120px; gap: 2px; margin-left: 4px; }
-.nx-mix i { display: block; height: 100%; border-radius: 2px; background: var(--c); }
-
-/* ---------- cards ---------- */
-.nx-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
-.nx-card > header { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 0; }
-.nx-card > header h2 { font-size: 14px; font-weight: 650; }
-.nx-card > header .sub { font-size: 12.5px; color: var(--mute); }
-.nx-card > header .sp { flex: 1; }
-.nx-pad { padding: 14px 18px 18px; }
-
-/* ---------- ECR header ---------- */
-.nx-head { margin-bottom: 18px; }
-.nx-head .top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; color: var(--mute); font-size: 13px; }
-.nx-head .top .id { color: var(--ink); font-weight: 650; }
-.nx-head h1 { font-size: 24px; line-height: 1.25; font-weight: 650; letter-spacing: -0.01em; max-width: 980px; }
-.nx-head .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 12px; }
-.nx-head .by { color: var(--mute); font-size: 13px; margin-left: 4px; }
-.nx-head .keyrow { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
-
-/* ---------- headline tiles ---------- */
-.nx-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
-.nx-tile { padding: 16px 18px 15px; display: flex; flex-direction: column; min-height: 176px; }
-.nx-tile .lab { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute); }
-.nx-tile .big { margin-top: 8px; font-size: 34px; line-height: 1.1; font-weight: 650; letter-spacing: -0.02em; }
-.nx-tile .big small { font-size: 14px; font-weight: 500; color: var(--mute); letter-spacing: 0; margin-left: 4px; }
-.nx-tile .rng { margin-top: 10px; font-size: 13.5px; color: var(--ink2); }
-.nx-tile .note { margin-top: auto; padding-top: 10px; font-size: 12.5px; color: var(--mute); line-height: 1.4; }
-.nx-tile .lik { margin-top: 6px; font-size: 13px; color: var(--ink2); }
-.nx-tile .lik b { font-weight: 650; color: var(--ink); }
-.nx-strip { position: relative; height: 12px; margin-top: 12px; }
-.nx-strip .track { position: absolute; left: 0; right: 0; top: 5px; height: 2px; background: var(--line); border-radius: 1px; }
-.nx-strip .span { position: absolute; top: 3px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--c) 40%, transparent); }
-.nx-strip .p50 { position: absolute; top: 0; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 2px #fff; }
-.nx-meter { display: flex; gap: 4px; margin-top: 13px; }
-.nx-meter i { flex: 1; height: 8px; border-radius: 3px; background: var(--line); }
-.nx-meter i.on { background: #4d4a43; }
-
-/* ---------- layout ---------- */
-.nx-cols { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 20px; align-items: start; }
-.nx-stack { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-
-/* ---------- cost table ---------- */
-.nx-cost table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-.nx-cost th {
-  font-size: 11.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--mute);
-  text-align: right; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--line);
+/* A marked number or claim: ink text with a thin underline in the class colour. The underline's style
+   also says the class (solid fact, dashed assumption, dotted computation, double judgment). */
+.nx-mark {
+  appearance: none; border: 0; background: none; padding: 0; margin: 0; cursor: pointer;
+  font: inherit; color: inherit; text-align: inherit; line-height: inherit; border-radius: 3px;
+  text-decoration-line: underline; text-decoration-color: var(--c); text-decoration-thickness: 1px;
+  text-underline-offset: 3px; text-decoration-skip-ink: none;
 }
-.nx-cost th:first-child { text-align: left; padding-left: 18px; }
-.nx-cost th:last-child, .nx-cost td:last-child { padding-right: 18px; }
-.nx-cost td { padding: 0 12px 0 0; height: 46px; text-align: right; border-bottom: 1px solid var(--line2); white-space: nowrap; }
-.nx-cost td:first-child { text-align: left; padding-left: 18px; white-space: normal; }
-.nx-cost tr.row:hover td { background: var(--hover); }
-.nx-cost .lbl { font-size: 14px; line-height: 1.25; }
-.nx-cost .nt { font-size: 12px; color: var(--mute); line-height: 1.3; }
-.nx-cost tr.blk td { height: 38px; background: #fbfaf8; border-bottom: 1px solid var(--line); font-weight: 650; }
-.nx-cost tr.blk td:first-child { font-size: 12.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink2); }
-.nx-cost tr.net td { height: 54px; border-top: 2px solid var(--ink); border-bottom: 0; font-weight: 650; font-size: 15px; background: #fff; }
-.nx-cost .rg { color: var(--mute); font-size: 13px; }
-.nx-cost .dash { color: #c4c0b6; }
-.nx-cost .qty { color: var(--mute); font-size: 12.5px; margin-left: 4px; }
-.nx-foot { padding: 10px 18px 14px; font-size: 12px; color: var(--mute); }
+.nx-mark.nx-ev-fact { text-decoration-style: solid; }
+.nx-mark.nx-ev-assumption { text-decoration-style: dashed; }
+.nx-mark.nx-ev-computation { text-decoration-style: dotted; text-decoration-thickness: 2px; }
+.nx-mark.nx-ev-judgment { text-decoration-style: double; text-decoration-thickness: 3px; text-underline-offset: 4px; }
+.nx-mark:hover, .nx-mark.open { background: var(--bgColor-neutral-muted); }
+.nx-mark:focus-visible { outline: 2px solid var(--fgColor-accent); outline-offset: 1px; }
+.nx-mark.claim { text-decoration: none; }
+.nx-mark.claim:hover, .nx-mark.claim.open { text-decoration: underline; text-decoration-color: var(--c); }
+
+/* ---------- GitHub's global header ---------- */
+.nx-gh {
+  display: flex; align-items: center; gap: 16px; height: 64px; padding: 0 32px;
+  background: var(--bgColor-muted); border-bottom: 1px solid var(--borderColor-default);
+}
+.nx .nx-gh-logo { display: inline-flex; color: var(--fgColor-default); }
+.nx-gh-logo:hover { text-decoration: none; }
+.nx-gh-crumbs { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.nx-gh-crumbs a { color: var(--fgColor-default); }
+.nx-gh-crumbs span { color: var(--fgColor-muted); }
+.nx-gh-link { color: var(--fgColor-muted) !important; font-size: 13px; }
+
+/* ---------- the repository title row ---------- */
+.nx-repo {
+  display: flex; align-items: center; gap: 8px; max-width: 1280px; margin: 0 auto; padding: 16px 32px 0; font-size: 20px;
+}
+.nx-repo-owner { color: var(--fgColor-accent) !important; }
+.nx-repo-name { font-weight: 600; }
+
+/* ---------- boxes ---------- */
+.nx-box {
+  background: var(--bgColor-default); border: 1px solid var(--borderColor-default); border-radius: 6px; margin-bottom: 16px; overflow: hidden;
+}
+.nx-box-head {
+  display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--bgColor-muted);
+  border-bottom: 1px solid var(--borderColor-default);
+}
+.nx-box-title { padding: 12px 16px; font-weight: 600; background: var(--bgColor-muted); border-bottom: 1px solid var(--borderColor-default); }
+.nx-box-title .nx-fg-muted { font-weight: 400; }
+.nx-foot { padding: 8px 16px; font-size: 12px; color: var(--fgColor-muted); border-top: 1px solid var(--borderColor-muted); }
+
+/* ---------- the ECR list ---------- */
+.nx-list { padding-top: 16px; padding-bottom: 64px; }
+.nx-searchbar { margin-bottom: 16px; }
+.nx-states { display: flex; gap: 16px; }
+.nx-state {
+  appearance: none; border: 0; background: none; padding: 4px 0; display: inline-flex; align-items: center; gap: 6px;
+  color: var(--fgColor-muted); font: inherit; cursor: pointer;
+}
+.nx-state:hover { color: var(--fgColor-default); }
+.nx-state.on { color: var(--fgColor-default); font-weight: 600; }
+.nx-filters { display: flex; align-items: center; gap: 2px; }
+.nx-filter { color: var(--fgColor-muted) !important; }
+.nx-filter.on { color: var(--fgColor-default) !important; font-weight: 600; }
+.nx-rows { list-style: none; padding: 0; margin: 0; }
+.nx-row {
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--borderColor-muted); cursor: pointer;
+}
+.nx-row:first-child { border-top: 0; }
+.nx-row:hover { background: var(--bgColor-muted); }
+.nx-row-state { padding-top: 2px; flex: none; width: 24px; display: inline-flex; align-items: flex-start; }
+.nx-row-main { flex: 1; min-width: 0; }
+.nx-row-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.nx-row-link { color: var(--fgColor-default) !important; font-weight: 600; font-size: 16px; line-height: 1.4; }
+.nx-row-link:hover { color: var(--fgColor-accent) !important; }
+.nx-row-labels { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.nx-row-sub { margin-top: 2px; font-size: 12px; color: var(--fgColor-muted); }
+.nx-flag { color: var(--fgColor-muted); }
+.nx-flag svg { vertical-align: -1px; }
+.nx-row-right { display: flex; align-items: center; gap: 16px; flex: none; padding-top: 2px; }
+.nx-row-check { width: 16px; display: inline-flex; }
+.nx-row-av { width: 60px; display: inline-flex; justify-content: flex-end; }
+.nx-row-comments { width: 44px; display: inline-flex; align-items: center; gap: 4px; color: var(--fgColor-muted); font-size: 12px; }
+.nx-row-cost { width: 64px; text-align: right; color: var(--fgColor-muted); font-size: 12px; }
+.nx-empty { padding: 32px; text-align: center; color: var(--fgColor-muted); }
+
+/* ---------- the ECR header ---------- */
+.nx-pr-head { padding-top: 16px; border-bottom: 1px solid var(--borderColor-default); }
+.nx-pr-head h1, .nx-pr-head [class*="Title"] { font-weight: 400 !important; }
+.nx-num-muted { color: var(--fgColor-muted); font-weight: 300; }
+.nx-pr-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--fgColor-muted); font-size: 14px; }
+.nx-pr-sub b { color: var(--fgColor-default); font-weight: 600; }
+.nx-chip-code {
+  background: var(--bgColor-accent-muted); color: var(--fgColor-accent); border-radius: 6px; padding: 1px 6px;
+}
+.nx-tabbody { padding-top: 24px; padding-bottom: 80px; }
+
+/* ---------- the conversation ---------- */
+.nx-thread { padding-left: 4px; }
+/* The timeline line runs through the avatar column, and the comment boxes sit to its right, as on GitHub. */
+.nx-t-comment { position: relative; padding-top: 8px; padding-bottom: 8px; }
+.nx-av-col { position: absolute; left: -20px; top: 8px; z-index: 1; border-radius: 50%; box-shadow: 0 0 0 4px var(--bgColor-default); }
+.nx-av-col img[data-component="Avatar"], .nx-av-col img { display: block; }
+.nx-t-body { margin-left: 36px; color: var(--fgColor-default) !important; margin-top: 0 !important; }
+.nx-ev { color: var(--fgColor-default); }
+.nx-comment { border: 1px solid var(--borderColor-default); border-radius: 6px; background: var(--bgColor-default); }
+.nx-comment-head {
+  display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--bgColor-muted);
+  border-bottom: 1px solid var(--borderColor-default); border-radius: 6px 6px 0 0; font-size: 14px;
+}
+.nx-comment-body { padding: 16px; }
+.nx-comment-body p { margin: 4px 0 0; }
+.nx .nx-h3 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+.nx .nx-h4 { font-size: 14px; font-weight: 600; margin: 16px 0 4px; display: flex; align-items: center; gap: 6px; }
+.nx .nx-comment-body > div:first-child > .nx-h4:first-child { margin-top: 0; }
+.nx-bot-table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+.nx-bot-table th {
+  text-align: left; font-weight: 600; font-size: 12px; color: var(--fgColor-muted); padding: 6px 12px 6px 0; border-bottom: 1px solid var(--borderColor-default);
+}
+.nx-bot-table td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--borderColor-muted); vertical-align: middle; }
+.nx-bot-table tr:last-child td { border-bottom: 0; }
+.nx-reasons, .nx-drivers { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.nx-reasons li { display: flex; gap: 8px; align-items: baseline; }
+.nx-reasons li .nx-glyph { transform: translateY(1px); }
+.nx-ev { display: flex; align-items: center; gap: 8px; }
+.nx-ev-detail { margin: 2px 0 0 24px; color: var(--fgColor-muted); font-size: 12px; }
+
+/* ---------- the approval box (GitHub's merge box) ---------- */
+.nx-merge { margin: 16px 0 0 56px; border: 1px solid var(--borderColor-default); border-radius: 6px; background: var(--bgColor-default); }
+.nx-merge-row { border-top: 1px solid var(--borderColor-default); }
+.nx-merge-row:first-child { border-top: 0; }
+.nx-merge-head {
+  appearance: none; width: 100%; border: 0; background: none; text-align: left; font: inherit; color: inherit;
+  display: flex; align-items: center; gap: 12px; padding: 16px;
+}
+button.nx-merge-head { cursor: pointer; }
+button.nx-merge-head:hover { background: var(--bgColor-muted); }
+.nx-merge-icon { flex: none; width: 24px; display: inline-flex; }
+.nx-merge-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.nx-merge-text b { font-weight: 600; font-size: 16px; }
+.nx-merge-text .nx-fg-muted { font-size: 14px; }
+.nx-merge-checks { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--borderColor-muted); background: var(--bgColor-muted); }
+.nx-merge-checks li { display: flex; align-items: center; gap: 8px; padding: 8px 16px 8px 52px; border-top: 1px solid var(--borderColor-muted); }
+.nx-merge-checks li:first-child { border-top: 0; }
+.nx-merge-checks li .nx-trunc { flex: 1; }
+.nx-details { font-size: 12px; }
+.nx-merge-bar { padding: 0 16px 16px 52px; margin-top: -4px; }
+.nx-merge-foot { display: flex; align-items: center; gap: 12px; padding: 16px; border-top: 1px solid var(--borderColor-default); background: var(--bgColor-muted); border-radius: 0 0 6px 6px; }
+
+/* ---------- the sidebar ---------- */
+.nx-side { font-size: 12px; }
+.nx-side section { padding: 16px 0; border-bottom: 1px solid var(--borderColor-muted); }
+.nx-side section:first-child { padding-top: 0; }
+.nx-side h3 { font-size: 12px; font-weight: 600; color: var(--fgColor-muted); margin-bottom: 8px; }
+.nx-side-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.nx-side-list li { display: flex; align-items: center; gap: 8px; }
+.nx-side-name { flex: 1; min-width: 0; font-weight: 600; font-size: 12px; }
+.nx-side-trail { display: inline-flex; }
+.nx-side-one { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.nx-side-labels { display: flex; flex-wrap: wrap; gap: 4px; }
+.nx-side-ms { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.nx-linked li { align-items: flex-start; }
+.nx-linked li svg { margin-top: 2px; flex: none; }
+
+/* ---------- the impact checks ---------- */
+.nx-checks { display: grid; grid-template-columns: 296px minmax(0, 1fr); gap: 24px; align-items: start; }
+.nx-checks-list { border: 1px solid var(--borderColor-default); border-radius: 6px; overflow: hidden; }
+.nx-checks-title { padding: 12px 16px; font-weight: 600; background: var(--bgColor-muted); border-bottom: 1px solid var(--borderColor-default); display: flex; flex-direction: column; }
+.nx-checks-title .nx-fg-muted { font-weight: 400; }
+.nx-check-pane { min-width: 0; }
+.nx-check-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--borderColor-muted); }
+.nx-check-head h2 { font-size: 20px; font-weight: 600; }
+.nx-check-sum { margin: 16px 0; font-size: 16px; }
+.nx-check-pane .nx-legend { margin-bottom: 4px; }
+
+.nx-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 20px; padding: 8px 12px; background: var(--bgColor-muted); border: 1px solid var(--borderColor-default); border-radius: 6px; font-size: 12px; }
+.nx-legend-title { font-weight: 600; }
+.nx-legend .k { display: inline-flex; align-items: center; gap: 6px; }
+.nx-legend .hint { color: var(--fgColor-muted); }
+.nx-legend .n { color: var(--fgColor-muted); font-variant-numeric: tabular-nums; }
+.nx-sample { text-decoration-line: underline; text-decoration-color: var(--c); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.nx-sample.nx-ev-assumption { text-decoration-style: dashed; }
+.nx-sample.nx-ev-computation { text-decoration-style: dotted; text-decoration-thickness: 2px; }
+.nx-sample.nx-ev-judgment { text-decoration-style: double; text-decoration-thickness: 3px; }
+
+.nx-table { width: 100%; border-collapse: collapse; }
+.nx-table th {
+  text-align: left; font-size: 12px; font-weight: 600; color: var(--fgColor-muted); padding: 8px 16px; border-bottom: 1px solid var(--borderColor-default);
+}
+.nx-table td { padding: 8px 16px; border-bottom: 1px solid var(--borderColor-muted); vertical-align: top; }
+.nx-table .r { text-align: right; white-space: nowrap; }
+.nx-table tr.blk td { background: var(--bgColor-muted); font-weight: 600; vertical-align: middle; }
+.nx-table tr.net td { border-top: 2px solid var(--borderColor-default); border-bottom: 0; font-weight: 600; font-size: 16px; vertical-align: middle; }
+.nx-check-pane .nx-legend { margin-bottom: 0; }
+
+.nx-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 16px; }
+.nx-stat { border: 1px solid var(--borderColor-default); border-radius: 6px; padding: 16px; }
+.nx-stat-label { font-size: 12px; font-weight: 600; color: var(--fgColor-muted); }
+.nx-stat-value { font-size: 24px; font-weight: 600; margin-top: 4px; line-height: 1.3; }
+.nx-stat-value b { font-weight: 600; }
+.nx-stat-sub { margin-top: 4px; font-size: 12px; color: var(--fgColor-muted); }
+.nx-plain { list-style: none; padding: 0; }
+.nx-plain li { display: flex; justify-content: space-between; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--borderColor-muted); }
+.nx-plain li:first-child { border-top: 0; }
 
 /* ---------- charts ---------- */
-.nx-chart { padding: 6px 18px 14px; position: relative; }
+.nx-chart { padding: 8px 16px 16px; position: relative; }
 .nx-chart > svg { display: block; width: 100%; height: auto; overflow: visible; }
-.nx-chart text { font-family: inherit; fill: var(--mute); font-size: 11.5px; }
-.nx-chart text.ink { fill: var(--ink); font-weight: 600; }
-.nx-chart text.halo { paint-order: stroke; stroke: rgba(236, 247, 244, 0.96); stroke-width: 4px; stroke-linejoin: round; }
-.nx-chart text.ink2 { fill: var(--ink2); }
-.nx-chart .grid { stroke: var(--line); stroke-width: 1; }
-.nx-chart .axis { stroke: #d9d5cc; stroke-width: 1; }
+.nx-chart text { font-family: var(--fontStack-system); fill: var(--fgColor-muted); font-size: 11.5px; }
+.nx-chart text.ink { fill: var(--fgColor-default); font-weight: 600; }
+.nx-chart text.ink2 { fill: var(--fgColor-muted); }
+.nx-chart text.halo { paint-order: stroke; stroke: var(--bgColor-default); stroke-width: 4px; stroke-linejoin: round; }
+.nx-chart .grid { stroke: var(--borderColor-muted); stroke-width: 1; }
+.nx-chart .axis { stroke: var(--borderColor-default); stroke-width: 1; }
 .nx-tip {
   position: absolute; pointer-events: none; z-index: 5; transform: translate(-50%, -100%);
-  background: var(--ink); color: #fff; border-radius: 8px; padding: 7px 10px; font-size: 12.5px; line-height: 1.35; white-space: nowrap;
+  background: var(--fgColor-default); color: var(--bgColor-default); border-radius: 6px; padding: 6px 10px; font-size: 12px; line-height: 1.4; white-space: nowrap;
 }
-.nx-tip b { font-weight: 650; }
-.nx-tip small { display: block; color: #cfcbc1; font-size: 11.5px; }
+.nx-tip small { display: block; opacity: 0.8; font-size: 11px; }
 .nx-bar-hit { cursor: pointer; }
 .nx-bar-hit:hover .bar { filter: brightness(0.92); }
 .nx-bar-hit:focus-visible { outline: none; }
-.nx-bar-hit:focus-visible .bar { stroke: var(--ink); stroke-width: 2; }
+.nx-bar-hit:focus-visible .bar { stroke: var(--fgColor-default); stroke-width: 2; }
 
-/* ---------- decision (the merge box) ---------- */
-.nx-decide .sec { padding: 14px 18px; border-top: 1px solid var(--line2); }
-.nx-decide .sec:first-child { border-top: 0; }
-.nx-decide .verdict { display: flex; gap: 12px; align-items: flex-start; padding: 16px 18px; }
-.nx-decide .check {
-  flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
-  background: #e6f2ea; color: var(--good);
-}
-.nx-decide .check.wait { background: #f1eee6; color: #7c6a3a; }
-.nx-decide .verdict h2 { font-size: 16.5px; font-weight: 650; line-height: 1.3; }
-.nx-decide .verdict ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.nx-decide .verdict li { display: flex; gap: 8px; align-items: flex-start; color: var(--ink2); font-size: 13.5px; line-height: 1.4; }
-.nx-decide .verdict li .nx-glyph { margin-top: 5px; }
-.nx-decide .row { display: flex; align-items: center; gap: 10px; }
-.nx-decide .sec h3 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute); margin-bottom: 8px; }
-.nx-decide .why { font-size: 12.5px; color: var(--mute); margin-top: 6px; }
-.nx-prog { display: flex; gap: 3px; margin: 2px 0 10px; }
-.nx-prog i { flex: 1; height: 5px; border-radius: 3px; background: var(--line); }
-.nx-prog i.ok { background: var(--good); }
-.nx-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.nx-steps li { display: flex; align-items: center; gap: 10px; min-height: 34px; font-size: 13.5px; }
-.nx-steps .who { flex: 1; min-width: 0; }
-.nx-steps .who span { color: var(--mute); }
-.nx-steps .st { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--mute); }
-.nx-steps .ico { width: 18px; height: 18px; flex: none; }
-.nx-need { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
-.nx-need li { display: flex; gap: 9px; align-items: flex-start; font-size: 13.5px; }
-.nx-need li span { color: var(--mute); }
-.nx-release {
-  width: 100%; height: 38px; border-radius: 8px; border: 1px solid var(--line); background: #f1efe9; color: #a8a499;
-  font-weight: 600; cursor: not-allowed;
-}
+/* ---------- the changes (files changed) ---------- */
+.nx-changes-summary { margin-bottom: 16px; color: var(--fgColor-muted); }
+.nx-add { color: var(--fgColor-success); font-weight: 600; }
+.nx-del { color: var(--fgColor-danger); font-weight: 600; }
+.nx-diff { border: 1px solid var(--borderColor-default); border-radius: 6px; margin-bottom: 16px; overflow: hidden; background: var(--bgColor-default); }
+.nx-diff-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bgColor-muted); border-bottom: 1px solid var(--borderColor-default); }
+.nx-diff-toggle { appearance: none; border: 0; background: none; padding: 4px; cursor: pointer; color: var(--fgColor-muted); display: inline-flex; border-radius: 6px; }
+.nx-diff-toggle:hover { background: var(--bgColor-neutral-muted); }
+.nx-diff-stat { font-family: var(--fontStack-monospace); font-size: 12px; }
+.nx-diff-title { font-weight: 600; }
+.nx-diff-table { width: 100%; border-collapse: collapse; font-family: var(--fontStack-monospace); font-size: 12px; line-height: 20px; }
+.nx-diff-table td { padding: 0; vertical-align: top; }
+.nx-diff-table .ln { width: 48px; min-width: 48px; text-align: right; padding: 0 10px; color: var(--fgColor-muted); user-select: none; }
+.nx-diff-table .mk { width: 20px; text-align: center; color: var(--fgColor-muted); user-select: none; }
+.nx-diff-table .tx { padding-right: 16px; white-space: pre; }
+.nx-diff-table .tx code { font-size: 12px; }
+.nx-remark { color: var(--fgColor-muted); }
+.nx-line.add td { background: var(--diffBlob-additionLine-bgColor); }
+.nx-line.add td.ln { background: var(--diffBlob-additionNum-bgColor); color: var(--fgColor-default); }
+.nx-line.del td { background: var(--diffBlob-deletionLine-bgColor); }
+.nx-line.del td.ln { background: var(--diffBlob-deletionNum-bgColor); color: var(--fgColor-default); }
 
-.nx-whatif .it { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line2); font-size: 13.5px; }
-.nx-whatif .it:first-of-type { border-top: 0; }
-.nx-whatif .it span { color: var(--ink2); }
+/* ---------- the revisions (commits) ---------- */
+.nx-revs { max-width: 1012px; }
+.nx-revs-day { font-size: 14px; font-weight: 400; color: var(--fgColor-muted); margin: 0 0 8px; }
+.nx-rev-list { list-style: none; padding: 0; margin: 0 0 24px; }
+.nx-rev-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; border-top: 1px solid var(--borderColor-muted); }
+.nx-rev-list li:first-child { border-top: 0; }
+.nx-rev-by { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-top: 4px; }
+.nx-rev-id { background: var(--bgColor-neutral-muted); border-radius: 6px; padding: 2px 8px; }
 
-/* ---------- activity ---------- */
-.nx-tl { list-style: none; margin: 0; padding: 4px 18px 8px; position: relative; }
-.nx-tl li { display: flex; gap: 12px; padding: 9px 0; position: relative; }
-.nx-tl li::before { content: ''; position: absolute; left: 11px; top: 36px; bottom: -9px; width: 1px; background: var(--line); }
-.nx-tl li:last-child::before { display: none; }
-.nx-tl .body { min-width: 0; flex: 1; }
-.nx-tl .who { display: flex; align-items: baseline; gap: 6px; font-size: 13px; line-height: 1.4; }
-.nx-tl .who b { font-weight: 650; font-size: 13.5px; }
-.nx-tl .who .for { color: var(--mute); }
-.nx-tl .who .sp { flex: 1; }
-.nx-tl .what { font-size: 13.5px; color: var(--ink); line-height: 1.4; margin-top: 1px; }
-.nx-tl .detail { font-size: 12.5px; color: var(--mute); margin-top: 2px; line-height: 1.4; }
-.nx-tl .time { font-size: 12px; color: var(--mute); white-space: nowrap; padding-top: 2px; }
-.nx-tl .lvl { margin-left: 6px; }
-.nx-tl .badge { font-size: 11.5px; padding: 1px 7px; border-radius: 5px; background: var(--line2); color: var(--ink2); margin-left: 6px; font-weight: 550; white-space: nowrap; }
-.nx-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--ink2); animation: nxspin 0.9s linear infinite; }
-@keyframes nxspin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .nx-spin { animation: none; } }
-
-/* ---------- why drawer ---------- */
-.nx-drawer {
-  position: fixed; top: 52px; right: 0; bottom: 0; z-index: 30; width: 480px; max-width: 94vw;
-  background: #fff; border-left: 1px solid var(--line); box-shadow: -18px 0 40px rgba(27, 26, 23, 0.08);
-  display: flex; flex-direction: column;
-  animation: nxslide 0.18s ease-out;
-}
-@keyframes nxslide { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
-.nx-drawer .dh { padding: 14px 20px 0; display: flex; align-items: center; gap: 8px; }
-.nx-drawer .dh .back { border: 0; background: var(--line2); border-radius: 6px; height: 26px; padding: 0 9px; font-size: 12.5px; color: var(--ink2); }
-.nx-drawer .dh .back:hover { background: var(--line); }
-.nx-drawer .dh .x { margin-left: auto; border: 0; background: transparent; width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; color: var(--ink2); }
-.nx-drawer .dh .x:hover { background: var(--line2); }
-.nx-drawer .scroll { overflow-y: auto; padding: 8px 20px 28px; flex: 1; }
-.nx-drawer .cls { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--ink2); }
-.nx-drawer h2 { font-size: 19px; line-height: 1.3; font-weight: 650; margin-top: 6px; letter-spacing: -0.01em; }
-.nx-drawer .val { margin-top: 12px; padding: 14px 16px; border-radius: 10px; background: color-mix(in srgb, var(--c) 8%, #fff); border: 1px solid color-mix(in srgb, var(--c) 28%, #fff); }
-.nx-drawer .val .v { font-size: 30px; line-height: 1.1; font-weight: 650; letter-spacing: -0.02em; }
-.nx-drawer .val .r { margin-top: 4px; color: var(--ink2); font-size: 13.5px; }
-.nx-drawer .sum { margin-top: 14px; color: var(--ink2); font-size: 14px; line-height: 1.55; }
-.nx-drawer section { margin-top: 22px; }
-.nx-drawer h3 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute); margin-bottom: 6px; }
-.nx-list { list-style: none; margin: 0; padding: 0; }
-.nx-list li { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line2); font-size: 13.5px; }
-.nx-list li:first-child { border-top: 0; }
-.nx-list .t { flex: 1; min-width: 0; }
-.nx-list .t .s { display: block; font-size: 12.5px; color: var(--mute); margin-top: 1px; line-height: 1.4; }
-.nx-list .v { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.nx-list button.go { all: unset; cursor: pointer; display: flex; align-items: flex-start; gap: 10px; width: 100%; border-radius: 6px; }
-.nx-list button.go:hover { background: var(--hover); }
-.nx-list button.go:focus-visible { outline: 2px solid var(--ink); }
-.nx-list .chev { color: #b9b5aa; margin-top: 2px; }
-.nx-origin { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 7px; border-radius: 5px; background: var(--line2); color: var(--ink2); white-space: nowrap; }
-.nx-origin.agent_estimated { background: #fbf0e3; color: #8a4f12; }
-.nx-sys { flex: none; width: 54px; font-size: 11.5px; font-weight: 650; color: var(--ink2); background: var(--line2); border-radius: 5px; text-align: center; padding: 1px 0; letter-spacing: 0.03em; }
-.nx-formula { background: #faf9f6; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
-.nx-formula .e { color: var(--ink2); font-size: 13px; }
-.nx-formula .w { margin-top: 6px; font-size: 13.5px; font-weight: 550; }
-.nx-by { display: flex; gap: 10px; align-items: flex-start; padding-top: 4px; font-size: 13.5px; }
-.nx-by .s { font-size: 12.5px; color: var(--mute); }
-
-/* ---------- list ---------- */
-.nx-list-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 16px; }
-.nx-list-head h1 { font-size: 24px; font-weight: 650; letter-spacing: -0.01em; }
-.nx-list-head p { color: var(--mute); margin-top: 2px; }
-.nx-sum { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
-.nx-sum .nx-card { padding: 14px 18px; }
-.nx-sum .lab { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute); }
-.nx-sum .v { font-size: 28px; font-weight: 650; letter-spacing: -0.02em; margin-top: 4px; line-height: 1.15; }
-.nx-sum .s { font-size: 12.5px; color: var(--mute); margin-top: 2px; }
-.nx-filters { display: flex; gap: 8px; margin-bottom: 12px; }
-.nx-filters button {
-  height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff; font-size: 13px; color: var(--ink2);
-}
-.nx-filters button:hover { background: var(--hover); }
-.nx-filters button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
-.nx-filters button span { opacity: 0.6; margin-left: 5px; }
-.nx-table { width: 100%; border-collapse: collapse; }
-.nx-table th {
-  font-size: 11.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--mute);
-  text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); white-space: nowrap;
-}
-.nx-table th.r, .nx-table td.r { text-align: right; }
-.nx-table td { padding: 12px 14px; border-bottom: 1px solid var(--line2); vertical-align: middle; }
-.nx-table tr.go { cursor: pointer; }
-.nx-table tr.go:hover td { background: var(--hover); }
-.nx-table tr:last-child td { border-bottom: 0; }
-.nx-table th:first-child, .nx-table td:first-child { padding-left: 18px; }
-.nx-table th:last-child, .nx-table td:last-child { padding-right: 18px; }
-.nx-table .id { font-weight: 650; font-size: 13px; white-space: nowrap; }
-.nx-table .ti { font-weight: 500; line-height: 1.35; max-width: 520px; }
-.nx-table .flag { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: 12.5px; color: var(--ink2); }
-.nx-table .cost { font-weight: 600; white-space: nowrap; }
-.nx-table .cost small { display: block; font-weight: 400; color: var(--mute); font-size: 12px; }
-.nx-table .st { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; font-size: 13px; }
-.nx-table .la { white-space: nowrap; color: var(--ink2); font-size: 13px; }
-.nx-table .la small { display: block; color: var(--mute); font-size: 12px; }
-.nx-ecr-cell { display: flex; flex-direction: column; }
-
-@media print { .nx-bar { position: static; } }
+/* ---------- the "why" panel ---------- */
+.nx-why-head { display: flex; align-items: flex-start; gap: 8px; width: 100%; }
+.nx-why-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.nx-why-class { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.nx-why { padding: 0 4px 16px; }
+.nx-why-value { padding: 16px; border: 1px solid var(--borderColor-default); border-left: 3px solid var(--c); border-radius: 6px; background: var(--bgColor-muted); }
+.nx-why-value .v { font-size: 28px; font-weight: 600; line-height: 1.2; }
+.nx-why-value .r { margin-top: 2px; color: var(--fgColor-muted); }
+.nx-why-sum { margin: 16px 0 0; color: var(--fgColor-default); }
+.nx-why-h { margin: 24px 0 8px; font-size: 12px; font-weight: 600; color: var(--fgColor-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.nx-why-formula { border: 1px solid var(--borderColor-default); border-radius: 6px; padding: 12px; background: var(--bgColor-muted); }
+.nx-why-formula .num { margin-top: 6px; }
+.nx-why .num, .nx-why-head .num { font-variant-numeric: tabular-nums; }
+.nx-why code { font-family: var(--fontStack-monospace); font-size: 12px; }
+.nx-trail { display: inline-flex; align-items: center; gap: 4px; color: var(--fgColor-default); }
+.nx-noact { cursor: default; }
+.nx-by { display: flex; gap: 12px; align-items: flex-start; }

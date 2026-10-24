@@ -150,6 +150,19 @@ export interface Needed {
 
 export type ActorKind = 'norn' | 'person' | 'person_agent' | 'system';
 
+/** What kind of timeline entry an event is, so the page can pick GitHub's icon and wording. */
+export type EventKind =
+  | 'filed'
+  | 'ran_checks'
+  | 'report'
+  | 'label'
+  | 'review_requested'
+  | 'approved'
+  | 'changes_requested'
+  | 'comment'
+  | 'research'
+  | 'policy';
+
 export interface ActivityEvent {
   id: string;
   /** ISO timestamp. */
@@ -160,6 +173,7 @@ export interface ActivityEvent {
   onBehalfOf?: string;
   /** What spawned it: "Norn, automatically". */
   spawnedBy?: string;
+  kind?: EventKind;
   text: string;
   detail?: string;
   /** A report that was published by this step. */
@@ -215,7 +229,14 @@ export interface EcrSummary {
   companyClass: 'I' | 'II';
   faa: 'major' | 'minor';
   priority: 'Routine' | 'Urgent' | 'Emergency';
-  status: 'Draft' | 'Submitted' | 'In review' | 'Approved' | 'ECO released';
+  status: 'Draft' | 'Submitted' | 'In review' | 'Approved' | 'ECO released' | 'Rejected';
+  /** Reviewers and how far they got, for the list's avatars and the "Review required" text. */
+  reviewers?: { name: string; state: 'approved' | 'pending' }[];
+  /** Status of the impact checks, for the list's check icon. */
+  checks?: 'passed' | 'attention' | 'running';
+  comments?: number;
+  /** What the ECR changes, for the subline: "BW-5120-210 from Rev B to Rev C". */
+  change?: string;
   /** Year-1 cost change with its range; negative is a saving. Absent until Norn has run. */
   cost?: { p10: number; p50: number; p90: number };
   level?: ReportLevel;
@@ -226,6 +247,57 @@ export interface EcrSummary {
   /** One short flag the backlog list can show, e.g. "Conflicts with ECR-0415". */
   flag?: string;
   hasAssessment: boolean;
+}
+
+/** One impact check (the stages S1 to S4 and the classification), as GitHub's Checks tab lists them. */
+export interface Check {
+  id: 'bom' | 'cost' | 'timeline' | 'supply' | 'class';
+  name: string;
+  state: 'passed' | 'attention' | 'running' | 'skipped';
+  /** One line for the checks list and the approval box. */
+  summary: string;
+  took: string;
+  by: string;
+}
+
+/** One line of a diff. */
+export interface DiffLine {
+  kind: 'ctx' | 'add' | 'del';
+  text: string;
+  /** A trailing remark, shown muted. */
+  remark?: string;
+}
+
+/** One block of the Changes tab: an item, a supplier record, a stock position. */
+export interface ChangedItem {
+  id: string;
+  title: string;
+  subtitle?: string;
+  /** What it does to the cost, in the block header: "+$415.20 per aircraft". */
+  impact?: string;
+  lines: DiffLine[];
+}
+
+/** One edit of the request itself (the Revisions tab). */
+export interface Revision {
+  id: string;
+  message: string;
+  author: string;
+  at: string;
+}
+
+export interface LinkedRecord {
+  kind: 'NCR' | 'ECO' | 'ECR' | 'Quote';
+  ref: string;
+  title: string;
+  state: 'open' | 'closed' | 'released' | 'valid';
+}
+
+/** The CCB meeting that decides, shown like a milestone. */
+export interface Meeting {
+  label: string;
+  /** ISO date. */
+  date: string;
 }
 
 /** The impact assessment a CFO or CCB member reads. */
@@ -248,5 +320,12 @@ export interface ImpactAssessment {
   recommendation: Recommendation;
   needed: Needed[];
   activity: ActivityEvent[];
+  /** The ECR text, as the opening comment. */
+  body: { heading: string; text: string }[];
+  checks: Check[];
+  changes: ChangedItem[];
+  revisions: Revision[];
+  linked: LinkedRecord[];
+  meeting: Meeting;
   traces: Record<string, Trace>;
 }

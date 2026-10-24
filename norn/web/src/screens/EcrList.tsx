@@ -1,154 +1,188 @@
 import { useMemo, useState } from 'react';
+import {
+  AlertFillIcon, CheckCircleFillIcon, CheckIcon, CommentIcon, DotFillIcon, GitPullRequestIcon, SearchIcon,
+} from '@primer/octicons-react';
+import { ActionList, ActionMenu, AvatarStack, Label, TextInput } from '@primer/react';
 import { source } from '../assessment/source.ts';
 import type { EcrSummary } from '../assessment/types.ts';
-import { LevelPill, StatusIcon } from '../ui/Bits.tsx';
-import { Glyph } from '../ui/Evidence.tsx';
+import { isOpen, LevelLabel, Person, StateIcon } from '../ui/Bits.tsx';
 import { ago, usdK } from '../ui/fmt.ts';
-import { navigate } from '../router.tsx';
+import { Link, navigate } from '../router.tsx';
+import { RepoHeader } from './Shell.tsx';
 
-type Filter = 'all' | 'decision' | 'flagged' | 'done';
+type Pick1 = string | null;
 
-const needsDecision = (e: EcrSummary) => e.status === 'In review' || (e.level === 3 && e.status !== 'Approved');
-const done = (e: EcrSummary) => e.status === 'Approved' || e.status === 'ECO released';
+function reviewText(e: EcrSummary): string {
+  if (e.status === 'ECO released') return 'Released';
+  if (e.status === 'Approved') return 'Approved';
+  const r = e.reviewers ?? [];
+  if (!r.length) return 'No reviewers';
+  const done = r.filter(x => x.state === 'approved').length;
+  return done ? `Review required · ${done} of ${r.length} approved` : 'Review required';
+}
+
+function Filter({ label, options, value, onChange }: { label: string; options: string[]; value: Pick1; onChange: (v: Pick1) => void }) {
+  return (
+    <ActionMenu>
+      <ActionMenu.Button variant="invisible" size="small" className={value ? 'nx-filter on' : 'nx-filter'}>
+        {value ? `${label}: ${value}` : label}
+      </ActionMenu.Button>
+      <ActionMenu.Overlay width="small">
+        <ActionList selectionVariant="single">
+          <ActionList.Item selected={value === null} onSelect={() => onChange(null)}>Any</ActionList.Item>
+          <ActionList.Divider />
+          {options.map(o => (
+            <ActionList.Item key={o} selected={value === o} onSelect={() => onChange(o)}>{o}</ActionList.Item>
+          ))}
+        </ActionList>
+      </ActionMenu.Overlay>
+    </ActionMenu>
+  );
+}
+
+const SORTS = ['Newest', 'Oldest', 'Largest cost', 'Recently updated'] as const;
+const PROGRAMS = ['Vesper', 'Meridian'];
+const CLASSES = ['Class I', 'Class II'];
+const LEVELS = ['Level 1', 'Level 2', 'Level 3'];
+const APPROVALS = ['Review required', 'Approved'];
 
 export function EcrList() {
   const all = source.listEcrs();
-  const [filter, setFilter] = useState<Filter>('all');
+  const [query, setQuery] = useState('is:open');
+  const [who, setWho] = useState<Pick1>(null);
+  const [program, setProgram] = useState<Pick1>(null);
+  const [cls, setCls] = useState<Pick1>(null);
+  const [level, setLevel] = useState<Pick1>(null);
+  const [approvals, setApprovals] = useState<Pick1>(null);
+  const [sort, setSort] = useState<(typeof SORTS)[number]>('Newest');
 
-  const counts = useMemo(
-    () => ({
-      all: all.length,
-      decision: all.filter(needsDecision).length,
-      flagged: all.filter(e => e.flag && !done(e)).length,
-      done: all.filter(done).length,
-    }),
-    [all]
-  );
-  const rows = all.filter(e => {
-    if (filter === 'decision') return needsDecision(e);
-    if (filter === 'flagged') return !!e.flag && !done(e);
-    if (filter === 'done') return done(e);
-    return true;
-  });
+  const state = /\bis:closed\b/.test(query) ? 'closed' : /\bis:open\b/.test(query) ? 'open' : 'any';
+  const text = query.replace(/\bis:(open|closed)\b/g, '').trim().toLowerCase();
+  const setState = (s: 'open' | 'closed') => setQuery(`is:${s}${text ? ' ' + text : ''}`);
 
-  const open = all.filter(e => !done(e));
-  const cost = open.reduce((s, e) => s + (e.cost?.p50 ?? 0), 0);
-  const level3 = all.filter(e => e.level === 3).length;
+  const nOpen = all.filter(e => isOpen(e.status)).length;
+  const nClosed = all.length - nOpen;
+
+  const rows = useMemo(() => {
+    const matches = all.filter(e => {
+      if (state === 'open' && !isOpen(e.status)) return false;
+      if (state === 'closed' && isOpen(e.status)) return false;
+      if (who && e.originator !== who) return false;
+      if (program && e.program !== program) return false;
+      if (cls && `Class ${e.companyClass}` !== cls) return false;
+      if (level && `Level ${e.level}` !== level) return false;
+      if (approvals) {
+        const r = e.reviewers ?? [];
+        const done = r.length > 0 && r.every(x => x.state === 'approved');
+        if (approvals === 'Approved' && !done) return false;
+        if (approvals === 'Review required' && done) return false;
+      }
+      if (text && !`${e.id} ${e.title} ${e.originator}`.toLowerCase().includes(text)) return false;
+      return true;
+    });
+    return matches.sort((a, b) => {
+      if (sort === 'Oldest') return a.id.localeCompare(b.id);
+      if (sort === 'Largest cost') return Math.abs(b.cost?.p50 ?? 0) - Math.abs(a.cost?.p50 ?? 0);
+      if (sort === 'Recently updated') return b.lastActivity.localeCompare(a.lastActivity);
+      return b.id.localeCompare(a.id);
+    });
+  }, [all, state, who, program, cls, level, approvals, text, sort]);
+
+  const people = [...new Set(all.map(e => e.originator))].sort();
 
   return (
-    <div className="nx-wrap">
-      <div className="nx-list-head">
-        <div>
-          <h1>Engineering change requests</h1>
-          <p>Bowman Aviation &middot; Vesper and Meridian</p>
+    <>
+      <RepoHeader mock />
+      <main className="nx-container nx-list">
+        <div className="nx-searchbar">
+          <TextInput
+            block
+            leadingVisual={SearchIcon}
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            aria-label="Search ECRs"
+            placeholder="Search all ECRs"
+          />
         </div>
-      </div>
 
-      <div className="nx-sum">
-        <div className="nx-card">
-          <div className="lab">Open</div>
-          <div className="v num">{open.length}</div>
-          <div className="s">{counts.done} approved this week</div>
-        </div>
-        <div className="nx-card">
-          <div className="lab">Year-1 impact, open</div>
-          <div className="v num">{usdK(cost, { plus: true })}</div>
-          <div className="s">Sum of medians, 2027</div>
-        </div>
-        <div className="nx-card">
-          <div className="lab">Next CCB</div>
-          <div className="v">Nov 12</div>
-          <div className="s">{counts.decision} waiting on a decision</div>
-        </div>
-        <div className="nx-card">
-          <div className="lab">Final verdicts</div>
-          <div className="v num">{level3} <span className="mute" style={{ fontSize: 16, fontWeight: 450 }}>of {all.length}</span></div>
-          <div className="s">The rest are provisional</div>
-        </div>
-      </div>
+        <div className="nx-box" data-testid="ecr-table">
+          <div className="nx-box-head">
+            <div className="nx-states">
+              <button type="button" className={`nx-state ${state === 'open' ? 'on' : ''}`} onClick={() => setState('open')}>
+                <GitPullRequestIcon size={16} /> {nOpen} Open
+              </button>
+              <button type="button" className={`nx-state ${state === 'closed' ? 'on' : ''}`} onClick={() => setState('closed')}>
+                <CheckIcon size={16} /> {nClosed} Closed
+              </button>
+            </div>
+            <span className="nx-sp" />
+            <div className="nx-filters">
+              <Filter label="Originator" options={people} value={who} onChange={setWho} />
+              <Filter label="Label" options={LEVELS} value={level} onChange={setLevel} />
+              <Filter label="Program" options={PROGRAMS} value={program} onChange={setProgram} />
+              <Filter label="Class" options={CLASSES} value={cls} onChange={setCls} />
+              <Filter label="Approvals" options={APPROVALS} value={approvals} onChange={setApprovals} />
+              <ActionMenu>
+                <ActionMenu.Button variant="invisible" size="small" className="nx-filter">Sort</ActionMenu.Button>
+                <ActionMenu.Overlay width="small">
+                  <ActionList selectionVariant="single">
+                    {SORTS.map(s => (
+                      <ActionList.Item key={s} selected={sort === s} onSelect={() => setSort(s)}>{s}</ActionList.Item>
+                    ))}
+                  </ActionList>
+                </ActionMenu.Overlay>
+              </ActionMenu>
+            </div>
+          </div>
 
-      <div className="nx-filters" role="tablist">
-        {([
-          ['all', 'All'],
-          ['decision', 'Needs a decision'],
-          ['flagged', 'Flagged by Norn'],
-          ['done', 'Approved'],
-        ] as [Filter, string][]).map(([k, label]) => (
-          <button key={k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)} role="tab" aria-selected={filter === k}>
-            {label}<span>{counts[k]}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="nx-card" style={{ overflow: 'hidden' }}>
-        <table className="nx-table" data-testid="ecr-table">
-          <thead>
-            <tr>
-              <th>ECR</th>
-              <th>Title</th>
-              <th>Program</th>
-              <th>Class</th>
-              <th>Status</th>
-              <th className="r">Cost impact, 2027</th>
-              <th>Report</th>
-              <th>Last activity</th>
-            </tr>
-          </thead>
-          <tbody>
+          <ul className="nx-rows">
             {rows.map(e => (
-              <tr
-                key={e.id}
-                className="go"
-                data-testid={`row-${e.id}`}
-                tabIndex={0}
-                onClick={() => navigate(`/ecr/${e.id}`)}
-                onKeyDown={ev => ev.key === 'Enter' && navigate(`/ecr/${e.id}`)}
-              >
-                <td>
-                  <div className="nx-ecr-cell">
-                    <span className="id">{e.id}</span>
+              <li key={e.id} className="nx-row" data-testid={`row-${e.id}`} onClick={() => navigate(`/ecr/${e.id}`)}>
+                <span className="nx-row-state"><StateIcon status={e.status} /></span>
+                <div className="nx-row-main">
+                  <div className="nx-row-title">
+                    <Link to={`/ecr/${e.id}`} className="nx-row-link" onClick={ev => ev.stopPropagation()}>{e.title}</Link>
+                    <span className="nx-row-labels">
+                      <Label variant="secondary">Class {e.companyClass}</Label>
+                      {e.priority !== 'Routine' && <Label variant="severe">{e.priority}</Label>}
+                      {e.level && <LevelLabel level={e.level} />}
+                    </span>
                   </div>
-                </td>
-                <td>
-                  <div className="ti">{e.title}</div>
-                  {e.flag && (
-                    <div className="flag">
-                      <Glyph ev="judgment" size={9} />
-                      {e.flag}
-                    </div>
-                  )}
-                </td>
-                <td className="la">
-                  {e.program}
-                  {e.partNumber && <small className="mono">{e.partNumber}</small>}
-                </td>
-                <td className="la">
-                  Class {e.companyClass}
-                  <small>FAA {e.faa}</small>
-                </td>
-                <td>
-                  <span className="st"><StatusIcon status={e.status} /> {e.status}</span>
-                </td>
-                <td className="r">
-                  {e.cost ? (
-                    <div className="cost num">
-                      {usdK(e.cost.p50, { plus: true })}
-                      <small>{usdK(e.cost.p10)} &ndash; {usdK(e.cost.p90)}</small>
-                    </div>
-                  ) : (
-                    <span className="mute">&ndash;</span>
-                  )}
-                </td>
-                <td><LevelPill level={e.level} /></td>
-                <td className="la">
-                  {ago(e.lastActivity)}
-                  <small>{e.lastActivityBy}</small>
-                </td>
-              </tr>
+                  <div className="nx-row-sub">
+                    {e.id} filed {ago(e.filedOn + 'T12:00:00-07:00')} by {e.originator} &middot; {reviewText(e)}
+                    {e.flag && isOpen(e.status) && (
+                      <span className="nx-flag"> &middot; <AlertFillIcon size={12} className="nx-fg-attention" /> {e.flag}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="nx-row-right">
+                  <span className="nx-row-check">
+                    {e.checks === 'passed' && <CheckCircleFillIcon size={16} className="nx-fg-success" aria-label="Checks passed" />}
+                    {e.checks === 'attention' && <DotFillIcon size={16} className="nx-fg-attention" aria-label="A check needs attention" />}
+                    {e.checks === 'running' && <DotFillIcon size={16} className="nx-fg-attention" aria-label="Checks running" />}
+                  </span>
+                  <span className="nx-row-av">
+                    {e.reviewers && e.reviewers.length > 0 && (
+                      <AvatarStack alignRight>
+                        {e.reviewers.slice(0, 3).map(r => (
+                          <Person key={r.name} name={r.name} kind={r.name === 'Norn' ? 'norn' : 'person'} size={20} />
+                        ))}
+                      </AvatarStack>
+                    )}
+                  </span>
+                  <span className="nx-row-comments">
+                    {(e.comments ?? 0) > 0 && (<><CommentIcon size={16} /> {e.comments}</>)}
+                  </span>
+                  <span className="nx-row-cost num" title="Year-1 cost impact, 2027">
+                    {e.cost ? usdK(e.cost.p50, { plus: true }) : ''}
+                  </span>
+                </div>
+              </li>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+            {rows.length === 0 && <li className="nx-empty">No ECRs match this search.</li>}
+          </ul>
+        </div>
+      </main>
+    </>
   );
 }

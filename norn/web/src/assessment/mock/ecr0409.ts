@@ -2,7 +2,8 @@
 // cost dominates and certification sets the date (bowman/data scenarios.ts, S2). MOCK, Level 1 only,
 // still under review, so some lines are honestly "not assessed".
 import { likelihoodWord, runModel, type InputDef, type RowDef } from '../engine.ts';
-import type { ActivityEvent, CostRow, EcrSummary, ImpactAssessment } from '../types.ts';
+import type { ActivityEvent, Check, CostRow, EcrSummary, ImpactAssessment } from '../types.ts';
+import { detail0409 } from './details.ts';
 import { dateShort, usdK } from '../../ui/fmt.ts';
 
 const DAY = 86400000;
@@ -191,6 +192,13 @@ tr['coupling'] = model.makeTrace('coupling', 'Interaction with ECR-0417', 'judgm
 });
 
 const net = model.net;
+const checks: Check[] = [
+  { id: 'bom', name: 'BOM delta', state: 'passed', summary: '4 item changes, 7 BOM lines', took: '0.6 s', by: 'Reader' },
+  { id: 'cost', name: 'Cost', state: 'attention', summary: `Year 1 ${usdK(net.p50, { plus: true })} for the assessed lines, and 3 lines not assessed`, took: '5.0 s', by: 'Cost check' },
+  { id: 'timeline', name: 'Time to the line', state: 'passed', summary: 'Cut-in Dec 2027, set by FAA acceptance', took: '1.4 s', by: 'Timeline check' },
+  { id: 'supply', name: 'Supply risk', state: 'attention', summary: 'New tooling from one supplier, 34 weeks', took: '2.6 s', by: 'Supply agent' },
+  { id: 'class', name: 'Classification', state: 'passed', summary: 'Class I, FAA major', took: '0.7 s', by: 'Router' },
+];
 const rowsOut: CostRow[] = model.rows.map(r => (unassessed.has(r.id) ? { ...r, notAssessed: true } : r));
 const level = 1 as const;
 
@@ -200,18 +208,21 @@ export const ecr0409Summary: EcrSummary = {
   cost: { p10: net.p10!, p50: net.p50, p90: net.p90! }, level,
   lastActivity: '2026-10-24T08:52:00-07:00', lastActivityBy: 'Norn is reviewing Level 1',
   originator: 'Maren Solheim', filedOn: '2026-10-05', flag: 'Retrofit of built aircraft is not scoped', hasAssessment: true,
+  reviewers: [{ name: 'Gideon Falk', state: 'pending' }, { name: 'Beatriz Nowak', state: 'pending' }, { name: 'Samir Vaidya', state: 'pending' }, { name: 'Colleen Rourke', state: 'pending' }],
+  checks: 'attention', comments: 2, change: 'the aft propellers from 2 blades to 4 blades',
 };
 
 const cap = Math.round((net.p90 ?? net.p50) / 100000) * 100000;
 const pUnder = model.sCurve.points.filter(p => p.x <= cap).length / 100;
 const pLate = model.prob(e => e.cutInWeeks > 55);
 const activity: ActivityEvent[] = [
-  { id: 'b6', at: '2026-10-24T08:52:00-07:00', actor: 'Reviewer', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Reviewing Level 1', detail: 'Checking the retrofit scope and the link to ECR-0417.', state: 'running' },
-  { id: 'b5', at: '2026-10-24T08:40:00-07:00', actor: 'Priya Venkataraman', actorKind: 'person', text: 'Asked for the full assessment' },
-  { id: 'b4', at: '2026-10-05T14:11:00-07:00', actor: 'Cost check', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Posted Level 1 to the PLM', detail: `Provisional: year 1 ${usdK(net.p50, { plus: true })}. Retrofit not assessed.`, level: 1 },
-  { id: 'b3', at: '2026-10-05T14:10:00-07:00', actor: 'Router', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Set the class and proposed the route', detail: 'Class I, FAA major. Needs an FAA project.' },
-  { id: 'b2', at: '2026-10-05T14:09:00-07:00', actor: 'Reader', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Read the ECR', detail: 'Four item changes, seven BOM lines.' },
-  { id: 'b1', at: '2026-10-05T14:08:00-07:00', actor: 'Maren Solheim', actorKind: 'person', text: 'Filed the ECR in the PLM', detail: 'From NCR-0113, damper wear and 2.1 dB over on noise.' },
+  { id: 'b1', at: '2026-10-05T14:08:00-07:00', actor: 'Maren Solheim', actorKind: 'person', kind: 'filed', text: 'filed the ECR', detail: 'From NCR-0113, damper wear and 2.1 dB over on noise.' },
+  { id: 'b2', at: '2026-10-05T14:09:00-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Maren Solheim', kind: 'ran_checks', text: 'ran 5 impact checks', detail: '3 passed, 2 need attention.' },
+  { id: 'b3', at: '2026-10-05T14:10:00-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Maren Solheim', kind: 'label', text: 'added the labels Class I, FAA major and Vesper' },
+  { id: 'b4', at: '2026-10-05T14:10:30-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Maren Solheim', kind: 'review_requested', text: 'requested review from Gideon Falk, Beatriz Nowak, Samir Vaidya, Colleen Rourke and the CCB', detail: 'FAA major and over $150,000.' },
+  { id: 'b5', at: '2026-10-05T14:11:00-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Maren Solheim', kind: 'report', text: 'posted the impact statement, Level 1', detail: `Provisional: year 1 ${usdK(net.p50, { plus: true })}. Retrofit not assessed.`, level: 1 },
+  { id: 'b6', at: '2026-10-24T08:40:00-07:00', actor: 'Priya Venkataraman', actorKind: 'person', kind: 'comment', text: 'asked for the full assessment' },
+  { id: 'b7', at: '2026-10-24T08:52:00-07:00', actor: 'Norn reviewer', actorKind: 'norn', onBehalfOf: 'Priya Venkataraman', kind: 'research', text: 'is reviewing Level 1', detail: 'Checking the retrofit scope and the link to ECR-0417.', state: 'running' },
 ];
 
 export const ecr0409: ImpactAssessment = {
@@ -254,5 +265,5 @@ export const ecr0409: ImpactAssessment = {
     { text: 'Confirm the 23 compliance items', owner: 'Gideon Falk' },
     { text: 'Re-run the aft-boom vibration survey', owner: 'Structures' },
   ],
-  activity, traces: tr,
+  activity, ...detail0409, checks, traces: tr,
 };

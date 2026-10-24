@@ -39,14 +39,22 @@ export function dayLabel(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' });
 }
 
-/** "2 d ago", "3 h ago". */
+/** GitHub's wording: "5 days ago", "20 hours ago", "3 weeks ago". */
 export function ago(iso: string): string {
   const s = Math.max(0, (NOW - Date.parse(iso)) / 1000);
+  const n = (v: number, unit: string) => `${v} ${unit}${v === 1 ? '' : 's'} ago`;
   if (s < 90) return 'just now';
-  if (s < 3600) return `${Math.round(s / 60)} min ago`;
-  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  if (s < 3600) return n(Math.round(s / 60), 'minute');
+  if (s < 86400) return n(Math.round(s / 3600), 'hour');
   const d = Math.round(s / 86400);
-  return d < 14 ? `${d} d ago` : `${Math.round(d / 7)} wk ago`;
+  if (d === 1) return 'yesterday';
+  if (d < 14) return n(d, 'day');
+  if (d < 60) return n(Math.round(d / 7), 'week');
+  return n(Math.round(d / 30), 'month');
+}
+
+export function dateTime(iso: string): string {
+  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
 }
 
 export function fig(f: Figure, kind: 'full' | 'short' = 'full', plus = false): string {

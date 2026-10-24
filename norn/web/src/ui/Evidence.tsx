@@ -1,47 +1,52 @@
 import { createContext, useContext, type ReactNode } from 'react';
+import { Tooltip } from '@primer/react/next';
 import type { Evidence, Figure } from '../assessment/types.ts';
 import { fig as figText } from './fmt.ts';
 
 export const EV: Record<Evidence, { label: string; hint: string }> = {
-  fact: { label: 'Fact', hint: 'Read from a source' },
-  assumption: { label: 'Assumption', hint: 'Supposed, to frame the analysis' },
-  computation: { label: 'Computation', hint: 'Calculated by code' },
-  judgment: { label: 'Judgment', hint: 'The agent’s conclusion' },
+  fact: { label: 'Fact', hint: 'read from a source' },
+  assumption: { label: 'Assumption', hint: 'supposed, to frame the analysis' },
+  computation: { label: 'Computation', hint: 'calculated by code' },
+  judgment: { label: 'Judgment', hint: 'the agent’s conclusion' },
 };
 export const EV_ORDER: Evidence[] = ['fact', 'assumption', 'computation', 'judgment'];
 
-/** Opens the "why" drawer on a trace. Provided by the ECR page. */
+/** Opens the "why" panel on a trace. Provided by the ECR page. */
 export const WhyContext = createContext<{ open: (traceId: string) => void; current: string | null }>({
   open: () => {},
   current: null,
 });
 export const useWhy = () => useContext(WhyContext);
 
-/** A shape per class, so the colour is never the only cue: circle, diamond, square, triangle. */
+/** A shape per class, so colour is never the only cue: circle, diamond, square, triangle. */
 export function Glyph({ ev, size = 10 }: { ev: Evidence; size?: number }) {
-  const s = size;
   return (
-    <svg className={`nx-glyph nx-ev-${ev}`} width={s} height={s} viewBox="0 0 10 10" aria-hidden="true">
+    <svg className={`nx-glyph nx-ev-${ev}`} width={size} height={size} viewBox="0 0 10 10" aria-hidden="true">
       {ev === 'fact' && <circle cx="5" cy="5" r="4.2" fill="var(--c)" />}
       {ev === 'assumption' && <path d="M5 .6 9.4 5 5 9.4.6 5Z" fill="var(--c)" />}
       {ev === 'computation' && <rect x=".9" y=".9" width="8.2" height="8.2" rx="1.3" fill="var(--c)" />}
-      {ev === 'judgment' && <path d="M5 .8 9.4 9H.6Z" fill="var(--c)" strokeLinejoin="round" stroke="var(--c)" strokeWidth=".8" />}
+      {ev === 'judgment' && <path d="M5 .8 9.4 9H.6Z" fill="var(--c)" stroke="var(--c)" strokeWidth=".8" strokeLinejoin="round" />}
     </svg>
   );
 }
 
-/** Any number or claim that has a "why". */
+/**
+ * A number or claim that has a "why". Quiet by default, as GitHub marks things: ink text with a thin
+ * underline in the class colour, and a tooltip that names the class. The underline style says it too
+ * (solid fact, dashed assumption, dotted computation, double judgment), so colour is never alone.
+ */
 export function Mark({ ev, id, children, className = '', claim = false }: { ev: Evidence; id: string; children: ReactNode; className?: string; claim?: boolean }) {
   const why = useWhy();
   return (
-    <button
-      type="button"
-      className={`nx-mark-btn nx-ev-${ev} ${claim ? 'claim' : ''} ${why.current === id ? 'open' : ''} ${className}`}
-      title={`${EV[ev].label}: ${EV[ev].hint}`}
-      onClick={() => why.open(id)}
-    >
-      {children}
-    </button>
+    <Tooltip text={`${EV[ev].label}: ${EV[ev].hint}`} direction="s" type="description">
+      <button
+        type="button"
+        className={`nx-mark nx-ev-${ev} ${claim ? 'claim' : ''} ${why.current === id ? 'open' : ''} ${className}`}
+        onClick={() => why.open(id)}
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -54,24 +59,19 @@ export function Num({ f, kind = 'full', plus = false, className }: { f: Figure; 
   );
 }
 
+/** The key, with how many of each class the assessment has. Lives on the Impact tab. */
 export function Legend({ counts }: { counts?: Record<Evidence, number> }) {
-  const total = counts ? EV_ORDER.reduce((s, k) => s + counts[k], 0) : 0;
   return (
     <div className="nx-legend" aria-label="Evidence key">
+      <span className="nx-legend-title">Evidence</span>
       {EV_ORDER.map(k => (
-        <span key={k} className={`k nx-ev-${k}`} title={EV[k].hint}>
+        <span key={k} className={`k nx-ev-${k}`}>
           <Glyph ev={k} />
-          {EV[k].label}
-          {counts && <span className="mute num">{counts[k]}</span>}
+          <span className={`nx-sample nx-ev-${k}`}>{EV[k].label}</span>
+          <span className="hint">{EV[k].hint}</span>
+          {counts && <span className="n">{counts[k]}</span>}
         </span>
       ))}
-      {counts && total > 0 && (
-        <span className="nx-mix" aria-hidden="true">
-          {EV_ORDER.filter(k => counts[k] > 0).map(k => (
-            <i key={k} className={`nx-ev-${k}`} style={{ flex: counts[k] }} />
-          ))}
-        </span>
-      )}
     </div>
   );
 }

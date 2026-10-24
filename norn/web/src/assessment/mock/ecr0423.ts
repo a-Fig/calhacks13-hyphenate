@@ -1,7 +1,8 @@
 // ECR-0423: the avionics closeout panel from grey to charcoal. The fast-track case (bowman/data
 // scenarios.ts, S3): Class II, same supplier, no tooling, so Norn approves within its limits. MOCK.
 import { likelihoodWord, runModel, type InputDef, type RowDef } from '../engine.ts';
-import type { ActivityEvent, EcrSummary, ImpactAssessment } from '../types.ts';
+import type { ActivityEvent, Check, EcrSummary, ImpactAssessment } from '../types.ts';
+import { detail0423 } from './details.ts';
 import { dateShort, usd } from '../../ui/fmt.ts';
 
 const DAY = 86400000;
@@ -93,6 +94,13 @@ tr['rec'] = model.makeTrace('rec', 'Norn’s decision', 'judgment', {
 });
 
 const net = model.net;
+const checks: Check[] = [
+  { id: 'bom', name: 'BOM delta', state: 'passed', summary: '1 item revised, no BOM line changes', took: '0.3 s', by: 'Reader' },
+  { id: 'cost', name: 'Cost', state: 'passed', summary: `Year 1 ${usd(net.p50, { plus: true })}, a net saving`, took: '3.1 s', by: 'Cost check' },
+  { id: 'timeline', name: 'Time to the line', state: 'passed', summary: 'After the grey stock is used up', took: '0.9 s', by: 'Timeline check' },
+  { id: 'supply', name: 'Supply risk', state: 'passed', summary: 'Same supplier, same mould', took: '1.2 s', by: 'Supply agent' },
+  { id: 'class', name: 'Classification', state: 'passed', summary: 'Class II, FAA minor: fast track', took: '0.6 s', by: 'Router' },
+];
 const pSave = model.sCurve.points.filter(p => p.x < 0).length / 100;
 export const ecr0423Summary: EcrSummary = {
   id: 'ECR-0423', title: 'Avionics bay closeout panel BW-9440-030: grey to charcoal',
@@ -100,16 +108,17 @@ export const ecr0423Summary: EcrSummary = {
   cost: { p10: net.p10 ?? net.p50, p50: net.p50, p90: net.p90 ?? net.p50 }, level: 3,
   lastActivity: '2026-10-23T13:10:00-07:00', lastActivityBy: 'Norn approved, fast track',
   originator: 'Ayesha Karimi', filedOn: '2026-10-22', flag: 'Fast track: Norn approved within its limits', hasAssessment: true,
+  reviewers: [{ name: 'Norn', state: 'approved' }], checks: 'passed', comments: 7, change: 'BW-9440-030 from grey to charcoal',
 };
 
 const activity: ActivityEvent[] = [
-  { id: 'c7', at: '2026-10-23T13:10:00-07:00', actor: 'Norn', actorKind: 'norn', onBehalfOf: 'Bowman’s fast-track rule', text: 'Approved the ECR', detail: 'Policy gate: allowed, within limits. No CCB.' },
-  { id: 'c6', at: '2026-10-22T10:44:00-07:00', actor: 'Reviewer', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Posted Level 3: Norn’s final verdict', detail: 'Checked the never-fast-track list: clear.', level: 3 },
-  { id: 'c5', at: '2026-10-22T10:30:00-07:00', actor: 'Blind checker', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Formed its own estimate without seeing the answer', detail: 'Same sign, same size.' },
-  { id: 'c4', at: '2026-10-22T10:21:00-07:00', actor: 'Cost check', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Posted Level 1 to the PLM', level: 1 },
-  { id: 'c3', at: '2026-10-22T10:20:00-07:00', actor: 'Router', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Set the class and proposed the route', detail: 'Class II, FAA minor. Fast track.' },
-  { id: 'c2', at: '2026-10-22T10:20:00-07:00', actor: 'Reader', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Read the ECR', detail: 'One item change.' },
-  { id: 'c1', at: '2026-10-22T10:19:00-07:00', actor: 'Ayesha Karimi', actorKind: 'person', text: 'Filed the ECR in the PLM' },
+  { id: 'c1', at: '2026-10-22T10:19:00-07:00', actor: 'Ayesha Karimi', actorKind: 'person', kind: 'filed', text: 'filed the ECR' },
+  { id: 'c2', at: '2026-10-22T10:20:00-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'ran_checks', text: 'ran 5 impact checks', detail: 'All passed.' },
+  { id: 'c3', at: '2026-10-22T10:20:30-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'label', text: 'added the labels Class II, FAA minor, Fast track and Vesper' },
+  { id: 'c4', at: '2026-10-22T10:21:00-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'report', text: 'posted the impact statement, Level 1', level: 1 },
+  { id: 'c5', at: '2026-10-22T10:30:00-07:00', actor: 'Norn blind checker', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'research', text: 'formed its own estimate without seeing the answer', detail: 'Same sign, same size.' },
+  { id: 'c6', at: '2026-10-22T10:44:00-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'report', text: 'posted Level 3: Norn\u2019s final verdict', detail: 'Checked the never-fast-track list: clear.', level: 3 },
+  { id: 'c7', at: '2026-10-23T13:10:00-07:00', actor: 'Norn', actorKind: 'norn', onBehalfOf: 'Bowman\u2019s fast-track rule', kind: 'approved', text: 'approved these changes', detail: 'Policy gate: allowed, within limits. No CCB.' },
 ];
 
 export const ecr0423: ImpactAssessment = {
@@ -141,5 +150,5 @@ export const ecr0423: ImpactAssessment = {
     ],
   },
   needed: [],
-  activity, traces: tr,
+  activity, ...detail0423, checks, traces: tr,
 };

@@ -5,7 +5,8 @@
 // $415.20 per aircraft). The ranges, the hold cost and the agent timeline are made up for the
 // screens, and the engine in ../engine.ts draws them. The shape follows docs/IN-PRACTICE.md section 1.
 import { likelihoodWord, runModel, type InputDef, type RowDef } from '../engine.ts';
-import type { ActivityEvent, EcrSummary, ImpactAssessment, Likelihood } from '../types.ts';
+import type { ActivityEvent, Check, EcrSummary, ImpactAssessment, Likelihood } from '../types.ts';
+import { detail0417 } from './details.ts';
 import { dateShort, usd, usdK } from '../../ui/fmt.ts';
 
 const DAY = 86400000;
@@ -489,21 +490,30 @@ t['rec'] = model.makeTrace('rec', 'Norn’s recommendation', 'judgment', {
 });
 
 const activity: ActivityEvent[] = [
-  { id: 'a12', at: '2026-10-23T10:05:00-07:00', actor: 'Samir Vaidya', actorKind: 'person', text: 'Approved the cost review' },
-  { id: 'a11', at: '2026-10-22T16:20:00-07:00', actor: 'Hamid Barzani’s agent', actorKind: 'person_agent', onBehalfOf: 'Hamid Barzani', text: 'Confirmed the 14 week lead time with Halden', detail: 'Reported by agent. Norn has not fetched the source itself.', reportedByAgent: true },
-  { id: 'a10', at: '2026-10-21T10:41:00-07:00', actor: 'Reviewer', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Posted Level 3: Norn’s final verdict', detail: `Year 1 ${usdK(model.net.p50, { plus: true })}, up from ${usdK(level1)} at Level 1.`, level: 3 },
-  { id: 'a9', at: '2026-10-21T10:36:00-07:00', actor: 'Blind checker', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Formed its own estimate without seeing the answer', detail: `${usdK(checker)}, within 4% of the verdict.` },
-  { id: 'a8', at: '2026-10-21T09:52:00-07:00', actor: 'Cost check', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Posted Level 2 after the pushback', detail: 'Added the hold on S/N 011 onward and the 324 pieces to scrap.', level: 2 },
-  { id: 'a7', at: '2026-10-21T09:30:00-07:00', actor: 'Reviewer', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Pushed back on Level 1', detail: 'Counted 252 pieces to scrap, left out the hold, and scoped the retrofit to four aircraft.' },
-  { id: 'a6', at: '2026-10-21T09:21:00-07:00', actor: 'Researcher', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', spawnedBy: 'Norn, for Wei-Lin Zhao', text: 'Read Halden’s quote and the stock in the ERP', detail: '6 purchase lines, 5 stock locations.' },
-  { id: 'a5', at: '2026-10-21T09:12:00-07:00', actor: 'Wei-Lin Zhao', actorKind: 'person', text: 'Asked for the full assessment' },
-  { id: 'a4', at: '2026-10-19T14:03:00-07:00', actor: 'Router', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Set the class and proposed the route', detail: 'Class I, FAA minor. Over $150,000, so the CCB decides.' },
-  { id: 'a3', at: '2026-10-19T14:03:00-07:00', actor: 'Cost check', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Posted Level 1 to the PLM', detail: `Provisional: year 1 ${usdK(level1, { plus: true })}.`, level: 1 },
-  { id: 'a2', at: '2026-10-19T14:02:00-07:00', actor: 'Reader', actorKind: 'norn', spawnedBy: 'Norn, automatically', text: 'Read the ECR', detail: 'One item change, five fields.' },
-  { id: 'a1', at: '2026-10-19T14:02:00-07:00', actor: 'Jeff Hargrove', actorKind: 'person', text: 'Filed the ECR in the PLM', detail: 'From NCR-0119, the fillet crack at 8.2 h.' },
+  { id: 'a1', at: '2026-10-19T14:02:00-07:00', actor: 'Jeff Hargrove', actorKind: 'person', kind: 'filed', text: 'filed the ECR', detail: 'From NCR-0119, the fillet crack at 8.2 h.' },
+  { id: 'a2', at: '2026-10-19T14:02:30-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Jeff Hargrove', kind: 'ran_checks', text: 'ran 5 impact checks', detail: '4 passed, 1 needs attention.' },
+  { id: 'a3', at: '2026-10-19T14:03:00-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Jeff Hargrove', kind: 'label', text: 'added the labels Class I, FAA minor, Urgent and Vesper' },
+  { id: 'a4', at: '2026-10-19T14:03:10-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Jeff Hargrove', kind: 'review_requested', text: 'requested review from Samir Vaidya, Hamid Barzani, Colleen Rourke, Beatriz Nowak, Gideon Falk and the CCB', detail: 'Over $150,000, so the CCB decides.' },
+  { id: 'a5', at: '2026-10-19T14:03:20-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Jeff Hargrove', kind: 'report', text: 'posted the impact statement, Level 1', detail: `Provisional: year 1 ${usdK(level1, { plus: true })}.`, level: 1 },
+  { id: 'a6', at: '2026-10-21T09:12:00-07:00', actor: 'Wei-Lin Zhao', actorKind: 'person', kind: 'comment', text: 'asked for the full assessment' },
+  { id: 'a7', at: '2026-10-21T09:21:00-07:00', actor: 'Norn researcher', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'research', text: 'read Halden\u2019s quote and the stock in the ERP', detail: '6 purchase lines, 5 stock locations.' },
+  { id: 'a8', at: '2026-10-21T09:30:00-07:00', actor: 'Norn reviewer', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'changes_requested', text: 'requested changes to Level 1', detail: 'It counted 252 pieces to scrap, left out the hold on S/N 011 onward, and scoped the retrofit to four aircraft.' },
+  { id: 'a9', at: '2026-10-21T09:52:00-07:00', actor: 'Norn', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'report', text: 'posted Level 2 after the pushback', detail: 'Added the hold and the 324 pieces to scrap.', level: 2 },
+  { id: 'a10', at: '2026-10-21T10:36:00-07:00', actor: 'Norn blind checker', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'research', text: 'formed its own estimate without seeing the answer', detail: `${usdK(checker)}, within 4% of the verdict.` },
+  { id: 'a11', at: '2026-10-21T10:41:00-07:00', actor: 'Norn', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'report', text: 'posted Level 3: Norn\u2019s final verdict', detail: `Year 1 ${usdK(model.net.p50, { plus: true })}, up from ${usdK(level1)} at Level 1.`, level: 3 },
+  { id: 'a12', at: '2026-10-22T16:20:00-07:00', actor: 'Hamid Barzani\u2019s agent', actorKind: 'person_agent', onBehalfOf: 'Hamid Barzani', kind: 'comment', text: 'confirmed the 14 week lead time with Halden', detail: 'Reported by agent. Norn has not fetched the source itself.', reportedByAgent: true },
+  { id: 'a13', at: '2026-10-22T16:25:00-07:00', actor: 'Hamid Barzani', actorKind: 'person', kind: 'approved', text: 'approved these changes' },
+  { id: 'a14', at: '2026-10-23T10:05:00-07:00', actor: 'Samir Vaidya', actorKind: 'person', kind: 'approved', text: 'approved these changes' },
 ];
 
 const net = model.net;
+const checks: Check[] = [
+  { id: 'bom', name: 'BOM delta', state: 'passed', summary: '1 item revised, no BOM line changes', took: '0.4 s', by: 'Reader' },
+  { id: 'cost', name: 'Cost', state: 'passed', summary: `Year 1 ${usdK(net.p50, { plus: true })}, range ${usdK(net.p10!)} to ${usdK(net.p90!)}`, took: '4.2 s', by: 'Cost check' },
+  { id: 'timeline', name: 'Time to the line', state: 'passed', summary: `Cut-in ${dateShort(cutInFig.p50)}, ${dateShort(cutInFig.p10!)} to ${dateShort(cutInFig.p90!)}`, took: '1.1 s', by: 'Timeline check' },
+  { id: 'supply', name: 'Supply risk', state: 'attention', summary: 'Sole source: Halden, and no Rev C stock to bridge a delay', took: '2.3 s', by: 'Supply agent' },
+  { id: 'class', name: 'Classification', state: 'passed', summary: 'Class I, FAA minor, set separately', took: '0.8 s', by: 'Router' },
+];
 export const ecr0417Summary: EcrSummary = {
   id: 'ECR-0417',
   title: 'Motor-controller mounting bracket BW-5120-210, Rev B to Rev C: fillet fatigue crack',
@@ -511,6 +521,11 @@ export const ecr0417Summary: EcrSummary = {
   cost: { p10: net.p10!, p50: net.p50, p90: net.p90! },
   level: 3, lastActivity: '2026-10-23T10:05:00-07:00', lastActivityBy: 'Samir Vaidya approved',
   originator: 'Jeff Hargrove', filedOn: '2026-10-19', hasAssessment: true,
+  reviewers: [
+    { name: 'Samir Vaidya', state: 'approved' }, { name: 'Hamid Barzani', state: 'approved' }, { name: 'Colleen Rourke', state: 'pending' },
+    { name: 'Beatriz Nowak', state: 'pending' }, { name: 'Gideon Falk', state: 'pending' },
+  ],
+  checks: 'attention', comments: 6, change: 'BW-5120-210 from Rev B to Rev C',
 };
 
 export const ecr0417: ImpactAssessment = {
@@ -576,5 +591,7 @@ export const ecr0417: ImpactAssessment = {
     { text: 'Delta first-article review', owner: 'Beatriz Nowak' },
   ],
   activity,
+  ...detail0417,
+  checks,
   traces: t,
 };

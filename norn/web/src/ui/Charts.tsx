@@ -83,7 +83,7 @@ export function SCurveChart({ data }: { data: SCurve }) {
 
         {/* The deterministic point estimate: a diamond, like the one GAO marks on its S-curves. */}
         <g transform={`translate(${sx(data.pointEstimate.x)} ${sy(data.pointEstimate.y)})`}>
-          <path d="M0 -6 6 0 0 6 -6 0Z" fill="#fff" stroke="var(--ink)" strokeWidth="1.8" />
+          <path d="M0 -6 6 0 0 6 -6 0Z" fill="#fff" stroke="var(--fgColor-default)" strokeWidth="1.8" />
         </g>
         <text x={sx(data.pointEstimate.x) + 12} y={sy(data.pointEstimate.y) + 20} className="ink2 halo">
           Point estimate {usdK(data.pointEstimate.x)} sits at {Math.round(data.pointEstimate.y * 100)}%
@@ -91,7 +91,7 @@ export function SCurveChart({ data }: { data: SCurve }) {
 
         {hp && (
           <g pointerEvents="none">
-            <line x1={sx(hp.x)} x2={sx(hp.x)} y1={T} y2={sy(0)} stroke="var(--ink)" strokeWidth="1" opacity="0.25" />
+            <line x1={sx(hp.x)} x2={sx(hp.x)} y1={T} y2={sy(0)} stroke="var(--fgColor-default)" strokeWidth="1" opacity="0.25" />
             <circle cx={sx(hp.x)} cy={sy(hp.y)} r="5" fill="#fff" stroke="var(--ev-computation)" strokeWidth="2.5" />
           </g>
         )}
@@ -161,7 +161,7 @@ export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: numbe
             >
               <rect x={0} y={y - (rowH - th) / 2} width={W} height={rowH} fill={hover === d.id ? 'rgba(0,0,0,0.025)' : 'transparent'} />
               <foreignObject x={0} y={y - 6} width={L - 14} height={34}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, fontSize: 13.5, lineHeight: 1.2, color: 'var(--ink)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, fontSize: 13.5, lineHeight: 1.2, color: 'var(--fgColor-default)' }}>
                   <Glyph ev={d.evidence} />
                   <span>{d.label}</span>
                 </div>
@@ -181,7 +181,7 @@ export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: numbe
             </g>
           );
         })}
-        <line x1={bx} x2={bx} y1={T - 6} y2={H - B} stroke="var(--ink)" strokeWidth="1.5" />
+        <line x1={bx} x2={bx} y1={T - 6} y2={H - B} stroke="var(--fgColor-default)" strokeWidth="1.5" />
       </svg>
     </div>
   );
