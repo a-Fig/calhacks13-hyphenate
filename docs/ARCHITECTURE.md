@@ -149,7 +149,7 @@ Minimum viable version: one effectivity date per ECO and a simple inventory burn
 
 What the choice rests on: the live, multi-user PR review surface (§2, §10) and the consistent single-update invalidation on assumption edits. What it does not rest on: price (Maincloud is $0 / $25 / $250 per month at the Free / Pro / Team tiers on 2026-10-24, and the source is available on GitHub under a Business Source License; the license text itself has not been read), analytics, or compute, none of which SpacetimeDB contributes.
 
-Known open risks, not blockers: the TypeScript client and module are the best-supported path while a Python compute worker is second-class (HTTP only); the product is young with breaking changes in recent minor releases; and if Archer's ECR/BOM data is export-controlled (e.g. ITAR; not checked), Maincloud may be unusable and the options are self-hosting or the custom-priced Enterprise tier. Whether finance values "live" as much as the demo does is also untested; ECR review is largely asynchronous.
+Known open risks, not blockers: TypeScript is the newest SpacetimeDB module language (new in 2.0) while Rust is the longest-standing, so the spike checks the TypeScript module and a Rust module is the fallback inside SpacetimeDB; the product is young with breaking changes in recent minor releases; and if Archer's ECR/BOM data is export-controlled (e.g. ITAR; not checked), Maincloud may be unusable and the options are self-hosting or the custom-priced Enterprise tier. Whether finance values "live" as much as the demo does is also untested; ECR review is largely asynchronous.
 
 ### What the layer must provide
 
@@ -198,7 +198,7 @@ Where it beats the alternatives (the reviewer's inference, not tested):
 3. **No backend to write.** The module is the backend and generates typed TypeScript bindings. With SQLite the API, websocket fan-out and client cache would be roughly 300–500 lines (the reviewer's estimate).
 
 Where it is worse:
-- **Python workers are second-class**: HTTP polling, or a small TypeScript process using the SDK in front of them (budget 1–2 hours). Monte Carlo over a few hundred parts in Node is fine.
+- **Python workers are second-class**: HTTP polling, or a small TypeScript process using the SDK in front of them (budget 1–2 hours). Monte Carlo over a few hundred parts in Node is fine. (No longer applies: the stack is TypeScript, §10.)
 - **No ad-hoc analytics.** Every roll-up is code that writes rows.
 - **Schema changes in a hurry cost a republish** (see above).
 - **Learning curve**: 2–4 hours to a first live table for a new team, versus about 30 minutes for Supabase (the reviewer's estimate).
@@ -216,14 +216,14 @@ Where it is worse:
 ### Spike (first build step, time-boxed)
 
 The spike exercises the real scenario, not a toy. The reviewer estimated about 4 hours; that figure is unverified.
-1. **Worker over HTTP** (Python if that's our compute language): claim a check run, write results, and hit a reducer error. Confirm the HTTP status and error message are reliable enough to build retry logic on.
+1. **TypeScript worker and module**: a TypeScript worker using the SDK claims a check run, writes results, and hits a reducer error, against a TypeScript module. Confirm error behavior is reliable enough to build retry logic on, and note any TypeScript-module rough edges (the newest module language).
 2. **Two browsers on one PR** (subscription filtered by `pr_id`): an assumption edit invalidates old checks atomically on both screens, and switching PRs is clean (subscribe to the new one before unsubscribing from the old one, per the docs).
 3. **Streaming progress**: a Monte Carlo worker writes progress rows at about 2 per second with percentile arrays, and the UI keeps up.
 4. **Crash recovery**: a killed worker's lease expires and the run is retried by another worker.
 5. **Iteration speed**: republishing after a column change plus reseeding takes under a minute.
 6. **Hosting**: a Maincloud deploy with anonymous demo users works, or we decide to run locally with `spacetime start` for the demo.
 
-The decision is made, so the spike's job is to surface problems early, not to approve the choice. If something fails badly (the Python path is painful, or any of 1–3 takes unreasonable time), bring it back to the team with what was tried before changing course; the contingency is Postgres + Supabase Realtime, and the narrow API below keeps that switch contained.
+The decision is made, so the spike's job is to surface problems early, not to approve the choice. If something fails badly (any of 1–3 takes unreasonable time, or the TypeScript module proves too immature), bring it back to the team with what was tried before changing course; the contingency is Postgres + Supabase Realtime, and the narrow API below keeps that switch contained.
 
 ### Fallback and portability
 
@@ -236,11 +236,17 @@ SpacetimeDB is the one confirmed part of the stack; the rest is open. The archit
 1. **State + coordination layer** (§9): the tables in §4 and the narrow API.
 2. **Workers**:
    - *Agent workers*: S0 extraction, assumption proposals, S5 narration (LLM calls).
-   - *Compute workers*: S1 diff, S2 cost, S3 timeline, S4 Monte Carlo. Numerics matter here (the main input to the language choice).
+   - *Compute workers*: S1 diff, S2 cost, S3 timeline, S4 Monte Carlo. TypeScript for now; the simulation is the one place a faster language might later pay off (see below).
 3. **UI**: backlog list, PR page (diff, impact card, streaming check status, assumption inspector with inline editing, comments, reviews), integration-branch builder with reorder/toggle and conflict flags, S0 confirmation screen.
 4. **Data generator** (§12).
 
-The language question is smaller than it looked: SpacetimeDB supports TypeScript for modules and clients, and a Monte Carlo over a few hundred nodes is fast in TypeScript, so an end-to-end TypeScript stack is plausible. If compute wants Python, the narrow API is the seam.
+**Language policy (decided 2026-10-24): TypeScript by default; another language only where it clearly earns its place.** The team has no language preference beyond that. Concretely: the SpacetimeDB module, UI, agent workers and compute workers are all TypeScript, sharing types through the generated bindings. The reducers are small claim/CRUD/transaction logic with no performance demand, so a TypeScript module costs nothing in speed.
+
+Candidates for a different language, none needed yet:
+- The **Monte Carlo hot loop in Rust** (native or WASM) if profiling shows TypeScript is too slow. The author's estimate is that a few hundred nodes and thousands of draws is comfortably fast in TypeScript; this is unmeasured.
+- The **SpacetimeDB module in Rust**, the longest-standing module language, if the TypeScript module proves immature in the spike.
+
+Python is not planned. The narrow API (§9) remains the seam if a component in another language is added.
 
 ## 11. Loop 2 hooks (everything else deferred)
 
