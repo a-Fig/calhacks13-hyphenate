@@ -3,6 +3,7 @@
 # fields, and the ECO release automation to released_eco. Frappe needs each to hold write
 # permission on the whole document, so this script is what limits it to those fields: any other
 # change (a field, a table row, the workflow status) is refused with a 403.
+# The bot's one field is further limited to the ECO that releases an Approved ECR (see below).
 # It also stamps "Last updated" when the impact assessment changes and Norn did not send a time.
 # Keep IMPACT in step with IMPACT_FIELDS in model.ts.
 NORN = "norn@bowman-aviation.example"
@@ -47,6 +48,11 @@ if before:
             + ", ".join(sorted(set(bad))),
             frappe.PermissionError,
         )
+
+    # The release bot may set released_eco only to the ECO that releases this ECR, and only once it is Approved.
+    if user == BOT and old.get("released_eco") != new.get("released_eco"):
+        if doc.workflow_state != "Approved" or not doc.released_eco or frappe.db.get_value("ECO", doc.released_eco, "ecr") != doc.name:
+            frappe.throw("released_eco must be the ECO of this ECR, and the ECR must be Approved.", frappe.PermissionError)
 
     changed = [k for k in IMPACT if k != "impact_updated_on" and old.get(k) != new.get(k)]
     if changed and old.get("impact_updated_on") == new.get("impact_updated_on"):

@@ -513,8 +513,10 @@ const eco: DocTypeDef = {
   ]),
   permissions: [
     ...[ROLES.designer, ROLES.member, ROLES.viewer, ROLES.norn].map((role) => ({ role, ...R })),
-    { role: ROLES.cm, ...RWC },
-    { role: ROLES.chair, ...RWC },
+    // No person creates an ECO: approving an ECR releases it, as the release automation. A person who could create one
+    // against an unapproved ECR would get the release bot to write released_eco onto it (the link-back webhook).
+    { role: ROLES.cm, ...RW },
+    { role: ROLES.chair, ...RW },
     { role: ROLES.releaser, ...RWC },
     sysman,
   ],

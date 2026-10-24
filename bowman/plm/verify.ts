@@ -232,6 +232,32 @@ async function main() {
     log('  probe ECR deleted; naming series restored (next ECR-0424)');
   }
 
+  log('9. released_eco cannot be reached through ECO creation (throwaway ECR kept In CM Review, removed afterwards)');
+  const t9 = (await jeff.post('/api/resource/ECR', { doctype: 'ECR', title: 'Bypass probe ECR (deleted after the test)', program: 'Vesper V4', priority: 'Routine', justification_code: 'D', company_class: 'Class I', faa_class: 'Minor', description: 'test', need: 'test', affected_items: [{ part: 'BW-5120-210', change_type: 'Revise', from_revision: 'B', to_revision: 'C' }] })).body.data;
+  const act9 = async (who: Plm, action: string) => { const d = (await who.get(`/api/resource/ECR/${t9.name}`)).body.data; await who.post('/api/method/frappe.model.workflow.apply_workflow', { doc: JSON.stringify(d), action }); };
+  try {
+    await act9(jeff, 'Submit'); await act9(dana, 'Start CM review'); // In CM Review: not approved, and not sent on to the CCB
+    const eco9 = { doctype: 'ECO', ecr: t9.name, title: 'Bypass probe (deleted after the test)', status: 'Released' };
+    const asDana = await dana.post('/api/resource/ECO', eco9, { allow: true });
+    const asRafael = await rafael.post('/api/resource/ECO', eco9, { allow: true });
+    log(`  POST /api/resource/ECO for the unapproved ${t9.name}: as the CM analyst -> ${asDana.status}, as the CCB chair -> ${asRafael.status}`);
+    check(asDana.status >= 400 && asRafael.status >= 400, 'the CM analyst and the CCB chair cannot create an ECO');
+    check((await admin.list('ECO', { fields: ['name'], filters: [['ecr', '=', t9.name]] })).length === 0, 'no ECO exists for the unapproved ECR');
+    // Second line of defence: an ECO that does exist (made here as Administrator) is not linked by the bot while its ECR is unapproved.
+    const made = (await admin.post('/api/resource/ECO', eco9)).body.data;
+    await sleep(8000); // the link-back webhook tries three times over about 5 seconds
+    const after9 = (await norn.get(`/api/resource/ECR/${t9.name}`)).body.data;
+    log(`  ${made.name} made on the unapproved ECR by Administrator; ECR released_eco afterwards: ${after9.released_eco ?? 'empty'}, state ${after9.workflow_state}`);
+    check(!after9.released_eco && after9.workflow_state === 'In CM Review', 'the release bot does not link an ECO onto an unapproved ECR');
+  } finally {
+    await admin.put(`/api/resource/ECR/${t9.name}`, { released_eco: null }, { allow: true }); // an ECO cannot be deleted while an ECR links to it
+    for (const x of await admin.list('ECO', { fields: ['name'], filters: [['ecr', '=', t9.name]] })) await admin.del(`/api/resource/ECO/${x.name}`, { allow: true });
+    await admin.del(`/api/resource/ECR/${t9.name}`, { allow: true });
+    await setSeries('ECR-', 424);
+    await setSeries('ECO-', 319);
+    log('  probe ECR and ECO deleted; naming series restored (next ECR-0424, ECO-0319)');
+  }
+
   log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed. ECR-0417 now carries the test impact assessment; run with --clear to remove it.');
   process.exit(failures ? 1 : 0);
 }
