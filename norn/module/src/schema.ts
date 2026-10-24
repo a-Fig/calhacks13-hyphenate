@@ -227,6 +227,65 @@ const agentEvent = table(
   }
 );
 
+// What a credential lets an agent write to. Norn's MCP server verifies a job's (or a person's
+// agent's) signed token, then records the scope it names here for that agent's own identity, and
+// the policy gate (scope.ts) checks every write against it. Absent for workers and the UI.
+// Self-declared by the connection, like register_actor: see mcp/NOTES.md for what that does and
+// does not protect against.
+const actorScope = table(
+  { name: 'actor_scope', public: true },
+  {
+    identity: t.identity().primaryKey(),
+    jobId: t.string(), // the job (or credential) the grant is for
+    anyEcr: t.bool(), // true: any ECR (a person's agent); the baseline is never writable
+    prIds: t.array(t.u64()), // the ECRs it may write to
+    expiresAt: t.timestamp(),
+    grantedAt: t.timestamp(),
+  }
+);
+
+// The structured parts of an impact statement. 'evidence' is one of fact | assumption |
+// computation | judgment (docs/GLOSSARY.md). A 'computation' number must equal a current
+// check_result of the ECR, key and p10/p50/p90 (post_impact_statement checks it).
+export const StatementNumber = t.object('StatementNumber', {
+  key: t.string(),
+  label: t.string(),
+  unit: t.string(),
+  p10: t.f64(),
+  p50: t.f64(),
+  p90: t.f64(),
+  evidence: t.string(),
+  resultKey: t.string(), // the check_result key it comes from; required for 'computation', else may be empty
+});
+export const StatementClaim = t.object('StatementClaim', { text: t.string(), evidence: t.string() });
+export const StatementAssumption = t.object('StatementAssumption', {
+  key: t.string(), // an assumption the ECR sees
+  source: t.string(), // given | default | agent_estimated; must match the assumption's own source
+  note: t.string(), // how the statement leans on it
+});
+
+// A Level 1-3 impact statement (#42). Append-only: a newer one for the same ECR and level
+// supersedes an older one in the reader's eyes. prRevision is the ECR revision it was written
+// against, so a reader can tell it has since gone out of date.
+const impactStatement = table(
+  { name: 'impact_statement', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    prId: t.u64().index('btree'),
+    level: t.u8(), // 1 | 2 | 3
+    prRevision: t.u32(),
+    changeClass: t.string(),
+    route: t.string(), // the proposed approval route
+    headline: t.string(),
+    numbers: t.array(StatementNumber),
+    drivers: t.array(StatementClaim),
+    assumptions: t.array(StatementAssumption),
+    claims: t.array(StatementClaim),
+    author: t.identity(),
+    createdAt: t.timestamp(),
+  }
+);
+
 // Drives reap_expired_leases. Private: clients have no use for it.
 const reaperSchedule = table(
   { name: 'reaper_schedule' },
@@ -249,6 +308,8 @@ const spacetimedb = schema({
   comment,
   actionLog,
   agentEvent,
+  actorScope,
+  impactStatement,
   reaperSchedule,
 });
 

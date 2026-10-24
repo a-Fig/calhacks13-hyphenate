@@ -41,7 +41,9 @@ import CreatePrReducer from "./create_pr_reducer";
 import EditPrTextReducer from "./edit_pr_text_reducer";
 import EnqueueCheckReducer from "./enqueue_check_reducer";
 import FailCheckReducer from "./fail_check_reducer";
+import GrantScopeReducer from "./grant_scope_reducer";
 import HeartbeatCheckReducer from "./heartbeat_check_reducer";
+import PostImpactStatementReducer from "./post_impact_statement_reducer";
 import RecordAgentEventsReducer from "./record_agent_events_reducer";
 import RecordAssumptionReducer from "./record_assumption_reducer";
 import RegisterActorReducer from "./register_actor_reducer";
@@ -54,12 +56,14 @@ import UpsertPartReducer from "./upsert_part_reducer";
 
 // Import all table schema definitions
 import ActionLogRow from "./action_log_table";
+import ActorScopeRow from "./actor_scope_table";
 import AgentEventRow from "./agent_event_table";
 import AssumptionRow from "./assumption_table";
 import CheckProgressRow from "./check_progress_table";
 import CheckResultRow from "./check_result_table";
 import CheckRunRow from "./check_run_table";
 import CommentRow from "./comment_table";
+import ImpactStatementRow from "./impact_statement_table";
 import MainVersionRow from "./main_version_table";
 import NornConfigRow from "./norn_config_table";
 import PartRow from "./part_table";
@@ -87,6 +91,17 @@ const tablesSchema = __schema({
       { name: 'action_log_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActionLogRow),
+  actorScope: __table({
+    name: 'actor_scope',
+    indexes: [
+      { accessor: 'identity', name: 'actor_scope_identity_idx_btree', algorithm: 'btree', columns: [
+        'identity',
+      ] },
+    ],
+    constraints: [
+      { name: 'actor_scope_identity_key', constraint: 'unique', columns: ['identity'] },
+    ],
+  }, ActorScopeRow),
   agentEvent: __table({
     name: 'agent_event',
     indexes: [
@@ -187,6 +202,20 @@ const tablesSchema = __schema({
       { name: 'comment_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, CommentRow),
+  impactStatement: __table({
+    name: 'impact_statement',
+    indexes: [
+      { accessor: 'id', name: 'impact_statement_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'prId', name: 'impact_statement_pr_id_idx_btree', algorithm: 'btree', columns: [
+        'prId',
+      ] },
+    ],
+    constraints: [
+      { name: 'impact_statement_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ImpactStatementRow),
   mainVersion: __table({
     name: 'main_version',
     indexes: [
@@ -264,7 +293,9 @@ const reducersSchema = __reducers(
   __reducerSchema("edit_pr_text", EditPrTextReducer),
   __reducerSchema("enqueue_check", EnqueueCheckReducer),
   __reducerSchema("fail_check", FailCheckReducer),
+  __reducerSchema("grant_scope", GrantScopeReducer),
   __reducerSchema("heartbeat_check", HeartbeatCheckReducer),
+  __reducerSchema("post_impact_statement", PostImpactStatementReducer),
   __reducerSchema("record_agent_events", RecordAgentEventsReducer),
   __reducerSchema("record_assumption", RecordAssumptionReducer),
   __reducerSchema("register_actor", RegisterActorReducer),

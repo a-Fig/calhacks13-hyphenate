@@ -30,6 +30,16 @@ export const ActionLog = __t.object("ActionLog", {
 });
 export type ActionLog = __Infer<typeof ActionLog>;
 
+export const ActorScope = __t.object("ActorScope", {
+  identity: __t.identity(),
+  jobId: __t.string(),
+  anyEcr: __t.bool(),
+  prIds: __t.array(__t.u64()),
+  expiresAt: __t.timestamp(),
+  grantedAt: __t.timestamp(),
+});
+export type ActorScope = __Infer<typeof ActorScope>;
+
 export const AgentEvent = __t.object("AgentEvent", {
   id: __t.u64(),
   eventKey: __t.string(),
@@ -145,6 +155,31 @@ export const Comment = __t.object("Comment", {
 });
 export type Comment = __Infer<typeof Comment>;
 
+export const ImpactStatement = __t.object("ImpactStatement", {
+  id: __t.u64(),
+  prId: __t.u64(),
+  level: __t.u8(),
+  prRevision: __t.u32(),
+  changeClass: __t.string(),
+  route: __t.string(),
+  headline: __t.string(),
+  get numbers() {
+    return __t.array(StatementNumber);
+  },
+  get drivers() {
+    return __t.array(StatementClaim);
+  },
+  get assumptions() {
+    return __t.array(StatementAssumption);
+  },
+  get claims() {
+    return __t.array(StatementClaim);
+  },
+  author: __t.identity(),
+  createdAt: __t.timestamp(),
+});
+export type ImpactStatement = __Infer<typeof ImpactStatement>;
+
 export const MainVersion = __t.object("MainVersion", {
   version: __t.u32(),
   parent: __t.u32(),
@@ -216,4 +251,29 @@ export const ResultInput = __t.object("ResultInput", {
   detailJson: __t.string(),
 });
 export type ResultInput = __Infer<typeof ResultInput>;
+
+export const StatementAssumption = __t.object("StatementAssumption", {
+  key: __t.string(),
+  source: __t.string(),
+  note: __t.string(),
+});
+export type StatementAssumption = __Infer<typeof StatementAssumption>;
+
+export const StatementClaim = __t.object("StatementClaim", {
+  text: __t.string(),
+  evidence: __t.string(),
+});
+export type StatementClaim = __Infer<typeof StatementClaim>;
+
+export const StatementNumber = __t.object("StatementNumber", {
+  key: __t.string(),
+  label: __t.string(),
+  unit: __t.string(),
+  p10: __t.f64(),
+  p50: __t.f64(),
+  p90: __t.f64(),
+  evidence: __t.string(),
+  resultKey: __t.string(),
+});
+export type StatementNumber = __Infer<typeof StatementNumber>;
 

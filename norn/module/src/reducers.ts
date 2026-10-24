@@ -9,7 +9,8 @@
 // refused).
 import { SenderError, t } from 'spacetimedb/server';
 import { ScheduleAt } from 'spacetimedb';
-import spacetimedb, { reaperSchedule } from './schema';
+import spacetimedb, { StatementAssumption, StatementClaim, StatementNumber, reaperSchedule } from './schema';
+import './scope'; // registers the job-scope rule with the policy gate
 import {
   CONFIG_DEFAULTS,
   OPEN_PR,
@@ -27,6 +28,7 @@ import {
   currentMain,
   decisionText,
   digestOf,
+  effectiveAssumptions,
   enqueueDeepOnOpen,
   getPr,
   getRun,
@@ -296,6 +298,127 @@ export const addComment = write(
       createdAt: ctx.timestamp,
     });
     return { prId: a.prId, entity: `comment:${c.id}`, summary: `commented${c.anchor ? ` on ${c.anchor}` : ''}` };
+  }
+);
+
+// ---------------------------------------------------------------------------------------------
+// Job scope (#56). Norn's MCP server verifies an agent's signed credential, then records here what
+// it may write to. The policy gate (scope.ts) holds every later write to it.
+// ---------------------------------------------------------------------------------------------
+
+export const grantScope = write(
+  'grant_scope',
+  { jobId: t.string(), anyEcr: t.bool(), prIds: t.array(t.u64()), expiresAt: t.timestamp() },
+  (ctx, a) => {
+    const jobId = nonEmpty(a.jobId, 'jobId', 64);
+    if (a.prIds.length > 50) throw new SenderError('a grant names at most 50 ECRs');
+    const labels = a.prIds.map(id => getPr(ctx, id).plmEcrNumber);
+    const ahead = a.expiresAt.microsSinceUnixEpoch - ctx.timestamp.microsSinceUnixEpoch;
+    if (ahead <= 0n) throw new SenderError('expiresAt is already past');
+    if (ahead > 24n * 3600n * 1_000_000n) throw new SenderError('a grant lasts at most 24 hours');
+    const row = { identity: ctx.sender, jobId, anyEcr: a.anyEcr, prIds: [...new Set(a.prIds)], expiresAt: a.expiresAt, grantedAt: ctx.timestamp };
+    if (ctx.db.actorScope.identity.find(ctx.sender)) ctx.db.actorScope.identity.update(row);
+    else ctx.db.actorScope.insert(row);
+    return {
+      entity: `actor_scope:${ctx.sender.toHexString().slice(0, 8)}`,
+      summary: `granted job ${jobId} write scope: ${a.anyEcr ? 'any ECR' : labels.join(', ') || 'no ECR'}, until ${a.expiresAt.toISOString()}`,
+      detail: { jobId, anyEcr: a.anyEcr, prIds: a.prIds },
+    };
+  }
+);
+
+// ---------------------------------------------------------------------------------------------
+// Impact statements (#42). The agent that writes the statement narrates; it does not compute: a
+// number marked 'computation' must be a current check result of this ECR, to the digit, and an
+// assumption's source must be the one the assumption actually has.
+// ---------------------------------------------------------------------------------------------
+
+const EVIDENCE = ['fact', 'assumption', 'computation', 'judgment'];
+
+export const postImpactStatement = write(
+  'post_impact_statement',
+  {
+    prId: t.u64(),
+    level: t.u8(),
+    changeClass: t.string(),
+    route: t.string(),
+    headline: t.string(),
+    numbers: t.array(StatementNumber),
+    drivers: t.array(StatementClaim),
+    assumptions: t.array(StatementAssumption),
+    claims: t.array(StatementClaim),
+  },
+  (ctx, a) => {
+    const pr = getPr(ctx, a.prId);
+    if (!OPEN_PR.includes(pr.status as PrStatus)) throw new SenderError(`ECR ${pr.id} is ${pr.status}; its statement is frozen`);
+    if (a.level < 1 || a.level > 3) throw new SenderError('level must be 1, 2 or 3');
+    const changeClass = nonEmpty(a.changeClass, 'changeClass', 80);
+    const route = nonEmpty(a.route, 'route', 200);
+    const headline = nonEmpty(a.headline, 'headline', 600);
+    if (a.numbers.length < 1 || a.numbers.length > 12) throw new SenderError('a statement has 1 to 12 headline numbers');
+    if (a.drivers.length > 8) throw new SenderError('a statement has at most 8 drivers');
+    if (a.claims.length > 12) throw new SenderError('a statement has at most 12 claims');
+    if (a.assumptions.length > 20) throw new SenderError('a statement lists at most 20 assumptions');
+    const evidence = (e: string, what: string) => {
+      if (!EVIDENCE.includes(e)) throw new SenderError(`${what}: evidence must be one of ${EVIDENCE.join(', ')}`);
+    };
+
+    // The newest result per key among runs that are still current ('done'; a stale run's are not).
+    const current = new Map<string, { id: bigint; p10: number; p50: number; p90: number }>();
+    for (const r of ctx.db.checkResult.prId.filter(pr.id)) {
+      if (ctx.db.checkRun.id.find(r.checkRunId)?.status !== 'done') continue;
+      const seen = current.get(r.key);
+      if (!seen || r.id > seen.id) current.set(r.key, r);
+    }
+    for (const n of a.numbers) {
+      const what = `number '${n.key}'`;
+      nonEmpty(n.key, `${what} key`, 80);
+      nonEmpty(n.label, `${what} label`, 200);
+      if (n.unit.length > 24) throw new SenderError(`${what}: unit is too long (max 24 characters)`);
+      if (![n.p10, n.p50, n.p90].every(Number.isFinite) || !(n.p10 <= n.p50 && n.p50 <= n.p90))
+        throw new SenderError(`${what}: need finite p10 <= p50 <= p90`);
+      evidence(n.evidence, what);
+      if (n.evidence === 'computation') {
+        const r = current.get(n.resultKey);
+        if (!r) throw new SenderError(`${what} is marked computation, but ECR ${pr.id} has no current check result '${n.resultKey}'`);
+        if (r.p10 !== n.p10 || r.p50 !== n.p50 || r.p90 !== n.p90)
+          throw new SenderError(`${what} is marked computation but differs from check result '${n.resultKey}' (${r.p10} / ${r.p50} / ${r.p90}); quote it exactly or mark it judgment`);
+      }
+    }
+    for (const c of [...a.drivers, ...a.claims]) {
+      nonEmpty(c.text, 'a driver or claim text', 600);
+      evidence(c.evidence, 'a driver or claim');
+    }
+    const seen = new Map(effectiveAssumptions(ctx, pr.id).map(x => [x.key, x]));
+    for (const x of a.assumptions) {
+      const known = seen.get(x.key);
+      if (!known) throw new SenderError(`assumption '${x.key}' is not one this ECR sees`);
+      if (known.source !== x.source)
+        throw new SenderError(`assumption '${x.key}' is ${known.source}, not ${x.source}; a statement may not relabel an assumption's source`);
+      if (x.note.length > 400) throw new SenderError(`assumption '${x.key}': note is too long (max 400 characters)`);
+    }
+
+    const row = ctx.db.impactStatement.insert({
+      id: 0n,
+      prId: pr.id,
+      level: a.level,
+      prRevision: pr.revision,
+      changeClass,
+      route,
+      headline,
+      numbers: a.numbers,
+      drivers: a.drivers,
+      assumptions: a.assumptions,
+      claims: a.claims,
+      author: ctx.sender,
+      createdAt: ctx.timestamp,
+    });
+    return {
+      prId: pr.id,
+      entity: `impact_statement:${row.id}`,
+      summary: `posted Level ${a.level} impact statement on ${pr.plmEcrNumber} (revision ${pr.revision}): ${headline.slice(0, 100)}`,
+      detail: { level: a.level, numbers: a.numbers.length, drivers: a.drivers.length, assumptions: a.assumptions.length, claims: a.claims.length },
+    };
   }
 );
 

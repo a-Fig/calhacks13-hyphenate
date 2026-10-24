@@ -201,11 +201,17 @@ export function digestOf(infos: Record<string, StageInfo>): string {
 // Actors (#34)
 // ---------------------------------------------------------------------------------------------
 
+// What a credential lets this connection write to (actor_scope, written by grant_scope). Set for
+// agents that come in through Norn's MCP server; null for workers and the UI, which have no limit
+// of this kind. expiresAtMicros is microseconds since the Unix epoch.
+export type ActorScope = { jobId: string; anyEcr: boolean; prIds: bigint[]; expiresAtMicros: bigint };
+
 export type Actor = {
   kind: 'person' | 'agent' | 'unknown';
   name: string;
   origin: string;
   onBehalfOf: string | null;
+  scope?: ActorScope | null;
 };
 
 export function resolveActor(ctx: Ctx): Actor {
@@ -214,8 +220,10 @@ export function resolveActor(ctx: Ctx): Actor {
     return { kind: 'agent', name: 'norn-scheduler', origin: 'norn', onBehalfOf: null };
   }
   const p = ctx.db.principal.identity.find(ctx.sender);
-  if (p) return { kind: p.kind as Actor['kind'], name: p.name, origin: p.origin, onBehalfOf: p.onBehalfOf ?? null };
-  return { kind: 'unknown', name: `unregistered:${ctx.sender.toHexString().slice(0, 8)}`, origin: 'unknown', onBehalfOf: null };
+  const s = ctx.db.actorScope.identity.find(ctx.sender);
+  const scope: ActorScope | null = s ? { jobId: s.jobId, anyEcr: s.anyEcr, prIds: s.prIds, expiresAtMicros: s.expiresAt.microsSinceUnixEpoch } : null;
+  if (p) return { kind: p.kind as Actor['kind'], name: p.name, origin: p.origin, onBehalfOf: p.onBehalfOf ?? null, scope };
+  return { kind: 'unknown', name: `unregistered:${ctx.sender.toHexString().slice(0, 8)}`, origin: 'unknown', onBehalfOf: null, scope };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -230,12 +238,17 @@ export type PolicyRule = (ctx: Ctx, actor: Actor, reducer: string, args: Record<
 // Empty in the real module: there are no rules yet. The test module registers some to exercise the gate.
 export const POLICY_RULES: PolicyRule[] = [];
 
+// The first rule that denies or downgrades decides. If none does, the first rule that explicitly
+// allowed gives its reason (so the log says why, e.g. "job scope: ..."), else 'no rules yet'.
 export function authorize(ctx: Ctx, actor: Actor, reducer: string, args: Record<string, any>): Decision {
+  let allowed: Decision | undefined;
   for (const rule of POLICY_RULES) {
     const d = rule(ctx, actor, reducer, args);
-    if (d && d.effect !== 'allow') return d;
+    if (!d) continue;
+    if (d.effect !== 'allow') return d;
+    allowed ??= d;
   }
-  return { effect: 'allow', reason: 'no rules yet' };
+  return allowed ?? { effect: 'allow', reason: 'no rules yet' };
 }
 
 export function decisionText(d: Decision): string {
