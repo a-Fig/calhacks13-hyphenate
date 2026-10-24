@@ -22,6 +22,7 @@ node bowman/erp/bootstrap.mjs   # company, price list, Norn role and user (idemp
 node bowman/erp/verify.mjs      # the call sequence below, then removes its test documents
 node bowman/erp/seed.ts         # load bowman/data/bowman.json as Administrator (re-runnable; phases can be named)
 node bowman/erp/verify-seed.ts  # read the seed back as Norn and compare with the dataset
+node bowman/erp/seed-planning.ts # volume plan (Master Production Schedule), built aircraft (Serial Nos), and Norn's read grants for them
 ```
 
 With the tunnel open, browse `http://127.0.0.1:8081` and log in as `Administrator` with `ERPNEXT_ADMIN_PASSWORD` from `.env`. 8081 is used on both ends because the laptop cannot bind 8080.
@@ -44,6 +45,7 @@ User `norn@bowman.example` (System User, only role `Norn Agent`, no password, AP
 | BOM Update Log (not on the brief's list) | yes | no | yes | yes | no |
 | Purchase Receipt (not on the brief's list) | yes | no | no | no | no |
 | Account (not on the brief's list) | yes | no | no | no | no |
+| Workstation, Master Production Schedule, Serial No (added by `seed-planning.ts` for the connector, #40) | yes | no | no | no | no |
 
 Why the two extras: `enqueue_replace_bom` and `enqueue_update_cost` create and submit a BOM Update Log, and without that grant both return 403 (verified); Account read lets Norn pick accounts for a draft Journal Entry (create works without it, but Norn could not list the chart); Purchase Receipt read gives the receipt dates that make up realised lead times. Because Journal Entry has no write, Norn cannot edit or replace its own draft; Bowman can add write if wanted. Also verified: Norn cannot submit a Journal Entry (403, draft stays draft), create an Item, cancel or delete a BOM, or read other users. It cannot read Cost Center or Fiscal Year. It can read UOM and Item Group (ERPNext default) and its own User record.
 
@@ -93,7 +95,8 @@ Mapping decisions:
 - **Price history.** An item an ECO repriced has an earlier `Standard Cost` row (valid 2025-01-15 to the day before the ECO) and a current one from the ECO's release date. Supplier quotes have no history; the purchase orders carry the price over time.
 - **Purchase orders and receipts.** Each PO keeps its order date, required dates and unit prices, and its dataset id in `bw_po_id` (ERPNext numbers them itself). Each received line becomes a Purchase Receipt on its received date, one per PO and date, created in date order so ERPNext needs no backdated stock repost. Receipt date minus PO date is the realised lead time.
 - **Stock.** Stores, Work In Progress and Finished Goods quantities map to the three stock warehouses; `supplierFinished` goes to a new `At Supplier - BWA` warehouse; `onOrder` is not stock (open POs fill the Bin `ordered_qty`, which equals `onOrder + supplierFinished`); `inField` (installed on aircraft) is not loaded. Items never received on a PO got an Opening Stock entry dated 2025-01-14 against `Temporary Opening`. The rest were set to the dataset quantity by a Stock Reconciliation dated 2026-10-24, with the difference posted to Cost of Goods Sold. Valuation rate is the standard cost, so FIFO or moving-average valuation will drift from it once ERPNext starts moving stock.
-- **Not loaded** (no natural ERPNext home, or Norn takes them from the PLM side): people, change-control policy, volume plan, built aircraft, NCRs, ECRs, ECOs as documents, supplier constraints, rate factors, scenarios.
+- **Volume plan and built aircraft** are loaded by `seed-planning.ts`, not `seed.ts`: the volume plan as one Master Production Schedule (`MPS26-000001`, planned units per month and program), and the ten built Vespers as Serial Nos `VESPER-001` to `-010` with the completion date as `posting_date` (no stock entry, so the reconciled stock is unchanged). Details in `norn/connectors/erpnext/NOTES.md`.
+- **Not loaded** (no natural ERPNext home, or Norn takes them from the PLM side): people, change-control policy, NCRs, ECRs, ECOs as documents, supplier constraints, rate factors, scenarios.
 - **GL side effects.** The receipts credit `Inventory Received But Not Billed` and nothing clears it, because no purchase invoices were created. Reconciliation differences sit in Cost of Goods Sold and Temporary Opening.
 
 ## Differences from the research doc
