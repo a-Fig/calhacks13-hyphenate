@@ -378,8 +378,9 @@ export const recordErpPackage = write(
     const erpBaseline = nonEmpty(a.erpBaseline, 'erpBaseline', 128);
     if (!ctx.db.baselineSnapshot.hash.find(erpBaseline)) throw new SenderError(`ERP baseline ${erpBaseline.slice(0, 12)} has not been recorded`);
     for (const [what, v] of [['releaseJson', a.releaseJson], ['packageJson', a.packageJson], ['notesJson', a.notesJson]] as const) parseJson(v, what);
-    if (a.releaseJson.length + a.packageJson.length + a.notesJson.length > 200000)
-      throw new SenderError('releaseJson, packageJson and notesJson are too long (max 200000 characters together)');
+    // A package lists every line of every BOM it versions, so a large assembly runs to a few hundred KB.
+    if (a.releaseJson.length + a.packageJson.length + a.notesJson.length > 2_000_000)
+      throw new SenderError('releaseJson, packageJson and notesJson are too long (max 2,000,000 characters together)');
     if (a.entered + a.conflicts > a.lines) throw new SenderError(`${a.entered} entered and ${a.conflicts} in conflict is more than the ${a.lines} line(s)`);
 
     const prev = ctx.db.erpPackage.prId.find(pr.id);

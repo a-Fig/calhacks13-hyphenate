@@ -61,7 +61,11 @@ export function releaseOf(cr: ChangeRequest, result: CostCheckResult, ctx: Relea
   }
 
   // ---- BOM lines, as the ECR redlines them
-  const bomChanges = cr.bomChanges.map(b => ({ parent: b.parent, op: b.op, child: b.child, ...(b.op !== 'remove' && b.qtyTo !== undefined ? { qty: b.qtyTo } : {}) }));
+  // Quantities as the assessment reads them (checks/src/bom.ts): an add with no quantity is 1, and a
+  // quantity change with none changes nothing, so it is not a line to enter.
+  const bomChanges = cr.bomChanges
+    .filter(b => !(b.op === 'set_qty' && b.qtyTo === undefined))
+    .map(b => ({ parent: b.parent, op: b.op, child: b.child, ...(b.op === 'add' ? { qty: b.qtyTo ?? 1 } : b.op === 'set_qty' ? { qty: b.qtyTo! } : {}) }));
 
   // ---- journal entries, from the old stock's disposition
   type Line = EcoJournal['lines'][number];

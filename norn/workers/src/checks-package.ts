@@ -11,12 +11,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bowman } from '../../../bowman/data/index.ts';
-import { type Baseline, type ChangeRequest } from '../../checks/src/index.ts';
+import { costCheck, type Baseline, type ChangeRequest } from '../../checks/src/index.ts';
 import { hashOf, type EcoRelease } from '../../connectors/erpnext/src/index.ts';
 import { BaselineStore, type BaselineSource } from './baseline.ts';
 import { DB, connect, subscribe, withRetry } from './connect.ts';
 import { ingestOnce, stubSource } from './ingest.ts';
 import { packageOnce, type Planner } from './package.ts';
+import { releaseOf } from './release.ts';
 import { TABLES, kit, recorder, rejects } from './testkit.ts';
 
 if (DB === 'norn') throw new Error('check:package runs a worker of its own: point NORN_DB at a scratch database, not norn');
@@ -69,12 +70,17 @@ const store = new BaselineStore(
 const handed: EcoRelease[] = [];
 let enteredNow = 0;
 let failNext = false;
+let oversizeNext = false;
 const planner: Planner = async release => {
   if (failNext && release.ecr === e417.id) {
     failNext = false;
     throw new Error('check: the ERP read failed');
   }
   if (release.ecr === e417.id) handed.push(release);
+  if (oversizeNext && release.ecr === e417.id) {
+    oversizeNext = false;
+    return { packageJson: JSON.stringify({ check: true, filler: 'x'.repeat(2_100_000) }), lines: 1, entered: 0, conflicts: 0, problems: [] };
+  }
   const lines = release.items.length + (release.bomChanges?.length ?? 0) + (release.journals?.length ?? 0);
   return { packageJson: JSON.stringify({ check: true, eco: release.eco, lines, entered: enteredNow }), lines, entered: enteredNow, conflicts: 0, problems: [] };
 };
@@ -137,6 +143,10 @@ try {
   check('a package is checked again on a timer, since entering it may not change the baseline hash', recheck.built >= 1 && handed.length === 2 && rowR.erpBaseline === hashOf(baseline), `${JSON.stringify(recheck)} ${rowR.entered}/${rowR.lines}`);
   failNext = true;
   const failed = await packageOnce(A.conn, R, store, planner, { ...opts, recheckMs: 0 }, quiet);
+  oversizeNext = true;
+  const tooBig = await packageOnce(A.conn, R, store, planner, { ...opts, recheckMs: 0 }, quiet);
+  check('a package the module refuses to store is reported, and the job goes on', tooBig.skipped.some(s => s.includes(e417.id) && s.includes('could not record')) && db.erpPackage.prId.find(pr.id)?.entered === 1, JSON.stringify(tooBig.skipped).slice(0, 200));
+  handed.pop();
   check('a failed ERP read for one ECO is reported and does not stop the job', failed.skipped.some(s => s.includes(e417.id) && s.includes('the ERP read failed')) && db.erpPackage.prId.find(pr.id)?.entered === 1, JSON.stringify(failed.skipped));
 
   // ---- a new ERP read: a person has entered two lines ------------------------------------------------
@@ -150,6 +160,13 @@ try {
   check('the release is the same on the new read: the amounts come from the assessment, not from the ERP now', handed[2]!.journals!.length === 3 && JSON.stringify(handed[0]) === JSON.stringify(handed[2]), '');
   const summary = pkgLogs(pr.id).at(-1)?.summary ?? '';
   check('the log says how much of the package is entered', summary.includes(`ERP change package for ${ECO}: 2 of 4 line(s) entered`), summary);
+  // ---- an added BOM line with no quantity is released as the assessment reads it: 1 --------------
+  const e409 = structuredClone(bowman.ecrs.find(e => e.id === 'ECR-0409')!) as ChangeRequest;
+  const add = e409.bomChanges.find(b => b.op === 'add')!;
+  delete add.qtyTo;
+  const rel409 = releaseOf(e409, costCheck(baseline, e409, { seed: SEED }), { eco: 'ECO-T', decision: { id: 'd', url: 'u' }, releasedOn: '2026-10-24' }).release;
+  const line = rel409.bomChanges!.find(b => b.op === 'add' && b.child === add.child);
+  check('an added BOM line with no quantity is released at 1, as the assessment counts it', line?.qty === 1, JSON.stringify(line));
 } catch (e) {
   check('the package run finished', false, (e as Error).message);
   console.log(workerLog.join('').split('\n').slice(-30).join('\n'));

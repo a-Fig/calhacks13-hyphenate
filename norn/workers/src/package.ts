@@ -116,18 +116,25 @@ export async function packageOnce(conn: DbConnection, R: Client['R'], baselines:
     // A read that finds what the last one found keeps the stored package, so no log row is added
     // for it; erp_package.updatedAt says when it was last checked.
     if (prev && prev.s2RunId === s2.id && withoutReadAt(prev.packageJson) === withoutReadAt(planned.packageJson)) planned.packageJson = prev.packageJson;
-    await R.recordErpPackage({
+    const ecoNumber = eco.ecoNumber;
+    const erpBaseline = base.hash;
+    try {
+      await R.recordErpPackage({
       prId: pr.id,
-      ecoNumber: eco.ecoNumber,
+      ecoNumber,
       s2RunId: s2.id,
-      erpBaseline: base.hash,
+      erpBaseline,
       releaseJson: JSON.stringify(release),
       packageJson: planned.packageJson,
       lines: planned.lines,
       entered: planned.entered,
       conflicts: planned.conflicts,
       notesJson: JSON.stringify({ notes, problems: planned.problems }),
-    });
+      });
+    } catch (e) {
+      out.skipped.push(`${pr.plmEcrNumber}: could not record the package: ${(e as Error).message}`);
+      continue;
+    }
     const changed = !prev || prev.packageJson !== planned.packageJson || prev.s2RunId !== s2.id;
     if (changed) {
       out.built++;
