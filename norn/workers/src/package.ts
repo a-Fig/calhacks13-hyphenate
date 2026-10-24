@@ -152,7 +152,7 @@ export async function packageOnce(conn: DbConnection, R: Client['R'], baselines:
       releasedOn: dayIn(eco.recordedAt.microsSinceUnixEpoch, opts.timeZone),
     });
     // A release that changes nothing the ERP holds has an empty package: nothing to ask the ERP.
-    const empty = !release.items.length && !release.bomChanges?.length && !release.journals?.length;
+    const empty = !release.items.length && !release.bomChanges?.length && !release.journals?.length && !release.unsupported?.length;
     const planned: PlannedPackage = empty
       ? { packageJson: JSON.stringify({ version: 1, release, lines: [], counts: { total: 0, entered: 0, toEnter: 0, conflict: 0 }, effects: [], warnings: [], problems: [] }), lines: 0, entered: 0, conflicts: 0, problems: [] }
       : await planner(release);

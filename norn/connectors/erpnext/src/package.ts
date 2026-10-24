@@ -60,6 +60,12 @@ export interface EcoRelease {
   items: { item: ItemCode; rev?: string; standardCost: number }[];
   bomChanges?: BomLineChange[];
   journals?: EcoJournal[];
+  /**
+   * Changes the assessment costs that this package cannot carry out (for example a labor-hours change, which ERPNext holds as
+   * BOM operation time). Each becomes a problem on the package, so a release is never reported as "nothing to enter" while
+   * the assessment still costs a change nobody has entered.
+   */
+  unsupported?: string[];
 }
 
 // ---- the package -------------------------------------------------------------------------------------------------
@@ -181,7 +187,7 @@ function checkRelease(r: EcoRelease): void {
   try { new URL(r.decision.url); } catch { bad('decision.url is not a URL'); }
   if (!ISO.test(r.effectiveDate ?? '') || Number.isNaN(Date.parse(r.effectiveDate))) bad('effectiveDate must be YYYY-MM-DD');
   if (r.postingDate !== undefined && (!ISO.test(r.postingDate) || Number.isNaN(Date.parse(r.postingDate)))) bad('postingDate must be YYYY-MM-DD');
-  if (!r.items?.length && !r.bomChanges?.length && !r.journals?.length) bad('the release changes nothing');
+  if (!r.items?.length && !r.bomChanges?.length && !r.journals?.length && !r.unsupported?.length) bad('the release changes nothing');
   const seen = new Set<string>();
   for (const i of r.items ?? []) {
     if (!i.item) bad('an item change has no item');
@@ -219,6 +225,26 @@ function tagFields(s: ErpnextSettings) {
     price: { eco: need(cf.itemPrice?.changeOrder, 'itemPrice.changeOrder'), decision: cf.itemPrice?.decision },
     je: { eco: need(cf.journalEntry?.changeOrder, 'journalEntry.changeOrder'), entry: need(cf.journalEntry?.entry, 'journalEntry.entry'), decision: cf.journalEntry?.decision },
   };
+}
+
+/**
+ * The redlines on one BOM line, applied in order, as the assessment applies them (checks/src/bom.ts): the net change is what a
+ * person enters. An add then a quantity change is an add at the last quantity; a change then a change is the last one; an add
+ * then a remove is nothing; a remove then an add is a quantity change on the line that was already there.
+ */
+function foldBomChanges(changes: BomLineChange[]): BomLineChange[] {
+  const net = new Map<string, BomLineChange>();
+  for (const ch of changes) {
+    const key = JSON.stringify([ch.parent, ch.child]);
+    const cur = net.get(key);
+    if (!cur) { net.set(key, { ...ch }); continue; }
+    if (ch.op === 'remove') {
+      if (cur.op === 'add') net.delete(key); else net.set(key, { ...ch });
+    } else if (cur.op === 'remove' && ch.op === 'add') net.set(key, { ...ch, op: 'set_qty' });
+    else if (cur.op === 'remove') continue; // a quantity change of a line that was removed: the assessment calls it a conflict
+    else net.set(key, { ...cur, qty: ch.qty ?? cur.qty });
+  }
+  return [...net.values()];
 }
 
 const slug = (doctype: string) => doctype.toLowerCase().replace(/\s+/g, '-');
@@ -342,7 +368,8 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
   }
 
   // -- BOMs ----------------------------------------------------------------------------------------------------------
-  const lineChanges = release.bomChanges ?? [];
+  const lineChanges = foldBomChanges(release.bomChanges ?? []);
+  for (const u of release.unsupported ?? []) problems.push(`not in this package: ${u}`);
   let affected: string[] = [];
   if (itemCodes.length) {
     const useLines = await c.list('BOM Item', { parent: 'BOM', filters: [['item_code', 'in', itemCodes], ['docstatus', '=', 1]], fields: ['parent'] });
@@ -369,7 +396,8 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
     const mine = versions.filter((v) => v.item === item);
     const tagged = [...mine].reverse().find((v) => v[t.bom.eco] === eco);
     const madeBefore = (v: Row) => !tagged!.creation || (v.creation ?? '') < tagged!.creation;
-    const base = tagged ? [...mine].reverse().find((v) => v !== tagged && v[t.bom.eco] !== eco && madeBefore(v)) : [...mine].reverse().find((v) => v.is_active && v.is_default);
+    // Only a submitted version can be the source: an unrelated draft saved in between is nobody's default.
+    const base = tagged ? [...mine].reverse().find((v) => v !== tagged && v.docstatus === 1 && v[t.bom.eco] !== eco && madeBefore(v)) : [...mine].reverse().find((v) => v.docstatus === 1 && v.is_active && v.is_default);
     if (!base) { problems.push(`${item} has no active default BOM to version`); continue; }
     const later = tagged ? mine.filter((v) => v !== tagged && v.docstatus === 1 && v[t.bom.eco] !== eco && tagged.creation && (v.creation ?? '') > tagged.creation) : [];
     bases.set(item, { base, tagged, later });
@@ -402,7 +430,8 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
   const ordered: ItemCode[] = [];
   const visit = (item: ItemCode, path: ItemCode[]) => {
     if (ordered.includes(item) || path.includes(item) || !bases.has(item)) return;
-    for (const l of baseLines.filter((x) => x.parent === bases.get(item)!.base.name)) if (bases.has(l.item_code)) visit(l.item_code, [...path, item]);
+    const needs = [...baseLines.filter((x) => x.parent === bases.get(item)!.base.name).map((x) => x.item_code), ...lineChanges.filter((b) => b.parent === item && b.op === 'add').map((b) => b.child)];
+    for (const code of needs) if (bases.has(code)) visit(code, [...path, item]);
     ordered.push(item);
   };
   for (const item of affected) visit(item, []);
@@ -464,6 +493,12 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
       // The lines are quantities for the BOM's output, so the output has to be the package's too.
       const output = num(tagged.quantity) || 1;
       if (Math.abs(output - q) > 1e-6) lineDiffs.push(`makes ${output} where the release says ${q}`);
+      // The package asks for an active default BOM. A submitted version that is neither only counts when a later version has
+      // taken over (`later`): otherwise the item is left with no BOM in force.
+      if (tagged.docstatus === 1 && !later.length) {
+        if (!tagged.is_active) lineDiffs.push('is not active where the release says Is Active');
+        else if (!tagged.is_default) lineDiffs.push('is not the default BOM where the release says Is Default');
+      }
       for (const [code, qty] of wanted) {
         if (!have.has(code)) lineDiffs.push(`has no line for ${code}`);
         else if (Math.abs(have.get(code)! - qty) > 1e-6) lineDiffs.push(`has ${code} x${have.get(code)} where the release says x${qty}`);

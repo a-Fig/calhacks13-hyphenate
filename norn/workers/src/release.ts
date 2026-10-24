@@ -7,6 +7,7 @@
 import type { DispositionRow } from '../../checks/src/cost.ts';
 import type { ChangeRequest, CostCheckResult, StockLocation } from '../../checks/src/index.ts';
 import type { EcoJournal, EcoRelease } from '../../connectors/erpnext/src/index.ts';
+import { HOURS_FIELD } from '../../checks/src/bom.ts';
 
 export type ReleaseContext = {
   /** The PLM's change order number, e.g. ECO-0319. */
@@ -67,6 +68,19 @@ export function releaseOf(cr: ChangeRequest, result: CostCheckResult, ctx: Relea
     .filter(b => !(b.op === 'set_qty' && b.qtyTo === undefined))
     .map(b => ({ parent: b.parent, op: b.op, child: b.child, ...(b.op === 'add' ? { qty: b.qtyTo ?? 1 } : b.op === 'set_qty' ? { qty: b.qtyTo! } : {}) }));
 
+  // ---- changes the assessment costs but the package cannot carry out
+  // Labor hours become BOM operation time in ERPNext, which the connector does not enter. The assessment prices the change
+  // (more hours at the work center's rate), so the release says so rather than call itself empty.
+  const unsupported: string[] = [];
+  for (const ch of cr.itemChanges) {
+    for (const fc of ch.changes) {
+      if (fc.field === HOURS_FIELD && typeof fc.to === 'number' && fc.to !== fc.from) {
+        unsupported.push(`${ch.item} labor hours ${fc.from ?? 'unset'} -> ${fc.to}: ERPNext holds labor as BOM operation time, which this package does not enter. The assessment costs the change; enter the new operation time by hand.`);
+      }
+    }
+  }
+  notes.push(...unsupported.map(u => `Not in the package: ${u}`));
+
   // ---- journal entries, from the old stock's disposition
   type Line = EcoJournal['lines'][number];
   const onHand: Line[] = [];
@@ -123,7 +137,7 @@ export function releaseOf(cr: ChangeRequest, result: CostCheckResult, ctx: Relea
   const effectiveDate = cutIn && cutIn > ctx.releasedOn ? cutIn : ctx.releasedOn;
   if (!cutIn && items.length) notes.push('No cut-in month was found, so the new standard costs apply from the release day.');
 
-  if (!items.length && !bomChanges.length && !journals.length) notes.push(`${cr.id} changes nothing the ERP holds: there is nothing to enter.`);
+  if (!items.length && !bomChanges.length && !journals.length && !unsupported.length) notes.push(`${cr.id} changes nothing the ERP holds: there is nothing to enter.`);
   return {
     release: {
       eco: ctx.eco,
@@ -134,6 +148,7 @@ export function releaseOf(cr: ChangeRequest, result: CostCheckResult, ctx: Relea
       items,
       ...(bomChanges.length ? { bomChanges } : {}),
       ...(journals.length ? { journals } : {}),
+      ...(unsupported.length ? { unsupported } : {}),
     },
     notes,
   };

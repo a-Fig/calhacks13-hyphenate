@@ -468,7 +468,7 @@ test('a BOM entered with another output quantity, or another sub-assembly BOM, i
 
   // T-1's BOM holds A, which this release also versions: that line has to point at A's new BOM, not the old one.
   const r: EcoRelease = { ...release, journals: [], bomChanges: [{ parent: 'T-1', op: 'set_qty', child: 'A', qty: 1 }] };
-  db.BOM.push({ name: 'BOM-T2', item: 'T-1', company: 'Co', docstatus: 1, is_active: 1, is_default: 0, quantity: 1, raw_material_cost: 81, operating_cost: 0, total_cost: 81, creation: '2026-06-02', eco: 'ECO-9' });
+  db.BOM.push({ name: 'BOM-T2', item: 'T-1', company: 'Co', docstatus: 1, is_active: 1, is_default: 1, quantity: 1, raw_material_cost: 81, operating_cost: 0, total_cost: 81, creation: '2026-06-02', eco: 'ECO-9' });
   db['BOM Item'].push({ parent: 'BOM-T2', item_code: 'A', qty: 1, bom_no: 'BOM-A', idx: 1, docstatus: 1 });
   pkg = await build(r);
   assert.deepEqual([line(pkg, 'bom:T-1').status, line(pkg, 'bom:T-1').note], ['conflict', 'BOM-T2 has A on BOM BOM-A where the release says BOM-A2']);
@@ -492,7 +492,7 @@ test('BomLineChange.qty is per one unit of the parent: a BOM that makes 10 is en
   // The estimate scales too: 40 P at 10 and 10 Q at 5 make 450 raw, plus the 40 of operations.
   assert.deepEqual(line(await build(set), 'bom:A').amounts, { rawBefore: 350, totalBefore: 390, rawAfter: 450, totalAfter: 490 });
   // Entered at 40 it matches; entered at the per-unit 4 it does not.
-  db.BOM.push({ name: 'BOM-A2', item: 'A', company: 'Co', docstatus: 1, is_active: 1, is_default: 0, quantity: 10, raw_material_cost: 450, operating_cost: 40, total_cost: 490, creation: '2026-06-01', eco: 'ECO-9' });
+  db.BOM.push({ name: 'BOM-A2', item: 'A', company: 'Co', docstatus: 1, is_active: 1, is_default: 1, quantity: 10, raw_material_cost: 450, operating_cost: 40, total_cost: 490, creation: '2026-06-01', eco: 'ECO-9' });
   db['BOM Item'].push({ parent: 'BOM-A2', item_code: 'P', qty: 40, idx: 1, docstatus: 1 }, { parent: 'BOM-A2', item_code: 'Q', qty: 10, idx: 2, docstatus: 1 });
   assert.equal(line(await build(set), 'bom:A').status, 'entered');
   db['BOM Item'].find((l) => l.parent === 'BOM-A2' && l.item_code === 'P')!.qty = 4;
@@ -553,7 +553,7 @@ test('set_qty is a total: repeated rows of the component become one row at the t
   assert.deepEqual(rows.map((x) => [x.item_code, x.qty]), [['P', 4], ['Q', 1]]);
   assert.deepEqual(line(pkg, 'bom:A').amounts, { rawBefore: 35, totalBefore: 75, rawAfter: 45, totalAfter: 85 });
   // Entered as one row of 4, or as 1 + 3, it is the same total.
-  db.BOM.push({ name: 'BOM-A2', item: 'A', company: 'Co', docstatus: 1, is_active: 1, is_default: 0, quantity: 1, raw_material_cost: 45, operating_cost: 40, total_cost: 85, creation: '2026-06-01', eco: 'ECO-9' });
+  db.BOM.push({ name: 'BOM-A2', item: 'A', company: 'Co', docstatus: 1, is_active: 1, is_default: 1, quantity: 1, raw_material_cost: 45, operating_cost: 40, total_cost: 85, creation: '2026-06-01', eco: 'ECO-9' });
   db['BOM Item'].push({ parent: 'BOM-A2', item_code: 'P', qty: 1, docstatus: 1 }, { parent: 'BOM-A2', item_code: 'P', qty: 3, docstatus: 1 }, { parent: 'BOM-A2', item_code: 'Q', qty: 1, docstatus: 1 });
   assert.equal(line(await build(r), 'bom:A').status, 'entered');
 });
@@ -571,7 +571,7 @@ test('quantities are stock units whatever UOM a BOM row uses: written, compared 
   pkg = await build(reprice);
   assert.deepEqual(line(pkg, 'bom:A').tables[0].rows.map((row) => values({ fields: row })), [{ item_code: 'P', qty: 3, uom: 'Box' }, { item_code: 'Q', qty: 1, uom: 'Nos' }]);
   assert.equal(line(pkg, 'bom:A').amounts.rawAfter, 30 * 1 + 6);
-  db.BOM.push({ name: 'BOM-A2', item: 'A', company: 'Co', docstatus: 1, is_active: 1, is_default: 0, quantity: 1, raw_material_cost: 36, operating_cost: 40, total_cost: 76, creation: '2026-06-01', eco: 'ECO-9' });
+  db.BOM.push({ name: 'BOM-A2', item: 'A', company: 'Co', docstatus: 1, is_active: 1, is_default: 1, quantity: 1, raw_material_cost: 36, operating_cost: 40, total_cost: 76, creation: '2026-06-01', eco: 'ECO-9' });
   db['BOM Item'].push({ parent: 'BOM-A2', item_code: 'P', qty: 30, uom: 'Nos', docstatus: 1 }, { parent: 'BOM-A2', item_code: 'Q', qty: 1, docstatus: 1 });
   assert.equal(line(await build(reprice), 'bom:A').status, 'entered', '30 units is 3 Box');
   const p = db['BOM Item'].find((l) => l.parent === 'BOM-A2' && l.item_code === 'P')!;
@@ -611,4 +611,74 @@ test('two entries with the same ECO and key are a conflict, not an entry', async
   // One of them gone, the other reads as entered.
   db['Journal Entry'].pop();
   assert.equal(line(await build(one), 'journal-entry:scrap').status, 'entered');
+});
+
+// ---- review round 3: sequential redlines, drafts, added sub-assemblies, inactive replacements, unsupported changes -------
+
+test('redlines on one line apply in order: P changed 3 to 4 to 5 is a BOM with 5 P', async () => {
+  const r: EcoRelease = { ...release, items: [], journals: [], bomChanges: [{ parent: 'A', op: 'set_qty', child: 'P', qty: 4 }, { parent: 'A', op: 'set_qty', child: 'P', qty: 5 }] };
+  const pkg = await build(r);
+  assert.deepEqual(line(pkg, 'bom:A').tables[0].rows.map((row) => values({ fields: row }).qty), [5, 1]);
+  assert.match(line(pkg, 'bom:A').instruction, /set_qty P x5/);
+  // The first redline alone is not what was released.
+  db.BOM.push({ name: 'BOM-A2', item: 'A', company: 'Co', docstatus: 1, is_active: 1, is_default: 1, quantity: 1, raw_material_cost: 55, operating_cost: 40, total_cost: 95, creation: '2026-06-01', eco: 'ECO-9' });
+  db['BOM Item'].push({ parent: 'BOM-A2', item_code: 'P', qty: 4, docstatus: 1 }, { parent: 'BOM-A2', item_code: 'Q', qty: 1, docstatus: 1 });
+  assert.equal(line(await build(r), 'bom:A').note, 'BOM-A2 has P x4 where the release says x5');
+  db['BOM Item'].find((l) => l.parent === 'BOM-A2' && l.item_code === 'P')!.qty = 5;
+  assert.equal(line(await build(r), 'bom:A').status, 'entered');
+  // Add then change is an add at the last quantity; add then remove is nothing; remove then add is a change.
+  const mixed = await build({ ...r, bomChanges: [{ parent: 'A', op: 'add', child: 'T-1', qty: 1 }, { parent: 'A', op: 'set_qty', child: 'T-1', qty: 2 }, { parent: 'A', op: 'remove', child: 'Q' }, { parent: 'A', op: 'add', child: 'Q', qty: 3 }] });
+  assert.deepEqual(line(mixed, 'bom:A').tables[0].rows.map((row) => values({ fields: row })).map((x) => [x.item_code, x.qty]), [['P', 3], ['Q', 3], ['T-1', 2]]);
+  const gone = await build({ ...r, bomChanges: [{ parent: 'A', op: 'add', child: 'T-1', qty: 1 }, { parent: 'A', op: 'remove', child: 'T-1' }] });
+  assert.deepEqual(line(gone, 'bom:A').tables[0].rows.map((row) => values({ fields: row }).item_code), ['P', 'Q']);
+});
+
+test('an unrelated draft BOM is never the source of a recheck', async () => {
+  const r: EcoRelease = { ...release, items: [], journals: [], bomChanges: [{ parent: 'A', op: 'set_qty', child: 'P', qty: 4 }] };
+  db.BOM.push({ name: 'UNRELATED-DRAFT', item: 'A', company: 'Co', docstatus: 0, is_active: 0, is_default: 0, quantity: 1, creation: '2026-05-01' });
+  db['BOM Item'].push({ parent: 'UNRELATED-DRAFT', item_code: 'P', qty: 99, docstatus: 0 });
+  enterBom();
+  db.BOM.find((b) => b.name === 'BOM-A')!.is_active = 0;
+  const pkg = await build(r);
+  assert.deepEqual(line(pkg, 'bom:A').document, { doctype: 'BOM', name: 'BOM-A' });
+  assert.deepEqual(line(pkg, 'bom-retire:A').document, { doctype: 'BOM', name: 'BOM-A' });
+  assert.equal(pkg.lines.some((l) => l.document?.name === 'UNRELATED-DRAFT' || values(l).current_bom === 'UNRELATED-DRAFT'), false);
+});
+
+test('a sub-assembly added to a parent is entered before the parent', async () => {
+  db['BOM Item'] = db['BOM Item'].filter((l) => l.parent !== 'BOM-T');
+  db['BOM Item'].push({ parent: 'BOM-T', item_code: 'Q', qty: 1, stock_qty: 1, rate: 5, uom: 'Nos', docstatus: 1, idx: 1 });
+  const r: EcoRelease = { ...release, items: [], journals: [], bomChanges: [{ parent: 'T-1', op: 'add', child: 'A', qty: 1 }, { parent: 'A', op: 'set_qty', child: 'P', qty: 4 }] };
+  const pkg = await build(r);
+  assert.deepEqual(pkg.problems, []);
+  assert.deepEqual(pkg.lines.map((l) => l.id), ['bom:A', 'bom-retire:A', 'bom:T-1', 'bom-retire:T-1']);
+  const added = line(pkg, 'bom:T-1').tables[0].rows.at(-1)!;
+  assert.deepEqual(values({ fields: added }), { item_code: 'A', qty: 1, uom: 'Nos', bom_no: null }, 'the new A BOM, made first');
+  assert.equal(added.find((f) => f.field === 'bom_no')!.from, 'bom:A');
+});
+
+test('a replacement BOM that is inactive or not the default is not entered', async () => {
+  const r: EcoRelease = { ...release, items: [], journals: [], bomChanges: [{ parent: 'A', op: 'set_qty', child: 'P', qty: 4 }] };
+  enterBom();
+  db['BOM Item'].find((l) => l.parent === 'BOM-T')!.bom_no = 'BOM-A2';
+  db.BOM.find((b) => b.name === 'BOM-A')!.is_active = 0;
+  db['BOM Item'].filter((l) => l.parent === 'BOM-A2' && l.item_code === 'P').forEach((l) => { l.qty = 4; });
+  assert.equal((await build(r)).counts.entered, 3, 'as entered, with nothing wrong, all of it reads entered');
+  const a2 = db.BOM.find((b) => b.name === 'BOM-A2')!;
+  a2.is_default = 0; a2.is_active = 0;
+  let pkg = await build(r);
+  assert.deepEqual([line(pkg, 'bom:A').status, line(pkg, 'bom:A').note], ['conflict', 'BOM-A2 is not active where the release says Is Active']);
+  assert.notEqual(pkg.counts.entered, pkg.counts.total);
+  a2.is_active = 1;
+  pkg = await build(r);
+  assert.deepEqual([line(pkg, 'bom:A').status, line(pkg, 'bom:A').note], ['conflict', 'BOM-A2 is not the default BOM where the release says Is Default']);
+});
+
+test('a change the package cannot carry out is a problem, never "nothing to enter"', async () => {
+  const unsupported = ['A labor hours 1 -> 2: ERPNext holds labor as BOM operation time, which this package does not enter.'];
+  const pkg = await build({ ...release, items: [], journals: [], unsupported });
+  assert.equal(pkg.lines.length, 0);
+  assert.deepEqual(pkg.problems, [`not in this package: ${unsupported[0]}`]);
+  assert.match(formatErpChangePackage(pkg), /## Problems[\s\S]*not in this package: A labor hours 1 -> 2/);
+  await assert.rejects(build({ ...release, items: [], journals: [] }), /the release changes nothing/);
 });
