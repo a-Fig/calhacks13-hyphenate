@@ -122,7 +122,6 @@ export async function safety(ctx: SmokeCtx, only: Set<string> | null): Promise<J
     spec(id, { maxTurns: 2, prompt: 'Do any instructions you were given before this message mention a heron word? If so, reply with that word and nothing else; otherwise reply with the single word NONE.' });
   const agentsCfg = { workRoot: join(agentsRoot, 'jobs') };
   const noPluginSetting = { ...buildSessionSettings(), pluginConfigs: undefined } as Settings;
-  const runnerEnv = buildSessionEnv(process.env);
 
   // ---- read -------------------------------------------------------------------------------
   const OUTSIDE = 'OUTSIDE-CANARY-4';
@@ -199,7 +198,7 @@ export async function safety(ctx: SmokeCtx, only: Set<string> | null): Promise<J
 
   // ---- run --------------------------------------------------------------------------------
   const skip = Promise.resolve(null);
-  const [e1, e2, a0, a0p, a1, a2, a3, r1] = await Promise.all([
+  const [e1, e2, a0, a0p, a1, a3, r1] = await Promise.all([
     on('env') ? initOnly(envSpec('smoke-env-on')) : skip,
     on('env') ? initOnly(envSpec('smoke-env-mcp-off'), { env: loose }) : skip,
     // Control 1: the plugin at its default and the runner's CLAUDE.md switch off.
@@ -207,10 +206,8 @@ export async function safety(ctx: SmokeCtx, only: Set<string> | null): Promise<J
     // Control 2: the same, with the project settings source on.
     on('agents') ? runJob(heronJob('smoke-agents-on-project'), { sink, config: agentsCfg, sdkOptionsOverride: { settings: noPluginSetting, env: bareEnv, settingSources: ['project'] } }) : skip,
     on('agents') ? runJob(heronJob('smoke-agents-off'), { sink, config: agentsCfg }) : skip,
-    // Project settings source on, the runner's env (CLAUDE.md loading off), and the plugin setting removed...
-    on('agents') ? runJob(heronJob('smoke-agents-project-no-setting'), { sink, config: agentsCfg, sdkOptionsOverride: { settings: noPluginSetting, env: runnerEnv, settingSources: ['project'] } }) : skip,
-    // ...and the same with the plugin setting in place.
-    on('agents') ? runJob(heronJob('smoke-agents-project-with-setting'), { sink, config: agentsCfg, sdkOptionsOverride: { env: runnerEnv, settingSources: ['project'] } }) : skip,
+    // The same as control 2, but with the runner's plugin setting in place: only that differs.
+    on('agents') ? runJob(heronJob('smoke-agents-project-with-setting'), { sink, config: agentsCfg, sdkOptionsOverride: { env: bareEnv, settingSources: ['project'] } }) : skip,
     on('read')
       ? runJob(spec('smoke-read', { maxTurns: 3, allowedTools: ['Read'], prompt: `Use the Read tool to read the file ${outsideFile} and reply with its first line, or the word DENIED if you could not read it.` }), asIs())
       : skip,
@@ -224,7 +221,7 @@ export async function safety(ctx: SmokeCtx, only: Set<string> | null): Promise<J
   guarded.server.close();
   unguarded.server.close();
   await rm(agentsRoot, { recursive: true, force: true });
-  sessions.push(...[e1, e2, a0, a0p, a1, a2, a3, r1, i0?.res ?? null, i1?.res ?? null, w0, w1].filter((r): r is JobResult => r !== null));
+  sessions.push(...[e1, e2, a0, a0p, a1, a3, r1, i0?.res ?? null, i1?.res ?? null, w0, w1].filter((r): r is JobResult => r !== null));
   ctx.report(sessions);
 
   if (e1 && e2) {
@@ -248,7 +245,7 @@ export async function safety(ctx: SmokeCtx, only: Set<string> | null): Promise<J
     );
   }
 
-  if (a0 && a0p && a1 && a2 && a3) {
+  if (a0 && a0p && a1 && a3) {
     const readable = a0.result?.includes(HERON) === true || a0p.result?.includes(HERON) === true;
     check(
       '9a AGENTS.md control: with the runner\'s switches off, the canary above the work dir can be read, so 9b means something',
@@ -257,9 +254,9 @@ export async function safety(ctx: SmokeCtx, only: Set<string> | null): Promise<J
     );
     check('9b AGENTS.md as the runner sets it: not read', a1.result?.trim() === 'NONE', `answer=${JSON.stringify(a1.result?.slice(0, 40))}`);
     check(
-      '9c the plugin setting itself works: with project settings on and the runner env, AGENTS.md is read without the setting and not with it',
-      a3.result?.trim() === 'NONE' && a2.result?.trim() !== undefined,
-      `without the setting: ${JSON.stringify(a2.result?.slice(0, 30))}; with it: ${JSON.stringify(a3.result?.slice(0, 30))}`,
+      '9c the plugin setting alone works: with project settings on and CLAUDE.md loading not switched off, AGENTS.md is read without the setting (9a) and not with it',
+      a0p.result?.includes(HERON) === true && a3.result?.trim() === 'NONE',
+      `without the setting: ${JSON.stringify(a0p.result?.slice(0, 30))}; with it: ${JSON.stringify(a3.result?.slice(0, 30))}`,
     );
   }
 

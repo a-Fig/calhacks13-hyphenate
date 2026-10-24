@@ -71,7 +71,7 @@ describe('session settings', () => {
     assert.equal(s.crossSessionInbound, 'refuse');
     assert.deepEqual(s.permissions?.deny, ['SendMessage', 'ListAgents']);
     assert.equal(s.permissions?.blockReadsOutsideWorkingDirectories, true);
-    assert.equal(s.pluginConfigs?.['cc-plugin-agents-md@builtin']?.options?.instructionFiles, 'managed-only');
+    assert.equal(s.pluginConfigs?.['cc-plugin-agents-md@builtin']?.options?.instructionFiles, 'claude-md');
     const job = resolveJob(baseSpec(), defaultConfig());
     const o = buildSdkOptions(job, { cwd: '/w', abortController: new AbortController(), env: {} });
     assert.deepEqual(o.settings, s);

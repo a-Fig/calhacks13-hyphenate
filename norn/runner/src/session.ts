@@ -93,9 +93,10 @@ export function buildSessionSettings(): SessionSettings {
       blockReadsOutsideWorkingDirectories: true,
     },
     // AGENTS.md is read by a built-in plugin, from the working directory and every directory
-    // above it, whatever `settingSources` says. `managed-only` leaves every AGENTS.md and
-    // CLAUDE.md out.
-    pluginConfigs: { 'cc-plugin-agents-md@builtin': { options: { instructionFiles: 'managed-only' } } },
+    // above it. `claude-md` limits it to CLAUDE.md files, so no AGENTS.md is read. (Not
+    // `managed-only`: that value also loads auto memory at launch, and the live control showed it
+    // overriding CLAUDE_CODE_DISABLE_AUTO_MEMORY.)
+    pluginConfigs: { 'cc-plugin-agents-md@builtin': { options: { instructionFiles: 'claude-md' } } },
   };
 }
 
