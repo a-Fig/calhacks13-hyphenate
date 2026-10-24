@@ -7,6 +7,7 @@
 //   NORN_DB=norn-test npm run check:module   (the same checks against the test module)
 import { Timestamp } from 'spacetimedb';
 import { connect, subscribe, DB } from './connect.ts';
+import { sleep } from './sim.ts';
 import { CODE, TABLES, kit, recorder, rejects, result } from './testkit.ts';
 
 const { check, finish } = recorder();
@@ -219,6 +220,91 @@ await R.recordAgentEvents({ checkRunId: target.id, events: [ev(1, 'tool_call'), 
 await holds(() => [...db.agentEvent.iter()].filter(e => e.jobId === job).length >= 4);
 const got = [...db.agentEvent.iter()].filter(e => e.jobId === job).sort((a, b) => a.seq - b.seq);
 check('agent events are keyed by (job, seq): out-of-order batches are stored once each, a resent batch adds nothing', got.map(e => e.seq).join(',') === '0,1,2,3' && got.every(e => e.eventKey === `${job}#${e.seq}` && e.prId === E1.id && e.checkRunId === target.id && e.actor === 'agent:norn/level1/ECR-0417' && e.spawnedBy === 'norn' && e.sender.isEqual(A.identity)), got.map(e => e.eventKey).join(' '));
+
+// ---- impact statements: the run they were written from, and the publication lease (#80) --------------------
+await subscribe(A.conn, ['SELECT * FROM impact_statement', 'SELECT * FROM publication_claim']);
+const L1 = await connect({ kind: 'agent', name: `check-l1-${stamp}`, origin: 'norn', spawnedBy: 'Norn' }, { persistToken: false, quiet: true });
+const E12 = await file('check: statement source');
+const E13 = await file('check: other ECR');
+await L1.R.grantScope({ jobId: `check-l1-job-${stamp}`, anyEcr: false, prIds: [E12.id], maxLevel: 2, expiresAt: Timestamp.fromDate(new Date(Date.now() + 3_600_000)) });
+await until(() => db.actorScope.identity.find(L1.identity), 3000, 'the job scope').catch(() => undefined);
+const stmts = (prId: bigint) => [...db.impactStatement.iter()].filter(s => s.prId === prId);
+const lastLog = () => logs(l => l.reducer === 'post_impact_statement' && l.actorName === `check-l1-${stamp}`).at(-1);
+const body = (spawnedBy: string, over: Record<string, unknown> = {}) => ({
+  prId: E12.id, level: 1, changeClass: 'Class I', route: 'CCB', headline: `statement ${stamp}`, drivers: [], assumptions: [], claims: [],
+  numbers: [{ key: 'net', label: 's2_cost', unit: 'x', p10: 1, p50: 2, p90: 3, evidence: 'computation', resultKey: 's2_cost' }],
+  meta: { requestId: `st-${stamp}-${Math.random().toString(36).slice(2, 6)}`, spawnedBy }, ...over,
+});
+await work(E12.id, 's1_bom_delta');
+const s2first = await work(E12.id, 's2_cost');
+await work(E13.id, 's1_bom_delta');
+const s2other = await work(E13.id, 's2_cost');
+
+await L1.R.postImpactStatement(body(`norn:check_run:${s2first}`));
+const first = await until(() => stmts(E12.id).at(0), 3000, 'the first statement');
+check('a statement posted by a session started by a check run records that run', first.checkRunId === s2first, `checkRunId ${first.checkRunId}, run ${s2first}`);
+
+await L1.R.postImpactStatement(body(`norn:check_run:${s2other}`));
+await sleep(300);
+check("...a session started by another ECR's check run is refused", stmts(E12.id).length === 1 && lastLog()?.outcome === 'rejected' && /not a check run of/.test(lastLog()?.summary ?? ''), lastLog()?.summary);
+
+await edit(E12.id, 'chk_stmt_source', 1, ['s1_bom_delta']); // the inputs change: the first s2 run goes stale
+await holds(() => run(s2first).status === 'stale');
+await L1.R.postImpactStatement(body(`norn:check_run:${s2first}`, { headline: `late ${stamp}` }));
+await sleep(300);
+check('...and a session whose check run has gone stale (a newer revision or baseline arrived) cannot post, even with its numbers unchanged', stmts(E12.id).length === 1 && lastLog()?.outcome === 'rejected' && /is stale/.test(lastLog()?.summary ?? '') && /Post nothing/.test(lastLog()?.summary ?? ''), lastLog()?.summary);
+
+await work(E12.id, 's1_bom_delta');
+const s2second = await work(E12.id, 's2_cost');
+await L1.R.postImpactStatement(body(`norn:check_run:${s2second}`, { headline: `second ${stamp}` }));
+const second = await until(() => stmts(E12.id).find(s => s.headline === `second ${stamp}`), 3000, 'the statement from the new run');
+check('...the new run\'s session posts, and the statement names the new run', second.checkRunId === s2second && second.checkRunId !== first.checkRunId, `${second.checkRunId}`);
+
+const norun = await rejects(A.R.postImpactStatement({ ...body('Norn'), headline: `no session ${stamp}` }));
+const noRunStmt = await holds(() => stmts(E12.id).some(s => s.headline === `no session ${stamp}`));
+check('a statement posted outside a session records the run its computation number was copied from', norun === null && noRunStmt && stmts(E12.id).find(s => s.headline === `no session ${stamp}`)!.checkRunId === s2second, String(norun?.message));
+await A.R.postImpactStatement({ ...body('Norn'), headline: `judgment ${stamp}`, numbers: [{ key: 'j', label: 'Effort', unit: 'h', p10: 1, p50: 2, p90: 3, evidence: 'judgment', resultKey: '' }] });
+check('...and records 0 when it rests on no run at all', await holds(() => stmts(E12.id).find(s => s.headline === `judgment ${stamp}`)?.checkRunId === 0n));
+
+// a scoped agent whose spawnedBy is not a check run: judgment only, so no run; the module records the revision it saw
+await L1.R.postImpactStatement(body('Norn', { headline: `scoped judgment ${stamp}`, numbers: [{ key: 'j', label: 'Effort', unit: 'h', p10: 1, p50: 2, p90: 3, evidence: 'judgment', resultKey: '' }] }));
+const scopedJ = await until(() => stmts(E12.id).find(s => s.headline === `scoped judgment ${stamp}`), 3000, 'the scoped judgment statement');
+check('a scoped agent\'s judgment-only statement records no run and the ECR revision the module saw when it was posted', scopedJ.checkRunId === 0n && scopedJ.prRevision === pr(E12.id).revision, `checkRunId ${scopedJ.checkRunId}, prRevision ${scopedJ.prRevision}, ECR at ${pr(E12.id).revision}`);
+
+// the publication lease: held by a connection's identity, for Norn's own agents only
+const A2 = await connect({ kind: 'agent', name: `check-a2-${stamp}`, origin: 'norn', spawnedBy: 'Norn' }, { persistToken: false, quiet: true });
+const claimAs = (who: { R: any }, processId: string, ms = 60_000) => rejects(who.R.claimPublication({ prId: E12.id, statementId: second.id, processId, leaseMs: ms }));
+const held = () => db.publicationClaim.prId.find(E12.id);
+const c1 = await claimAs(A, 'p1');
+const c2 = await claimAs(A, 'p2');
+const c1b = await claimAs(A, 'p1');
+check('claim_publication: one holder at a time, even two processes of one identity; the second is refused with [held], the first may renew', c1 === null && c2?.message.includes('[held]') === true && c1b === null, `${c2?.message}`);
+check('...and the claim is a row naming the connection\'s identity and the statement', held()?.holder.isEqual(A.identity) === true && held()?.processId === 'p1' && held()?.statementId === second.id);
+const c3 = await claimAs(A2, 'p1');
+check('...another Norn agent, even using the same process id, is refused while the lease stands', c3?.message.includes('[held]') === true, c3?.message);
+const cExt = await claimAs(C, 'x');
+const cPerson = await claimAs(P, 'x');
+check('...a person and an outside agent may not claim a lease at all', cExt?.message.includes('[forbidden]') === true && cPerson?.message.includes('[forbidden]') === true, `${cExt?.message} | ${cPerson?.message}`);
+await A2.R.releasePublication({ prId: E12.id, processId: 'p1' });
+await C.R.releasePublication({ prId: E12.id, processId: 'p1' });
+await A.R.releasePublication({ prId: E12.id, processId: 'p2' });
+await sleep(200);
+check('...copying the holder text does not release it: not another identity, not the same identity\'s other process', held()?.holder.isEqual(A.identity) === true && held()?.processId === 'p1');
+await A.R.releasePublication({ prId: E12.id, processId: 'p1' });
+check('...the holder releases it, and then another can claim', await holds(() => !held()) && (await claimAs(A2, 'q1')) === null);
+await A2.R.releasePublication({ prId: E12.id, processId: 'q1' });
+await claimAs(A, 'p1', 1000);
+await sleep(1300);
+check('a lease that is not released ends by itself: another Norn agent may claim over it', (await claimAs(A2, 'q1')) === null && (await holds(() => held()?.holder.isEqual(A2.identity))));
+await A2.R.releasePublication({ prId: E12.id, processId: 'q1' });
+await claimAs(A, 'p1', 1000);
+await sleep(1300);
+await A2.R.releasePublication({ prId: E12.id, processId: 'whatever' });
+check('...or clear it', await holds(() => !held()));
+const bad = await rejects(A.R.claimPublication({ prId: E12.id, statementId: 999999n, processId: 'x', leaseMs: 1000 }));
+check('claiming for a statement that does not exist is refused', bad?.message.includes('does not exist') === true, bad?.message);
+A2.close();
+L1.close();
 
 // ---- every write left a log row ---------------------------------------------------------------------
 const names = ['register_actor', 'create_pr', 'edit_pr_text', 'add_comment', 'enqueue_check', 'record_assumption', 'set_pr_status', 'claim_check', 'complete_check', 'fail_check', 'set_config', 'upsert_part'];
