@@ -309,8 +309,9 @@ async function readConstraintRows(c: ErpnextClient, src: SupplierConstraintSourc
 /**
  * ERPNext rows to the baseline's `supplierConstraints`. Frappe leaves null fields out and stores an unset number as 0,
  * so a 0 or a missing value means "not stated". Sorted by id, items by code, so the baseline hash is stable.
- * A row with an unknown kind, or no id, supplier or items is skipped with a warning; so is a supplier no sourcing row names,
- * because the supply check matches a constraint to the sourcing rows by that exact string.
+ * A row with an unknown kind, or no id, supplier or items is skipped with a warning. A constraint whose supplier no sourcing
+ * row names is kept, with a warning: the supply check matches a constraint to the sourcing rows by that exact string, so it
+ * will find nothing to apply it to, and the warning says why.
  */
 export function mapSupplierConstraints(
   src: SupplierConstraintSource, parents: Record<string, any>[], itemRows: Record<string, any>[], sourcingSuppliers: Set<string>, warnings: string[],
