@@ -28,13 +28,6 @@ workflow decisions here.
 - **Agent.** Either the product's agents (ECR extraction, assumption proposals, card narration) or
   a coding agent working on this repo.
 
-## Hackathon rules that bind the code
-
-- All implementation happens during hacking, which started Fri 2026-10-23 18:00 PT. Cal Hacks
-  disqualifies prior work (`docs/hackathon-logistics.md`). Open-source libraries and patterns are
-  fine. Code from Tyler's or Ankit's earlier projects is not.
-- Personal hotspots are banned at the venue. The live demo runs on venue Wi-Fi, or locally.
-
 ## Workflow
 
 These rules were carried over on 2026-10-24 from Tyler's earlier projects and his Claude memory.
@@ -45,28 +38,57 @@ Tyler, whether Ankit can also approve is open.
 **Git and PRs**
 
 - Agents commit and push to non-`main` branches without asking, and say so afterwards.
-- Pushing to `main` needs Tyler's explicit OK. Agents never merge PRs; Tyler does. An explicit
-  "merge it" from him covers that PR only (2026-10-19).
-- PRs open as drafts. The hand-off says "ready for you to un-draft" (2026-10-21).
+- Pushing to `main` needs Tyler's explicit OK. An agent merges a PR only when Tyler explicitly
+  says to, and that OK covers that PR only. Otherwise Tyler merges.
+- PRs open as drafts. The agent marks its PR ready for review itself once the work is done,
+  verified and reviewed. Un-drafting is not Tyler's job (2026-10-24).
 - Branch off `main`, one branch per change, named `claude/<slug>`. Stack a PR on another branch
   only when it truly depends on it.
 - Commit messages and PR bodies explain *why*. Subjects are plain sentence-case descriptions of
   the change *(proposed, matching his earlier repos)*.
 - PR bodies follow `.github/pull_request_template.md`. Its comments say what each section needs.
   GitHub pre-fills the template only for PRs opened in the web UI, so an agent opening one with
-  `gh` writes the sections itself. Add `Closes #N` when an issue exists.
+  `gh` writes the sections itself.
+- Every PR closes at least one issue, and its body starts with only its `Closes #N` lines. Work no
+  issue covers gets one filed first (2026-10-24). This keeps the issue list a record of what
+  shipped.
+- A PR that changes what a user sees or does shows it (2026-10-24):
+  - before and after screenshots of each changed screen;
+  - a short video or GIF for a flow.
+
+  `node .github/pr-media.mjs <pr> <files>` puts them on the `pr-media` branch and prints the
+  markdown, since GitHub's API can't attach files to a PR. Images and GIFs show inline. An mp4
+  linked that way downloads rather than plays; a video dragged into the PR in the web UI plays.
 - Before pushing to a branch someone else touches, `git fetch` and rebase.
 - Before pushing follow-ups, check the PR is still open. Pushes to a merged PR's branch are
   silently stranded.
 - Never overwrite someone else's uncommitted work.
-- Do tiny, clearly right fixes (a typo, a one-line bug) in the same session on a branch, and
-  mention them afterwards. An offer or an issue costs Tyler more attention than the fix.
+- Do tiny, clearly right fixes (a typo, a one-line bug) in the same session rather than offering
+  them. Fold one into the PR at hand and mention it there. Otherwise its issue is one line.
+
+**Issues and labels**
+
+- Every issue carries at least one label. The labels sit on independent axes:
+  - **Kind.** `bug`, `Feature` or `Task`, spelled exactly so; `--add-label` fails on other
+    spellings. An open design question takes `question` instead.
+  - **Priority.** Either a time (`priority: now`, `soon`, `future`) or a level (`high`, `medium`,
+    `low`), never both (2026-10-14). It goes on open issues only, one label each. A time suits work
+    tied to when it's needed; a level suits the rest.
+  - **Where the work lives.** `PR needed` is a change in this repo. `non-PR needed` is work no PR
+    can do: an account, a decision, something in the world. An issue can carry both.
+  - **Who filed it.** A model filing on its own initiative adds `(from <model>)` to the title and
+    labels it `from: Opus` or `from: Sonnet`. An issue Tyler asks for is `from: Tyler`, with no
+    title suffix, even though a model typed it. Ankit's are `from: Ankit`.
+  - **Area.** `area:` labels come once the code has a layout.
+- An issue Tyler asks to log captures his idea and the obvious why, in his shape, not a researched
+  spec. Research comes from whoever picks it up.
+- Why an issue closed is its `state_reason` (`completed`, `not_planned`, `duplicate`), not a
+  label. Add no new label without a reason; one-offs dilute the axes.
 
 **Review**
 
-- Sonnet subagents implement and Opus agents review (2026-10-18). Opus implementers drained
-  Tyler's usage.
-- Setting the `model` parameter explicitly is his rule for every repo.
+- Sonnet subagents implement and Opus agents review (2026-10-18), with `model` always set
+  explicitly. Opus implementers drained Tyler's usage.
 - In a 2026-10-20 head-to-head Tyler ran, Haiku fixed the example rather than the bug and used more
   tokens than Sonnet.
 - One fresh-context review when the work is done, not mid-change. Give the reviewer the goal and
@@ -88,7 +110,6 @@ Tyler, whether Ankit can also approve is open.
   building on its assumed shape.
 - Mock output is labelled mock on screen and in logs, and is never shown as live. Hyphenate's
   judges ask what's real, what's simulated, and how we know.
-- A PR that changes a demo-path screen shows it in a screenshot or GIF.
 
 **Secrets and privacy**
 
@@ -106,14 +127,10 @@ Tyler, whether Ankit can also approve is open.
 - Get the work done. Ask about scope or architecture forks only, never routine choices like a
   dependency, a type error or a branch name (2026-09-14). A fork that touches the other person's
   part is worth asking about.
-- These need Tyler's ask every time:
-  - the Devpost submission;
-  - making the repo public;
-  - posting to Slack, sponsors or organizers;
-  - new paid plans, or credits beyond the keys already in `.env`;
-  - deleting branches or data;
-  - force-pushing a branch someone else uses;
-  - touching any repo other than this one.
+- These need Tyler's ask every time: the Devpost submission, making the repo public, posting to
+  Slack, sponsors or organizers, new paid plans or credits beyond the keys already in `.env`,
+  deleting branches or data, force-pushing a branch someone else uses, and touching any repo other
+  than this one.
 - An authorization covers exactly what was named: those PRs, that window, this repo. When scope is
   ambiguous, treat it as not covered. An agent once read "merge devmain PRs and sibling PRs" as
   covering sibling repos' `main` branches, and it didn't.
@@ -145,12 +162,8 @@ Tyler, whether Ankit can also approve is open.
 
 - Claims come only from what is built and verified, or what Tyler stated. Assumptions are labelled
   as assumptions, and only what exists is documented.
-- Tyler's anti-slop criteria come from his slop eval and pitch deck (2026-09):
-  - no em dashes;
-  - few negations;
-  - no slogans or buzzwords;
-  - no preamble or repetition;
-  - concrete numbers.
+- Tyler's anti-slop criteria, from his slop eval and pitch deck (2026-09): no em dashes, few
+  negations, no slogans or buzzwords, no preamble or repetition, and concrete numbers.
 - Revise from the current best draft with a strong model. Fifty blind parallel Haiku cover-letter
   drafts were all bad (2026-09-24). Parallel rounds stay small (3-5) and are seeded from the best
   draft so far.
