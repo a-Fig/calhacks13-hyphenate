@@ -12,6 +12,7 @@
 //   evidence "assumption", text "[default] ..." / "[agent estimate] ..." / "[needs estimate] ..."
 // A statement that does not follow them still renders; it just has no recommendation field.
 import { createHash } from 'node:crypto';
+import type { CompanyConfig, CostCheckHeadline } from '../../../config/src/index.ts';
 import { routeFor, ROUTE_PENDING, type AssessmentRef, type EcrRef } from './routing.ts';
 import type { ImpactFields } from './plm.ts';
 
@@ -58,11 +59,15 @@ export interface Provenance {
   formulas: Record<string, string>;
   /** Some number comes from mock compute. */
   mock: boolean;
+  /** The run's cost check with its rows, for routing (`costCheckOf`). Not shown in the statement. */
+  costCheck?: CostCheckHeadline;
 }
 
 export interface FormatOptions {
   /** Base URL of Norn's pages, e.g. http://127.0.0.1:5173. */
   nornBaseUrl: string;
+  /** The company configuration routing runs on. Without it nothing is routed and the statement's own class and route stand. */
+  config?: CompanyConfig;
 }
 
 export const RECOMMENDATIONS = ['Approve with conditions', 'Approve', 'Send back', 'Reject'] as const;
@@ -157,17 +162,17 @@ export interface Formatted {
 /** The ECR number's own link in Norn. */
 export const nornUrl = (base: string, ecrNumber: string) => `${base.replace(/\/+$/, '')}/ecr/${encodeURIComponent(ecrNumber)}`;
 
-export function assessmentOf(s: StatementDoc): AssessmentRef {
+export function assessmentOf(s: StatementDoc, costCheck?: CostCheckHeadline): AssessmentRef {
   const numbers: AssessmentRef['numbers'] = {};
   for (const n of s.numbers) if (n.resultKey) numbers[n.resultKey] = { p10: n.p10, p50: n.p50, p90: n.p90, unit: n.unit };
-  return { numbers };
+  return { numbers, costCheck };
 }
 
 export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provenance, opts: FormatOptions): Formatted {
   const rec = parseRecommendation(s.claims);
   const proposal = parseClassProposal(s.claims);
-  // What Norn's routing decides wins; today it decides nothing (routing.ts), so the statement's own class and route stand.
-  const routed = routeFor(ecr, assessmentOf(s));
+  // What Norn's routing decides wins; where it decides nothing (no configuration, or no class set) the statement's own class and route stand.
+  const routed = routeFor(ecr, assessmentOf(s, prov.costCheck), opts.config);
   const cls = routed.class ?? (PLM_CLASSES.includes(s.changeClass as (typeof PLM_CLASSES)[number]) ? s.changeClass : undefined);
   const route = routed.route ?? (s.route.trim() || ROUTE_PENDING);
   const classIsProposal = routed.class === undefined;

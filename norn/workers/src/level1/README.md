@@ -54,9 +54,15 @@ classes, words to avoid) are in the system prompt. The standards are constants c
 `bowman/norn-config/bowman.config.ts` on 2026-10-24 (`norn/config` was not on this branch); read
 them from the loaded config when it is.
 
-A change class is only ever the agent's own proposal, marked judgment. The approval route is
-"Pending Norn's routing". The seam is `routing.ts`: `routeFor(ecr, assessment)` returns nothing now;
-#75 fills it in there and nowhere else (the dispatcher and the publisher both call it).
+The seam is `routing.ts`: `routeFor(ecr, assessment, config)` calls `routeEcr` (norn/config) on the company
+configuration stored in `norn_config` (`company_config`), and the dispatcher and the publisher both call it with
+the same stored config and the same run's cost rows (`costCheckOf`), so the agent is told the route the PLM gets.
+The route is the tier's approval body with the cost against its limit, e.g. "Change Control Board, with Technical
+Review Committee review (p90 cost about 164,489 USD, above 150,000 USD)". The class is returned only if the ECR
+was given one that routing used (no caller gives one yet), so it stays the agent's proposal, marked judgment.
+With no stored config (or one that does not validate) `routeFor` returns nothing and the route is
+"Pending Norn's routing". The headline rows alone cannot place a change for a company whose cost measure does not
+let savings offset spend (Bowman's): the cost reads as unmeasured and the top tier, so the cost check's rows are used.
 
 ## The publisher (`publisher.ts`, `format.ts`, `plm.ts`)
 
