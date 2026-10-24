@@ -384,13 +384,18 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
   const entered: Row[] = await c.list('BOM', { filters: [[t.bom.eco, '=', eco], ['company', '=', opts.company], ['docstatus', '<', 2]], fields: ['item'] });
   affected = uniq([...affected, ...entered.map((b) => b.item as ItemCode), ...lineChanges.map((b) => b.parent)]);
 
-  const bomFields = ['name', 'item', 'is_active', 'is_default', 'docstatus', 'quantity', 'raw_material_cost', 'operating_cost', 'total_cost', 'creation', t.bom.eco];
+  // The costing settings the package asks for. ERPNext picks material rates by them, so a BOM entered with others is not the
+  // BOM that was asked for, however right its lines are.
+  const BOM_COSTING = { rm_cost_as_per: 'Price List', buying_price_list: opts.standardCostPriceList };
+  const bomFields = ['name', 'item', 'is_active', 'is_default', 'docstatus', 'quantity', 'raw_material_cost', 'operating_cost', 'total_cost', 'creation', t.bom.eco,
+    ...Object.keys(BOM_COSTING), ...[t.bom.releasedOn, t.bom.decision].filter((x): x is string => !!x)];
   const versions: Row[] = affected.length
     ? await c.list('BOM', { filters: [['item', 'in', affected], ['company', '=', opts.company], ['docstatus', '<', 2]], fields: bomFields, orderBy: 'creation asc' })
     : [];
   // `base` is the BOM this ECO's version comes from. Before the ECO's version exists it is the active default. Once it exists
   // it is the version made just before it: a later ECO's version must never become the source, or rechecking this ECO would
-  // tell a person to undo that one. `later` holds the submitted versions made after this ECO's.
+  // tell a person to undo that one. `later` holds the versions made after this ECO's that took over from it: submitted, active
+  // and the default. A later version nobody uses has not taken over, and must not excuse this ECO's version being inactive.
   const bases = new Map<ItemCode, { base: Row; tagged?: Row; later: Row[] }>();
   for (const item of affected) {
     const mine = versions.filter((v) => v.item === item);
@@ -399,7 +404,7 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
     // Only a submitted version can be the source: an unrelated draft saved in between is nobody's default.
     const base = tagged ? [...mine].reverse().find((v) => v !== tagged && v.docstatus === 1 && v[t.bom.eco] !== eco && madeBefore(v)) : [...mine].reverse().find((v) => v.docstatus === 1 && v.is_active && v.is_default);
     if (!base) { problems.push(`${item} has no active default BOM to version`); continue; }
-    const later = tagged ? mine.filter((v) => v !== tagged && v.docstatus === 1 && v[t.bom.eco] !== eco && tagged.creation && (v.creation ?? '') > tagged.creation) : [];
+    const later = tagged ? mine.filter((v) => v !== tagged && v.docstatus === 1 && v.is_active && v.is_default && v[t.bom.eco] !== eco && tagged.creation && (v.creation ?? '') > tagged.creation) : [];
     bases.set(item, { base, tagged, later });
   }
   const baseLines: Row[] = bases.size
@@ -494,10 +499,20 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
       const output = num(tagged.quantity) || 1;
       if (Math.abs(output - q) > 1e-6) lineDiffs.push(`makes ${output} where the release says ${q}`);
       // The package asks for an active default BOM. A submitted version that is neither only counts when a later version has
-      // taken over (`later`): otherwise the item is left with no BOM in force.
+      // taken over (`later`: active and default): otherwise the item is left with no BOM in force.
       if (tagged.docstatus === 1 && !later.length) {
         if (!tagged.is_active) lineDiffs.push('is not active where the release says Is Active');
         else if (!tagged.is_default) lineDiffs.push('is not the default BOM where the release says Is Default');
+      }
+      // The costing settings and the trace tags the package asks for.
+      const asked: [string, string, unknown][] = [
+        ['rm_cost_as_per', 'Rate Of Materials Based On', BOM_COSTING.rm_cost_as_per], ['buying_price_list', 'Price List', BOM_COSTING.buying_price_list],
+        ...(t.bom.releasedOn ? [[t.bom.releasedOn, 'Released on', effectiveDate] as [string, string, unknown]] : []),
+        ...(t.bom.decision ? [[t.bom.decision, 'Norn decision', release.decision.url] as [string, string, unknown]] : []),
+      ];
+      for (const [name, label, want] of asked) {
+        const got = String(tagged[name] ?? '').slice(0, name === t.bom.releasedOn ? 10 : undefined);
+        if (got !== want) lineDiffs.push(`has ${label} ${got ? `'${got}'` : 'empty'} where the release says '${want}'`);
       }
       for (const [code, qty] of wanted) {
         if (!have.has(code)) lineDiffs.push(`has no line for ${code}`);
@@ -506,16 +521,21 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
       for (const code of have.keys()) if (!wanted.has(code)) lineDiffs.push(`has a line for ${code} that the release does not`);
       // A sub-assembly line has to use the BOM the package names: the new version when this release versions it (null until
       // that BOM exists, and then no BOM can be the right one yet), the existing one otherwise.
-      const expectedBom = new Map<string, string | null>();
+      // An item can appear in several rows, each on its own BOM (the unchanged rows keep theirs), so the references are grouped by
+      // item: an entered row passes when its BOM is one of the references the package gives that item.
+      const expectedBom = new Map<string, Set<string | null>>();
       for (const row of rows) {
-        const f = row.find((x) => x.field === 'bom_no');
         const code = row.find((x) => x.field === 'item_code')!.value as string;
-        if (f && !expectedBom.has(code)) expectedBom.set(code, f.value as string | null);
+        const set = expectedBom.get(code) ?? expectedBom.set(code, new Set()).get(code)!;
+        set.add(row.some((x) => x.field === 'bom_no') ? (row.find((x) => x.field === 'bom_no')!.value as string | null) : ''); // '': a row with no BOM
       }
-      for (const [code, want] of expectedBom) {
-        // With no new sub-assembly BOM yet, any entered line is wrong: it cannot point at a BOM that does not exist.
-        for (const l of taggedRows.filter((x) => x.item_code === code && (want === null || (x.bom_no || null) !== want))) {
-          lineDiffs.push(want ? `has ${code} on BOM ${l.bom_no || 'none'} where the release says ${want}` : `has ${code} ${l.bom_no ? `on BOM ${l.bom_no}` : 'with no BOM'} but the new ${code} BOM is not entered yet`);
+      for (const [code, wants] of expectedBom) {
+        if (wants.size === 1 && wants.has('')) continue; // no row of this item names a BOM: nothing to compare
+        const refs = [...wants].filter((x): x is string => !!x);
+        for (const l of taggedRows.filter((x) => x.item_code === code)) {
+          const ref = (x: string | null | undefined) => x || '';
+          if (wants.has(null)) lineDiffs.push(`has ${code} ${l.bom_no ? `on BOM ${l.bom_no}` : 'with no BOM'} but the new ${code} BOM is not entered yet`);
+          else if (!wants.has(ref(l.bom_no))) lineDiffs.push(`has ${code} on BOM ${l.bom_no || 'none'} where the release says ${refs.length ? refs.join(' or ') : 'no BOM'}`);
         }
       }
     }

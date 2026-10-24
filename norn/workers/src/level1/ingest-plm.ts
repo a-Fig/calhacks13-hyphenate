@@ -19,12 +19,22 @@ import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PlmMappingError, listEcrs, readChangeRequest, watchEcrs, type EcrListing, type PlmOptions } from '../../../connectors/plm/src/index.ts';
-import type { Client } from '../connect.ts';
+import { classify, withRetry, type Client } from '../connect.ts';
 // ingest.ts hands these in: it is the entry module, and importing it back from here would deadlock its top-level await.
 import type { IngestItem, ingestOnce as IngestOnce, itemOf as ItemOf } from '../ingest.ts';
 import { plmOptionsFromEnv } from './plm.ts';
 
 export const DEFAULT_STATES = ['Submitted', 'In CM Review', 'CCB Review'];
+
+/**
+ * States an ECR is watched in even though it is decided: Approved is where the PLM's release automation links the ECO to the
+ * ECR (`released_eco`, a moment after the approval; bowman/plm/NOTES.md), and no other Bowman state carries it. Without it the
+ * poller drops the approval and the ECO link, and the ECO's package is never built. An ECR in one of these states only ever has
+ * its ECO release recorded (`recordEcoOnly`): it is never reported to ingest_ecr, so it cannot bump the ECR's revision, re-run
+ * its checks or start a Level 1 agent. The first listing does not take these in either (see `startupWanted`): the PLM's
+ * history is full of approved ECRs Norn has no business opening.
+ */
+export const ECO_STATES = ['Approved'];
 
 export interface PlmIngestOptions {
   /** ECR numbers to take in; empty: all. */
@@ -49,13 +59,37 @@ export function plmIngestOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): P
 
 /** Whether an ECR in this state, by this number, is Norn's to take in. */
 export const wanted = (o: PlmIngestOptions, e: Pick<EcrListing, 'name' | 'workflowState'>) =>
-  o.states.includes(e.workflowState) && (o.only.length === 0 || o.only.includes(e.name));
+  (o.states.includes(e.workflowState) || ECO_STATES.includes(e.workflowState)) && (o.only.length === 0 || o.only.includes(e.name));
+
+/** The same for the first listing: only the ECRs still undecided, not every approved one in the PLM's history. */
+export const startupWanted = (o: PlmIngestOptions, e: Pick<EcrListing, 'name' | 'workflowState'>) =>
+  wanted(o, e) && (o.states.includes(e.workflowState) || !ECO_STATES.includes(e.workflowState));
 
 /** One ECR as the PLM has it now, as an ingest item. */
 export async function readItem(opts: PlmOptions, name: string, itemOf: typeof ItemOf): Promise<IngestItem> {
   const r = await readChangeRequest(opts, name);
   // The PLM's own title and text, as filed; the change request carries the structure the checks read.
   return { ...itemOf(r.change as Record<string, any>, r.modified), title: r.record.title || name, description: r.record.text.description };
+}
+
+/**
+ * The PLM has decided the ECR: record the ECO it released, once, and nothing else. This is deliberately not `ingestOnce`:
+ * that reports the ECR through ingest_ecr, and a decided ECR must not get a new revision, a re-check or an agent. An ECR the PLM
+ * has not yet linked an ECO to does nothing; the link bumps its `modified`, and the watcher delivers it again.
+ */
+export async function recordEcoOnly(R: Pick<Client['R'], 'recordEcoRelease'>, item: IngestItem, sent: Map<string, string>, log: (m: string) => void): Promise<void> {
+  const key = `eco:${item.plmEcrNumber}`;
+  if (!item.eco || sent.get(key) === item.eco) return;
+  try {
+    await withRetry(() => R.recordEcoRelease({ plmEcrNumber: item.plmEcrNumber, ecoNumber: item.eco!, source: 'plm', sourceRef: item.sourceRef }), { idempotent: true, label: `record_eco_release ${item.plmEcrNumber}` });
+    sent.set(key, item.eco);
+    log(`${item.plmEcrNumber} released as ${item.eco} (plm)`);
+  } catch (e) {
+    const c = classify(e);
+    if (c.name === 'SenderError') sent.set(key, item.eco); // refused for good (an ECR Norn never opened): not retried every poll
+    log(`could not record ${item.plmEcrNumber}'s change order ${item.eco}: ${c.name}: ${c.message}`);
+    if (c.name !== 'SenderError') throw e; // transient: the watcher offers it again
+  }
 }
 
 /** A mapping error is the ECR's own fault (a field the connector will not guess): retrying cannot help, a person must fix it. Anything else (network, timeout, 5xx, a failed report) is transient. */
@@ -152,6 +186,21 @@ export async function takeIn(
 export const retryDue = (retry: RetryQueue, read: (name: string) => Promise<IngestItem>, report: (item: IngestItem) => Promise<void>, log: (m: string) => void, now: () => number = Date.now, lock: EcrLock = noLock) =>
   takeIn(retry.due(now()), read, report, log, retry, now, lock, true);
 
+/** What the watcher does with one changed ECR: a decided one only records its ECO release, any other is reported to ingest_ecr. */
+export async function onChange(
+  o: PlmIngestOptions,
+  change: Pick<EcrListing, 'name' | 'workflowState'>,
+  d: { read: (name: string) => Promise<IngestItem>; report: (item: IngestItem) => Promise<void>; recordEco: (item: IngestItem) => Promise<void>; lock: EcrLock; retry: RetryQueue }
+): Promise<void> {
+  if (!wanted(o, change)) return;
+  await d.lock(change.name, async () => {
+    const item = await d.read(change.name);
+    if (ECO_STATES.includes(change.workflowState) && !o.states.includes(change.workflowState)) await d.recordEco(item);
+    else await d.report(item);
+    d.retry.done(change.name); // delivered fresh by the watcher: nothing left to retry
+  });
+}
+
 /** Run until the process ends. */
 export async function runPlmIngest(R: Client['R'], log: (m: string) => void, deps: { ingestOnce: typeof IngestOnce; itemOf: typeof ItemOf }, o = plmIngestOptionsFromEnv()): Promise<void> {
   const opts = await plmOptionsFromEnv();
@@ -166,7 +215,7 @@ export async function runPlmIngest(R: Client['R'], log: (m: string) => void, dep
   // ingest the open ones, then watch from the mark.
   const all = await listEcrs(opts);
   const mark = all.at(-1)?.modified;
-  const take = all.filter(e => wanted(o, e));
+  const take = all.filter(e => startupWanted(o, e));
   log(`the PLM has ${all.length} ECR(s); ${take.length} to take in${o.only.length ? ` (only ${o.only.join(', ')})` : ''}: ${take.map(e => `${e.name} [${e.workflowState}]`).join(', ') || 'none'}`);
   const read = (name: string) => readItem(opts, name, deps.itemOf);
   const retry = new RetryQueue(o.intervalMs);
@@ -182,11 +231,7 @@ export async function runPlmIngest(R: Client['R'], log: (m: string) => void, dep
   const watcher = watchEcrs(
     opts,
     async change => {
-      if (!wanted(o, change)) return;
-      await lock(change.name, async () => {
-        await report(await readItem(opts, change.name, deps.itemOf));
-        retry.done(change.name); // delivered fresh by the watcher: nothing left to retry
-      });
+      await onChange(o, change, { read, report, recordEco: item => recordEcoOnly(R, item, sent, log), lock, retry });
     },
     { intervalMs: o.intervalMs, since: mark, stateFile: o.stateFile, onError: e => log(`PLM watch: ${(e as Error).message}`) }
   );

@@ -52,11 +52,21 @@ export function releaseOf(cr: ChangeRequest, result: CostCheckResult, ctx: Relea
   const notes: string[] = [];
   const change = new Map(cr.itemChanges.map(c => [c.item, c]));
 
+  // Changes the assessment costs but the package cannot carry out: they are said in the release, so the package reports each as
+  // a problem to resolve by hand rather than dropping it or calling itself empty (or refusing the whole release).
+  const unsupported: string[] = [];
+
   // ---- standard costs: every item whose price the ECR changes, at its new price
   const items: EcoRelease['items'] = [];
   for (const p of result.piecePrices) {
     if (!p.head) continue; // removed by the ECR: it leaves the BOM, and its standard cost stays as history
     if (p.base && r2(p.base.point) === r2(p.head.point)) continue;
+    // A price of zero or less is not a standard cost the package enters (a zero Item Price is unverified in ERPNext, and BOMs costed
+    // from it would price the part at nothing): one such item must not sink the whole package, so it is left out and said.
+    if (!(r2(p.head.point) > 0)) {
+      unsupported.push(`${p.item} standard cost ${p.base ? money(p.base.point) : 'unset'} -> ${money(r2(p.head.point))}: the package enters only standard costs above zero. The assessment costs the change; set the new price by hand if a zero cost is intended.`);
+      continue;
+    }
     const rev = change.get(p.item)?.toRev;
     items.push({ item: p.item, ...(rev ? { rev } : {}), standardCost: r2(p.head.point) });
   }
@@ -71,7 +81,6 @@ export function releaseOf(cr: ChangeRequest, result: CostCheckResult, ctx: Relea
   // ---- changes the assessment costs but the package cannot carry out
   // Labor hours become BOM operation time in ERPNext, which the connector does not enter. The assessment prices the change
   // (more hours at the work center's rate), so the release says so rather than call itself empty.
-  const unsupported: string[] = [];
   for (const ch of cr.itemChanges) {
     for (const fc of ch.changes) {
       if (fc.field === HOURS_FIELD && typeof fc.to === 'number' && fc.to !== fc.from) {
