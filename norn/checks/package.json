@@ -1,0 +1,19 @@
+{
+  "name": "@norn/checks",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Norn's impact checks as a pure library: S1 BOM delta and S2 cost with paired Monte Carlo ranges. No database dependency.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --test-reporter=spec \"test/*.test.ts\"",
+    "typecheck": "tsc -p .",
+    "demo": "node demo.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  }
+}

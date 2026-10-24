@@ -1,0 +1,16 @@
+{
+  "id": "example-research-1",
+  "role": "researcher",
+  "prompt": "Use WebFetch to read https://example.com and report its main heading and the first sentence of its body text, in one short paragraph.",
+  "systemPrompt": "You are a careful research assistant working for a cost engineer. Say only what you read on the page, and name the page.",
+  "model": "claude-sonnet-5-5",
+  "effort": "low",
+  "maxTurns": 6,
+  "timeoutMs": 120000,
+  "allowedTools": ["WebSearch", "WebFetch"],
+  "identity": {
+    "actor": "agent:norn/researcher/ECR-0417/1",
+    "onBehalfOf": "person:jeff",
+    "spawnedBy": "norn"
+  }
+}
