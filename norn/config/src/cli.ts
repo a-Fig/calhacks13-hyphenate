@@ -17,7 +17,7 @@ function summary(config: CompanyConfig): string[] {
   const { company, ecrForm, approval, autonomy, reviewDepth, materiality, postingStandards } = config;
   const money = (n: number) => `${n.toLocaleString('en-US')} ${company.currency}`;
   const fields = ecrForm.sections.reduce((n, s) => n + s.fields.length, 0);
-  const tiers = approval.tiers.map((t) => `${t.upToUsd === null ? 'above' : 'up to ' + money(t.upToUsd)}: ${approval.bodies.find((b) => b.id === t.body)?.name ?? t.body}`);
+  const tiers = approval.tiers.map((t) => `${t.upTo === null ? 'above' : 'up to ' + money(t.upTo)}: ${approval.bodies.find((b) => b.id === t.body)?.name ?? t.body}`);
   const levels = LEVEL_IDS.map((level) => `${autonomy.actions.filter((a) => a.level === level).length} ${level}`);
   const { deepReview } = reviewDepth;
   const rows: [string, string][] = [
@@ -28,7 +28,7 @@ function summary(config: CompanyConfig): string[] {
     ['people', `${config.people.length} people in ${config.roles.length} roles`],
     ['autonomy', `${autonomy.actions.length} actions: ${levels.join(', ')}`],
     ['deep review', `${deepReview.mode}, at most ${deepReview.maxPasses} ${deepReview.maxPasses === 1 ? 'pass' : 'passes'}`],
-    ['materiality', `unit cost ${money(materiality.unitCost.absoluteUsd)} or ${materiality.unitCost.relativePct}%, one-time ${money(materiality.oneTimeCostUsd)}, cut-in ${materiality.cutInSlipDays} days`],
+    ['materiality', `unit cost ${money(materiality.unitCost.absolute)} or ${materiality.unitCost.relativePct}%, one-time ${money(materiality.oneTimeCost)}, cut-in ${materiality.cutInSlipDays} days`],
     ['posting', `${postingStandards.requirements.length} checks, ${postingStandards.requirements.filter((r) => r.enforcement === 'block').length} blocking`],
   ];
   return rows.map(([label, text]) => `  ${label.padEnd(12)}${text}`);

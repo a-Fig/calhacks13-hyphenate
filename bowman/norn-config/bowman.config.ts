@@ -9,14 +9,18 @@
 // One source of truth: the change-control policy (approval tiers, CCB dates, fast-track and
 // never-fast-track rules, target days) and the people live in bowman/data/company.ts, which also
 // seeds the PLM and ERPNext. This file imports them and adds what only Norn needs: ids Norn can
-// act on, class tests, roles, limits. If the policy there changes shape, the checks below stop the
-// file from loading rather than let the two drift apart.
+// act on, class tests, roles, limits. Each policy entry is found by what it says, not by its
+// position in a list, and the file refuses to load if one is missing or doubled, so a reordered or
+// reworded source cannot silently swap one rule for another.
 //
 // Provenance (`prov`) follows the dataset: `sourced` traces to docs/IN-PRACTICE.md or the research,
 // `invented` is Bowman's own choice. Every number under autonomy and materiality is invented. They
 // are a starting point to tune against forecasts and overrides, not research findings.
+//
+// Amounts are in the company currency (USD).
 
 import type { CompanyConfig } from '../../norn/config/src/schema.ts';
+import { findOne } from '../../norn/config/src/pick.ts';
 import { company, people as staff } from '../data/company.ts';
 import { INV, PRACTICE, inv, src } from '../data/prov.ts';
 
@@ -29,13 +33,43 @@ const policy = company.changeControl;
 function expectShape(ok: boolean, what: string): void {
   if (!ok) throw new Error(`bowman.config.ts no longer matches bowman/data/company.ts: ${what}. Update both together.`);
 }
+// Counts catch an entry added or dropped; the lookups below catch one reworded or replaced.
 expectShape(policy.approvalTiers.length === 3, 'expected 3 approval tiers');
-expectShape(policy.approvalTiers[0]!.approver.startsWith('Technical Review Committee'), 'tier 1 should be the Technical Review Committee');
-expectShape(policy.approvalTiers[1]!.approver.startsWith('Change Control Board'), 'tier 2 should be the Change Control Board');
-expectShape(policy.approvalTiers[2]!.approver.startsWith('Program Management Committee'), 'tier 3 should be the Program Management Committee');
 expectShape(policy.fastTrackCriteria.length === 4, 'expected 4 fast-track criteria');
 expectShape(policy.neverFastTrack.length === 5, 'expected 5 never-fast-track rules');
 expectShape(staff.filter((p) => p.ccbRole === 'chair').length === 1, 'expected exactly one CCB chair');
+
+const tierOf = (name: string) => findOne(policy.approvalTiers, name, 'bowman/data/company.ts changeControl.approvalTiers', (t) => t.approver);
+const trcTier = tierOf('Technical Review Committee');
+const ccbTier = tierOf('Change Control Board');
+const pmcTier = tierOf('Program Management Committee');
+expectShape(pmcTier.approver.includes('CFO'), 'the Program Management Committee should be chaired by the CFO');
+
+/** The never-fast-track rule that mentions `word`. */
+const neverFastTrackRule = (word: string): string => findOne(policy.neverFastTrack, word, 'bowman/data/company.ts changeControl.neverFastTrack');
+/** The fast-track criterion that mentions every one of `words`. */
+const fastTrackCriterion = (...words: string[]): string => findOne(policy.fastTrackCriteria, words, 'bowman/data/company.ts changeControl.fastTrackCriteria');
+
+// The first criterion is restated below as two class tests, and the third as four kinds of change.
+// Finding them here proves the data still says what those restatements say.
+fastTrackCriterion('Class II', 'FAA minor');
+fastTrackCriterion('pre-authorized', 'obsolescence', 'documentation');
+
+// The Technical Review Committee is named in the tier-1 approver text, in brackets, as seats:
+// "Technical Review Committee (engineering director, quality, certification, CM analyst); ...".
+// The data names no chair, so the seat listed first chairs it.
+const SEAT_FOR_PHRASE: Record<string, string> = {
+  'engineering director': 'engineering_director',
+  quality: 'quality',
+  certification: 'certification',
+  'CM analyst': 'cm_analyst',
+};
+const trcSeats: string[] = (/\(([^)]*)\)/.exec(trcTier.approver)?.[1] ?? '').split(',').map((phrase) => {
+  const seat = SEAT_FOR_PHRASE[phrase.trim()];
+  expectShape(seat !== undefined, `the Technical Review Committee lists "${phrase.trim()}", which this file has no role for`);
+  return seat!;
+});
+expectShape(trcSeats.length >= 2, 'the Technical Review Committee should list a chair and members in brackets');
 
 /** The data stores "no upper limit" as the largest safe integer. The config says null. */
 const limit = (usd: number): number | null => (usd >= Number.MAX_SAFE_INTEGER ? null : usd);
@@ -43,8 +77,12 @@ const limit = (usd: number): number | null => (usd >= Number.MAX_SAFE_INTEGER ? 
 // ---------------------------------------------------------------- roles
 // A role is a seat in the data. `can` is what people in the seat may do; an agent acting for one of
 // them may do no more (#34). Approval bodies below can only name roles that hold the matching action.
+// The seats are the dataset's; the permissions are Bowman's own model, since the dataset describes
+// each seat's duties in prose, not as permissions.
 
-const roles: CompanyConfig['roles'] = [
+const PERMISSIONS = inv('Which seat may do which gated action is invented for Bowman. The dataset records each seat\'s responsibilities in prose, not as permissions.');
+
+const roleRows: Omit<CompanyConfig['roles'][number], 'prov'>[] = [
   { id: 'design_engineer', label: 'Design engineer', can: ['file_ecr', 'approve_fast_track_ecr'] },
   { id: 'cm_analyst', label: 'Configuration management analyst', can: ['review_ecr', 'set_company_class', 'post_impact_statement', 'approve_fast_track_ecr', 'release_eco', 'write_bom'] },
   { id: 'ccb_chair', label: 'CCB chair (program manager)', can: ['file_ecr', 'review_ecr', 'approve_ecr_at_tier', 'release_eco'] },
@@ -60,6 +98,7 @@ const roles: CompanyConfig['roles'] = [
   { id: 'operations_vp', label: 'VP operations and supply chain', can: ['review_ecr'] },
   { id: 'cfo', label: 'Chief financial officer', can: ['review_ecr', 'approve_ecr_at_tier'] },
 ];
+const roles: CompanyConfig['roles'] = roleRows.map((row) => ({ ...row, prov: PERMISSIONS }));
 
 // ---------------------------------------------------------------- people
 // Straight from the dataset, so the PLM, ERPNext and Norn agree on who is who. Email addresses are
@@ -73,11 +112,11 @@ const people: CompanyConfig['people'] = [...staff]
     title: p.title,
     role: p.seat,
     ...(p.reportsTo ? { reportsTo: p.reportsTo } : {}),
-    ...(p.ccbRole ? { boardRole: p.ccbRole } : {}),
+    ...(p.ccbRole ? { ccbRole: p.ccbRole } : {}),
   }));
 
 /** Distinct seats of the people who hold a seat on the CCB, in the data's order. */
-const ccbSeats = (boardRole: 'chair' | 'secretary' | 'member'): string[] => [...new Set(staff.filter((p) => p.ccbRole === boardRole).map((p) => p.seat))];
+const ccbSeats = (ccbRole: 'chair' | 'secretary' | 'member'): string[] => [...new Set(staff.filter((p) => p.ccbRole === ccbRole).map((p) => p.seat))];
 
 // ---------------------------------------------------------------- the configuration
 
@@ -105,7 +144,9 @@ const config = {
       fullImpactAssessment: { name: 'Full impact assessment' },
       productionBaseline: { name: 'Production baseline' },
     },
-    avoid: ['ECN', 'change notice', 'branch', 'merge', 'pull request', 'commit'],
+    // The vocabulary check blocks a post that uses one of these, so ordinary business words stay off the
+    // list: "Halden can commit to 6 weeks" is fine, though "commit" is also a git word.
+    avoid: ['ECN', 'change notice', 'branch', 'merge', 'pull request'],
     note: company.vocabulary,
     prov: src('docs/GLOSSARY.md', 'Two vocabularies: git words are for building, business words for everything a person sees.'),
   },
@@ -141,8 +182,8 @@ const config = {
           { id: 'program', label: 'Program', kind: 'program', required: 'draft' },
           { id: 'priority', label: 'Priority', kind: 'priority', required: 'submit' },
           { id: 'justification', label: 'Justification code', kind: 'justificationCode', required: 'submit' },
-          { id: 'company_class', label: 'Company class', kind: 'companyClass', required: 'submit', help: 'Norn proposes a class on every ECR; the CM analyst decides.' },
-          { id: 'regulatory_class', label: 'FAA class', kind: 'regulatoryClass', required: 'submit', help: 'Your proposal. The certification lead decides.' },
+          { id: 'company_class', label: 'Company class', kind: 'companyClass', required: 'submit', help: 'Norn proposes a class; the CM analyst has the final say.' },
+          { id: 'regulatory_class', label: 'FAA class', kind: 'regulatoryClass', required: 'submit', help: 'Your proposal. The certification lead has the final say.' },
           { id: 'ncr', label: 'Originating NCR', kind: 'ncr', required: 'optional' },
           { id: 'needed_by', label: 'Needed by', kind: 'date', required: 'optional' },
         ],
@@ -207,7 +248,7 @@ const config = {
           meaning: 'Needs formal approval.',
           triggers: [
             'Changes form, fit or function',
-            'Changes cost or schedule',
+            'Changes unit cost, one-time cost or a schedule milestone by more than the materiality thresholds',
             'Touches safety or a flight-safety part',
             'Retrofits aircraft already built or delivered',
             'Changes interchangeability',
@@ -216,13 +257,13 @@ const config = {
         {
           id: 'II',
           label: 'Class II',
-          meaning: 'Everything that is not Class I: documentation fixes, approved alternates, internal changes that leave form, fit, function, cost and schedule alone.',
+          meaning: 'Everything that is not Class I: documentation fixes, approved alternates, and internal changes that leave form, fit and function alone and move cost and schedule by less than the materiality thresholds.',
         },
       ],
       whenUnsure: 'I',
       proposedBy: ['originator', 'norn'],
       decidedBy: 'cm_analyst',
-      note: 'The CM analyst makes the final classification.',
+      note: 'Norn proposes a class and the CM analyst has the final say, and can change it at any time. Whether Norn\'s class takes effect before the CM analyst has seen it is the autonomy level of set_company_class.',
     },
     regulatory: {
       label: 'FAA class',
@@ -233,7 +274,7 @@ const config = {
       whenUnsure: 'major',
       proposedBy: ['originator', 'norn'],
       decidedBy: 'certification',
-      note: 'The originator proposes and Norn reviews. The certification lead decides, as the design approval holder.',
+      note: 'The originator proposes and Norn reviews. The certification lead has the final say, as the design approval holder, and the class does not take effect until the lead has set it (set_regulatory_class is recommend only).',
     },
     prov: src(`${PRACTICE} §4`, 'Company Class I/II after MIL-HDBK-61A Table 6-2; FAA major/minor from 14 CFR 21.93 and Order 8110.37G.'),
   },
@@ -241,15 +282,24 @@ const config = {
   // -------------------------------------------------------------- approval (#22)
   // The tiers, CCB dates and the fast-track and never-fast-track rules come from the dataset.
   approval: {
-    // Tiers use the upper tail of the forecast over the first year of production, so a change that
-    // might cost more than a limit goes to the body above it.
-    routedOn: { percentile: 'p90', horizonMonths: 12 },
+    // One measure of what a change costs, used to pick the tier below and to bound every autonomy
+    // limit. The upper tail of the forecast over the first year of production, so a change that
+    // might cost more than a limit goes to the body above it. Savings do not net off: a change with
+    // 1.8M of tooling that saves more than that still routes as 1.8M of spend, and no agent limit
+    // sees it as small.
+    costMeasure: {
+      percentile: 'p90',
+      horizonMonths: 12,
+      savingsOffset: false,
+      prov: inv('Invented for Bowman: the dataset gives dollar tiers but not how a change\'s cost is measured against them. Tyler to confirm.'),
+    },
     bodies: [
       {
         id: 'trc',
         name: 'Technical Review Committee',
-        chairRole: 'engineering_director',
-        memberRoles: ['quality', 'certification', 'cm_analyst'],
+        chairRole: trcSeats[0]!,
+        memberRoles: trcSeats.slice(1),
+        prov: src('bowman/data/company.ts changeControl.approvalTiers', 'The members are the seats the dataset lists for the committee. It names no chair; the seat listed first is taken as chair.'),
       },
       {
         id: 'ccb',
@@ -259,27 +309,30 @@ const config = {
         secretaryRole: ccbSeats('secretary')[0]!,
         cadence: policy.ccbCadence,
         meetings: policy.ccbMeetings,
+        prov: src(`${PRACTICE} §2`, 'Chair, members and secretary are the dataset\'s board seats (people.ccbRole). The cadence and dates are the dataset\'s invented schedule.'),
       },
       {
         id: 'pmc',
         name: 'Program Management Committee',
         chairRole: 'cfo',
         memberRoles: ['operations_vp', 'certification'],
+        prov: inv('The dataset names the CFO and "the executive team". Which executives sit on the committee is invented.'),
       },
     ],
     tiers: [
-      { id: 'technical_review', upToUsd: limit(policy.approvalTiers[0]!.upToUsd), body: 'trc', alsoReviewsAbove: true },
-      { id: 'board', upToUsd: limit(policy.approvalTiers[1]!.upToUsd), body: 'ccb' },
-      { id: 'program_management', upToUsd: limit(policy.approvalTiers[2]!.upToUsd), body: 'pmc' },
+      { id: 'technical_review', upTo: limit(trcTier.upToUsd), body: 'trc', alsoReviewsAbove: true },
+      { id: 'board', upTo: limit(ccbTier.upToUsd), body: 'ccb' },
+      { id: 'program_management', upTo: limit(pmcTier.upToUsd), body: 'pmc' },
     ],
     fastTrack: {
       // "The CM analyst and the owning design engineer, without convening the board."
       approvers: [{ role: 'cm_analyst' }, { role: 'design_engineer', mustOwnTheChange: true }],
       requireAll: [
+        // The first criterion in the data, "Company Class II and FAA minor", as two class checks.
         { id: 'company_class_ii', text: 'Company Class II', whenClass: { axis: 'company', value: 'II' } },
         { id: 'faa_minor', text: 'FAA minor', whenClass: { axis: 'regulatory', value: 'minor' } },
-        { id: 'no_form_fit_function_change', text: policy.fastTrackCriteria[1]! },
-        { id: 'same_supplier_no_tooling', text: policy.fastTrackCriteria[3]! },
+        { id: 'no_form_fit_function_change', text: fastTrackCriterion('form, fit, function') },
+        { id: 'same_supplier_no_tooling', text: fastTrackCriterion('first-article') },
       ],
       // The dataset lists these kinds as one criterion: "Swaps from the pre-authorized equivalents
       // list, obsolescence replacements and documentation fixes". The supplier-notified change is
@@ -292,11 +345,11 @@ const config = {
       ],
     },
     neverFastTrack: [
-      { id: 'safety_part', text: policy.neverFastTrack[0]! },
-      { id: 'interchangeability_or_interface', text: policy.neverFastTrack[1]! },
-      { id: 'retrofit_of_delivered_units', text: policy.neverFastTrack[2]! },
-      { id: 'supplier_process_or_tooling', text: policy.neverFastTrack[3]! },
-      { id: 'faa_major', text: policy.neverFastTrack[4]!, whenClass: { axis: 'regulatory', value: 'major' } },
+      { id: 'safety_part', text: neverFastTrackRule('safety') },
+      { id: 'interchangeability_or_interface', text: neverFastTrackRule('Interchangeability') },
+      { id: 'retrofit_of_delivered_units', text: neverFastTrackRule('Retrofit') },
+      { id: 'supplier_process_or_tooling', text: neverFastTrackRule('first-article') },
+      { id: 'faa_major', text: neverFastTrackRule('FAA-major'), whenClass: { axis: 'regulatory', value: 'major' } },
     ],
     prov: policy.prov,
   },
@@ -308,7 +361,11 @@ const config = {
   // One rule per action. An agent acting for a person is also held to that person's role (`can`
   // above), and the stricter of the two applies (#34). Defaults are conservative on money and
   // certification and open on routine work; widen a rule when forecast-versus-actual results and
-  // override rates support it.
+  // override rates support it. Every maxCost below is measured by approval.costMeasure.
+  //
+  // approve_sampled: a second agent recomputes blind, and the sample is drawn from the ECR id and
+  // the deployment's seed. recommend: the roles that hold the action receive it. The never-fast-track
+  // rules above are checked first, so they win over the escalation triggers on approve_fast_track_ecr.
   autonomy: {
     actingFor: 'stricter',
     actions: [
@@ -346,7 +403,7 @@ const config = {
         sampleRate: 0.2,
         // #26 is open: whether a Level 1 report is enough to approve on, or only Level 3. Set to 1
         // so the fast track works before the deep review exists; raise to 3 to require the final verdict.
-        limits: { maxP90CostUsd: 25_000, maxP90SlipDays: 14, minReportLevel: 1 },
+        limits: { maxCost: 25_000, maxP90SlipDays: 14, minReportLevel: 1 },
         otherwise: 'recommend',
         escalateOn: ['safety_part', 'new_supplier', 'conflicting_open_ecr', 'shared_supplier_exposure', 'linchpin_assumption_agent_estimated', 'sources_conflict', 'stale_data', 'checker_disagrees'],
         escalateTo: 'cm_analyst',
@@ -360,9 +417,12 @@ const config = {
       {
         action: 'release_eco',
         level: 'approve',
-        limits: { maxP90CostUsd: 25_000 },
+        limits: { maxCost: 25_000 },
         otherwise: 'recommend',
-        why: 'Releasing follows an approval that already carried authority. Within the fast-track limit Norn releases; above it the CM analyst does.',
+        // Proposed, for Tyler to confirm: once the body for the change's tier has approved it, releasing
+        // is carrying out its decision, so Norn releases whatever the change costs.
+        carriesOutApproval: true,
+        why: 'Releasing carries out an approval that already had authority. Once the body for the change\'s tier has approved it, Norn releases at any cost. With no such approval, as on the fast track, it releases within 25,000 and the CM analyst does above.',
       },
       {
         action: 'write_bom',
@@ -374,9 +434,13 @@ const config = {
         action: 'update_standard_cost',
         level: 'approve_sampled',
         sampleRate: 0.5,
-        limits: { maxP90CostUsd: 150_000 },
+        limits: { maxCost: 150_000 },
         otherwise: 'recommend',
-        why: 'Standard cost drives the books. Below the first approval tier Norn updates it and half get a blind recompute. Above it the cost accountant decides.',
+        // Proposed, for Tyler to confirm: as with release_eco, an approved change's cost update is
+        // carrying out the decision. The ledger keeps its human step below: Norn drafts the journal
+        // entry and the cost accountant posts it.
+        carriesOutApproval: true,
+        why: 'Standard cost drives the books. Once the body for the change\'s tier has approved it, Norn updates the cost at any size and half get a blind recompute. With no such approval it updates within 150,000 and the cost accountant decides above.',
       },
       {
         action: 'draft_journal_entry',
@@ -393,14 +457,15 @@ const config = {
   },
 
   // -------------------------------------------------------------- review depth (#10, #26)
-  // The cheap tier (the impact screen) always runs. The deep tier waits until someone asks, once
-  // or at most twice per ECR, except for the kinds of change known to need it.
+  // The cheap tier (the impact screen) always runs. The deep tier waits until someone asks, except for
+  // the kinds of change known to need it. A deep stage may be requested at most twice on the same
+  // inputs, failed runs included; revised inputs start a fresh count.
   reviewDepth: {
     deepReview: {
       mode: 'on_request',
       autoFor: [{ axis: 'regulatory', value: 'major' }],
       maxPasses: 2,
-      mayRequest: ['design_engineer', 'cm_analyst', 'ccb_chair', 'engineering_director', 'cost_engineer', 'buyer', 'production_planner', 'cost_accountant', 'cfo'],
+      mayRequest: ['design_engineer', 'cm_analyst', 'ccb_chair', 'engineering_director', 'cost_engineer', 'buyer', 'production_planner', 'cost_accountant', 'cfo', 'certification', 'program_manager'],
     },
     prov: src('docs/PLAN.md §3', '"Ideally once per ECR, and at most twice" (#10). The FAA-major trigger is Bowman\'s choice.'),
   },
@@ -410,10 +475,10 @@ const config = {
   // bar is a share of the unit's current standard cost (about $2.8M for Vesper), so 0.01 percent is
   // about $280 per aircraft.
   materiality: {
-    unitCost: { absoluteUsd: 250, relativePct: 0.01 },
-    oneTimeCostUsd: 10_000,
+    unitCost: { absolute: 250, relativePct: 0.01 },
+    oneTimeCost: 10_000,
     cutInSlipDays: 14,
-    dispositionSwingUsd: 10_000,
+    dispositionSwing: 10_000,
     driverMinSharePct: 10,
     maxFlagsPerStatement: 3,
     whenNothingMaterial: 'Nothing here needs more than a routine look.',

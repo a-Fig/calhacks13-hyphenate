@@ -36,7 +36,21 @@ export const ACTIONS = {
 export type ActionId = keyof typeof ACTIONS;
 export const ACTION_IDS = Object.keys(ACTIONS) as ActionId[];
 
-/** What an agent may do with an action (#24). Ordered from most to least autonomous. */
+/**
+ * Actions that carry out a decision already made, rather than make or prepare one. Only these can
+ * be set to `carriesOutApproval`.
+ */
+export const FOLLOWS_APPROVAL: readonly ActionId[] = ['release_eco', 'write_bom', 'update_standard_cost', 'draft_journal_entry', 'post_journal_entry'];
+
+/**
+ * What an agent may do with an action (#24). Ordered from most to least autonomous.
+ *
+ * - `approve_sampled`: for the share of actions chosen by the rule's `sampleRate`, a second agent
+ *   recomputes the result blind, without seeing the first agent's output, and the action waits for
+ *   that check. The sample is drawn deterministically from the deployment's `seed` setting, the ECR
+ *   id and the action (`isSampled` in sample.ts), so the same ECR is always or never sampled.
+ * - `recommend`: the recommendation goes to the role or roles whose `can` holds the action.
+ */
 export const AUTONOMY_LEVELS = {
   approve: 'The agent acts. Nobody checks first.',
   approve_sampled: 'The agent acts. A sample of its actions wait for a blind second check first.',
@@ -238,7 +252,11 @@ const classValue = obj({
   id: id(),
   label: str(),
   meaning: str(),
-  /** The tests that put a change in this class, for the agent that classifies and the person who checks. */
+  /**
+   * The tests that put a change in this class, for the agent that classifies and the person who
+   * checks. A test about cost or schedule should be tied to the `materiality` section, not to any
+   * change at all: otherwise every small saving would be classed as a major change.
+   */
   triggers: opt(arr(str(), { min: 1 })),
 });
 
@@ -247,8 +265,13 @@ const classAxis = obj({
   values: arr(classValue, { min: 2, uniqueBy: 'id' }),
   /** The class used when Norn cannot tell. Choose the stricter one. */
   whenUnsure: id(),
-  /** Who puts a class on an ECR first. The role below decides. */
+  /** Who puts a class on an ECR first. */
   proposedBy: arr(oneOf(['originator', 'norn']), { min: 1 }),
+  /**
+   * The role with final authority over the class. It can change the class at any time. Whether
+   * Norn's call takes effect before this role has seen it is the autonomy level of `set_company_class`
+   * or `set_regulatory_class`, not this field.
+   */
   decidedBy: id(),
   note: opt(str()),
 });
@@ -273,35 +296,58 @@ const approvalBody = obj({
   cadence: opt(str()),
   /** Meeting dates, if known. */
   meetings: opt(arr(date())),
+  /** Where this body's membership came from. */
+  prov: opt(provenance),
 });
 
 const approvalTier = obj({
   id: id(),
-  /** The tier takes changes up to this cost. `null` means no upper limit, and only the last tier may have it. */
-  upToUsd: nullable(num({ min: 0 })),
+  /**
+   * The tier takes changes whose cost, by `approval.costMeasure`, is up to this amount in the
+   * company's currency. `null` means no upper limit, and only the last tier may have it.
+   */
+  upTo: nullable(num({ min: 0 })),
   body: id(),
-  /** The body also reviews every change in the tiers above this one. */
+  /** The body also reviews every change in the tiers above this one. The loader fills in false. */
   alsoReviewsAbove: opt(bool()),
 });
 
+/**
+ * The one measure of what a change costs. It picks the tier a change is routed to and bounds every
+ * autonomy limit (`autonomy.actions[].limits.maxCost`), so the two cannot disagree about whether a
+ * change is "over".
+ *
+ * The cost is the change's one-time spend plus its recurring cost increases over the first
+ * `horizonMonths` of production, read at `percentile` of Norn's forecast. With `savingsOffset: false`
+ * savings (a lower recurring cost, a credit for old stock) are not netted off: a change that spends
+ * 1.8 million on tooling and saves more than that still costs 1.8 million here. With `true` they net.
+ */
+const costMeasure = obj({
+  percentile: oneOf(['p50', 'p90']),
+  horizonMonths: num({ min: 1, integer: true }),
+  savingsOffset: bool(),
+  prov: opt(provenance),
+});
+
 const approval = obj({
-  /** The cost that picks the tier: the one-time cost plus recurring cost over the next `horizonMonths`, at this percentile. */
-  routedOn: obj({
-    percentile: oneOf(['p50', 'p90']),
-    horizonMonths: num({ min: 1, integer: true }),
-  }),
+  costMeasure,
   bodies: arr(approvalBody, { min: 1, uniqueBy: 'id' }),
   /** In ascending order of cost. The last tier has no limit. */
   tiers: arr(approvalTier, { min: 1, uniqueBy: 'id' }),
   fastTrack: obj({
-    /** Everyone listed must sign. */
+    /** Everyone listed must sign. `mustOwnTheChange` means the person must own the changed item; the loader fills in false. */
     approvers: arr(obj({ role: id(), mustOwnTheChange: opt(bool()) }), { min: 1 }),
     /** All of these hold. */
     requireAll: arr(test),
     /** At least one of these holds (the kinds of change the fast track is for). */
     requireOneOf: arr(test),
   }),
-  /** If any of these holds, the ECR never takes the fast track, whatever its class. */
+  /**
+   * If any of these holds, the ECR never takes the fast track, whatever its class. This is a hard
+   * rule checked before autonomy: `approve_fast_track_ecr` is not available for the ECR, and the
+   * `escalateOn` triggers of that action are not consulted for it. The ECR goes the normal way, to
+   * the body of its cost tier.
+   */
   neverFastTrack: arr(test, { min: 1, uniqueBy: 'id' }),
   prov: opt(provenance),
 });
@@ -313,6 +359,8 @@ const role = obj({
   label: str(),
   /** What people in this role may do. An agent acting for one of them can do no more. */
   can: arr(oneOf(ACTION_IDS), { unique: true }),
+  /** Where the permissions came from. */
+  prov: opt(provenance),
 });
 
 const person = obj({
@@ -321,15 +369,23 @@ const person = obj({
   title: str(),
   role: id(),
   reportsTo: opt(id()),
-  /** Their seat at the approval bodies, if any. */
-  boardRole: opt(oneOf(['chair', 'secretary', 'member'])),
+  /**
+   * Their seat on the Change Control Board (`vocabulary.terms.board`), if any. It records only that
+   * board. Who sits on the other approval bodies is `approval.bodies[].memberRoles`.
+   */
+  ccbRole: opt(oneOf(['chair', 'secretary', 'member'])),
 });
 
 // ---------------------------------------------------------------- agent autonomy (#22, #24)
 
 const limits = obj({
-  /** The agent holds its level only while the p90 net cost of the change stays at or under this. */
-  maxP90CostUsd: opt(num({ min: 0 })),
+  /**
+   * The agent holds its level only while the change's cost stays at or under this amount in the
+   * company's currency. The cost is `approval.costMeasure`, the same measure that routes the tiers.
+   * An action marked `carriesOutApproval` holds its level past these limits once the change is
+   * approved.
+   */
+  maxCost: opt(num({ min: 0 })),
   /** ... and the p90 slip of the cut-in date stays at or under this many days. */
   maxP90SlipDays: opt(num({ min: 0, integer: true })),
   /** ... and the report it rests on is at least this level (#26: whether Level 1 is enough is still open). */
@@ -340,12 +396,29 @@ const actionRule = obj({
   action: oneOf(ACTION_IDS),
   level: oneOf(LEVEL_IDS),
   limits: opt(limits),
-  /** The level once a limit is passed. Defaults to 'recommend'. Only with `limits`. */
+  /** The level once a limit is passed. Only with `limits`. The loader fills in 'recommend' when it is left out. */
   otherwise: opt(oneOf(LEVEL_IDS)),
-  /** If any of these is detected, the action goes to `escalateTo` instead. */
+  /**
+   * Carrying out a decision that has already been made. Only for the actions in FOLLOWS_APPROVAL, and
+   * only with `limits`. When an approval body whose tier covers the change (by
+   * `approval.costMeasure`) has approved the ECR, Norn may take the action at `level` whatever the
+   * `limits` say: the body's decision carried the authority and this action only carries it out. The
+   * limits apply when no such approval exists, as when a change took the fast track. `escalateOn`
+   * triggers still apply either way.
+   */
+  carriesOutApproval: opt(bool()),
+  /**
+   * If any of these is detected, the action goes to `escalateTo` instead. For
+   * `approve_fast_track_ecr`, `approval.neverFastTrack` is checked first and wins: an ECR it rules
+   * out never reaches these triggers.
+   */
   escalateOn: opt(arr(oneOf(TRIGGER_IDS), { min: 1, unique: true })),
+  /** The role that gets the matter. It must hold this action in its `can`, so it is able to finish the work. */
   escalateTo: opt(id()),
-  /** The share of actions that wait for a blind second check, from just above 0 to 1. For approve_sampled. */
+  /**
+   * The share of actions that wait for a blind second check, from just above 0 to 1. For
+   * approve_sampled. Which actions are drawn is deterministic: see AUTONOMY_LEVELS.
+   */
   sampleRate: opt(num({ above: 0, max: 1 })),
   /** Why the company set it this way, in a line. */
   why: str(),
@@ -366,9 +439,13 @@ const reviewDepth = obj({
   deepReview: obj({
     /** 'on_request' waits until someone asks. 'auto' starts a deep review when an ECR is filed. */
     mode: oneOf(['on_request', 'auto']),
-    /** Kinds of change that start a deep review on their own even when the mode is 'on_request'. */
-    autoFor: opt(arr(classRef, { min: 1 })),
-    /** The most deep passes one ECR may use. */
+    /** Kinds of change that start a deep review on their own even when the mode is 'on_request'. The loader fills in none. */
+    autoFor: opt(arr(classRef)),
+    /**
+     * How many times a deep stage may be requested on the same inputs, failed runs included. New
+     * inputs (the ECR is revised, or a source changes) start a fresh count. Stored as the module's
+     * `deep_review_limit`. It is not a budget for the whole ECR.
+     */
     maxPasses: num({ min: 1, max: 10, integer: true }),
     mayRequest: arr(id(), { min: 1, unique: true }),
   }),
@@ -378,12 +455,16 @@ const reviewDepth = obj({
 // ---------------------------------------------------------------- materiality (#30)
 
 const materiality = obj({
-  /** A change to the cost of one unit is raised when it clears either bar. Relative means a share of the unit's standard cost. */
-  unitCost: obj({ absoluteUsd: num({ above: 0 }), relativePct: num({ above: 0, max: 100 }) }),
-  oneTimeCostUsd: num({ above: 0 }),
+  /**
+   * A change to the cost of one unit is raised when it clears either bar. `absolute` is an amount in
+   * the company's currency; `relativePct` is a share of the unit's standard cost. All amounts in this
+   * section are in the company's currency.
+   */
+  unitCost: obj({ absolute: num({ above: 0 }), relativePct: num({ above: 0, max: 100 }) }),
+  oneTimeCost: num({ above: 0 }),
   cutInSlipDays: num({ above: 0, integer: true }),
   /** The difference between dispositions of old stock, such as use up versus scrap. */
-  dispositionSwingUsd: num({ above: 0 }),
+  dispositionSwing: num({ above: 0 }),
   /** A driver is named only if it explains at least this share of the spread of the forecast. */
   driverMinSharePct: num({ above: 0, max: 100 }),
   /** At most this many flags on one statement. */

@@ -5,7 +5,7 @@
 // Plain functions and interfaces only (erasable syntax): Node 24 strips the types.
 
 export interface Issue {
-  /** Where the problem is, e.g. 'approval.tiers[1].upToUsd'. Empty for the file as a whole. */
+  /** Where the problem is, e.g. 'approval.tiers[1].upTo'. Empty for the file as a whole. */
   path: string;
   message: string;
 }
@@ -131,7 +131,10 @@ export function bool(): Schema<boolean> {
 export function date(): Schema<string> {
   return {
     check(value, path, issues) {
-      const ok = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(value + 'T00:00:00Z').toISOString().startsWith(value);
+      // A month or day out of range (2026-13-12) gives an invalid Date, and one that rolls over
+      // (2026-02-30) gives a different day: both fail.
+      const parsed = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(value + 'T00:00:00Z') : undefined;
+      const ok = parsed !== undefined && !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value as string);
       if (!ok) issues.push({ path, message: `expected a date as YYYY-MM-DD, got ${describe(value)}` });
       return ok;
     },

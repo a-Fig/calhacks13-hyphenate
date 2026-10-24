@@ -10,6 +10,7 @@ import { describe, didYouMean } from './kit.ts';
 import {
   ACTION_IDS,
   EVIDENCE_CLASS_IDS,
+  FOLLOWS_APPROVAL,
   LEVEL_RANK,
   REQUIRED_FIELD_KINDS,
   type ActionId,
@@ -113,14 +114,14 @@ export const rules: Rule[] = [
         const path = `approval.tiers[${i}]`;
         const last = i === approval.tiers.length - 1;
         mustExist(tier.body, bodies, 'an approval body', `${path}.body`, issues);
-        if (!last && tier.upToUsd === null) {
-          issues.push({ path: `${path}.upToUsd`, message: 'expected a number, because only the last tier has no limit, got null' });
-        } else if (last && tier.upToUsd !== null) {
-          issues.push({ path: `${path}.upToUsd`, message: `expected null, because the last tier takes every cost above the one before it, got ${tier.upToUsd}` });
+        if (!last && tier.upTo === null) {
+          issues.push({ path: `${path}.upTo`, message: 'expected a number, because only the last tier has no limit, got null' });
+        } else if (last && tier.upTo !== null) {
+          issues.push({ path: `${path}.upTo`, message: `expected null, because the last tier takes every cost above the one before it, got ${tier.upTo}` });
         }
-        const before = approval.tiers[i - 1]?.upToUsd;
-        if (i > 0 && typeof before === 'number' && typeof tier.upToUsd === 'number' && tier.upToUsd <= before) {
-          issues.push({ path: `${path}.upToUsd`, message: `expected a number above tiers[${i - 1}].upToUsd (${before}), got ${tier.upToUsd}` });
+        const before = approval.tiers[i - 1]?.upTo;
+        if (i > 0 && typeof before === 'number' && typeof tier.upTo === 'number' && tier.upTo <= before) {
+          issues.push({ path: `${path}.upTo`, message: `expected a number above tiers[${i - 1}].upTo (${before}), got ${tier.upTo}` });
         }
       });
     },
@@ -214,6 +215,13 @@ export const rules: Rule[] = [
         if (rule.limits && !acts) {
           issues.push({ path: `${path}.limits`, message: `expected no limits, because level ${JSON.stringify(rule.level)} does not let the agent act and limits only bound a level that does` });
         }
+        if (rule.carriesOutApproval !== undefined) {
+          if (!FOLLOWS_APPROVAL.includes(rule.action)) {
+            issues.push({ path: `${path}.carriesOutApproval`, message: `expected nothing, because ${rule.action} gives or prepares a decision and only ${FOLLOWS_APPROVAL.join(', ')} carry one out, got ${rule.carriesOutApproval}` });
+          } else if (!rule.limits) {
+            issues.push({ path: `${path}.carriesOutApproval`, message: 'expected limits to be set, because carrying out an approval only waives limits, got no limits' });
+          }
+        }
         if (rule.otherwise && !rule.limits) {
           issues.push({ path: `${path}.otherwise`, message: 'expected limits to be set, because otherwise only applies once a limit is passed, got no limits' });
         }
@@ -230,7 +238,33 @@ export const rules: Rule[] = [
         if (escalates && !rule.escalateTo) {
           issues.push({ path: `${path}.escalateTo`, message: 'expected the role to escalate to, because the rule can escalate, got nothing' });
         }
-        if (rule.escalateTo) mustExist(rule.escalateTo, known, 'a role', `${path}.escalateTo`, issues);
+        // Whoever receives the matter must be able to finish it.
+        if (rule.escalateTo && mustExist(rule.escalateTo, known, 'a role', `${path}.escalateTo`, issues)) {
+          mustBeAllowedTo(rule.escalateTo, rule.action, config, `${path}.escalateTo`, issues);
+        }
+      });
+    },
+  },
+  {
+    // A role that the file makes responsible for something needs a person in it, or the work has nobody to go to.
+    needs: ['approval', 'changeClasses', 'autonomy', 'people', 'roles'],
+    run(config, issues) {
+      const { approval, changeClasses, autonomy, people } = config;
+      const known = roleIds(config);
+      const held = new Set(people.map((p) => p.role));
+      const needsSomeone = (role: string, path: string, duty: string): void => {
+        // A role that does not exist is reported where roles are checked.
+        if (known.includes(role) && !held.has(role)) {
+          issues.push({ path, message: `expected a role that at least one person holds, because it ${duty}, got ${JSON.stringify(role)}, which nobody in people holds` });
+        }
+      };
+      approval.bodies.forEach((body, i) => needsSomeone(body.chairRole, `approval.bodies[${i}].chairRole`, 'chairs a body'));
+      for (const axis of ['company', 'regulatory'] as const) {
+        needsSomeone(changeClasses[axis].decidedBy, `changeClasses.${axis}.decidedBy`, 'decides a change class');
+      }
+      approval.fastTrack.approvers.forEach((approver, i) => needsSomeone(approver.role, `approval.fastTrack.approvers[${i}].role`, 'signs on the fast track'));
+      autonomy.actions.forEach((rule, i) => {
+        if (rule.escalateTo) needsSomeone(rule.escalateTo, `autonomy.actions[${i}].escalateTo`, 'receives escalations');
       });
     },
   },

@@ -30,6 +30,9 @@ function problems(change: (c: any) => void): string[] {
   return result.ok ? [] : result.issues.map(formatIssue);
 }
 
+const ruleIndex = (action: string): number => good.autonomy.actions.findIndex((a) => a.action === action);
+const bodyIndex = (id: string): number => good.approval.bodies.findIndex((b) => b.id === id);
+
 /** Asserts that exactly one problem was found, at `path`, with a message containing `text`. */
 function assertOne(change: (c: any) => void, path: string, text: string): void {
   const found = problems(change);
@@ -47,8 +50,8 @@ describe("Bowman's file", () => {
 
   it('takes its policy and people from the dataset', () => {
     const tiers = company.changeControl.approvalTiers.map((t) => (t.upToUsd >= Number.MAX_SAFE_INTEGER ? null : t.upToUsd));
-    assert.deepEqual(good.approval.tiers.map((t) => t.upToUsd), tiers);
-    assert.deepEqual(good.approval.tiers.map((t) => t.upToUsd).slice(0, 2), [150_000, 2_000_000]);
+    assert.deepEqual(good.approval.tiers.map((t) => t.upTo), tiers);
+    assert.deepEqual(good.approval.tiers.map((t) => t.upTo).slice(0, 2), [150_000, 2_000_000]);
     assert.deepEqual(good.approval.bodies.find((b) => b.id === 'ccb')?.meetings, company.changeControl.ccbMeetings);
     assert.equal(good.approval.neverFastTrack.length, company.changeControl.neverFastTrack.length);
   });
@@ -67,6 +70,154 @@ describe("Bowman's file", () => {
   });
 });
 
+describe("what Bowman's file takes from the dataset and how it says so", () => {
+  const byId = <T extends { id: string }>(list: T[], id: string): T => list.find((x) => x.id === id)!;
+
+  it('each never-fast-track id carries the text it is named for, whatever order the data lists them in', () => {
+    const wanted: Record<string, string> = {
+      safety_part: 'safety',
+      interchangeability_or_interface: 'Interchangeability',
+      retrofit_of_delivered_units: 'Retrofit',
+      supplier_process_or_tooling: 'first-article',
+      faa_major: 'FAA-major',
+    };
+    for (const [id, word] of Object.entries(wanted)) {
+      assert.ok(byId(good.approval.neverFastTrack, id).text.includes(word), id + ' should be the rule that mentions ' + word);
+    }
+    assert.deepEqual(
+      [...good.approval.neverFastTrack.map((t) => t.text)].sort(),
+      [...company.changeControl.neverFastTrack].sort(),
+      'every rule in the data is used once'
+    );
+  });
+
+  it('the fast-track tests carry the data\'s own wording', () => {
+    assert.ok(byId(good.approval.fastTrack.requireAll, 'no_form_fit_function_change').text.includes('form, fit, function'));
+    assert.ok(byId(good.approval.fastTrack.requireAll, 'same_supplier_no_tooling').text.includes('first-article'));
+  });
+
+  it('the Technical Review Committee is the one the data lists, with its first seat as chair', () => {
+    const trc = byId(good.approval.bodies, 'trc');
+    assert.equal(trc.chairRole, 'engineering_director');
+    assert.deepEqual(trc.memberRoles, ['quality', 'certification', 'cm_analyst']);
+  });
+
+  it('the board is the data\'s seats', () => {
+    const ccb = byId(good.approval.bodies, 'ccb');
+    assert.equal(ccb.chairRole, 'ccb_chair');
+    assert.equal(ccb.secretaryRole, 'cm_analyst');
+    assert.ok(ccb.memberRoles.length >= 8);
+  });
+
+  it('says where the membership came from: sourced for the committee and board, invented for the PMC', () => {
+    assert.equal(byId(good.approval.bodies, 'trc').prov?.basis, 'sourced');
+    assert.equal(byId(good.approval.bodies, 'ccb').prov?.basis, 'sourced');
+    assert.equal(byId(good.approval.bodies, 'pmc').prov?.basis, 'invented');
+    for (const body of good.approval.bodies) assert.ok(body.prov, body.id + ' has no provenance');
+  });
+
+  it('says the cost measure and the permission model are invented', () => {
+    assert.equal(good.approval.costMeasure.prov?.basis, 'invented');
+    for (const role of good.roles) assert.equal(role.prov?.basis, 'invented', role.id);
+  });
+
+  it('measures cost one way, for the tiers and for every limit, and does not let savings offset spend', () => {
+    assert.deepEqual({ ...good.approval.costMeasure, prov: undefined }, { percentile: 'p90', horizonMonths: 12, savingsOffset: false, prov: undefined });
+    const limited = good.autonomy.actions.filter((a) => a.limits?.maxCost !== undefined);
+    assert.ok(limited.length >= 3);
+    assert.ok(!JSON.stringify(good).includes('maxP90Cost'), 'no second definition of cost is left');
+  });
+
+  it('Class I is tied to the materiality thresholds, so a small saving does not make it Class I', () => {
+    const [classI, classII] = good.changeClasses.company.values;
+    const cost = classI!.triggers!.find((t) => /cost/.test(t))!;
+    assert.match(cost, /by more than the materiality thresholds/);
+    assert.match(classII!.meaning, /less than the materiality thresholds/);
+  });
+
+  it('carries out an approval on release_eco and update_standard_cost, and keeps the ledger human', () => {
+    const rule = (action: string) => good.autonomy.actions[ruleIndex(action)]!;
+    assert.equal(rule('release_eco').carriesOutApproval, true);
+    assert.equal(rule('update_standard_cost').carriesOutApproval, true);
+    for (const action of ['write_bom', 'draft_journal_entry', 'post_journal_entry']) assert.equal(rule(action).carriesOutApproval, undefined, action);
+    assert.equal(rule('draft_journal_entry').level, 'approve');
+    assert.equal(rule('post_journal_entry').level, 'recommend');
+  });
+
+  it('says one thing about who decides the company class', () => {
+    assert.equal(good.changeClasses.company.decidedBy, 'cm_analyst');
+    const help = good.ecrForm.sections.flatMap((s) => s.fields).find((f) => f.kind === 'companyClass')!.help!;
+    assert.equal(help, 'Norn proposes a class; the CM analyst has the final say.');
+  });
+
+  it('avoids the git words that are never business words, and not "commit"', () => {
+    assert.deepEqual(good.vocabulary.avoid, ['ECN', 'change notice', 'branch', 'merge', 'pull request']);
+  });
+
+  it('lets certification and the program manager ask for a deep review', () => {
+    assert.ok(good.reviewDepth.deepReview.mayRequest.includes('certification'));
+    assert.ok(good.reviewDepth.deepReview.mayRequest.includes('program_manager'));
+  });
+
+  it('records a person\'s seat on the board as ccbRole', () => {
+    assert.equal(good.people.find((p) => p.id === 'EMP-01')?.ccbRole, 'chair');
+    assert.ok(!JSON.stringify(good).includes('boardRole'));
+  });
+
+  it('names no amount after a currency: amounts are in the company currency', () => {
+    const names: string[] = [];
+    const walk = (value: unknown): void => {
+      if (Array.isArray(value)) value.forEach(walk);
+      else if (value && typeof value === 'object') {
+        for (const [key, child] of Object.entries(value)) {
+          names.push(key);
+          walk(child);
+        }
+      }
+    };
+    walk(good);
+    assert.deepEqual(names.filter((n) => /(Usd|USD|Eur)$/.test(n)), []);
+  });
+});
+
+describe('defaults the loader fills in', () => {
+  it('gives a fallback level of recommend where limits are set and the file says nothing', () => {
+    const at = ruleIndex('update_standard_cost');
+    const copy = structuredClone(good) as any;
+    delete copy.autonomy.actions[at].otherwise;
+    const result = validateConfig(copy);
+    assert.ok(result.ok);
+    assert.equal(result.config.autonomy.actions[at]!.otherwise, 'recommend');
+    // A rule with no limits has nothing to fall back from.
+    assert.equal(result.config.autonomy.actions[ruleIndex('write_bom')]!.otherwise, undefined);
+  });
+
+  it('fills false and none for the optional flags and lists', () => {
+    const copy = structuredClone(good) as any;
+    delete copy.approval.tiers[1].alsoReviewsAbove;
+    delete copy.approval.fastTrack.approvers[0].mustOwnTheChange;
+    delete copy.reviewDepth.deepReview.autoFor;
+    const result = validateConfig(copy);
+    assert.ok(result.ok);
+    assert.equal(result.config.approval.tiers[0]!.alsoReviewsAbove, true, 'a value the file gave is kept');
+    assert.equal(result.config.approval.tiers[1]!.alsoReviewsAbove, false);
+    assert.equal(result.config.approval.fastTrack.approvers[0]!.mustOwnTheChange, false);
+    assert.deepEqual(result.config.reviewDepth.deepReview.autoFor, []);
+  });
+
+  it('does not change what it is given, and filling twice changes nothing', () => {
+    const copy = structuredClone(good) as any;
+    delete copy.reviewDepth.deepReview.autoFor;
+    const before = canonicalJson(copy);
+    const once = validateConfig(copy);
+    assert.ok(once.ok);
+    assert.equal(canonicalJson(copy), before);
+    const twice = validateConfig(once.config);
+    assert.ok(twice.ok);
+    assert.equal(canonicalJson(twice.config), canonicalJson(once.config));
+  });
+});
+
 describe('a malformed file is rejected with the path of the bad field', () => {
   it('a missing section', () => {
     assertOne((c) => delete c.approval, 'approval', 'required section, but missing');
@@ -77,20 +228,20 @@ describe('a malformed file is rejected with the path of the bad field', () => {
   });
 
   it('a wrong type', () => {
-    assertOne((c) => (c.approval.tiers[0].upToUsd = '150000'), 'approval.tiers[0].upToUsd', 'expected a number of at least 0, got "150000"');
+    assertOne((c) => (c.approval.tiers[0].upTo = '150000'), 'approval.tiers[0].upTo', 'expected a number of at least 0, got "150000"');
   });
 
   it('tiers out of order', () => {
-    const found = problems((c) => (c.approval.tiers[1].upToUsd = 90_000));
-    assert.deepEqual(found, ['approval.tiers[1].upToUsd: expected a number above tiers[0].upToUsd (150000), got 90000']);
+    const found = problems((c) => (c.approval.tiers[1].upTo = 90_000));
+    assert.deepEqual(found, ['approval.tiers[1].upTo: expected a number above tiers[0].upTo (150000), got 90000']);
   });
 
   it('a last tier that has a limit', () => {
-    assertOne((c) => (c.approval.tiers[2].upToUsd = 5_000_000), 'approval.tiers[2].upToUsd', 'expected null');
+    assertOne((c) => (c.approval.tiers[2].upTo = 5_000_000), 'approval.tiers[2].upTo', 'expected null');
   });
 
   it('a tier with no limit before the last', () => {
-    assertOne((c) => (c.approval.tiers[0].upToUsd = null), 'approval.tiers[0].upToUsd', 'only the last tier has no limit');
+    assertOne((c) => (c.approval.tiers[0].upTo = null), 'approval.tiers[0].upTo', 'only the last tier has no limit');
   });
 
   it('a tier that names a body that does not exist', () => {
@@ -106,7 +257,7 @@ describe('a malformed file is rejected with the path of the bad field', () => {
   });
 
   it('a person in a role that does not exist', () => {
-    assertOne((c) => (c.people[0].role = 'wizard'), 'people[0].role', 'expected a role defined in this file');
+    assertOne((c) => (c.people[3].role = 'wizard'), 'people[3].role', 'expected a role defined in this file');
   });
 
   it('a duplicate id', () => {
@@ -150,10 +301,105 @@ describe('a malformed file is rejected with the path of the bad field', () => {
     assert.ok(found[0]!.includes('.sampleRate: expected a sample rate'));
   });
 
+  it('limits on a level that does not let the agent act', () => {
+    const at = ruleIndex('update_standard_cost');
+    const found = problems((c) => (c.autonomy.actions[at].level = 'recommend'));
+    assert.ok(found.some((p) => p.startsWith('autonomy.actions[' + at + '].limits: expected no limits')), found.join('\n'));
+  });
+
   it('a fallback level more autonomous than the level it falls back from', () => {
-    const at = (c: any) => c.autonomy.actions.findIndex((a: any) => a.action === 'update_standard_cost');
-    const found = problems((c) => (c.autonomy.actions[at(c)].level = 'recommend'));
-    assert.ok(found.some((p) => p.includes('.limits: expected no limits')), found.join('\n'));
+    const at = ruleIndex('update_standard_cost'); // approve_sampled, otherwise recommend
+    assertOne((c) => (c.autonomy.actions[at].otherwise = 'approve'), 'autonomy.actions[' + at + '].otherwise', 'expected a level no more autonomous than "approve_sampled", got "approve"');
+  });
+
+  it('a fallback level with no limits to pass', () => {
+    const at = ruleIndex('write_bom'); // approve_sampled, no limits
+    assertOne((c) => (c.autonomy.actions[at].otherwise = 'recommend'), 'autonomy.actions[' + at + '].otherwise', 'expected limits to be set');
+  });
+
+  it('a class decider whose role may not set the class', () => {
+    assertOne((c) => (c.changeClasses.company.decidedBy = 'buyer'), 'changeClasses.company.decidedBy', 'role "buyer" cannot set_company_class');
+    assertOne((c) => (c.changeClasses.regulatory.decidedBy = 'cm_analyst'), 'changeClasses.regulatory.decidedBy', 'role "cm_analyst" cannot set_regulatory_class');
+  });
+
+  it('a fallback class that does not exist', () => {
+    assertOne((c) => (c.changeClasses.company.whenUnsure = 'III'), 'changeClasses.company.whenUnsure', 'expected a company class');
+    assertOne((c) => (c.changeClasses.regulatory.whenUnsure = 'severe'), 'changeClasses.regulatory.whenUnsure', 'expected a regulatory class');
+  });
+
+  it('a board member whose role may not review', () => {
+    const ccb = bodyIndex('ccb');
+    const next = good.approval.bodies[ccb]!.memberRoles.length;
+    assertOne((c) => c.approval.bodies[ccb].memberRoles.push('design_engineer'), 'approval.bodies[' + ccb + '].memberRoles[' + next + ']', 'role "design_engineer" cannot review_ecr');
+  });
+
+  it('a fast-track approver whose role may not approve on the fast track', () => {
+    assertOne((c) => (c.approval.fastTrack.approvers[1].role = 'buyer'), 'approval.fastTrack.approvers[1].role', 'role "buyer" cannot approve_fast_track_ecr');
+  });
+
+  it('an escalation to a role that does not exist', () => {
+    const at = ruleIndex('set_company_class');
+    assertOne((c) => (c.autonomy.actions[at].escalateTo = 'wizard'), 'autonomy.actions[' + at + '].escalateTo', 'expected a role defined in this file');
+  });
+
+  it('an escalation to a role that cannot do the work', () => {
+    const at = ruleIndex('set_company_class');
+    assertOne((c) => (c.autonomy.actions[at].escalateTo = 'buyer'), 'autonomy.actions[' + at + '].escalateTo', 'role "buyer" cannot set_company_class');
+  });
+
+  it('a deep review requester role that does not exist', () => {
+    assertOne((c) => (c.reviewDepth.deepReview.mayRequest[0] = 'wizard'), 'reviewDepth.deepReview.mayRequest[0]', 'expected a role defined in this file');
+  });
+
+  it('a body chair that nobody holds', () => {
+    const pmc = bodyIndex('pmc');
+    assertOne(
+      (c) => {
+        c.roles.push({ id: 'vacant', label: 'Vacant seat', can: ['approve_ecr_at_tier'] });
+        c.approval.bodies[pmc].chairRole = 'vacant';
+      },
+      'approval.bodies[' + pmc + '].chairRole',
+      'which nobody in people holds'
+    );
+  });
+
+  it('removing everyone from a role the file relies on', () => {
+    const found = problems((c) => (c.people = c.people.filter((p: any) => p.role !== 'cm_analyst')));
+    const wanted = [
+      'approval.fastTrack.approvers[0].role',
+      'autonomy.actions[' + ruleIndex('approve_fast_track_ecr') + '].escalateTo',
+      'autonomy.actions[' + ruleIndex('set_company_class') + '].escalateTo',
+      'changeClasses.company.decidedBy',
+    ];
+    assert.deepEqual(found.map((p) => p.split(': ')[0]).sort(), wanted.sort(), found.join('\n'));
+    assert.ok(found.every((p) => p.includes('"cm_analyst", which nobody in people holds')));
+  });
+
+  it('carrying out an approval on an action that gives or prepares one', () => {
+    for (const action of ['approve_ecr_at_tier', 'approve_fast_track_ecr', 'set_company_class', 'file_ecr']) {
+      const at = ruleIndex(action);
+      assertOne((c) => (c.autonomy.actions[at].carriesOutApproval = true), 'autonomy.actions[' + at + '].carriesOutApproval', 'expected nothing, because ' + action + ' gives or prepares a decision');
+    }
+    // Even false is refused: the field does not belong on these actions at all.
+    const at = ruleIndex('approve_ecr_at_tier');
+    assertOne((c) => (c.autonomy.actions[at].carriesOutApproval = false), 'autonomy.actions[' + at + '].carriesOutApproval', 'expected nothing');
+  });
+
+  it('carrying out an approval with no limits to waive', () => {
+    const at = ruleIndex('draft_journal_entry'); // follows an approval, has no limits
+    assertOne((c) => (c.autonomy.actions[at].carriesOutApproval = true), 'autonomy.actions[' + at + '].carriesOutApproval', 'expected limits to be set');
+  });
+
+  it('a date that is not a real date is reported, not thrown', () => {
+    const ccb = bodyIndex('ccb');
+    for (const bad of ['2026-13-12', '2026-00-10', '2026-02-30']) {
+      assertOne((c) => (c.approval.bodies[ccb].meetings[0] = bad), 'approval.bodies[' + ccb + '].meetings[0]', 'expected a date as YYYY-MM-DD, got "' + bad + '"');
+    }
+    const found = problems((c) => {
+      c.approval.bodies[ccb].meetings[0] = '2026-13-12';
+      c.company.currency = 'dollars';
+    });
+    assert.equal(found.length, 2, 'the other problems are still reported:\n' + found.join('\n'));
   });
 
   it('an escalation with nobody to escalate to', () => {
@@ -212,10 +458,10 @@ describe('a malformed file is rejected with the path of the bad field', () => {
       c.company.currency = 'dollars';
       c.people[3].reportsTo = 'EMP-99';
       c.autonomy.actions[0].level = 'maybe';
-      c.materiality.unitCost.absoluteUsd = -1;
+      c.materiality.unitCost.absolute = -1;
     });
     assert.equal(found.length, 5, found.join('\n'));
-    for (const path of ['approval', 'company.currency', 'people[3].reportsTo', 'autonomy.actions[0].level', 'materiality.unitCost.absoluteUsd']) {
+    for (const path of ['approval', 'company.currency', 'people[3].reportsTo', 'autonomy.actions[0].level', 'materiality.unitCost.absolute']) {
       assert.ok(found.some((p) => p.startsWith(`${path}: `)), `no problem reported at ${path}:\n${found.join('\n')}`);
     }
   });

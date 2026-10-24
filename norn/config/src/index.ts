@@ -3,3 +3,6 @@ export { validateConfig, formatIssue, type ValidationResult } from './validate.t
 export { loadConfigFile, type LoadResult } from './load.ts';
 export { COMPANY_CONFIG_KEY, canonicalJson, configEntries, type ConfigEntry } from './output.ts';
 export type { Issue } from './kit.ts';
+export { withDefaults } from './defaults.ts';
+export { findOne } from './pick.ts';
+export { hash32, isSampled, sampleValue, type SampleKey } from './sample.ts';

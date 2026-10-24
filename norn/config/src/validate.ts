@@ -1,6 +1,7 @@
 // Checks a loaded value against the schema and the cross-field rules, and reports every problem.
 
 import { describe, didYouMean, type Issue } from './kit.ts';
+import { withDefaults } from './defaults.ts';
 import { rules } from './rules.ts';
 import { SECTION_NAMES, configShape, type CompanyConfig, type SectionName } from './schema.ts';
 
@@ -9,7 +10,7 @@ export type ValidationResult = { ok: true; config: CompanyConfig } | { ok: false
 /**
  * Every section is checked on its own, so one bad section does not hide problems in the others.
  * The rules that connect sections run for the sections that came out clean; the rest of them run
- * once the file is fixed.
+ * once the file is fixed. A valid config comes back as a copy with the schema's defaults filled in.
  */
 export function validateConfig(input: unknown): ValidationResult {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) {
@@ -30,7 +31,7 @@ export function validateConfig(input: unknown): ValidationResult {
     if (rule.needs.every((name) => clean.has(name))) rule.run(record as CompanyConfig, issues);
   }
 
-  return issues.length === 0 ? { ok: true, config: record as CompanyConfig } : { ok: false, issues };
+  return issues.length === 0 ? { ok: true, config: withDefaults(record as CompanyConfig) } : { ok: false, issues };
 }
 
 /** One line per problem: the path of the field, then what is wrong with it. */
