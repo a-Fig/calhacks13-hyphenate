@@ -128,7 +128,8 @@ const sections: [string, (c: any) => any][] = [
   ['identity (id, program, filed on)', (c) => ({ id: c.id, program: c.program, filedOn: c.filedOn })],
   ['item changes (item, op, revisions, field redlines)', (c) => c.itemChanges],
   ['BOM changes', (c) => c.bomChanges],
-  ['supplier quotes (id, supplier, item, lines, lead time, note)', (c) => c.supplierQuotes],
+  // Firmness is not in the dataset (the PLM derives it from the note); it has its own check below.
+  ['supplier quotes (id, supplier, item, lines, lead time, note)', (c) => c.supplierQuotes.map(({ firmness, ...q }: any) => q)],
   ['effectivity (production, retrofit, interchangeable)', (c) => c.effectivity],
   ['inventory proposal', (c) => c.inventoryProposal],
   ['cost page (4 blocks, rows in order)', (c) => c.costPage],
@@ -165,8 +166,21 @@ for (const [what, pick] of sections) {
   check(bad.length === 0, `cost-page row ids: ${rowsSeen} rows, each has the PLM's row name and no two in an ECR share one`, bad.join(', '));
 }
 {
-  const bad = [...reads].filter(([, r]) => r.change.eco !== undefined || r.record.eco !== undefined || r.change.supplierQuotes.some((q) => q.firmness !== undefined)).map(([id]) => id);
-  check(bad.length === 0, 'open ECRs have no ECO, and no quote claims a firmness the PLM does not carry', bad.join(', '));
+  const bad = [...reads].filter(([, r]) => r.change.eco !== undefined || r.record.eco !== undefined).map(([id]) => id);
+  check(bad.length === 0, 'open ECRs have no ECO', bad.join(', '));
+  // Firmness: the dataset marks a quote budgetary only in its note ("Budgetary, plus or minus 20%"), which is what the PLM was seeded from.
+  const wrong: string[] = [];
+  let quotesSeen = 0;
+  for (const e of ref.ecrs) {
+    const got = reads.get(e.id)?.change.supplierQuotes ?? [];
+    for (const q of e.supplierQuotes) {
+      quotesSeen++;
+      const want = /^budgetary/i.test(q.note ?? '') ? 'budgetary' : 'firm';
+      const have = got.find((x) => x.id === q.id)?.firmness;
+      if (have !== want) wrong.push(`${e.id} ${q.id}: ${have} not ${want}`);
+    }
+  }
+  check(wrong.length === 0 && quotesSeen > 0, `quote firmness: all ${quotesSeen} quotes carry it, ECR-0409's is budgetary`, wrong.join('; '));
   const warned = [...reads].filter(([, r]) => r.record.warnings.length).map(([id, r]) => `${id}: ${r.record.warnings.join('; ')}`);
   check(warned.length === 0, 'nothing in the PLM data went unplaced (record.warnings is empty)', warned.join('; '));
 }
@@ -176,10 +190,14 @@ for (const [what, pick] of sections) {
   check(JSON.stringify(a.change) === JSON.stringify(b.change), `${spec.demoEcr} reads the same twice, row ids included`);
 }
 {
-  // An approved ECR has an ECO: the link comes through.
-  const approved = listing.map((r) => String(r.name)).filter((id) => inPlm.get(id) === 'Approved');
-  const withEco = approved.length ? await readChangeRequest(opts, approved[0]) : undefined;
-  check(!!withEco && /^ECO-\d+$/.test(withEco.change.eco ?? '') && withEco.change.eco === withEco.record.eco, `an approved ECR carries its ECO`, withEco ? `${withEco.change.id} -> ${withEco.change.eco}` : 'no approved ECR');
+  // An approved ECR carries its ECO through the PLM's released_eco link: each of the dataset's released ECOs is on its ECR.
+  const wrongEco: string[] = [];
+  for (const h of ref.history) {
+    if (!inPlm.has(h.ecr)) { wrongEco.push(`${h.ecr} missing`); continue; }
+    const got = await readChangeRequest(opts, h.ecr);
+    if (got.change.eco !== h.id || got.record.eco !== h.id || !got.record.ecoReleasedOn) wrongEco.push(`${h.ecr}: ${got.change.eco} not ${h.id}`);
+  }
+  check(wrongEco.length === 0 && ref.history.length > 0, `approved ECRs carry their ECO: ${ref.history.length} of ${ref.history.length} released ECOs found through released_eco`, wrongEco.join('; '));
 }
 
 // ---------------------------------------------------------------- 2. webhook round trip

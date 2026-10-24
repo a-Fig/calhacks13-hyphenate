@@ -25,6 +25,7 @@ export const plm: PlmSettings = {
     'Use until depleted': 'use_until_depleted', 'Mandatory install': 'mandatory_install', Rework: 'rework', Scrap: 'scrap', Cancel: 'cancel', TBD: 'tbd',
   },
   costBasis: { 'Supplier quote': 'supplier_quote', 'Engineer estimate': 'engineer_estimate', 'Not provided': 'not_provided' },
+  firmness: { Firm: 'firm', Budgetary: 'budgetary' },
   // The functions the CM analyst routes an ECR to, as the dataset's seats.
   reviewFunctions: {
     'CM analyst': 'cm_analyst', 'Cost engineer': 'cost_engineer', Buyer: 'buyer', 'Production planner': 'production_planner',

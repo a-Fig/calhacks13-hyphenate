@@ -42,12 +42,11 @@ test('a quote is one group of rows; a supplier goes through the settings; zero m
   const { change, record } = mapEcr(settings, ecrDoc());
   assert.deepEqual(change.supplierQuotes, [
     {
-      id: 'Q-1', supplier: 'Tarn Composites', item: 'P-100', leadTimeWeeks: 14, note: 'Plate in 6 weeks.',
+      id: 'Q-1', supplier: 'Tarn Composites', item: 'P-100', leadTimeWeeks: 14, firmness: 'firm', note: 'Plate in 6 weeks.',
       lines: [{ description: 'Steady state', unitPrice: 221 }, { description: 'First lot', unitPrice: 239.5, qty: 25 }, { description: 'Fixture', oneTime: 6800 }],
     },
-    { id: 'Q-2', supplier: 'Other Co', item: 'P-200', lines: [{ description: 'Unit', unitPrice: 12.5 }] },
+    { id: 'Q-2', supplier: 'Other Co', item: 'P-200', firmness: 'budgetary', lines: [{ description: 'Unit', unitPrice: 12.5 }] },
   ]);
-  assert.equal('firmness' in change.supplierQuotes[0], false, 'the PLM has no firmness field, so it stays unset');
   assert.deepEqual(record.quotes, [{ id: 'Q-1', receivedOn: '2026-10-16', validUntil: '2027-01-15' }, { id: 'Q-2', receivedOn: '2026-10-17' }]);
   const asFunction = mapEcr({ ...settings, supplier: (n) => n.toUpperCase() }, ecrDoc());
   assert.deepEqual(asFunction.change.supplierQuotes.map((q) => q.supplier), ['TARN CO', 'OTHER CO']);
@@ -86,6 +85,29 @@ test('an unmapped spelling stops the read and names the ECR, the field and the v
   const bom = ecrDoc();
   bom.bom_changes[0].op = 'Swap';
   assert.throws(() => mapEcr(settings, bom), /BOM change "Swap"/);
+});
+
+test('quote firmness goes through the settings; one budgetary row makes the quote budgetary; absent means unset', () => {
+  const doc = ecrDoc();
+  assert.deepEqual(mapEcr(settings, doc).change.supplierQuotes.map((q) => q.firmness), ['firm', 'budgetary']);
+  doc.supplier_quotes[2].firmness = 'Provisional';
+  assert.equal(mapEcr(settings, doc).change.supplierQuotes[0].firmness, 'budgetary');
+  for (const q of doc.supplier_quotes) q.firmness = '';
+  assert.equal('firmness' in mapEcr(settings, doc).change.supplierQuotes[0], false, 'a blank firmness stays unset, so the checks read the note');
+  const noField = mapEcr({ ...settings, firmness: undefined }, ecrDoc());
+  assert.equal('firmness' in noField.change.supplierQuotes[0], false, 'settings without a firmness map leave it unset');
+  const odd = ecrDoc();
+  odd.supplier_quotes[0].firmness = 'Maybe';
+  assert.throws(() => mapEcr(settings, odd), /quote firmness "Maybe"/);
+});
+
+test("the ECO comes from the ECR's own released_eco when no ECO is passed in", () => {
+  const doc = ecrDoc();
+  doc.released_eco = 'ECO-0009';
+  const { change, record } = mapEcr(settings, doc);
+  assert.deepEqual([change.eco, record.eco], ['ECO-0009', 'ECO-0009']);
+  assert.equal(mapEcr(settings, doc, { name: 'ECO-0010', released_on: '2026-10-30' }).change.eco, 'ECO-0010', 'a passed-in ECO wins');
+  assert.equal('eco' in mapEcr(settings, { ...doc, released_eco: '' }).change, false, 'a blank link is no ECO');
 });
 
 test('no retrofit when its basis is blank; a draft without a cut-in reads as to be decided, with a warning', () => {

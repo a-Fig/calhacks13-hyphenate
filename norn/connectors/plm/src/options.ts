@@ -29,6 +29,8 @@ export interface PlmSettings {
   dispositions: Record<string, Disposition>;
   /** Who stands behind a cost-page number. */
   costBasis: Record<string, CostBasis>;
+  /** A supplier quote's firmness, as the form's pick list spells it. Optional: a PLM without the field leaves it unset and the checks read the quote's note. */
+  firmness?: Record<string, 'firm' | 'budgetary'>;
   /** Review function the CM analyst routed the request to, to the company's own id. Default: the PLM's label. */
   reviewFunctions?: Record<string, string>;
   /**

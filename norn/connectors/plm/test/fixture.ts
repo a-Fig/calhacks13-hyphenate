@@ -14,6 +14,7 @@ export const settings: PlmSettings = {
   locations: { Stores: 'stores', WIP: 'wip', 'Finished goods': 'finished_goods', 'At supplier': 'supplier_finished', 'On order': 'on_order', 'In field': 'in_field' },
   dispositions: { Use: 'use_until_depleted', Install: 'mandatory_install', Rework: 'rework', Scrap: 'scrap', Cancel: 'cancel', TBD: 'tbd' },
   costBasis: { Quote: 'supplier_quote', Estimate: 'engineer_estimate', 'Not provided': 'not_provided' },
+  firmness: { Held: 'firm', Provisional: 'budgetary' },
   reviewFunctions: { Buyer: 'buyer', 'Cost engineer': 'cost_engineer' },
   supplier: { 'Tarn Co': 'Tarn Composites' },
   webhook: { eventHeader: 'X-Acme-Event' },
@@ -53,10 +54,10 @@ export function ecrDoc(): Record<string, any> {
       row('inventory', 'iv2', { part: 'P-100', location: 'At supplier', disposition: 'Cancel', note: '' }),
     ],
     supplier_quotes: [
-      row('supplier_quotes', 'sq1', { quote_id: 'Q-1', supplier: 'Tarn Co', part: 'P-100', description: 'Steady state', unit_price: 221, qty: 0, one_time: 0, received_on: '2026-10-16', valid_until: '2027-01-15', lead_time_weeks: 14, note: 'Plate in 6 weeks.' }),
-      row('supplier_quotes', 'sq2', { quote_id: 'Q-1', supplier: 'Tarn Co', part: 'P-100', description: 'First lot', unit_price: 239.5, qty: 25, one_time: 0, received_on: '2026-10-16', valid_until: '2027-01-15', lead_time_weeks: 14, note: '' }),
-      row('supplier_quotes', 'sq3', { quote_id: 'Q-1', supplier: 'Tarn Co', part: 'P-100', description: 'Fixture', unit_price: 0, qty: 0, one_time: 6800, received_on: '2026-10-16', valid_until: '2027-01-15', lead_time_weeks: 14, note: '' }),
-      row('supplier_quotes', 'sq4', { quote_id: 'Q-2', supplier: 'Other Co', part: 'P-200', description: 'Unit', unit_price: 12.5, qty: 0, one_time: 0, received_on: '2026-10-17', lead_time_weeks: 0, note: '' }),
+      row('supplier_quotes', 'sq1', { quote_id: 'Q-1', firmness: 'Held', supplier: 'Tarn Co', part: 'P-100', description: 'Steady state', unit_price: 221, qty: 0, one_time: 0, received_on: '2026-10-16', valid_until: '2027-01-15', lead_time_weeks: 14, note: 'Plate in 6 weeks.' }),
+      row('supplier_quotes', 'sq2', { quote_id: 'Q-1', firmness: 'Held', supplier: 'Tarn Co', part: 'P-100', description: 'First lot', unit_price: 239.5, qty: 25, one_time: 0, received_on: '2026-10-16', valid_until: '2027-01-15', lead_time_weeks: 14, note: '' }),
+      row('supplier_quotes', 'sq3', { quote_id: 'Q-1', firmness: 'Held', supplier: 'Tarn Co', part: 'P-100', description: 'Fixture', unit_price: 0, qty: 0, one_time: 6800, received_on: '2026-10-16', valid_until: '2027-01-15', lead_time_weeks: 14, note: '' }),
+      row('supplier_quotes', 'sq4', { quote_id: 'Q-2', firmness: 'Provisional', supplier: 'Other Co', part: 'P-200', description: 'Unit', unit_price: 12.5, qty: 0, one_time: 0, received_on: '2026-10-17', lead_time_weeks: 0, note: '' }),
     ],
     cost_production: [
       row('cost_production', 'cp1', { label: 'Bracket unit cost', basis: 'Quote', one_time: 0, unit_cost: 34.6, quantity: 12, note: 'per aircraft' }),

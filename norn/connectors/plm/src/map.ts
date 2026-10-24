@@ -168,6 +168,12 @@ function bomChanges(s: PlmSettings, doc: PlmDoc): BomChange[] {
   });
 }
 
+function firmness(s: PlmSettings, rs: PlmDoc[], ecr: string): SupplierQuote['firmness'] {
+  if (!s.firmness) return undefined;
+  const found = rs.map((r) => text(r.firmness)).filter((v): v is string => v !== undefined).map((v) => lookup(s.firmness!, v, 'quote firmness', ecr));
+  return found.includes('budgetary') ? 'budgetary' : found[0];
+}
+
 function supplierQuotes(s: PlmSettings, doc: PlmDoc): { quotes: SupplierQuote[]; dates: EcrRecord['quotes'] } {
   const groups = new Map<string, PlmDoc[]>();
   for (const r of rows(doc.supplier_quotes)) {
@@ -184,7 +190,8 @@ function supplierQuotes(s: PlmSettings, doc: PlmDoc): { quotes: SupplierQuote[];
       item: String(head.part),
       lines: rs.map((r): QuoteLine => clean({ description: String(r.description ?? ''), unitPrice: given(r.unit_price), qty: given(r.qty), oneTime: given(r.one_time) })),
       leadTimeWeeks: given(head.lead_time_weeks),
-      // The PLM has no firm/budgetary field: `firmness` stays unset and the checks read it from the note.
+      // Firm or budgetary where the PLM carries it; unset otherwise, and the checks then read the note. One budgetary row makes the quote budgetary.
+      firmness: firmness(s, rs, doc.name),
       note: rs.map((r) => text(r.note)).find((n) => n !== undefined),
     }));
     dates.push(clean({ id, receivedOn: text(head.received_on), validUntil: text(head.valid_until) }));
@@ -251,6 +258,8 @@ export function mapEcr(s: PlmSettings, doc: PlmDoc, eco?: { name: string; releas
   const id = String(doc.name);
   const warnings: string[] = [];
   const quotes = supplierQuotes(s, doc);
+  // The ECO that released the ECR: the one passed in (a lookup by `ecr`), else the ECR's own `released_eco`.
+  const ecoName = eco?.name ?? text(doc.released_eco);
   const change: PlmChangeRequest = clean({
     id,
     program: lookup(s.programs, doc.program, 'program', id),
@@ -261,7 +270,7 @@ export function mapEcr(s: PlmSettings, doc: PlmDoc, eco?: { name: string; releas
     effectivity: effectivity(s, doc, warnings),
     inventoryProposal: inventory(s, doc),
     costPage: costPage(s, doc),
-    eco: eco?.name,
+    eco: ecoName,
   });
   const names = s.reviewFunctions ?? {};
   const record: EcrRecord = clean({
@@ -275,7 +284,7 @@ export function mapEcr(s: PlmSettings, doc: PlmDoc, eco?: { name: string; releas
     justificationCode: String(doc.justification_code ?? ''),
     ecpRevision: text(doc.ecr_revision),
     originatingNcr: text(doc.originating_ncr),
-    eco: eco?.name,
+    eco: ecoName,
     ecoReleasedOn: text(eco?.released_on),
     routedTo: rows(doc.routed_to).map((r) => (Object.hasOwn(names, r.review_function) ? names[r.review_function] : String(r.review_function))),
     dates: clean({ filedOn: change.filedOn, neededBy: text(doc.needed_by), decidedOn: text(doc.decided_on), created: text(doc.creation), modified: String(doc.modified ?? '') }),
