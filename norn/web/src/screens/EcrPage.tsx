@@ -1,18 +1,18 @@
 import { Component, useCallback, useMemo, useState, type ErrorInfo, type ReactNode } from 'react';
-import { ChecklistIcon, CommentDiscussionIcon, FileDiffIcon, GitCommitIcon } from '@primer/octicons-react';
+import { CommentDiscussionIcon } from '@primer/octicons-react';
 import { Flash, PageHeader, Spinner, UnderlineNav } from '@primer/react';
 import { source, useAssessment } from '../assessment/source.ts';
 import type { ImpactAssessment } from '../assessment/types.ts';
-import { StateBadge, LevelLabel } from '../ui/Bits.tsx';
+import { StateBadge, LevelLabel, RequestNumber, MockTag } from '../ui/Bits.tsx';
+import { AircraftIcon, CaliperIcon, GaugeIcon, RevisionIcon } from '../ui/EngineeringIcons.tsx';
 import { WhyContext } from '../ui/Evidence.tsx';
 import { WhyPanel } from '../ui/WhyPanel.tsx';
 import { dayLabel } from '../ui/fmt.ts';
-import { navigate } from '../router.tsx';
+import { Link, navigate } from '../router.tsx';
 import { Changes } from './Changes.tsx';
 import { Conversation } from './Conversation.tsx';
 import { Impact } from './Impact.tsx';
 import { Revisions } from './Revisions.tsx';
-import { RepoHeader } from './Shell.tsx';
 
 export type Tab = 'conversation' | 'impact' | 'changes' | 'revisions';
 
@@ -42,7 +42,6 @@ class PageBoundary extends Component<{ id: string; children: ReactNode }, { erro
     if (!this.state.error) return this.props.children;
     return (
       <>
-        <RepoHeader />
         <main className="nx-container nx-tabbody">
           <Flash variant="danger">
             <b>Norn could not draw {this.props.id}.</b> The data for this ECR is not in a shape the page can show. {this.state.error.message}
@@ -67,13 +66,13 @@ function AssessmentView({ a, tab, check }: { a: ImpactAssessment; tab: Tab; chec
 
   return (
     <WhyContext.Provider value={ctx}>
-      <RepoHeader />
       <div className="nx-pr-head">
         <div className="nx-container">
+          <div className="nx-drawing-head"><Link to="/">Engineering changes</Link><span className="nx-sp" /><AircraftIcon size={16} /> {e.program}<RequestNumber id={e.id} /></div>
           <PageHeader>
             <PageHeader.TitleArea variant="large">
               <PageHeader.Title>
-                {e.title} <span className="nx-num-muted">{e.id}</span>
+                {e.title}
               </PageHeader.Title>
             </PageHeader.TitleArea>
             <PageHeader.Description>
@@ -91,13 +90,13 @@ function AssessmentView({ a, tab, check }: { a: ImpactAssessment; tab: Tab; chec
                 <UnderlineNav.Item href={base} icon={CommentDiscussionIcon} counter={comments} aria-current={tab === 'conversation' ? 'page' : undefined} onSelect={go(base)}>
                   Conversation
                 </UnderlineNav.Item>
-                <UnderlineNav.Item href={`${base}/impact`} icon={ChecklistIcon} counter={a.checks.length} aria-current={tab === 'impact' ? 'page' : undefined} onSelect={go(`${base}/impact`)}>
+                <UnderlineNav.Item href={`${base}/impact`} icon={GaugeIcon} counter={a.checks.length} aria-current={tab === 'impact' ? 'page' : undefined} onSelect={go(`${base}/impact`)}>
                   Impact
                 </UnderlineNav.Item>
-                <UnderlineNav.Item href={`${base}/changes`} icon={FileDiffIcon} counter={a.changes.length} aria-current={tab === 'changes' ? 'page' : undefined} onSelect={go(`${base}/changes`)}>
+                <UnderlineNav.Item href={`${base}/changes`} icon={CaliperIcon} counter={a.changes.length} aria-current={tab === 'changes' ? 'page' : undefined} onSelect={go(`${base}/changes`)}>
                   Changes
                 </UnderlineNav.Item>
-                <UnderlineNav.Item href={`${base}/revisions`} icon={GitCommitIcon} counter={a.revisions.length} aria-current={tab === 'revisions' ? 'page' : undefined} onSelect={go(`${base}/revisions`)}>
+                <UnderlineNav.Item href={`${base}/revisions`} icon={RevisionIcon} counter={a.revisions.length} aria-current={tab === 'revisions' ? 'page' : undefined} onSelect={go(`${base}/revisions`)}>
                   Revisions
                 </UnderlineNav.Item>
               </UnderlineNav>
@@ -124,13 +123,13 @@ function AssessmentView({ a, tab, check }: { a: ImpactAssessment; tab: Tab; chec
 function SummaryOnly({ e }: { e: NonNullable<ReturnType<typeof useAssessment>['summary']> }) {
   return (
     <>
-      <RepoHeader />
       <div className="nx-pr-head">
         <div className="nx-container">
+          <div className="nx-drawing-head"><Link to="/">Engineering changes</Link><span className="nx-sp" /><AircraftIcon size={16} /> {e.program}<RequestNumber id={e.id} /></div>
           <PageHeader>
             <PageHeader.TitleArea variant="large">
               <PageHeader.Title>
-                {e.title} <span className="nx-num-muted">{e.id}</span>
+                {e.title}
               </PageHeader.Title>
             </PageHeader.TitleArea>
             <PageHeader.Description>
@@ -145,7 +144,7 @@ function SummaryOnly({ e }: { e: NonNullable<ReturnType<typeof useAssessment>['s
       </div>
       <main className="nx-container nx-tabbody">
         {source.isMock ? (
-          <p className="nx-fg-muted">Only ECR-0417, ECR-0409 and ECR-0423 have a full page in this mock.</p>
+          <div className="nx-pending-card"><GaugeIcon size={24} /><div><h2 className="nx-h3">Assessment preview unavailable <MockTag /></h2><p className="nx-fg-muted">This saved-run preview includes full assessments for <Link to="/ecr/ECR-0417">ECR-0417</Link>, <Link to="/ecr/ECR-0409">ECR-0409</Link> and <Link to="/ecr/ECR-0423">ECR-0423</Link>.</p></div></div>
         ) : e.costNote ? (
           <p className="nx-fg-muted">{e.costNote}</p>
         ) : e.checks === 'running' ? (

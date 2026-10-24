@@ -1,35 +1,31 @@
 import {
-  AlertFillIcon, CheckCircleFillIcon, CircleIcon, DotFillIcon, GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon,
-  GitPullRequestIcon, SkipIcon, XCircleFillIcon,
+  AlertFillIcon, CheckCircleFillIcon, CircleIcon, DotFillIcon, SkipIcon, XCircleFillIcon,
 } from '@primer/octicons-react';
-import { Avatar, Label, Spinner, StateLabel } from '@primer/react';
+import { Avatar, Label, Spinner } from '@primer/react';
 import type { Check, EcrSummary, ReportLevel } from '../assessment/types.ts';
 import { avatarSrc, type AvatarKind } from './avatars.ts';
 import { staleNote } from './fmt.ts';
+import { EcrIcon, RejectedIcon, ReleaseIcon } from './EngineeringIcons.tsx';
 
 type Status = EcrSummary['status'];
 
 export const isOpen = (s: Status) => s === 'Draft' || s === 'Submitted' || s === 'In review';
 
-/** GitHub's state colours: open is green, approved and released (merged) purple, rejected (closed) red. */
+/** Explicit words plus an engineering symbol keep status readable without colour. */
 export function StateBadge({ status, size = 'medium' }: { status: Status; size?: 'small' | 'medium' }) {
-  const map: Record<Status, { status: 'pullOpened' | 'pullMerged' | 'pullClosed' | 'draft'; text: string }> = {
-    Draft: { status: 'draft', text: 'Draft' },
-    Submitted: { status: 'pullOpened', text: 'Submitted' },
-    'In review': { status: 'pullOpened', text: 'In review' },
-    Approved: { status: 'pullMerged', text: 'Approved' },
-    'ECO released': { status: 'pullMerged', text: 'Released' },
-    Rejected: { status: 'pullClosed', text: 'Rejected' },
-  };
-  const m = map[status];
-  return <StateLabel status={m.status} size={size}>{m.text}</StateLabel>;
+  return <span className={`nx-state-badge nx-status-${status.toLowerCase().replaceAll(' ', '-')} ${size}`}><StateIcon status={status} />{status === 'ECO released' ? 'Released' : status}</span>;
 }
 
 export function StateIcon({ status, size = 16 }: { status: Status; size?: number }) {
-  if (status === 'Draft') return <GitPullRequestDraftIcon size={size} className="nx-fg-muted" />;
-  if (status === 'Approved' || status === 'ECO released') return <GitMergeIcon size={size} className="nx-fg-done" />;
-  if (status === 'Rejected') return <GitPullRequestClosedIcon size={size} className="nx-fg-danger" />;
-  return <GitPullRequestIcon size={size} className="nx-fg-open" />;
+  if (status === 'Approved') return <CheckCircleFillIcon size={size} className="nx-fg-success" />;
+  if (status === 'ECO released') return <ReleaseIcon size={size} className="nx-fg-done" />;
+  if (status === 'Rejected') return <RejectedIcon size={size} className="nx-fg-danger" />;
+  return <EcrIcon size={size} strokeDasharray={status === 'Draft' ? '3 2' : undefined} className={status === 'Draft' ? 'nx-fg-muted' : 'nx-fg-open'} />;
+}
+
+/** A title-block cell uses the request's known number, without inventing a part revision. */
+export function RequestNumber({ id }: { id: string }) {
+  return <span className="nx-request-number"><span>ECR</span><b>{id.replace(/^ECR-/, '')}</b></span>;
 }
 
 export function LevelLabel({ level, long = false }: { level: ReportLevel; long?: boolean }) {
