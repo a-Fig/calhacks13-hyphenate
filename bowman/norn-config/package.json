@@ -1,0 +1,6 @@
+{
+  "name": "bowman-norn-config",
+  "private": true,
+  "type": "module",
+  "description": "Bowman Aviation's configuration of Norn: one typed file, checked by @norn/config (node norn/config/src/cli.ts bowman/norn-config/bowman.config.ts)."
+}
