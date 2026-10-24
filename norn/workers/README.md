@@ -49,11 +49,14 @@ NORN_DB=norn-cfg npm run check:config                # end to end on a scratch d
      `erpBaselineSource`, `erpBaselineAsOf` and `revisionSource`.
 5. **Workers that can't serve a run.** A worker with no baseline source leaves s1 to s4 runs it
    has no baseline for to a worker that has one, instead of failing them.
-   **Peers (s4).** s4 also reads the other open ECRs' current change requests from the worker's
-   cache, to show what two changes to one supplier do to each other. They are not in the run's
-   inputs, so filing or editing a peer does not re-run s4 by itself: the result is right for the
-   peers present when it ran. A new revision of the ECR, a baseline change or an assumption re-runs
-   it. The `detail` row lists the peers it saw.
+   **Peers (s4).** s4 also reads the other open ECRs' change requests, to show what two changes to
+   one supplier do to each other. The run's inputs name them (each open ECR's id, revision number
+   and digest), and the worker reads exactly those revisions, so the same inputs always give the
+   same rows. Filing, editing, closing or reopening another ECR changes the list and re-runs s4 on
+   every other open ECR; the module cannot tell which share a supplier, so all are named and the
+   check decides. This does not change the ECR's own revision or withdraw an approval: the peer list
+   is left out of the digest an approval stands on. A named revision the worker doesn't have, or has
+   with another digest, drops the run (stale). The `detail` row lists the peers it compared with.
 6. **Code version.** `code_version` (default `checks-0.3.0`) is part of every hash. Set it to the
    checks library's `CHECKS_CODE_VERSION` when the library changes. The worker warns when the two
    disagree.

@@ -79,12 +79,14 @@ const probRow = (key: string, label: string, p: number, detail: object): CheckRe
  * detail. `cut_in_serial` is the first serial that can take the change.
  */
 export function timelineRows(r: TimelineResult): CheckResultRow[] {
-  const out: CheckResultRow[] = [
-    statRow('cut_in_date', 'Earliest cut-in date', 'day', r.cutIn.day, { date: r.cutIn.date }),
-    statRow('cut_in_weeks', 'Weeks from filing to cut-in', 'weeks', r.cutIn.weeksFromFiling, { date: r.cutIn.date }),
-    statRow('cut_in_serial', 'First serial that can take the change', 'serial', r.cutIn.serial),
-    statRow('decision_date', 'Board decision date', 'day', r.decision.day, { date: r.decision.date }),
-  ];
+  // The date rows are left out when the old stock runs past the volume plan: no date can be placed, only the serial.
+  const out: CheckResultRow[] = [];
+  if (r.cutIn.day && r.cutIn.weeksFromFiling) {
+    out.push(statRow('cut_in_date', 'Earliest cut-in date', 'day', r.cutIn.day, { date: r.cutIn.date }));
+    out.push(statRow('cut_in_weeks', 'Weeks from filing to cut-in', 'weeks', r.cutIn.weeksFromFiling, { date: r.cutIn.date }));
+  }
+  out.push(statRow('cut_in_serial', 'First serial that can take the change', 'serial', r.cutIn.serial, { placed: r.cutIn.placed }));
+  out.push(statRow('decision_date', 'Board decision date', 'day', r.decision.day, { date: r.decision.date }));
   if (r.late) {
     out.push(statRow('late_weeks', `Weeks after the stated effectivity (${r.stated.label})`, 'weeks', r.late.weeks, { statedDate: r.stated.date, statedSerial: r.stated.serial }));
     out.push(probRow('p_late', 'Chance the change reaches the line after the stated effectivity', r.late.probability, { stated: r.stated, trace: r.late.weeks.trace }));
@@ -103,7 +105,7 @@ export function timelineRows(r: TimelineResult): CheckResultRow[] {
 export function supplyCheckRows(r: SupplyResult): CheckResultRow[] {
   const out: CheckResultRow[] = [];
   if (r.missEffectivity) {
-    out.push(probRow('p_miss_effectivity', `Chance the supply misses the stated effectivity (${r.stated.label})`, r.missEffectivity.probability, { stated: r.stated, weeksLate: r.missEffectivity.weeks, trace: r.missEffectivity.weeks.trace }));
+    out.push(probRow('p_miss_effectivity', `Chance the supply misses the stated effectivity (${r.stated.label})`, r.missEffectivity.probability, { stated: r.stated, weeksLate: r.missEffectivity.weeks, ...(r.missEffectivity.weeks ? { trace: r.missEffectivity.weeks.trace } : { placed: false }) }));
   }
   out.push(countRow('single_source_items', 'Changed parts with one qualified source', 'parts', r.singleSourceItems.length, { items: r.singleSourceItems, parts: r.parts.filter((p) => p.singleSource).map((p) => ({ item: p.item, supplier: p.supplier, sources: p.sources })) }));
   for (const p of r.parts) {
@@ -117,8 +119,10 @@ export function supplyCheckRows(r: SupplyResult): CheckResultRow[] {
   }
   const I = r.interaction;
   if (I) {
-    out.push(statRow('peer_cut_in_shift_weeks', 'Weeks the cut-in moves because of the other open ECRs', 'weeks', I.cutIn.shiftWeeks, { peers: I.peers.map((p) => p.ecr), slots: I.slots }));
-    out.push(probRow('p_cut_in_later_with_peers', 'Chance the other open ECRs push the cut-in later', I.cutIn.probabilityLater, { peers: I.peers, trace: I.cutIn.shiftWeeks.trace }));
+    if (I.cutIn) {
+      out.push(statRow('peer_cut_in_shift_weeks', 'Weeks the cut-in moves because of the other open ECRs', 'weeks', I.cutIn.shiftWeeks, { peers: I.peers.map((p) => p.ecr), slots: I.slots }));
+      out.push(probRow('p_cut_in_later_with_peers', 'Chance the other open ECRs push the cut-in later', I.cutIn.probabilityLater, { peers: I.peers, trace: I.cutIn.shiftWeeks.trace }));
+    }
     if (I.late) out.push(probRow('p_miss_effectivity_with_peers', 'Chance the supply misses the stated effectivity, with the other open ECRs', I.late.probability, { weeksLate: I.late.weeks, trace: I.late.weeks.trace }));
     for (const b of I.bundles) {
       out.push(statRow(`bundle_saving:${b.constraint}`, `Saving from the bundle terms, this ECR (${b.constraint})`, 'USD', b.ownSaving, { withinWeeks: b.withinWeeks, probabilityBundled: b.probabilityBundled }));
@@ -128,7 +132,7 @@ export function supplyCheckRows(r: SupplyResult): CheckResultRow[] {
   out.push({
     key: 'detail', label: 'Inputs, flags and supporting results', unit: 'json', p10: 0, p50: 0, p90: 0,
     detailJson: JSON.stringify({
-      codeVersion: r.codeVersion, seed: r.seed, draws: r.draws, correlation: r.correlation, stated: r.stated, parts: r.parts,
+      codeVersion: r.codeVersion, seed: r.seed, draws: r.draws, correlation: r.correlation, stated: r.stated, cutInPlaced: r.cutInPlaced, parts: r.parts,
       singleSourceItems: r.singleSourceItems, missEffectivity: r.missEffectivity, spend: r.spend, capacity: r.capacity,
       interaction: I, unrelatedPeers: r.unrelatedPeers, convergence: r.convergence, flags: r.flags, inputs: r.inputs,
     }),

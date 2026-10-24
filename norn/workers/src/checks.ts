@@ -220,6 +220,35 @@ await holds(() => [...db.agentEvent.iter()].filter(e => e.jobId === job).length 
 const got = [...db.agentEvent.iter()].filter(e => e.jobId === job).sort((a, b) => a.seq - b.seq);
 check('agent events are keyed by (job, seq): out-of-order batches are stored once each, a resent batch adds nothing', got.map(e => e.seq).join(',') === '0,1,2,3' && got.every(e => e.eventKey === `${job}#${e.seq}` && e.prId === E1.id && e.checkRunId === target.id && e.actor === 'agent:norn/level1/ECR-0417' && e.spawnedBy === 'norn' && e.sender.isEqual(A.identity)), got.map(e => e.eventKey).join(' '));
 
+// ---- s4 reads the other open ECRs: it names them, and re-runs when one changes -------------------------
+const crOf = (id: string, note = '') => JSON.stringify({ id, program: 'vesper', filedOn: '2026-10-20', itemChanges: [], bomChanges: [], supplierQuotes: [], effectivity: { production: { basis: 'tbd', from: '' }, interchangeable: true }, inventoryProposal: [], costPage: { production: [], retrofit: [], logisticsSupport: [], other: [] }, note });
+const plmA = `CHK-PEER-A-${stamp}`;
+const plmB = `CHK-PEER-B-${stamp}`;
+const ingest = (plm: string, note = '') => R.ingestEcr({ plmEcrNumber: plm, title: `check: peers ${plm}`, description: 'peer check', changeRequestJson: crOf(plm, note), source: 'check', sourceRef: note || 'first' });
+const peersOf = (id: bigint) => (JSON.parse(current(id, 's4_supply')!.inputsJson).peers ?? []) as { pr: string; revision: number; overlay: string }[];
+await ingest(plmA);
+const PA = await until(() => [...db.pullRequest.iter()].find(x => x.plmEcrNumber === plmA), 5000, 'the first peer ECR');
+created.push(PA.id);
+await approve(PA.id);
+const s4A = current(PA.id, 's4_supply')!;
+const revA = pr(PA.id).revision;
+check('s4 names the other open ECRs it reads, none yet', Array.isArray(JSON.parse(s4A.inputsJson).peers) && !peersOf(PA.id).some(n => n.pr === String(PA.id)), JSON.stringify(peersOf(PA.id)));
+await ingest(plmB);
+const PB = await until(() => [...db.pullRequest.iter()].find(x => x.plmEcrNumber === plmB), 5000, 'the second peer ECR');
+created.push(PB.id);
+check('filing a second ECR re-runs the s4 of the first ECR, which now names the second', await holds(() => current(PA.id, 's4_supply')!.id !== s4A.id && run(s4A.id).status === 'stale' && peersOf(PA.id).some(n => n.pr === String(PB.id) && n.revision === 1)), `${JSON.stringify(peersOf(PA.id))}, old s4 ${run(s4A.id).status}`);
+check('...and the first ECR revision and approval stay as they were: another ECR is not a change to its inputs', pr(PA.id).revision === revA && pr(PA.id).status === 'approved', `rev ${revA} -> ${pr(PA.id).revision}, ${pr(PA.id).status}`);
+check('...while stages that do not read the peers (s1, s2, s3) are left alone', ['s1_bom_delta', 's2_cost', 's3_timeline'].every(st => run(current(PA.id, st)!.id).status !== 'stale'), ['s1_bom_delta', 's2_cost', 's3_timeline'].map(st => run(current(PA.id, st)!.id).status).join(','));
+const s4A2 = current(PA.id, 's4_supply')!;
+await ingest(plmB, 'second report');
+check('a new revision of the second ECR re-runs the s4 of the first ECR on the revised change request', await holds(() => current(PA.id, 's4_supply')!.id !== s4A2.id && peersOf(PA.id).some(n => n.pr === String(PB.id) && n.revision === 2)), JSON.stringify(peersOf(PA.id)));
+const s4A3 = current(PA.id, 's4_supply')!;
+await R.setPrStatus({ prId: PB.id, status: 'closed' });
+check('closing the second ECR drops it from the peers of the first ECR', await holds(() => current(PA.id, 's4_supply')!.id !== s4A3.id && !peersOf(PA.id).some(n => n.pr === String(PB.id))), JSON.stringify(peersOf(PA.id)));
+const s4A4 = current(PA.id, 's4_supply')!;
+await R.setPrStatus({ prId: PB.id, status: 'draft' });
+check('reopening it adds it back', await holds(() => current(PA.id, 's4_supply')!.id !== s4A4.id && peersOf(PA.id).some(n => n.pr === String(PB.id))), JSON.stringify(peersOf(PA.id)));
+
 // ---- every write left a log row ---------------------------------------------------------------------
 const names = ['register_actor', 'create_pr', 'edit_pr_text', 'add_comment', 'enqueue_check', 'record_assumption', 'set_pr_status', 'claim_check', 'complete_check', 'fail_check', 'set_config', 'upsert_part'];
 const missing = names.filter(n => !logs(l => l.reducer === n && (l.actorName === 'check-a' || l.actorName === 'tylers-agent' || l.actorName === 'check-person')).length);

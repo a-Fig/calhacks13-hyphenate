@@ -14,7 +14,7 @@ import { hash128 } from './random.ts';
 import { pert } from './dist.ts';
 import {
   type Convergence, type PlanOptions, type Schedule, type Stat, type Timing, Book, evaluateSchedules,
-  gatherSchedule, isoRange, mergePlanDefaults, r4, simulate, unitsNextYear, WEEK,
+  gatherSchedule, isoRange, mergePlanDefaults, r4, registerPriceVars, simulate, unitsNextYear, WEEK,
 } from './plan.ts';
 import { dateOf } from './time.ts';
 import { type Baseline, type ChangeRequest, type Flag, type InputRecord, type ItemCode, type ProgramId, CHECKS_CODE_VERSION } from './types.ts';
@@ -75,8 +75,8 @@ export interface BundleResult {
 
 export interface Interaction {
   peers: PeerRef[];
-  /** The day the change can first reach the line: alone, with the peers, and the shift between them. */
-  cutIn: { alone: Stat; withPeers: Stat; shiftWeeks: Stat; probabilityLater: number };
+  /** The day the change can first reach the line: alone, with the peers, and the shift between them. Null when the old stock runs past the volume plan, so no day can be placed. */
+  cutIn: { alone: Stat; withPeers: Stat; shiftWeeks: Stat; probabilityLater: number } | null;
   /** Against the stated effectivity, with the peers. */
   late: { weeks: Stat; probability: number } | null;
   slots: { constraint: string; item: ItemCode; alone: DateRange; withPeers: DateRange; peers: { ecr: string; item: ItemCode; opens: DateRange }[] }[];
@@ -94,9 +94,11 @@ export interface SupplyResult {
   stated: { basis: string; label: string; date: string | null; serial: number | null };
   parts: SupplyPart[];
   singleSourceItems: ItemCode[];
-  /** The chance the change misses the effectivity it states, ECR alone. Null when the ECR states none the plan can place. */
-  missEffectivity: { probability: number; weeks: Stat } | null;
-  /** What a year of production of the changed parts spends from the cut-in, at the quoted prices. */
+  /** The chance the change misses the effectivity it states, ECR alone. Null when the ECR states none the plan can place. `weeks` is null (and the chance 1) when using up the old stock needs serials past the end of the volume plan. */
+  missEffectivity: { probability: number; weeks: Stat | null } | null;
+  /** False when using up the old stock needs serials past the end of the volume plan: the cut-in cannot be placed, and the spend and capacity here are 0. */
+  cutInPlaced: boolean;
+  /** What a year of production of the changed parts spends from the cut-in, at the quoted prices and the market range for them. */
   spend: { yearOne: Stat; singleSourceYearOne: Stat };
   capacity: CapacityResult[];
   /** Null when no peer shares a supplier with this ECR. */
@@ -139,10 +141,18 @@ export function supplyCheck(baseline: Baseline, ecr: ChangeRequest, options: Sup
   }
   const group = [sched, ...related.map((r) => r.sched)];
 
-  // What a year of production of each changed part spends, at the quoted price.
-  for (const s of group) for (const it of s.items) {
-    if (it.price !== null) book.input({ id: `price:${s.ecr.id}:${it.item}`, label: `${s.ecr.id}: quoted unit price of ${it.item}`, source: 'given', value: it.price, ref: it.quoteId ? `supplier quote ${it.quoteId}` : `${where.baseline}: item master` });
+  // What a year of production of each changed part spends, at the quoted price and the market range for it.
+  for (const s of group) {
+    for (const it of s.items) {
+      if (it.price === null) continue;
+      book.input({
+        id: `price:${s.ecr.id}:${it.item}`, label: `${s.ecr.id}: quoted unit price of ${it.item}`, source: 'given', value: it.price,
+        ref: it.priceQuote ? `supplier quote ${it.priceQuote.quoteId} line ${it.priceQuote.line}` : `${where.baseline}: item master`,
+      });
+      registerPriceVars(book, baseline, it, where);
+    }
   }
+  const priceIds = (s: Schedule) => s.items.filter((it) => it.price !== null).flatMap((it) => [`price:${s.ecr.id}:${it.item}`, ...(it.priceVars ?? [])]);
   const qualIds = new Map<string, string>();
   for (const s of group) for (const [item, amount] of s.qualification) {
     qualIds.set(`${s.ecr.id}:${item}`, book.input({ id: `qualification:${s.ecr.id}:${item}`, label: `${s.ecr.id}: qualification lot for ${item}`, source: 'given', value: amount, ref: `supplier quote lines on ${s.ecr.id} that name qualification` }));
@@ -168,48 +178,154 @@ export function supplyCheck(baseline: Baseline, ecr: ChangeRequest, options: Sup
   );
   for (const c of capacityConstraints) book.input({ id: `constraint:${c.id}`, label: `${c.id}: ${c.supplier} capacity`, source: 'given', value: c.capacityPerYear, ref: `${where.baseline}: supplier constraint ${c.id}${c.window ? `, ${c.window.from} to ${c.window.to}` : ''}` });
 
-  // ---- per-draw quantities
-  const spendOf = (s: Schedule, t: Timing, n: number, only?: (k: number) => boolean) => {
-    const out = new Float64Array(n);
+  // The bundles this ECR could be part of: a slot constraint two or more of the group's ECRs queue for, with terms.
+  const bundleSpecs = bundleConstraints.flatMap((c) => {
+    const holders = group.map((s, gi) => ({ s, gi })).filter(({ s }) => s.items.some((it) => it.slot?.constraintId === c.id));
+    const terms = holders.flatMap(({ s }) => s.items.map((it) => it.slot).filter((x) => x?.constraintId === c.id))[0]?.terms.bundle;
+    return holders.length < 2 || !holders.some(({ s }) => s === sched) || !terms ? [] : [{ c, holders, terms }];
+  });
+
+  // The cut-in is unplaceable when using up the old stock needs serials past the end of the volume plan.
+  const placed = !sched.floor?.beyondPlan;
+
+  // ---- per-draw quantities. Everything the result reports is derived here once, from the draws or from
+  // the single point draw, so the convergence check sees every continuous number the result states.
+  const priceMult = (it: Schedule['items'][number], dd: Draws, i: number) => {
+    let m = 1;
+    for (const v of it.priceVars ?? []) m *= dd.values.get(v)![i];
+    return m;
+  };
+  const spendOf = (s: Schedule, t: Timing, dd: Draws, only?: (k: number) => boolean) => {
+    const out = new Float64Array(dd.n);
     s.items.forEach((it, k) => {
       if (it.price === null || (only && !only(k))) return;
-      for (let i = 0; i < n; i++) out[i] += it.perUnit * it.price * unitsNextYear(s.table, t.cutIn[i]);
+      for (let i = 0; i < dd.n; i++) out[i] += it.perUnit * it.price * priceMult(it, dd, i) * unitsNextYear(s.table, t.cutIn[i]);
     });
     return out;
   };
-  const lateOf = (t: Timing) => {
+  const weeksOf = (t: Timing, from: number) => {
     const out = new Float64Array(t.cutIn.length);
-    for (let i = 0; i < out.length; i++) out[i] = (t.cutIn[i] - statedDay!) / WEEK;
+    for (let i = 0; i < out.length; i++) out[i] = (t.cutIn[i] - from) / WEEK;
     return out;
   };
-  const compute = (d: Draws) => ({
-    d,
-    alone: evaluateSchedules([sched], d, false)[0],
-    joint: related.length ? evaluateSchedules(group, d, true) : null,
-  });
-  const sim = simulate(
-    book,
-    { seed: options.seed, n0, maxDraws: Math.max(n0, options.maxDraws ?? 4 * n0), rho, tol },
-    compute,
-    (r) => {
-      const n = r.d.n;
-      const weeks = (t: Timing) => {
-        const w = new Float64Array(n);
-        for (let i = 0; i < n; i++) w[i] = (t.cutIn[i] - sched.filedDay) / WEEK;
-        return w;
-      };
-      return {
-        cutInWeeks: weeks(r.alone),
-        spendYearOne: spendOf(sched, r.alone, n),
-        ...(r.joint ? { cutInWeeksWithPeers: weeks(r.joint[0]) } : {}),
-      };
-    },
-  );
-  const { d, alone, joint } = sim.result;
+  const singleSourceIdx = (k: number) => sched.items[k].sources.length <= 1;
+  const utilizationOf = (c: (typeof capacityConstraints)[number], dd: Draws, timing: (s: Schedule) => Timing, ids: Schedule[]) => {
+    const total = new Float64Array(dd.n);
+    for (const s of ids) {
+      const tt = timing(s);
+      for (const it of s.items) {
+        if (!c.items.includes(it.item) || (it.supplier && it.supplier !== c.supplier)) continue;
+        for (let i = 0; i < dd.n; i++) total[i] += (it.perUnit * unitsNextYear(s.table, tt.cutIn[i])) / c.capacityPerYear!;
+      }
+    }
+    return total;
+  };
+  const capacityHolders = (c: (typeof capacityConstraints)[number]) => group.filter((s) => s === sched || s.items.some((it) => c.items.includes(it.item)));
+  /** What a bundle saves one ECR in the group (index gi), given where each ECR's order is placed. */
+  const savingOf = (spec: (typeof bundleSpecs)[number], gi: number, i: number, dd: Draws, tt: Timing[], raw: number): number => {
+    const startOf = (g: number) => tt[g].placed[group[g].items.findIndex((it) => it.slot?.constraintId === spec.c.id)][i];
+    const w = spec.terms.withinWeeks * WEEK;
+    const mine = startOf(gi);
+    let near = false;
+    let later = false;
+    for (const h of spec.holders) {
+      if (h.gi === gi) continue;
+      const other = startOf(h.gi);
+      if (Math.abs(other - mine) <= w) {
+        near = true;
+        if (other < mine || (other === mine && h.gi < gi)) later = true;
+      }
+    }
+    if (!near) return 0;
+    const s = group[gi];
+    let out = 0;
+    s.items.forEach((it) => {
+      if (it.slot?.constraintId !== spec.c.id) return;
+      if (later) out += spec.terms.secondQualificationDiscount * (s.qualification.get(it.item) ?? 0);
+      if (it.price !== null) out += spec.terms.priceBreak * raw * it.perUnit * it.price * priceMult(it, dd, i) * unitsNextYear(s.table, tt[gi].cutIn[i]);
+    });
+    return out;
+  };
+
+  interface Derived {
+    cutInWeeks: Float64Array | null;
+    lateWeeks: Float64Array | null;
+    spendYearOne: Float64Array;
+    spendSingleSource: Float64Array;
+    utilization: Float64Array[];
+    // With the peers (null without any)
+    shift: Float64Array | null;
+    cutInWeeksWithPeers: Float64Array | null;
+    lateWeeksWithPeers: Float64Array | null;
+    utilizationWithPeers: Float64Array[] | null;
+    bundles: { own: Float64Array; pair: Float64Array }[] | null;
+  }
+  const derive = (dd: Draws, alone: Timing, joint: Timing[] | null): Derived => {
+    const n = dd.n;
+    const me = joint?.[0];
+    const rawDraws = rawVar ? dd.values.get(rawVar)! : new Float64Array(n);
+    return {
+      cutInWeeks: placed ? weeksOf(alone, sched.filedDay) : null,
+      lateWeeks: placed && statedDay !== null ? weeksOf(alone, statedDay) : null,
+      spendYearOne: spendOf(sched, alone, dd),
+      spendSingleSource: spendOf(sched, alone, dd, singleSourceIdx),
+      utilization: capacityConstraints.map((c) => utilizationOf(c, dd, () => alone, [sched])),
+      shift: me && placed ? (() => {
+        const out = new Float64Array(n);
+        for (let i = 0; i < n; i++) out[i] = (me.cutIn[i] - alone.cutIn[i]) / WEEK;
+        return out;
+      })() : null,
+      cutInWeeksWithPeers: me && placed ? weeksOf(me, sched.filedDay) : null,
+      lateWeeksWithPeers: me && placed && statedDay !== null ? weeksOf(me, statedDay) : null,
+      utilizationWithPeers: joint ? capacityConstraints.map((c) => utilizationOf(c, dd, (s) => joint[group.indexOf(s)], capacityHolders(c))) : null,
+      bundles: joint
+        ? bundleSpecs.map((spec) => {
+            const own = new Float64Array(n);
+            const pair = new Float64Array(n);
+            for (let i = 0; i < n; i++) {
+              own[i] = savingOf(spec, 0, i, dd, joint, rawDraws[i]);
+              for (const h of spec.holders) pair[i] += savingOf(spec, h.gi, i, dd, joint, rawDraws[i]);
+            }
+            return { own, pair };
+          })
+        : null,
+    };
+  };
+  const compute = (d: Draws) => {
+    const alone = evaluateSchedules([sched], d, false)[0];
+    const joint = related.length ? evaluateSchedules(group, d, true) : null;
+    return { d, alone, joint, derived: derive(d, alone, joint) };
+  };
+  /**
+   * Every continuous number the result computes, for the convergence check. A part's lead time is left
+   * out: it is one input's own draws, not a result of them, and it reaches the cut-in weeks checked here.
+   */
+  const metricsOf = (r: ReturnType<typeof compute>) => {
+    const x = r.derived;
+    const m: Record<string, Float64Array> = {};
+    if (x.cutInWeeks) m.cutInWeeks = x.cutInWeeks;
+    if (x.lateWeeks) m.lateWeeks = x.lateWeeks;
+    m.spendYearOne = x.spendYearOne;
+    m.spendSingleSource = x.spendSingleSource;
+    capacityConstraints.forEach((c, k) => (m[`utilization:${c.id}`] = x.utilization[k]));
+    if (x.shift) m.cutInShiftWeeks = x.shift;
+    if (x.cutInWeeksWithPeers) m.cutInWeeksWithPeers = x.cutInWeeksWithPeers;
+    if (x.lateWeeksWithPeers) m.lateWeeksWithPeers = x.lateWeeksWithPeers;
+    capacityConstraints.forEach((c, k) => x.utilizationWithPeers && (m[`utilizationWithPeers:${c.id}`] = x.utilizationWithPeers[k]));
+    bundleSpecs.forEach((spec, k) => {
+      if (!x.bundles) return;
+      m[`bundleOwnSaving:${spec.c.id}`] = x.bundles[k].own;
+      m[`bundlePairSaving:${spec.c.id}`] = x.bundles[k].pair;
+    });
+    return m;
+  };
+  const sim = simulate(book, { seed: options.seed, n0, maxDraws: Math.max(n0, options.maxDraws ?? 4 * n0), rho, tol }, compute, metricsOf);
+  const { d, alone, joint, derived } = sim.result;
   const n = d.n;
   const pd = book.pointDraws();
   const atAlone = evaluateSchedules([sched], pd, false)[0];
   const atJoint = related.length ? evaluateSchedules(group, pd, true) : null;
+  const point = derive(pd, atAlone, atJoint);
   const share = (pred: (i: number) => boolean) => {
     let c = 0;
     for (let i = 0; i < n; i++) if (pred(i)) c++;
@@ -234,45 +350,31 @@ export function supplyCheck(baseline: Baseline, ecr: ChangeRequest, options: Sup
   // ---- lateness against the stated effectivity, ECR alone
   let missEffectivity: SupplyResult['missEffectivity'] = null;
   if (statedDay !== null) {
-    const w = lateOf(alone);
-    missEffectivity = {
-      probability: share((i) => w[i] > 0),
-      weeks: book.stat(w, (atAlone.cutIn[0] - statedDay) / WEEK, '(cut-in day − the day the stated effectivity is planned) / 7; positive is late', [...baseUses, sched.stated.id]),
-    };
+    missEffectivity = derived.lateWeeks
+      ? {
+          probability: share((i) => derived.lateWeeks![i] > 0),
+          weeks: book.stat(derived.lateWeeks, point.lateWeeks![0], '(cut-in day − the day the stated effectivity is planned) / 7; positive is late', [...baseUses, sched.stated.id]),
+        }
+      : { probability: 1, weeks: null }; // the old stock needs serials past the plan: the stated date is missed whatever it is
   }
 
   // ---- spend
-  const spendIds = (s: Schedule) => [...s.uses, ...s.items.filter((it) => it.price !== null).map((it) => `price:${s.ecr.id}:${it.item}`)];
-  const spendFormula = 'Σ changed parts: parts per finished unit × quoted unit price × planned units completed in the 365 days from the cut-in';
-  const singleSourceIdx = (k: number) => sched.items[k].sources.length <= 1;
+  const spendIds = (s: Schedule) => [...s.uses, ...priceIds(s)];
+  const spendFormula = 'Σ changed parts: parts per finished unit × quoted unit price × the price index (the market range, and a budgetary quote\'s own spread) × planned units completed in the 365 days from the cut-in';
   const spend = {
-    yearOne: book.stat(spendOf(sched, alone, n), spendOf(sched, atAlone, 1)[0], spendFormula, spendIds(sched)),
-    singleSourceYearOne: book.stat(spendOf(sched, alone, n, singleSourceIdx), spendOf(sched, atAlone, 1, singleSourceIdx)[0], `${spendFormula}, for the parts with one qualified source`, spendIds(sched)),
+    yearOne: book.stat(derived.spendYearOne, point.spendYearOne[0], spendFormula, spendIds(sched)),
+    singleSourceYearOne: book.stat(derived.spendSingleSource, point.spendSingleSource[0], `${spendFormula}, for the parts with one qualified source`, spendIds(sched)),
   };
 
   // ---- capacity
-  const utilization = (c: (typeof capacityConstraints)[number], t: (s: Schedule) => Timing, at: boolean, ids: Schedule[]) => {
-    const total = new Float64Array(at ? 1 : n);
-    for (const s of ids) {
-      const tt = t(s);
-      for (const it of s.items) {
-        if (!c.items.includes(it.item) || (it.supplier && it.supplier !== c.supplier)) continue;
-        for (let i = 0; i < total.length; i++) total[i] += (it.perUnit * unitsNextYear(s.table, tt.cutIn[i])) / c.capacityPerYear!;
-      }
-    }
-    return total;
-  };
-  const capacity: CapacityResult[] = capacityConstraints.map((c) => {
+  const capacity: CapacityResult[] = capacityConstraints.map((c, k) => {
     const ids = [...baseUses, `constraint:${c.id}`];
     const formula = `Σ ECRs: parts per finished unit × planned units completed in the 365 days from the cut-in, as a share of ${c.capacityPerYear} a year`;
     return {
       constraint: c.id, supplier: c.supplier, items: c.items.filter((x) => sched.items.some((it) => it.item === x)), capacityPerYear: c.capacityPerYear!, window: c.window ?? null,
-      utilization: book.stat(utilization(c, () => alone, false, [sched]), utilization(c, () => atAlone, true, [sched])[0], formula.replace('Σ ECRs', 'this ECR'), ids, 4),
-      utilizationWithPeers: joint && atJoint
-        ? book.stat(
-            utilization(c, (s) => joint[group.indexOf(s)], false, group.filter((s) => s === sched || s.items.some((it) => c.items.includes(it.item)))),
-            utilization(c, (s) => atJoint[group.indexOf(s)], true, group.filter((s) => s === sched || s.items.some((it) => c.items.includes(it.item))))[0],
-            formula, [...ids, ...related.flatMap((r) => r.sched.uses)], 4)
+      utilization: book.stat(derived.utilization[k], point.utilization[k][0], formula.replace('Σ ECRs', 'this ECR'), ids, 4),
+      utilizationWithPeers: derived.utilizationWithPeers && point.utilizationWithPeers
+        ? book.stat(derived.utilizationWithPeers[k], point.utilizationWithPeers[k][0], formula, [...ids, ...related.flatMap((r) => r.sched.uses)], 4)
         : null,
     };
   });
@@ -282,13 +384,16 @@ export function supplyCheck(baseline: Baseline, ecr: ChangeRequest, options: Sup
   if (joint && atJoint) {
     const me = joint[0];
     const meAt = atJoint[0];
-    const shift = new Float64Array(n);
-    for (let i = 0; i < n; i++) shift[i] = (me.cutIn[i] - alone.cutIn[i]) / WEEK;
     const peerUses = related.flatMap((r) => r.sched.uses);
     const ids = [...baseUses, ...peerUses];
-    const cutAlone = book.stat(alone.cutIn, atAlone.cutIn[0], 'the day the change can first reach the line, this ECR alone', baseUses);
-    const cutWith = book.stat(me.cutIn, meAt.cutIn[0], 'the day the change can first reach the line when the open ECRs that share a supplier are filed ahead of it in the supplier\'s slots', ids);
-    const shiftStat = book.stat(shift, (meAt.cutIn[0] - atAlone.cutIn[0]) / WEEK, '(cut-in day with the peers − cut-in day alone) / 7, on the same draws', ids);
+    const cutIn: Interaction['cutIn'] = placed
+      ? {
+          alone: book.stat(alone.cutIn, atAlone.cutIn[0], 'the day the change can first reach the line, this ECR alone', baseUses),
+          withPeers: book.stat(me.cutIn, meAt.cutIn[0], 'the day the change can first reach the line when the open ECRs that share a supplier are filed ahead of it in the supplier\'s slots', ids),
+          shiftWeeks: book.stat(derived.shift!, point.shift![0], '(cut-in day with the peers − cut-in day alone) / 7, on the same draws', ids),
+          probabilityLater: share((i) => derived.shift![i] > 1e-9),
+        }
+      : null;
     const slots: Interaction['slots'] = [];
     sched.items.forEach((it, k) => {
       if (!it.slot) return;
@@ -306,69 +411,29 @@ export function supplyCheck(baseline: Baseline, ecr: ChangeRequest, options: Sup
       });
     });
     // Bundle terms: a second part number qualified within the window of the first, and a price break for ordering both.
-    const bundles: BundleResult[] = [];
-    for (const c of bundleConstraints) {
-      const holders = group.map((s, gi) => ({ s, gi })).filter(({ s }) => s.items.some((it) => it.slot?.constraintId === c.id));
-      const terms = holders.flatMap(({ s }) => s.items.map((it) => it.slot).filter((x) => x?.constraintId === c.id))[0]?.terms.bundle;
-      if (holders.length < 2 || !holders.some(({ s }) => s === sched) || !terms) continue;
-      const w = terms.withinWeeks * WEEK;
-      const start = (gi: number, i: number, tt: Timing[]) => {
-        const s = group[gi];
-        const k = s.items.findIndex((it) => it.slot?.constraintId === c.id);
-        return tt[gi].placed[k][i];
-      };
-      const savingOf = (gi: number, i: number, tt: Timing[], raw: number): number => {
-        const mine = start(gi, i, tt);
-        let near = false;
-        let later = false;
-        for (const h of holders) {
-          if (h.gi === gi) continue;
-          const other = start(h.gi, i, tt);
-          if (Math.abs(other - mine) <= w) {
-            near = true;
-            if (other < mine || (other === mine && h.gi < gi)) later = true;
-          }
-        }
-        if (!near) return 0;
-        const s = group[gi];
-        let out = 0;
-        s.items.forEach((it, k) => {
-          if (it.slot?.constraintId !== c.id) return;
-          if (later) out += terms.secondQualificationDiscount * (s.qualification.get(it.item) ?? 0);
-          if (it.price !== null) out += terms.priceBreak * raw * it.perUnit * it.price * unitsNextYear(s.table, tt[gi].cutIn[i]);
-        });
-        return out;
-      };
-      const rawDraws = rawVar ? d.values.get(rawVar)! : new Float64Array(n);
-      const rawPoint = rawVar ? pd.values.get(rawVar)![0] : 0;
-      const own = new Float64Array(n);
-      const pair = new Float64Array(n);
+    const bundles: BundleResult[] = bundleSpecs.map((spec, k) => {
+      const { c, terms } = spec;
+      const own = derived.bundles![k].own;
       let bundled = 0;
-      for (let i = 0; i < n; i++) {
-        own[i] = savingOf(0, i, joint, rawDraws[i]);
-        for (const h of holders) pair[i] += savingOf(h.gi, i, joint, rawDraws[i]);
-        if (own[i] > 0) bundled++;
-      }
-      const ownPoint = savingOf(0, 0, atJoint, rawPoint);
-      const pairPoint = holders.reduce((a, h) => a + savingOf(h.gi, 0, atJoint, rawPoint), 0);
-      const bundleIds = [...ids, `constraint:${c.id}`, `constraint:${c.id}:terms`, ...(rawVar ? [rawVar] : []), ...[...qualIds.values()], ...group.flatMap((s) => s.items.filter((it) => it.price !== null).map((it) => `price:${s.ecr.id}:${it.item}`))];
-      bundles.push({
+      for (let i = 0; i < n; i++) if (own[i] > 0) bundled++;
+      const bundleIds = [...ids, `constraint:${c.id}`, `constraint:${c.id}:terms`, ...(rawVar ? [rawVar] : []), ...[...qualIds.values()], ...group.flatMap(priceIds)];
+      return {
         constraint: c.id, withinWeeks: terms.withinWeeks, probabilityBundled: r4(bundled / n),
-        ownSaving: book.stat(own, ownPoint, `this ECR's saving when its part number is qualified within ${terms.withinWeeks} weeks of another's: ${terms.secondQualificationDiscount * 100}% off its qualification lot if it is the later one, plus ${terms.priceBreak * 100}% × the raw-material share × its year-one spend`, bundleIds),
-        pairSaving: book.stat(pair, pairPoint, 'the same saving summed over every ECR in the bundle', bundleIds),
-      });
-    }
+        ownSaving: book.stat(own, point.bundles![k].own[0], `this ECR's saving when its part number is qualified within ${terms.withinWeeks} weeks of another's: ${terms.secondQualificationDiscount * 100}% off its qualification lot if it is the later one, plus ${terms.priceBreak * 100}% × the raw-material share × its year-one spend`, bundleIds),
+        pairSaving: book.stat(derived.bundles![k].pair, point.bundles![k].pair[0], 'the same saving summed over every ECR in the bundle', bundleIds),
+      };
+    });
     let lateWith: Interaction['late'] = null;
-    if (statedDay !== null) {
-      const w = lateOf(me);
+    if (derived.lateWeeksWithPeers) {
+      const w = derived.lateWeeksWithPeers;
       lateWith = {
-        weeks: book.stat(w, (meAt.cutIn[0] - statedDay) / WEEK, '(cut-in day with the peers − the day the stated effectivity is planned) / 7; positive is late', [...ids, sched.stated.id]),
+        weeks: book.stat(w, point.lateWeeksWithPeers![0], '(cut-in day with the peers − the day the stated effectivity is planned) / 7; positive is late', [...ids, sched.stated.id]),
         probability: share((i) => w[i] > 0),
       };
     }
     interaction = {
       peers: related.map((r) => ({ ecr: r.ecr.id, program: r.ecr.program, filedOn: r.ecr.filedOn, sharedSuppliers: r.shared, contentHash: contentHash(r.ecr) })),
-      cutIn: { alone: cutAlone, withPeers: cutWith, shiftWeeks: shiftStat, probabilityLater: share((i) => shift[i] > 1e-9) },
+      cutIn,
       late: lateWith,
       slots,
       bundles,
@@ -386,7 +451,7 @@ export function supplyCheck(baseline: Baseline, ecr: ChangeRequest, options: Sup
     }
     if (p.price === null) flags.push({ kind: 'no_price', severity: 'warn', ref: p.item, message: `${p.item}: no quote or item master gives a price, so its spend is left out.` });
   }
-  if (missEffectivity && missEffectivity.probability >= 0.5) {
+  if (missEffectivity && missEffectivity.weeks && missEffectivity.probability >= 0.5) {
     flags.push({ kind: 'likely_late', severity: 'warn', ref: sched.stated.id, message: `${ecr.id} states ${sched.stated.label}; the chance the supply misses it is ${Math.round(missEffectivity.probability * 100)}%, by ${missEffectivity.weeks.p50} weeks at the median.` });
   }
   for (const c of capacity) {
@@ -396,7 +461,7 @@ export function supplyCheck(baseline: Baseline, ecr: ChangeRequest, options: Sup
   }
   if (interaction) {
     flags.push({ kind: 'shared_supplier', severity: 'info', message: `${ecr.id} shares ${[...new Set(related.flatMap((r) => r.shared))].join(', ')} with ${related.map((r) => r.ecr.id).join(', ')}.` });
-    if (interaction.cutIn.probabilityLater >= 0.5) {
+    if (interaction.cutIn && interaction.cutIn.probabilityLater >= 0.5) {
       flags.push({ kind: 'slot_contention', severity: 'warn', message: `With ${interaction.peers.map((p) => p.ecr).join(', ')} filed ahead, ${ecr.id} waits for a later qualification slot: its cut-in moves ${interaction.cutIn.shiftWeeks.p50} weeks at the median.` });
     }
   }
@@ -414,6 +479,7 @@ export function supplyCheck(baseline: Baseline, ecr: ChangeRequest, options: Sup
     parts,
     singleSourceItems,
     missEffectivity,
+    cutInPlaced: placed,
     spend,
     capacity,
     interaction,

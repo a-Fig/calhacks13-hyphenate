@@ -45,8 +45,9 @@ traces name.
 
 Both read the ECR's own program, from the same model (`src/plan.ts`), and follow S2's conventions:
 per-input draws keyed by the seed and the input's id, correlation 0.3 inside a group, a second-seed
-convergence check on the continuous results (cut-in weeks, weeks late, lead times, spend, savings),
-traces whose ids are all in `inputs`, and assumptions by id (`replacesGiven` for stated numbers).
+convergence check on every continuous result they compute (cut-in weeks, weeks late, spend, capacity
+use, the shift with peers, the bundle savings; a part's lead time is one input's own draws and is not
+checked), traces whose ids are all in `inputs`, and assumptions by id (`replacesGiven` for stated numbers).
 Dates hang on the ECR's filing date, never on the clock, so a result is a function of its inputs and
 the seed.
 
@@ -62,10 +63,21 @@ decision. The change reaches the line on the latest of: every changed part in th
 old stock the proposal uses up having been built into aircraft. The first serial that can take it is
 the first one the volume plan completes on or after that day.
 
+**Which parts, and their prices.** The changed buy parts are the ones the ECR changes or adds, plus
+any part the change needs more of than the baseline does, wherever in the BOM the quantity rises
+(a `set_qty` on a part, or a changed assembly above it): the spend is at the full head quantity, not
+only the increase. A part's price is the quote line that names that part (a quote can price several
+parts, so the order of its lines does not matter), or a line that names none and is on the quote for
+that part, else the item master's. S4 draws the price from the same variables the cost check uses:
+the sourcing record's p10/p50/p90 as a multiplier (`price:<item>`; a part with no record takes the
+cost check's default range), and a budgetary quote's own spread (`quote:<item>`).
+
 **What S3 returns.** The decision date, the cut-in date (P10, P50, P90), the weeks from filing, the
 first serial, how late that is against the effectivity the ECR states (positive is late) with the
 share of draws in which it is late, and each step on the path with how often it sets the cut-in.
-Row values for days are days since 1970-01-01 (unit `day`); the ISO dates are in the `detail` row.
+The old-stock step is the day the aircraft before the stock's serial are planned to complete, from
+the volume plan alone, so it differs from the cut-in whenever a part arrives later. Row values for
+days are days since 1970-01-01 (unit `day`); the ISO dates are in the `detail` row.
 
 **What S4 returns.** Each changed part's sources (single-source is flagged) and lead time, the
 probability the parts miss the stated effectivity, year-one spend and the single-source share of
@@ -93,9 +105,16 @@ for, and S4 reports the shared supplier without a shift.
 - S2 still reads the effectivity the ECR states, so S2's money does not move when S3 reports a
   later cut-in. S3 is the earliest the change can reach the line, on the facts it has.
 - Only the ECR's own program is timed.
-- `peers` are not part of a run's inputs. The result for an ECR is right for the peers present
-  when it was computed and goes stale when a peer is filed or edited, until the ECR's own S4 runs
-  again. The peer list, with a content hash of each peer's change request, is in the `detail` row.
+- Using up the old stock can need a serial past the end of the volume plan. Then no day can be
+  placed: the serial floor is kept (`cut_in_serial`), the cut-in date and weeks, the lateness and
+  the interaction shift are left out (null in the result, absent from the rows), the chance of
+  missing a stated effectivity is 1 with no weeks, the year-one spend and capacity use are 0 (no
+  planned aircraft takes the change), and a `stock_beyond_plan` flag says the plan needs to run
+  further.
+- `peers` are the caller's to pass. The worker names them in the run's inputs (each open ECR's
+  change request revision and digest), so a run is a function of them and filing, editing, closing
+  or reopening a peer re-runs S4. The peer list, with a content hash of each peer's change request,
+  is in the `detail` row.
 - Convergence is checked on the continuous results only. Serial numbers and probabilities are
   steps and are not.
 - The cumulative units a plan completes are interpolated through each month, so the serial that
@@ -112,9 +131,11 @@ for, and S4 reports the shared supplier without a shift.
   group are independent.
 - Convergence: P80 and P90 of the headline numbers are recomputed on a second seed and must agree
   within 1%. A run that misses doubles its draws, up to 40,000 (`maxDraws`), and `draws` in the
-  result says how many it used. ECR-0409, whose budgetary quote makes its change wide, needed
-  20,000 or 40,000 on 12 of 60 seeds tried; every other dataset ECR converged at 10,000 on all 12
-  seeds tried. A run that still misses at the cap is flagged `not_converged`.
+  result says how many it used. On 12 seeds tried (`seed-0` to `seed-11`), S3 and S4 converged at
+  10,000 draws on every seed for six of the ten dataset ECRs; ECR-0417, ECR-0409, ECR-0412 and
+  ECR-0419 needed 20,000 or 40,000 on some, and ECR-0417 missed the tolerance on `seed-0` even at
+  40,000 (its weeks-late number) and was flagged `not_converged`. A run that still misses at the cap
+  is flagged `not_converged`.
 
 ## Paired draws and the seed rule
 

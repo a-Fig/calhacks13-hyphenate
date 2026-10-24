@@ -57,10 +57,10 @@ test('ECR-0417: the Halden bracket cannot reach the line until about February 20
   // Filed 2026-10-19, urgent: decided about three weeks later; Halden quotes 14 weeks after the order.
   assert.ok(r417.decision.date.p50 >= '2026-11-02' && r417.decision.date.p50 <= '2026-11-20', r417.decision.date.p50);
   const c = r417.cutIn.date;
-  assert.ok(c.p10 < c.p50 && c.p50 < c.p90, 'a range, not a point');
-  assert.ok(c.p10 >= '2026-12-20' && c.p90 <= '2027-05-15', `${c.p10} to ${c.p90}`);
-  assert.ok(c.p50 >= '2027-02-01' && c.p50 <= '2027-03-05', c.p50);
-  assert.ok(r417.cutIn.weeksFromFiling.p50 > 14 && r417.cutIn.weeksFromFiling.p50 < 20);
+  assert.ok(c!.p10 < c!.p50 && c!.p50 < c!.p90, 'a range, not a point');
+  assert.ok(c!.p10 >= '2026-12-20' && c!.p90 <= '2027-05-15', `${c!.p10} to ${c!.p90}`);
+  assert.ok(c!.p50 >= '2027-02-01' && c!.p50 <= '2027-03-05', c!.p50);
+  assert.ok(r417.cutIn.weeksFromFiling!.p50 > 14 && r417.cutIn.weeksFromFiling!.p50 < 20);
   // S/N 011-014 wait for the part: the scenario says about 14 weeks.
   assert.ok(r417.late && r417.late.weeks.p50 > 11 && r417.late.weeks.p50 < 16, String(r417.late?.weeks.p50));
   assert.equal(r417.late!.probability, 1, 'the quoted lead time alone puts the part past S/N 011 in every draw');
@@ -90,7 +90,7 @@ test('ECR-0419: the Orrin qualification slot opens 2027-04-01 and the part follo
   assert.deepEqual(slot.opens, { p10: '2027-04-01', p50: '2027-04-01', p90: '2027-04-01' });
   assert.equal(slot.shareInFirstSlot, 1);
   assert.equal(r419.stated.serial, 30);
-  assert.ok(r419.cutIn.date.p50 >= '2027-10-01' && r419.cutIn.date.p50 <= '2027-10-31', r419.cutIn.date.p50);
+  assert.ok(r419.cutIn.date!.p50 >= '2027-10-01' && r419.cutIn.date!.p50 <= '2027-10-31', r419.cutIn.date!.p50);
   assert.ok(r419.cutIn.serial.p50 >= 29 && r419.cutIn.serial.p50 <= 31, String(r419.cutIn.serial.p50));
   // Close to the stated date, so it is a coin toss and not a certainty either way.
   assert.ok(r419.late!.probability > 0.2 && r419.late!.probability < 0.5, String(r419.late!.probability));
@@ -132,7 +132,7 @@ test('rows: finite and ordered, with a detail row that carries the inputs', () =
     JSON.parse(r.detailJson);
   }
   const date = rows.find((r) => r.key === 'cut_in_date')!;
-  assert.equal(dateOf(date.p50), r417.cutIn.date.p50);
+  assert.equal(dateOf(date.p50), r417.cutIn.date!.p50);
   const detail = JSON.parse(rows.at(-1)!.detailJson) as TimelineResult;
   assert.equal(detail.codeVersion, r417.codeVersion);
   assert.equal(detail.seed, SEED);
@@ -146,17 +146,17 @@ test('an assumption replaces a default: a faster board decision moves the cut-in
   });
   const dec = fast.inputs.find((i) => i.id === 'decision:ECR-0417')!;
   assert.equal(dec.source, 'agent_estimated');
-  assert.ok(fast.cutIn.day.p50 < r417.cutIn.day.p50 - 10);
+  assert.ok(fast.cutIn.day!.p50 < r417.cutIn.day!.p50 - 10);
   assert.equal(fast.decision.date.p50, '2026-10-26');
 });
 
 test('an assumption cannot replace a number someone stated unless it says so; unknown ids are reported', () => {
   const dist = point(8);
   const refused = timelineCheck(baseline, ecr('ECR-0417'), { seed: SEED, assumptions: [{ id: 'lead:ECR-0417:BW-5120-210', source: 'agent_estimated', rationale: 'x', dist }] });
-  assert.equal(refused.cutIn.date.p50, r417.cutIn.date.p50);
+  assert.equal(refused.cutIn.date!.p50, r417.cutIn.date!.p50);
   assert.ok(refused.flags.some((f) => f.kind === 'assumption_not_applied'));
   const applied = timelineCheck(baseline, ecr('ECR-0417'), { seed: SEED, assumptions: [{ id: 'lead:ECR-0417:BW-5120-210', source: 'agent_estimated', rationale: 'x', dist, replacesGiven: true }] });
-  assert.ok(applied.cutIn.day.p50 < r417.cutIn.day.p50 - 30);
+  assert.ok(applied.cutIn.day!.p50 < r417.cutIn.day!.p50 - 30);
   const unknown = timelineCheck(baseline, ecr('ECR-0417'), { seed: SEED, assumptions: [{ id: 'nonsense', source: 'default', rationale: 'x', dist }] });
   assert.ok(unknown.flags.some((f) => f.kind === 'unused_assumption' && f.ref === 'nonsense'));
 });
@@ -167,7 +167,7 @@ test('old stock the proposal uses up sets the cut-in when it outlasts the parts'
   const stock = r.paths.find((p) => p.id === 'stock')!;
   assert.equal(stock.criticalShare, 1, 'about 100 aircraft of old magnet sets: the new grade waits for them');
   assert.ok(r.cutIn.serial.p50 >= 100, String(r.cutIn.serial.p50));
-  assert.ok(r.cutIn.date.p50 > r419.cutIn.date.p50);
+  assert.ok(r.cutIn.date!.p50 > r419.cutIn.date!.p50);
 });
 
 test('an ECR that brings in no bought part waits only for the board', () => {
@@ -175,7 +175,7 @@ test('an ECR that brings in no bought part waits only for the board', () => {
   e.itemChanges = [];
   const r = timelineCheck(baseline, e, { seed: SEED });
   assert.ok(r.flags.some((f) => f.kind === 'no_supply_path'));
-  assert.equal(r.cutIn.date.p50, r.decision.date.p50);
+  assert.equal(r.cutIn.date!.p50, r.decision.date.p50);
   assert.deepEqual(r.paths.map((p) => p.id), ['decision']);
 });
 
@@ -192,7 +192,7 @@ test('without the supplier constraint (the ERP holds none) the order is not held
   const { supplierConstraints: _, ...erpLike } = baseline;
   const r = timelineCheck(erpLike as Baseline, ecr('ECR-0419'), { seed: SEED });
   assert.equal(r.paths.find((p) => p.id === 'parts:BW-3120-340')!.slot, null);
-  assert.ok(r.cutIn.date.p50 < r419.cutIn.date.p50, 'decision plus 28 weeks is June 2027, ahead of the slot');
+  assert.ok(r.cutIn.date!.p50 < r419.cutIn.date!.p50, 'decision plus 28 weeks is June 2027, ahead of the slot');
 });
 
 test('slot terms: read from structured fields, else from the description, else defaulted', () => {

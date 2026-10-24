@@ -29,7 +29,7 @@ import {
   currentMain,
   currentRevision,
   decisionText,
-  digestOf,
+  approvalDigest,
   effectiveAssumptions,
   enqueueDeepOnOpen,
   fnv1a64,
@@ -48,6 +48,7 @@ import {
   stageInfos,
   write,
   type Actor,
+  type Call,
   type Ctx,
   type PrStatus,
 } from './core';
@@ -175,7 +176,7 @@ export const setConfig = write('set_config', { key: t.string(), value: t.string(
 type RevisionIn = { changeRequestJson: string; source: string; sourceRef: string };
 
 // Open an ECR, with its first change request if one came with it, in the caller's transaction.
-function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description: string }, first?: RevisionIn) {
+function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description: string }, first?: RevisionIn, call?: Call) {
   const title = nonEmpty(a.title, 'title', 200);
   if (a.description.length > 20000) throw new SenderError('description is too long (max 20000 characters)');
   const plm = a.plmEcrNumber.trim();
@@ -205,21 +206,23 @@ function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description:
   ctx.db.pullRequest.id.update({
     ...pr,
     plmEcrNumber: plm || `NORN-${pr.id}`,
-    inputsDigest: digestOf(stageInfos(ctx, pr)),
+    inputsDigest: approvalDigest(ctx, pr),
   });
   const outcome = reconcile(ctx, pr.id);
   const deep = enqueueDeepOnOpen(ctx, pr.id);
+  // The other open ECRs compare themselves with this one in s4: re-run them.
+  const others = first && call ? reconcileAllOpen(ctx, call, `ECR ${pr.id} filed`, pr.id) : 0;
   return {
     prId: pr.id,
     entity: `pull_request:${pr.id}`,
-    summary: `opened ECR '${title}' (${plm || `NORN-${pr.id}`}) on baseline v${base}${first ? ', change request rev 1' : ''}; ${outcome}${deep ? `; ${deep} deep run(s) requested by config` : ''}`,
+    summary: `opened ECR '${title}' (${plm || `NORN-${pr.id}`}) on baseline v${base}${first ? ', change request rev 1' : ''}; ${outcome}${deep ? `; ${deep} deep run(s) requested by config` : ''}${others ? `; ${others} other open ECR(s) checked against it` : ''}`,
   };
 }
 
 export const createPr = write(
   'create_pr',
   { plmEcrNumber: t.string(), title: t.string(), description: t.string() },
-  (ctx, a) => openPr(ctx, a)
+  (ctx, a, call) => openPr(ctx, a, undefined, call)
 );
 
 // A change request must be a JSON object naming the ECR it belongs to (the checks library's
@@ -263,11 +266,11 @@ function insertRevision(ctx: Ctx, prId: bigint, r: RevisionIn, digest: string) {
 export const ingestEcr = write(
   'ingest_ecr',
   { plmEcrNumber: t.string(), title: t.string(), description: t.string(), changeRequestJson: t.string(), source: t.string(), sourceRef: t.string() },
-  (ctx, a) => {
+  (ctx, a, call) => {
     const plm = nonEmpty(a.plmEcrNumber, 'plmEcrNumber', 64);
     const rev: RevisionIn = { changeRequestJson: a.changeRequestJson, source: a.source, sourceRef: a.sourceRef };
     const existing = ctx.db.pullRequest.plmEcrNumber.find(plm);
-    if (!existing) return openPr(ctx, { plmEcrNumber: plm, title: a.title, description: a.description }, rev);
+    if (!existing) return openPr(ctx, { plmEcrNumber: plm, title: a.title, description: a.description }, rev, call);
 
     const digest = checkedChangeRequest(a.changeRequestJson, plm);
     const title = nonEmpty(a.title, 'title', 200);
@@ -288,10 +291,13 @@ export const ingestEcr = write(
       const row = insertRevision(ctx, existing.id, rev, digest);
       what.push(`change request rev ${row.seq}`);
     }
+    const own = reconcile(ctx, existing.id);
+    // A new change request is what the other open ECRs compare themselves with in s4.
+    const others = crChanged ? reconcileAllOpen(ctx, call, `${plm} change request rev updated`, existing.id) : 0;
     return {
       prId: existing.id,
       entity: `pull_request:${existing.id}`,
-      summary: `${plm} from ${rev.source}: ${what.join(' and ')} updated; ${reconcile(ctx, existing.id)}`,
+      summary: `${plm} from ${rev.source}: ${what.join(' and ')} updated; ${own}${others ? `; ${others} other open ECR(s) checked against it` : ''}`,
     };
   }
 );
@@ -403,6 +409,9 @@ export const setPrStatus = write(
     } else if (from === 'closed') {
       // Reopening: move onto today's baseline and replace whatever went out of date meanwhile.
       extra = `; ${reconcile(ctx, pr.id)}`;
+      reconcileAllOpen(ctx, call, `ECR ${pr.id} reopened`, pr.id); // its change request is a peer again
+    } else if (to === 'closed') {
+      reconcileAllOpen(ctx, call, `ECR ${pr.id} closed`, pr.id); // no longer a peer
     }
     return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: `${from} -> ${to}${extra}` };
   },

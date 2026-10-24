@@ -45,7 +45,7 @@ test('ECR-0417: the bracket has one source, 14 weeks of lead time and a certain 
   near(p.leadWeeks.p50, 14, 0.5, 'median lead time');
   assert.ok(p.leadWeeks.p10 < 11 && p.leadWeeks.p90 > 19, `${p.leadWeeks.p10} to ${p.leadWeeks.p90}`);
   assert.equal(r417.missEffectivity!.probability, 1);
-  near(r417.missEffectivity!.weeks.p50, 13, 1.5, 'weeks late against S/N 011');
+  near(r417.missEffectivity!.weeks!.p50, 13, 1.5, 'weeks late against S/N 011');
   assert.ok(r417.flags.some((f) => f.kind === 'single_source' && f.ref === 'BW-5120-210'));
   assert.ok(r417.flags.some((f) => f.kind === 'likely_late'));
   assert.equal(r417.interaction, null, 'no other open ECR buys from Halden');
@@ -75,17 +75,17 @@ test('ECR-0419 and ECR-0421 share Orrin: the second to file waits a quarter for 
   // ECR-0419 was filed first and keeps the 2027-Q2 slot.
   assert.deepEqual(i419.slots[0].alone.p50, '2027-04-01');
   assert.deepEqual(i419.slots[0].withPeers.p50, '2027-04-01');
-  assert.equal(i419.cutIn.shiftWeeks.p50, 0);
-  assert.equal(i419.cutIn.probabilityLater, 0);
+  assert.equal(i419.cutIn!.shiftWeeks.p50, 0);
+  assert.equal(i419.cutIn!.probabilityLater, 0);
   // ECR-0421 slips to 2027-Q3: 13 weeks, in every draw.
   assert.equal(i421.slots[0].alone.p50, '2027-04-01');
   assert.equal(i421.slots[0].withPeers.p50, '2027-07-01');
   assert.deepEqual(i421.slots[0].peers.map((p) => [p.ecr, p.opens.p50]), [['ECR-0419', '2027-04-01']]);
-  assert.equal(i421.cutIn.shiftWeeks.p10, 13);
-  assert.equal(i421.cutIn.shiftWeeks.p90, 13);
-  assert.equal(i421.cutIn.probabilityLater, 1);
-  assert.ok(i421.cutIn.withPeers.p50 > i421.cutIn.alone.p50);
-  assert.ok(i421.late!.weeks.p50 > r421.missEffectivity!.weeks.p50 + 12.9);
+  assert.equal(i421.cutIn!.shiftWeeks.p10, 13);
+  assert.equal(i421.cutIn!.shiftWeeks.p90, 13);
+  assert.equal(i421.cutIn!.probabilityLater, 1);
+  assert.ok(i421.cutIn!.withPeers.p50 > i421.cutIn!.alone.p50);
+  assert.ok(i421.late!.weeks.p50 > r421.missEffectivity!.weeks!.p50 + 12.9);
   assert.ok(r421.flags.some((f) => f.kind === 'slot_contention'));
   assert.ok(r419.flags.every((f) => f.kind !== 'slot_contention'));
   assert.ok(r419.flags.some((f) => f.kind === 'shared_supplier'));
@@ -115,7 +115,7 @@ test('the interaction depends on who filed first, not on the order peers are pas
   const early = ecr('ECR-0421');
   early.filedOn = '2026-10-18';
   const r = supplyCheck(baseline, ecr('ECR-0419'), { seed: SEED, peers: [early] });
-  assert.equal(r.interaction!.cutIn.probabilityLater, 1, 'ECR-0419 now files second and waits');
+  assert.equal(r.interaction!.cutIn!.probabilityLater, 1, 'ECR-0419 now files second and waits');
   const a = supplyCheck(baseline, ecr('ECR-0417'), { seed: SEED, peers: [ecr('ECR-0419'), ecr('ECR-0421')] });
   const b = supplyCheck(baseline, ecr('ECR-0417'), { seed: SEED, peers: [ecr('ECR-0421'), ecr('ECR-0419')] });
   assert.equal(JSON.stringify(a), JSON.stringify(b));
@@ -131,8 +131,8 @@ test('the headline treats the ECR alone: the interaction is the what-if beside i
   assert.equal(JSON.stringify(alone.spend), JSON.stringify(r421.spend));
   // The timeline check is alone by construction, and agrees with the supply check's alone side.
   const t = timelineCheck(baseline, ecr('ECR-0421'), { seed: SEED });
-  assert.equal(t.cutIn.date.p50, r421.interaction!.cutIn.alone.p50 === 0 ? '' : t.cutIn.date.p50);
-  assert.equal(t.late!.weeks.p50, r421.missEffectivity!.weeks.p50);
+  assert.equal(t.cutIn.day!.p50, r421.interaction!.cutIn!.alone.p50);
+  assert.equal(t.late!.weeks.p50, r421.missEffectivity!.weeks!.p50);
 });
 
 test('capacity: the 1,200 UH sets a year are far from used by either ECR, and flagged when a smaller figure is set', () => {
@@ -180,7 +180,7 @@ test('a constraint that states no bundle terms gives the slot contention and no 
     supplierConstraints: bowman.supplierConstraints.map((s) => (s.id === 'CON-ORRIN-UH-SLOT' ? { ...s, description: 'Open slots: 2027-Q2, then 2027-Q3.' } : s)),
   };
   const r = supplyCheck(bare, ecr('ECR-0421'), { seed: SEED, peers: [ecr('ECR-0419')] });
-  assert.equal(r.interaction!.cutIn.shiftWeeks.p50, 13);
+  assert.equal(r.interaction!.cutIn!.shiftWeeks.p50, 13);
   assert.deepEqual(r.interaction!.bundles, []);
   assert.ok(r.inputs.every((i) => i.id !== 'plan:rawMaterialShare'));
 });
@@ -189,7 +189,7 @@ test('without constraints (the ERP holds none) there is no slot and no interacti
   const { supplierConstraints: _, ...erpLike } = baseline;
   const r = supplyCheck(erpLike as Baseline, ecr('ECR-0421'), { seed: SEED, peers: [ecr('ECR-0419')] });
   assert.equal(r.parts[0].slot, null);
-  assert.equal(r.interaction!.cutIn.shiftWeeks.p50, 0);
+  assert.equal(r.interaction!.cutIn!.shiftWeeks.p50, 0);
   assert.deepEqual(r.interaction!.bundles, []);
   assert.deepEqual(r.capacity, []);
 });

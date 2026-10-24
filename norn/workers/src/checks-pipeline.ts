@@ -110,23 +110,20 @@ const expectS1 = (e: object, b: Baseline) => bomDeltaRows(bomDelta(b, JSON.parse
 const expectS3 = (runInputs: string, e: object, b: Baseline) =>
   timelineRows(timelineCheck(b, JSON.parse(JSON.stringify(e)), { seed: SEED, assumptions: assumptionsNamed(runInputs), provenance: provenanceOf(JSON.parse(runInputs) as Inputs) }));
 /**
- * s4 depends on which other ECRs were open when it ran, and a run's inputs do not name them. The
- * stored detail row lists the ones the worker saw (those sharing a supplier, and those that did not),
- * so the expectation is the library on exactly that set, taken from the ECRs this script filed.
+ * s4 compares an ECR with the other open ones, and its inputs name them (core.ts peerSnapshot: each
+ * one's pull request, revision and digest). The expectation is the library on exactly those change
+ * requests, read from the revisions the run names.
  */
-const everyEcr: Record<string, object> = {};
-const peersSeen = (stored: Row[]): string[] => {
-  const d = JSON.parse(stored.find(r => r.key === 'detail')!.detailJson) as { interaction: { peers: { ecr: string }[] } | null; unrelatedPeers: string[] };
-  return [...(d.interaction?.peers.map(p => p.ecr) ?? []), ...d.unrelatedPeers].sort();
-};
-const expectS4 = (runInputs: string, e: { id: string }, b: Baseline, peerIds: string[]) =>
+const peersNamed = (runInputs: string): object[] =>
+  ((JSON.parse(runInputs) as Inputs).peers ?? []).map(n => JSON.parse([...db.ecrRevision.prId.filter(BigInt(n.pr))].find(r => r.seq === n.revision)!.changeRequestJson));
+const peerIdsOf = (runInputs: string): string[] => peersNamed(runInputs).map(c => (c as { id: string }).id).sort();
+const expectS4 = (runInputs: string, e: object, b: Baseline) =>
   supplyCheckRows(supplyCheck(b, JSON.parse(JSON.stringify(e)), {
-    seed: SEED, assumptions: assumptionsNamed(runInputs), provenance: provenanceOf(JSON.parse(runInputs) as Inputs), peers: peerIds.map(id => JSON.parse(JSON.stringify(everyEcr[id]))),
+    seed: SEED, assumptions: assumptionsNamed(runInputs), provenance: provenanceOf(JSON.parse(runInputs) as Inputs), peers: peersNamed(runInputs) as never,
   }));
 const source = stubSource(ecrDir);
 const sent = new Map<string, string>();
 const log = (m: string) => console.log(`  ingest: ${m}`);
-for (const e of [e417, e423, e419, e421]) everyEcr[e.id] = e;
 
 try {
   // ---- the worker records the baseline it read --------------------------------------------------
@@ -160,7 +157,7 @@ try {
   const want3 = expectS3(s3.inputsJson, e417, baseline);
   check('s3 stores timelineRows unchanged, marked computed, with a cut-in date and the first serial', same(results(s3.id), want3) && results(s3.id).every(r => !r.mock) && results(s3.id).some(r => r.key === 'cut_in_date') && results(s3.id).some(r => r.key === 'cut_in_serial'), firstDiff(results(s3.id), want3));
   const s4 = await doneRun(p417.id, 's4_supply');
-  const want4 = expectS4(s4.inputsJson, e417, baseline, peersSeen(results(s4.id)));
+  const want4 = expectS4(s4.inputsJson, e417, baseline);
   const single = results(s4.id).find(r => r.key === 'single_source_items');
   check('s4 stores supplyCheckRows unchanged, marked computed, with the single-source part', same(results(s4.id), want4) && results(s4.id).every(r => !r.mock) && (single?.p50 ?? 0) >= 1 && single!.detailJson.includes('BW-5120-210'), firstDiff(results(s4.id), want4));
 
@@ -229,35 +226,43 @@ try {
   const wantN = expectS2(s2n.inputsJson, e423, baseline);
   check('a new baseline is recorded and every open ECR is re-checked on it', run(s2ooo.id).status === 'stale' && same(results(s2n.id).filter(r => r.key !== 'assumption_errors'), wantN), firstDiff(results(s2n.id).filter(r => r.key !== 'assumption_errors'), wantN));
 
-  // ---- two ECRs on one supplier: the second one filed sees the first, and the first sees it after an edit ------
-  // Only the stage's own run reads the other open ECRs, so each is a fresh run of s4.
+  // ---- two ECRs on one supplier: filing the second re-runs the first's s4 ---------------------------
   putEcr(e419);
   await ingestOnce(R, source, sent, log);
   const p419 = await until(() => byNumber(e419.id), 5000, `${e419.id} to be filed`);
   const s4_419 = await doneRun(p419.id, 's4_supply');
+  const rev419 = byNumber(e419.id)!.revision;
+  check('the first ECR files with no peer on its supplier: s4 shows no interaction', JSON.parse(results(s4_419.id).find(r => r.key === 'detail')!.detailJson).interaction === null && peerIdsOf(s4_419.inputsJson).every(id => id !== e421.id), peerIdsOf(s4_419.inputsJson).join());
   putEcr(e421);
   await ingestOnce(R, source, sent, log);
   const p421 = await until(() => byNumber(e421.id), 5000, `${e421.id} to be filed`);
   const s4_421 = await doneRun(p421.id, 's4_supply');
   const s3_421 = await doneRun(p421.id, 's3_timeline');
-  const w421 = expectS4(s4_421.inputsJson, e421, baseline, peersSeen(results(s4_421.id)));
+  const w421 = expectS4(s4_421.inputsJson, e421, baseline);
   const d421 = JSON.parse(results(s4_421.id).find(r => r.key === 'detail')!.detailJson);
   check('the ECR filed second sees the first in s4: same rows as the library, its slot moves a quarter later', same(results(s4_421.id), w421) && d421.interaction?.peers.map((p: { ecr: string }) => p.ecr).join() === e419.id && results(s4_421.id).find(r => r.key === 'peer_cut_in_shift_weeks')?.p50 === 13 && results(s4_421.id).find(r => r.key === 'p_cut_in_later_with_peers')?.p50 === 1, firstDiff(results(s4_421.id), w421));
   check('s3 on the same ECR is alone by construction: its own cut-in, unmoved by the pair', same(results(s3_421.id), expectS3(s3_421.inputsJson, e421, baseline)) && results(s3_421.id).every(r => !r.mock), firstDiff(results(s3_421.id), expectS3(s3_421.inputsJson, e421, baseline)));
-  const before419 = JSON.parse(results(s4_419.id).find(r => r.key === 'detail')!.detailJson).interaction;
-  check('the first ECR s4 was computed before the second was filed, so it shows no interaction yet', before419 === null || !before419.peers.some((p: { ecr: string }) => p.ecr === e421.id), JSON.stringify(before419?.peers));
+  // The first ECR's s4 names the second now: it re-ran by itself, on the same revision.
+  const s4_419b = await until(() => {
+    const r = current(p419.id, 's4_supply');
+    return r && r.id !== s4_419.id && r.status === 'done' && results(r.id).length > 0 && r;
+  }, 60000, 's4 on ECR-0419 after ECR-0421 was filed');
+  const w419 = expectS4(s4_419b.inputsJson, e419, baseline);
+  const d419 = JSON.parse(results(s4_419b.id).find(r => r.key === 'detail')!.detailJson);
+  const own = (rows: Row[], k: string) => rows.find(r => r.key === k)?.p50 ?? NaN;
+  check('filing the second ECR re-ran s4 on the first ECR by itself: it names the second, and shows the pair', run(s4_419.id).status === 'stale' && peerIdsOf(s4_419b.inputsJson).includes(e421.id) && same(results(s4_419b.id), w419) && d419.interaction?.peers.map((p: { ecr: string }) => p.ecr).join() === e421.id && own(results(s4_419b.id), 'peer_cut_in_shift_weeks') === 0 && own(results(s4_419b.id), 'pair_bundle_saving:CON-ORRIN-UH-SLOT') > own(results(s4_419b.id), 'bundle_saving:CON-ORRIN-UH-SLOT'), firstDiff(results(s4_419b.id), w419));
+  check('...without a new revision of the first ECR: another ECR being filed is not a change to its inputs', byNumber(e419.id)!.revision === rev419 && JSON.parse(s4_419b.inputsJson).revision === JSON.parse(s4_419.inputsJson).revision, `revision ${rev419} -> ${byNumber(e419.id)!.revision}`);
+  // A new revision of the first ECR is a new peer revision for the second.
   const fee = e419.costPage.production.find(r => /Engineering and testing/.test(r.label))!;
   fee.oneTime = (fee.oneTime ?? 0) + 1000;
   putEcr(e419);
   await ingestOnce(R, source, sent, log);
-  const s4_419b = await until(() => {
-    const r = current(p419.id, 's4_supply');
-    return r && r.id !== s4_419.id && r.status === 'done' && results(r.id).length > 0 && r;
-  }, 60000, 's4 on ECR-0419 revision 2');
-  const w419 = expectS4(s4_419b.inputsJson, e419, baseline, peersSeen(results(s4_419b.id)));
-  const d419 = JSON.parse(results(s4_419b.id).find(r => r.key === 'detail')!.detailJson);
-  const own = (rows: Row[], k: string) => rows.find(r => r.key === k)?.p50 ?? NaN;
-  check('a new revision of the first ECR re-runs s4 and now shows the pair: it keeps its slot, the bundle saves both', same(results(s4_419b.id), w419) && d419.interaction?.peers.map((p: { ecr: string }) => p.ecr).join() === e421.id && own(results(s4_419b.id), 'peer_cut_in_shift_weeks') === 0 && own(results(s4_419b.id), 'pair_bundle_saving:CON-ORRIN-UH-SLOT') > own(results(s4_419b.id), 'bundle_saving:CON-ORRIN-UH-SLOT'), firstDiff(results(s4_419b.id), w419));
+  const s4_421b = await until(() => {
+    const r = current(p421.id, 's4_supply');
+    return r && r.id !== s4_421.id && r.status === 'done' && results(r.id).length > 0 && r;
+  }, 60000, 's4 on ECR-0421 after ECR-0419 revision 2');
+  const named419 = (JSON.parse(s4_421b.inputsJson) as Inputs).peers?.find(n => n.pr === String(p419.id));
+  check('a new revision of the first ECR re-runs s4 on the second ECR, on the revised change request', run(s4_421.id).status === 'stale' && named419?.revision === 2 && same(results(s4_421b.id), expectS4(s4_421b.inputsJson, e421, baseline)), `${JSON.stringify(named419)} ${firstDiff(results(s4_421b.id), expectS4(s4_421b.inputsJson, e421, baseline))}`);
   console.log(`  pair: ECR-0421 cut-in later by ${own(results(s4_421.id), 'peer_cut_in_shift_weeks')} weeks in ${own(results(s4_421.id), 'p_cut_in_later_with_peers') * 100}% of draws; pair bundle saving $${Math.round(own(results(s4_419b.id), 'pair_bundle_saving:CON-ORRIN-UH-SLOT'))} (P50)`);
 
   // ---- an ECR with no change request keeps the mock handlers ----------------------------------------

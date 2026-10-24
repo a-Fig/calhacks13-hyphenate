@@ -23,9 +23,9 @@ export interface PathResult {
   id: string;
   kind: 'decision' | 'parts' | 'stock';
   label: string;
-  /** Day (since 1970-01-01) this step is done: the decision, the part in the building, or the old stock gone. */
-  day: Stat;
-  date: DateRange;
+  /** Day (since 1970-01-01) this step is done: the decision, the part in the building, or the old stock gone. Null for the old stock when it runs past the volume plan. */
+  day: Stat | null;
+  date: DateRange | null;
   /** Share of draws in which this step is the one that sets the cut-in. */
   criticalShare: number;
   supplier?: string;
@@ -45,10 +45,12 @@ export interface TimelineResult {
   stated: { basis: string; label: string; date: string | null; serial: number | null };
   decision: { day: Stat; date: DateRange };
   cutIn: {
-    /** Day number since 1970-01-01, with the dates it stands for. */
-    day: Stat;
-    date: DateRange;
-    weeksFromFiling: Stat;
+    /** False when using up the old stock needs serials past the end of the volume plan: no day can be placed, and `serial` is the first serial the stock allows. */
+    placed: boolean;
+    /** Day number since 1970-01-01, with the dates it stands for. Null when not placed. */
+    day: Stat | null;
+    date: DateRange | null;
+    weeksFromFiling: Stat | null;
     /** The first serial that can take the change. */
     serial: Stat;
   };
@@ -71,6 +73,8 @@ export function timelineCheck(baseline: Baseline, ecr: ChangeRequest, options: P
   const sched = gatherSchedule(book, baseline, ecr, where);
   const statedDay = sched.stated.day;
 
+  // Using up the old stock can need serials past the end of the volume plan; then no cut-in day exists.
+  const placed = !sched.floor?.beyondPlan;
   const compute = (d: Draws) => ({ d, t: evaluateSchedules([sched], d, false)[0] });
   const lateOf = (t: ReturnType<typeof compute>['t']) => {
     const out = new Float64Array(t.cutIn.length);
@@ -82,9 +86,16 @@ export function timelineCheck(baseline: Baseline, ecr: ChangeRequest, options: P
     { seed: options.seed, n0, maxDraws: Math.max(n0, options.maxDraws ?? 4 * n0), rho, tol },
     compute,
     (r) => {
-      const weeks = new Float64Array(r.t.cutIn.length);
-      for (let i = 0; i < weeks.length; i++) weeks[i] = (r.t.cutIn[i] - sched.filedDay) / WEEK;
-      return { cutInWeeks: weeks, ...(statedDay !== null ? { lateWeeks: lateOf(r.t) } : {}) };
+      // The cut-in and the lateness are what the draws compute. With no placeable cut-in, the decision is all that moves.
+      const n = r.t.cutIn.length;
+      const m: Record<string, Float64Array> = {};
+      if (placed) {
+        m.cutInWeeks = new Float64Array(n).map((_, i) => (r.t.cutIn[i] - sched.filedDay) / WEEK);
+        if (statedDay !== null) m.lateWeeks = lateOf(r.t);
+      } else {
+        m.decisionWeeks = new Float64Array(n).map((_, i) => (r.t.decision[i] - sched.filedDay) / WEEK);
+      }
+      return m;
     },
   );
   const { d, t } = sim.result;
@@ -95,12 +106,12 @@ export function timelineCheck(baseline: Baseline, ecr: ChangeRequest, options: P
   const filedId = `ecr:${ecr.id}:filed`;
   const decisionUses = [filedId, sched.decisionVar];
   const decision = book.stat(t.decision, dayAt(at.decision), 'filing date + weeks to the board\'s decision × 7', decisionUses);
-  const cutDay = book.stat(
+  const cutDay = !placed ? null : book.stat(
     t.cutIn, dayAt(at.cutIn),
     'the later of: the day every changed part is in (for each part, the day its order is placed + its weeks from order to parts in × 7; an order for a part with a qualification slot is placed at the first slot that opens after the decision), and the day old stock the proposal uses up has been built into aircraft',
     sched.uses,
   );
-  const cutWeeks = (() => {
+  const cutWeeks = !placed ? null : (() => {
     const w = new Float64Array(t.cutIn.length);
     for (let i = 0; i < w.length; i++) w[i] = (t.cutIn[i] - sched.filedDay) / WEEK;
     return book.stat(w, (dayAt(at.cutIn) - sched.filedDay) / WEEK, '(cut-in day − filing day) / 7', sched.uses);
@@ -108,7 +119,7 @@ export function timelineCheck(baseline: Baseline, ecr: ChangeRequest, options: P
   const serial = book.stat(t.serial, dayAt(at.serial), 'the first serial planned to complete on or after the cut-in day, never before the first unbuilt serial', [...sched.uses, `volume:${sched.program}`], 0);
 
   let late: TimelineResult['late'] = null;
-  if (statedDay !== null) {
+  if (statedDay !== null && placed) {
     const w = lateOf(t);
     let over = 0;
     for (const x of w) if (x > 0) over++;
@@ -149,14 +160,21 @@ export function timelineCheck(baseline: Baseline, ecr: ChangeRequest, options: P
     });
   });
   if (sched.floor) {
-    const fl = book.stat(t.cutIn, dayAt(at.cutIn), `the day S/N ${sched.floor.serial - 1} is planned to complete: the old stock is used up`, [sched.floor.id, `volume:${sched.program}`]);
-    paths.push({ id: 'stock', kind: 'stock', label: 'Old stock used up', day: fl, date: isoRange(fl), criticalShare: share((i) => t.floored[i] === 1) });
+    // The old stock is gone when the aircraft before the floor's serial are built: a fixed day, from the plan, not from the draws.
+    // It is not the cut-in: a part arriving later than that sets the cut-in, and this step does not move with it.
+    if (sched.floor.beyondPlan) {
+      paths.push({ id: 'stock', kind: 'stock', label: 'Old stock used up (past the volume plan)', day: null, date: null, criticalShare: share((i) => t.floored[i] === 1) });
+    } else {
+      const day = Number.isFinite(sched.floor.day) ? Math.floor(sched.floor.day) : sched.filedDay; // the last old-stock aircraft completes on this day; the floor is half a day after
+      const fl = book.stat(new Float64Array(d.n).fill(day), day, `the day S/N ${sched.floor.serial - 1} is planned to complete: the old stock is used up${Number.isFinite(sched.floor.day) ? '' : ' (already built: the filing day)'}`, [sched.floor.id, `volume:${sched.program}`]);
+      paths.push({ id: 'stock', kind: 'stock', label: 'Old stock used up', day: fl, date: isoRange(fl), criticalShare: share((i) => t.floored[i] === 1) });
+    }
   }
 
   // What a reader should look at.
   const flags: Flag[] = [...book.flags];
   const planEnd = sched.table.days.length ? sched.table.days[sched.table.days.length - 1] : -Infinity;
-  if (cutDay.p50 > planEnd) flags.push({ kind: 'cut_in_beyond_plan', severity: 'warn', ref: ecr.id, message: `The median cut-in (${dateOf(cutDay.p50)}) is beyond the volume plan, so no serial is planned to take the change by then.` });
+  if (cutDay && cutDay.p50 > planEnd) flags.push({ kind: 'cut_in_beyond_plan', severity: 'warn', ref: ecr.id, message: `The median cut-in (${dateOf(cutDay.p50)}) is beyond the volume plan, so no serial is planned to take the change by then.` });
   if (late && late.probability >= 0.5) {
     flags.push({ kind: 'likely_late', severity: 'warn', ref: sched.stated.id, message: `${ecr.id} states ${sched.stated.label}; the change can first reach the line ${late.weeks.p50} weeks after it (P10 ${late.weeks.p10}, P90 ${late.weeks.p90}), in ${Math.round(late.probability * 100)}% of draws.` });
   }
@@ -178,7 +196,7 @@ export function timelineCheck(baseline: Baseline, ecr: ChangeRequest, options: P
     filed: ecr.filedOn,
     stated: { basis: sched.stated.basis, label: sched.stated.label, date: statedDay === null ? null : dateOf(statedDay), serial: sched.stated.serial },
     decision: { day: decision, date: isoRange(decision) },
-    cutIn: { day: cutDay, date: isoRange(cutDay), weeksFromFiling: cutWeeks, serial },
+    cutIn: { placed, day: cutDay, date: cutDay ? isoRange(cutDay) : null, weeksFromFiling: cutWeeks, serial },
     late,
     paths,
     convergence: sim.convergence,

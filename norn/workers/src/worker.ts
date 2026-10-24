@@ -53,7 +53,6 @@ await subscribe(conn, [
   "SELECT * FROM check_run WHERE status = 'running'",
   // What the real checks read: the change requests, the assumptions a run names, the baselines recorded.
   'SELECT * FROM ecr_revision',
-  'SELECT * FROM pull_request', // which other ECRs are open: s4 reads them as peers
   'SELECT * FROM assumption',
   'SELECT * FROM baseline_snapshot',
   'SELECT * FROM norn_config',

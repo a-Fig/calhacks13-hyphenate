@@ -34,13 +34,13 @@ export type Inputs = {
   erpBaselineSource?: string;
   erpBaselineAsOf?: string;
   assumptions?: { id: string; key: string; rev: number }[];
+  /** s4: the other open ECRs' change requests it compared this one with. */
+  peers?: { pr: string; revision: number; overlay: string }[];
 };
 
 /** The stages this file computes for real, on ECRs with a change request. */
 export const REAL_STAGES = ['s1_bom_delta', 's2_cost', 's3_timeline', 's4_supply'];
 
-/** The statuses of an ECR that is still open (module core.ts OPEN_PR). */
-const OPEN = ['draft', 'review', 'approved'];
 
 /** Where the run's baseline and change request came from, as the trace names them. Anything not from the ERP or the PLM says so. */
 export function provenanceOf(i: Inputs) {
@@ -140,16 +140,16 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
   }
 
   /**
-   * The other open ECRs' current change requests, the peers s4 reads for the interaction. Read from
-   * the cache when the stage runs: the run's inputs do not name them (see the README), so a peer
-   * filed or edited later changes the interaction only when s4 next runs.
+   * The peers this run names: the other open ECRs' change requests, by revision and digest, as the
+   * module recorded them when it made the run (core.ts peerSnapshot). Reading exactly these keeps the
+   * rows a function of the run's inputs, so a retry gives the same rows. A peer revision that is not
+   * in the cache yet, or whose digest differs, means the run is stale or Norn is behind: drop it.
    */
-  function peersOf(prId: bigint): ChangeRequest[] {
+  function peersNamed(inputs: Inputs): ChangeRequest[] {
     const peers: ChangeRequest[] = [];
-    for (const rev of conn.db.ecrRevision.iter()) {
-      if (!rev.current || rev.prId === prId) continue;
-      const pr = conn.db.pullRequest.id.find(rev.prId);
-      if (!pr || pr.kind !== 'ecr' || !OPEN.includes(pr.status)) continue;
+    for (const named of inputs.peers ?? []) {
+      const rev = [...conn.db.ecrRevision.prId.filter(BigInt(named.pr))].find(r => r.seq === named.revision);
+      if (!rev || rev.digest !== named.overlay) throw new AbortedError();
       try {
         const cr = JSON.parse(rev.changeRequestJson) as ChangeRequest;
         if (cr && typeof cr === 'object' && typeof cr.id === 'string') peers.push(cr);
@@ -201,7 +201,7 @@ export function impactHandlers(conn: DbConnection, baselines: BaselineStore) {
       const p = await prepare(ctx);
       if (!p) return HANDLERS.s4_supply!(ctx);
       const { overrides, problems } = assumptionsOf(p.inputs);
-      const peers = peersOf(ctx.prId);
+      const peers = peersNamed(p.inputs);
       const t0 = Date.now();
       const r = supplyCheck(p.baseline, p.ecr, { seed: p.inputs.seed!, assumptions: overrides, provenance: provenanceOf(p.inputs), peers });
       const rows = withProblems(real(supplyCheckRows(r)), problems);

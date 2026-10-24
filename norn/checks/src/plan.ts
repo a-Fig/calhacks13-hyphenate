@@ -8,6 +8,7 @@
 // every number carries a trace; a run that misses the convergence tolerance doubles its draws.
 
 import { applyOverlay, type HeadState } from './bom.ts';
+import { COST_DEFAULTS } from './cost.ts';
 import { type Dist, lognormal, lognormalFromQuantiles, pert, pointOf } from './dist.ts';
 import { type Draws, type Variable, drawAll, summarize, type Summary } from './sim.ts';
 import { type SerialTable, addMonthsToDay, dateOf, dayOf, dayOfSerial, serialAtDay, serialTable } from './time.ts';
@@ -36,6 +37,10 @@ export interface PlanDefaults {
   rawMaterialShare: Triple;
   /** Months between qualification slots when the constraint does not say. */
   slotCadenceMonths: number;
+  /** A part with no sourcing record: its forward price as multiples of its quoted price (the cost check's default). */
+  newItemPrice: { p10: number; p90: number };
+  /** Log-space spread of a budgetary quote's price, on top of the market (the cost check's default). */
+  budgetaryQuoteSpread: number;
 }
 
 export const PLAN_DEFAULTS: PlanDefaults = {
@@ -44,6 +49,8 @@ export const PLAN_DEFAULTS: PlanDefaults = {
   unsourcedLeadSigma: 0.25,
   rawMaterialShare: { min: 0.4, mode: 0.6, max: 0.8 },
   slotCadenceMonths: 3,
+  newItemPrice: COST_DEFAULTS.newItemPrice,
+  budgetaryQuoteSpread: COST_DEFAULTS.spread.budgetary_quote,
 };
 
 export const mergePlanDefaults = (d?: Partial<PlanDefaults>): PlanDefaults => ({
@@ -64,6 +71,8 @@ const DEFAULT_WHY: Record<string, string> = {
   rawMaterialShare:
     'The share of a part\'s price that a raw-material price break applies to, PERT(40%, 60%, 80%). Nobody has stated it, so it needs an estimate (Norn default).',
   slotCadenceMonths: 'The constraint does not say how often a qualification slot opens: one per quarter (Norn default).',
+  newItemPrice: 'A part with no sourcing record: forward price p10 0.95 and p90 1.08 times its quoted price (the cost check\'s default).',
+  budgetaryQuoteSpread: 'A budgetary quote ("plus or minus 20%"): log-space spread 0.15 on top of the market range (the cost check\'s default).',
 };
 
 export interface PlanOptions {
@@ -266,8 +275,14 @@ export interface SupplyItem {
   leadVar: string;
   leadFrom: 'quote' | 'sourcing' | 'default';
   quoteId?: string;
-  /** Head unit price (the quote's), and the parts per finished unit of the ECR's program. */
+  /** Head unit price: the quote line that names this part, else the item master's. And the parts per finished unit of the ECR's program (at head). */
   price: number | null;
+  /** The quote line the price is from, when it is. */
+  priceQuote?: { quoteId: string; line: number; budgetary: boolean };
+  /** The supplier the price range is looked up under, as the cost check does. */
+  priceSupplier?: SupplierId;
+  /** Ids of the draws that scale the price (the market range, and a budgetary quote's own spread). Filled by `registerPriceVars`. */
+  priceVars?: string[];
   perUnit: number;
   slot: Slot | null;
 }
@@ -280,8 +295,12 @@ export interface Schedule {
   items: SupplyItem[];
   table: SerialTable;
   firstUnbuilt: number;
-  /** Old stock the proposal uses up first: the change cannot start before this serial. */
-  floor: { serial: number; id: string; why: string } | null;
+  /**
+   * Old stock the proposal uses up first: the change cannot start before this serial. `day` is when
+   * the serial before it is planned to complete (-Infinity: already built). `beyondPlan` is true when
+   * that serial is past the end of the volume plan, so no date can be placed.
+   */
+  floor: { serial: number; id: string; why: string; day: number; beyondPlan: boolean } | null;
   stated: { basis: string; label: string; day: number | null; serial: number | null; id: string };
   /** One-time qualification cost from the quote lines, by item. */
   qualification: Map<ItemCode, number>;
@@ -323,6 +342,11 @@ export function gatherSchedule(book: Book, baseline: Baseline, ecr: ChangeReques
   const explodedBase = s.explodedBase.get(program) ?? new Map<ItemCode, number>();
   const candidates = new Set<ItemCode>(ecr.itemChanges.filter((c) => c.op !== 'remove').map((c) => c.item));
   for (const b of ecr.bomChanges) if (b.op === 'add' && (explodedBase.get(b.child) ?? 0) === 0) candidates.add(b.child);
+  // A part the change needs more of, wherever in the BOM the quantity rises (a set_qty, or a changed assembly above it).
+  for (const [code, qty] of explodedHead) if (qty > (explodedBase.get(code) ?? 0) + 1e-9) candidates.add(code);
+  // A quote line prices the part whose code its description names, else the quote's own item (the cost check's rule).
+  const knownCodes = [...new Set([...s.head.keys(), ...s.base.keys()])].sort((a, b) => b.length - a.length || (a < b ? -1 : 1));
+  const lineItem = (q: ChangeRequest['supplierQuotes'][number], description: string) => knownCodes.find((c) => description.includes(c)) ?? q.item;
   const sourcingOf = (code: ItemCode) => baseline.sourcing.filter((x) => x.item === code);
   const allLeads = baseline.sourcing.map((x) => x.leadTimeWeeks?.p50).filter((x): x is number => Number.isFinite(x) && x > 0);
   const constraints = (baseline.supplierConstraints ?? []).filter((c) => c.kind === 'qualification_slot');
@@ -412,11 +436,22 @@ export function gatherSchedule(book: Book, baseline: Baseline, ecr: ChangeReques
       for (const qq of ecr.supplierQuotes) if (qq.item === code) for (const l of qq.lines) if (l.oneTime !== undefined && /qualif/i.test(l.description)) q += l.oneTime;
       if (q > 0) qualification.set(code, q);
     }
-    const price = (() => {
-      for (const qq of ecr.supplierQuotes) if (qq.item === code) for (const l of qq.lines) if (l.unitPrice !== undefined && l.oneTime === undefined && !/first lot|cancel/i.test(l.description)) return l.unitPrice;
-      return h.unitPrice ?? null;
-    })();
-    items.push({ item: code, name: h.name, ...(supplier ? { supplier } : {}), sources, leadVar, leadFrom, ...(quote ? { quoteId: quote.id } : {}), price, perUnit: explodedHead.get(code) ?? 0, slot });
+    // The price is the quote line that names this part (a quote can price several parts), else the item master's.
+    let priceQuote: SupplyItem['priceQuote'];
+    let price: number | null = h.unitPrice ?? null;
+    outer: for (const qq of ecr.supplierQuotes) {
+      for (let li = 0; li < qq.lines.length; li++) {
+        const l = qq.lines[li];
+        if (lineItem(qq, l.description) !== code || l.unitPrice === undefined || l.oneTime !== undefined || /first lot|cancel/i.test(l.description)) continue;
+        price = l.unitPrice;
+        priceQuote = { quoteId: qq.id, line: li + 1, budgetary: budgetary(qq) };
+        break outer;
+      }
+    }
+    items.push({
+      item: code, name: h.name, ...(supplier ? { supplier } : {}), sources, leadVar, leadFrom, ...(quote ? { quoteId: quote.id } : {}), price, ...(priceQuote ? { priceQuote } : {}),
+      priceSupplier: src?.supplier ?? h.supplier ?? s.base.get(code)?.supplier, perUnit: explodedHead.get(code) ?? 0, slot,
+    });
   }
   if (items.length === 0) {
     book.flags.push({
@@ -442,10 +477,21 @@ export function gatherSchedule(book: Book, baseline: Baseline, ecr: ChangeReques
     const onHand = (Object.keys(FIELD) as (keyof typeof FIELD)[]).filter((l) => !gone.has(l)).reduce((a, l) => a + (st[FIELD[l]] as number), 0);
     const serial = firstUnbuilt + Math.floor(onHand / qty);
     if (!floor || serial > floor.serial) {
-      floor = { serial, id: `stock-floor:${ecr.id}:${u.item}`, why: `Use up ${onHand} ${u.item} on hand and on order at ${qty} per unit: ${Math.floor(onHand / qty)} units, so the change starts at S/N ${serial}.` };
+      const prev = dayOfSerial(table, serial - 1);
+      floor = {
+        serial, id: `stock-floor:${ecr.id}:${u.item}`,
+        why: `Use up ${onHand} ${u.item} on hand and on order at ${qty} per unit: ${Math.floor(onHand / qty)} units, so the change starts at S/N ${serial}.`,
+        day: prev !== undefined ? prev + 0.5 : -Infinity,
+        beyondPlan: prev === undefined && serial - 1 >= table.first + table.days.length,
+      };
     }
   }
-  if (floor) use(book.input({ id: floor.id, label: `${ecr.id}: old stock used up first`, source: 'given', value: floor.serial, ref: `${where.changeRequest}: inventoryProposal and ${where.baseline}: stock`, rationale: floor.why }));
+  if (floor) {
+    use(book.input({ id: floor.id, label: `${ecr.id}: old stock used up first`, source: 'given', value: floor.serial, ref: `${where.changeRequest}: inventoryProposal and ${where.baseline}: stock`, rationale: floor.why }));
+    if (floor.beyondPlan) {
+      book.flags.push({ kind: 'stock_beyond_plan', severity: 'warn', ref: floor.id, message: `${ecr.id}: using up the old stock means starting at S/N ${floor.serial}, but the volume plan ends at S/N ${table.first + table.days.length - 1}. No date can be placed for it; the plan would need to run further.` });
+    }
+  }
 
   // What the ECR states as its effectivity, to compare the feasible date with.
   const ep = ecr.effectivity.production;
@@ -465,6 +511,48 @@ export function gatherSchedule(book: Book, baseline: Baseline, ecr: ChangeReques
   }
   book.input({ id: statedId, label: `${ecr.id} production effectivity`, source: 'given', value: stated.label, ref: `${where.changeRequest}: effectivity.production` });
   return { ecr, program, filedDay: dayOf(ecr.filedOn), decisionVar, items, table, firstUnbuilt, floor, stated, qualification, uses: [...new Set(uses)] };
+}
+
+/**
+ * Register the draws that scale a changed part's price, as the cost check draws them: the market range
+ * for the next 12 months (the sourcing record's p10, p50 and p90 as ratios to the p50, else the default
+ * range for a part with no record), and a budgetary quote's own spread on top. The ids are the cost
+ * check's (`price:<item>`, `quote:<item>`), so on the same seed both checks draw the same numbers.
+ */
+export function registerPriceVars(book: Book, baseline: Baseline, it: SupplyItem, where: { baseline: string }): string[] {
+  if (it.priceVars) return it.priceVars;
+  const recs = baseline.sourcing.filter((x) => x.item === it.item);
+  const src = recs.find((x) => x.primary) ?? recs[0];
+  const groups = it.priceSupplier ? [`supplier:${it.priceSupplier}`] : [];
+  const ids: string[] = [];
+  const id = `price:${it.item}`;
+  if (src && !okRange(src.unitPrice)) {
+    book.flags.push({ kind: 'bad_sourcing', severity: 'warn', ref: it.item, message: `${it.item}: the sourcing price range (p10 ${src.unitPrice.p10}, p50 ${src.unitPrice.p50}, p90 ${src.unitPrice.p90}) is not positive and in order, so the default range is used.` });
+  }
+  if (src && okRange(src.unitPrice)) {
+    const p = src.unitPrice;
+    ids.push(book.variable({
+      id, label: `${it.item} price index (next 12 months)`, groups, source: 'given', dist: lognormalFromQuantiles(p.p10 / p.p50, 1, p.p90 / p.p50),
+      ref: `${where.baseline}: sourcing ${it.item} ${src.supplier}: p10 ${p.p10}, p50 ${p.p50}, p90 ${p.p90}`,
+      rationale: 'The supplier price range for the next 12 months, as a multiplier on the unit price. Lognormal through the stated p10, p50 and p90.',
+    }));
+  } else {
+    const D = book.D;
+    ids.push(book.variable({
+      id, label: `${it.item} price index (no sourcing record)`, groups, source: 'default', dist: lognormalFromQuantiles(D.newItemPrice.p10, 1, D.newItemPrice.p90),
+      ref: book.defaultInput('newItemPrice', 'Price range for an item with no sourcing record', `${D.newItemPrice.p10} to ${D.newItemPrice.p90}`), rationale: DEFAULT_WHY.newItemPrice,
+    }));
+  }
+  if (it.priceQuote?.budgetary) {
+    const D = book.D;
+    ids.push(book.variable({
+      id: `quote:${it.item}`, label: `${it.item}: budgetary quote moves`, dist: lognormal(1, D.budgetaryQuoteSpread), groups: [], source: 'default',
+      ref: book.defaultInput('budgetaryQuoteSpread', 'Spread of a budgetary supplier quote', D.budgetaryQuoteSpread),
+      rationale: `The price is from budgetary quote ${it.priceQuote.quoteId}. ${DEFAULT_WHY.budgetaryQuoteSpread}`,
+    }));
+  }
+  it.priceVars = ids;
+  return ids;
 }
 
 // ---------------------------------------------------------------- evaluating schedules on draws
@@ -537,17 +625,14 @@ export function evaluateSchedules(scheds: Schedule[], d: Draws, contend: boolean
       });
       t.parts[i] = parts;
       let cutIn = parts;
-      if (s.floor) {
-        const prev = dayOfSerial(s.table, s.floor.serial - 1);
-        const last = s.table.days.length ? s.table.days[s.table.days.length - 1] : parts;
-        const floorDay = prev !== undefined ? prev + 0.5 : s.floor.serial > s.table.first ? last + 1 : -Infinity;
-        if (floorDay > parts) {
-          cutIn = floorDay;
-          t.floored[i] = 1;
-        }
+      // Old stock used up: the change starts at the floor's serial. If that serial is past the plan, no
+      // day can be placed: the cut-in is infinitely late (a stock-bound unit count of zero follows).
+      if (s.floor && (s.floor.beyondPlan || s.floor.day > parts)) {
+        cutIn = s.floor.beyondPlan ? Infinity : s.floor.day;
+        t.floored[i] = 1;
       }
       t.cutIn[i] = cutIn;
-      t.serial[i] = Math.max(serialAtDay(s.table, cutIn), s.firstUnbuilt);
+      t.serial[i] = Math.max(cutIn === Infinity ? 0 : serialAtDay(s.table, cutIn), s.firstUnbuilt, s.floor?.serial ?? 0);
     }
   }
   return out;
