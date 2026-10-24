@@ -60,19 +60,18 @@ body { margin: 0; }
 /* ---------- GitHub's global header ---------- */
 .nx-gh {
   display: flex; align-items: center; gap: 16px; height: 64px; padding: 0 32px;
-  background: var(--bgColor-muted); border-bottom: 1px solid var(--borderColor-default);
+  background: var(--bgColor-emphasis); color: var(--fgColor-onEmphasis);
 }
-.nx .nx-gh-logo { display: inline-flex; color: var(--fgColor-default); }
+.nx .nx-gh-logo { display: inline-flex; color: var(--fgColor-onEmphasis); }
 .nx-gh-logo:hover { text-decoration: none; }
 .nx-gh-crumbs { display: flex; align-items: center; gap: 6px; font-size: 14px; }
-.nx-gh-crumbs a { color: var(--fgColor-default); }
-.nx-gh-crumbs span { color: var(--fgColor-muted); }
-.nx-gh-link { color: var(--fgColor-muted) !important; font-size: 13px; }
+.nx .nx-gh-crumbs a { color: var(--fgColor-onEmphasis); }
+.nx-gh-crumbs span { color: #9198a1; }
+.nx .nx-gh-link { color: #9198a1; font-size: 13px; }
 
 /* ---------- the repository title row ---------- */
-.nx-repo {
-  display: flex; align-items: center; gap: 8px; max-width: 1280px; margin: 0 auto; padding: 16px 32px 0; font-size: 20px;
-}
+.nx-repoband { background: var(--bgColor-muted); border-bottom: 1px solid var(--borderColor-default); padding-top: 16px; }
+.nx-repo { display: flex; align-items: center; gap: 8px; font-size: 16px; margin-bottom: 12px; }
 .nx-repo-owner { color: var(--fgColor-accent) !important; }
 .nx-repo-name { font-weight: 600; }
 
@@ -89,7 +88,8 @@ body { margin: 0; }
 .nx-foot { padding: 8px 16px; font-size: 12px; color: var(--fgColor-muted); border-top: 1px solid var(--borderColor-muted); }
 
 /* ---------- the ECR list ---------- */
-.nx-list { padding-top: 16px; padding-bottom: 64px; }
+.nx-list { padding-top: 24px; padding-bottom: 64px; }
+.nx .nx-list-title { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
 .nx-searchbar { margin-bottom: 16px; }
 .nx-states { display: flex; gap: 16px; }
 .nx-state {

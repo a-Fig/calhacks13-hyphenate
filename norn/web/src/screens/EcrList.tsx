@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   AlertFillIcon, CheckCircleFillIcon, CheckIcon, CommentIcon, DotFillIcon, GitPullRequestIcon, SearchIcon,
 } from '@primer/octicons-react';
-import { ActionList, ActionMenu, AvatarStack, Label, TextInput } from '@primer/react';
+import { ActionList, ActionMenu, AvatarStack, CounterLabel, Label, TextInput } from '@primer/react';
 import { useEcrList } from '../assessment/source.ts';
 import type { EcrSummary } from '../assessment/types.ts';
 import { isOpen, LevelLabel, Person, StateIcon } from '../ui/Bits.tsx';
@@ -95,6 +95,7 @@ export function EcrList() {
     <>
       <RepoHeader mock />
       <main className="nx-container nx-list">
+        <h2 className="nx-list-title">All ECRs</h2>
         <div className="nx-searchbar">
           <TextInput
             block
@@ -110,10 +111,10 @@ export function EcrList() {
           <div className="nx-box-head">
             <div className="nx-states">
               <button type="button" className={`nx-state ${state === 'open' ? 'on' : ''}`} onClick={() => setState('open')}>
-                <GitPullRequestIcon size={16} /> {nOpen} Open
+                <GitPullRequestIcon size={16} /> Open <CounterLabel>{nOpen}</CounterLabel>
               </button>
               <button type="button" className={`nx-state ${state === 'closed' ? 'on' : ''}`} onClick={() => setState('closed')}>
-                <CheckIcon size={16} /> {nClosed} Closed
+                <CheckIcon size={16} /> Closed <CounterLabel>{nClosed}</CounterLabel>
               </button>
             </div>
             <span className="nx-sp" />
