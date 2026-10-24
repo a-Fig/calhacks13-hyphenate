@@ -8,7 +8,7 @@ import { afterEach, test } from 'node:test';
 import { EcrWatcher } from '../../../connectors/plm/src/index.ts';
 import { ecrDoc, opts } from '../../../connectors/plm/test/fixture.ts';
 import { ingestOnce, itemOf } from '../ingest.ts';
-import { ECO_STATES, RetryQueue, ecrLock, onChange, plmIngestOptionsFromEnv, readItem, recordEcoOnly, startupWanted, wanted } from './ingest-plm.ts';
+import { ECO_STATES, RetryQueue, ecrLock, onChange, plmIngestOptionsFromEnv, readItem, recordEcoOnly, recoverEcos, startupWanted, wanted } from './ingest-plm.ts';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -82,4 +82,14 @@ test('the first listing still takes in only undecided ECRs, not the PLM\'s appro
   assert.equal(wanted(o, { name: 'ECR-1', workflowState: 'Rejected' }), false);
   assert.equal(wanted(plmIngestOptionsFromEnv({ NORN_PLM_ECRS: 'ECR-2' }), { name: 'ECR-1', workflowState: 'Approved' }), false, 'NORN_PLM_ECRS still narrows');
   assert.equal(startupWanted(plmIngestOptionsFromEnv({ NORN_PLM_STATES: 'Approved' }), { name: 'ECR-1', workflowState: 'Approved' }), true, 'unless Approved is asked for');
+});
+
+test('at start-up, an ECO linked while the process was down is recorded, and one failure does not stop the others', async () => {
+  const calls: string[] = [];
+  const logs: string[] = [];
+  const items: Record<string, any> = { 'ECR-1': { plmEcrNumber: 'ECR-1', eco: 'ECO-1' }, 'ECR-3': { plmEcrNumber: 'ECR-3' }, 'ECR-4': { plmEcrNumber: 'ECR-4', eco: 'ECO-4' } };
+  const read = async (name: string) => { if (name === 'ECR-2') throw new Error('PLM 500'); return items[name]; };
+  await recoverEcos(['ECR-1', 'ECR-2', 'ECR-3', 'ECR-4'], read, async (item) => { calls.push(`${item.plmEcrNumber}:${item.eco}`); }, ecrLock(), (m) => logs.push(m));
+  assert.deepEqual(calls, ['ECR-1:ECO-1', 'ECR-4:ECO-4'], 'only ECRs with an ECO, and past the one that failed');
+  assert.ok(logs.some((l) => l.includes('ECR-2') && l.includes('PLM 500')), logs.join(' | '));
 });

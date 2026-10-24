@@ -186,6 +186,24 @@ export async function takeIn(
 export const retryDue = (retry: RetryQueue, read: (name: string) => Promise<IngestItem>, report: (item: IngestItem) => Promise<void>, log: (m: string) => void, now: () => number = Date.now, lock: EcrLock = noLock) =>
   takeIn(retry.due(now()), read, report, log, retry, now, lock, true);
 
+/**
+ * At start-up, the decided ECRs' change orders: an ECO the PLM linked while this process was down is never delivered by the
+ * watcher, which starts from the newest stamp. Each is only recorded (`recordEco`, as `recordEcoOnly`), never ingested, and an
+ * ECR Norn never opened is refused by the module and skipped. One failure does not stop the others.
+ */
+export async function recoverEcos(names: string[], read: (name: string) => Promise<IngestItem>, recordEco: (item: IngestItem) => Promise<void>, lock: EcrLock, log: (m: string) => void): Promise<void> {
+  for (const name of names) {
+    try {
+      await lock(name, async () => {
+        const item = await read(name);
+        if (item.eco) await recordEco(item);
+      });
+    } catch (e) {
+      log(`could not check ${name}'s change order at start-up: ${(e as Error).message}`);
+    }
+  }
+}
+
 /** What the watcher does with one changed ECR: a decided one only records its ECO release, any other is reported to ingest_ecr. */
 export async function onChange(
   o: PlmIngestOptions,
@@ -221,6 +239,9 @@ export async function runPlmIngest(R: Client['R'], log: (m: string) => void, dep
   const retry = new RetryQueue(o.intervalMs);
   const lock = ecrLock();
   await takeIn(take.map(e => e.name), read, report, log, retry, Date.now, lock);
+  const recordEco = (item: IngestItem) => recordEcoOnly(R, item, sent, log);
+  const decided = all.filter(e => wanted(o, e) && !startupWanted(o, e)).map(e => e.name);
+  await recoverEcos(decided, read, recordEco, lock, log);
   let retrying = false;
   setInterval(() => {
     if (retrying || retry.names.length === 0) return;
@@ -231,7 +252,7 @@ export async function runPlmIngest(R: Client['R'], log: (m: string) => void, dep
   const watcher = watchEcrs(
     opts,
     async change => {
-      await onChange(o, change, { read, report, recordEco: item => recordEcoOnly(R, item, sent, log), lock, retry });
+      await onChange(o, change, { read, report, recordEco, lock, retry });
     },
     { intervalMs: o.intervalMs, since: mark, stateFile: o.stateFile, onError: e => log(`PLM watch: ${(e as Error).message}`) }
   );
