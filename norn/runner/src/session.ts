@@ -41,8 +41,9 @@ const FORCED_ENV: Record<string, string> = {
  */
 export function buildSessionEnv(base: NodeJS.ProcessEnv = process.env): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {};
-  for (const [key, value] of Object.entries(base)) {
-    if (!DROPPED_ENV.has(key.toUpperCase()) && !PARENT_SESSION_ENV.test(key)) env[key] = value;
+  // Walk the names, not the entries, so the value of a dropped variable is never read.
+  for (const key of Object.keys(base)) {
+    if (!DROPPED_ENV.has(key.toUpperCase()) && !PARENT_SESSION_ENV.test(key)) env[key] = base[key];
   }
   return { ...env, ...FORCED_ENV };
 }

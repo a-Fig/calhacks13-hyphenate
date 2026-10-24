@@ -159,7 +159,7 @@ async function core(): Promise<JobResult[]> {
   // The rest go straight through runJob so the test can loosen one thing at a time. They run
   // together; the sessions are independent.
   const config = { workRoot };
-  const controlEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^ANTHROPIC_(API_KEY|AUTH_TOKEN)$/i.test(k)));
+  const controlEnv = Object.fromEntries(Object.keys(process.env).filter((k) => !/^ANTHROPIC_(API_KEY|AUTH_TOKEN)$/i.test(k)).map((k) => [k, process.env[k]]));
   const memoryOn = !!memoryCwd && !!memoryPhrase;
   const [r3, rc, m1, m2] = await Promise.all([
     // S3: Bash is made visible; only the permission layer is left to stop it.
