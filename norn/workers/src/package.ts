@@ -6,7 +6,7 @@
 // ERP (#71): the connector only reads.
 import type { DbConnection } from '@norn/bindings';
 import { costCheck, costCheckRows, type ChangeRequest, type CostCheckResult } from '../../checks/src/index.ts';
-import { planEcoRelease, type EcoRelease, type ErpnextConnection, type ErpnextSettings } from '../../connectors/erpnext/src/index.ts';
+import { buildErpChangePackage, type EcoRelease, type ErpChangePackage, type ErpnextConnection, type ErpnextSettings } from '../../connectors/erpnext/src/index.ts';
 import type { BaselineStore } from './baseline.ts';
 import type { Client } from './connect.ts';
 import { assumptionsOf, provenanceOf, type Inputs } from './impact.ts';
@@ -17,19 +17,23 @@ import { AbortedError } from './stages.ts';
 export type PlannedPackage = { packageJson: string; lines: number; entered: number; conflicts: number; problems: string[] };
 export type Planner = (release: EcoRelease) => Promise<PlannedPackage>;
 
-/** The connector's planner on the company's ERPNext. It reads; it never writes. */
+/** The connector's change package on the company's ERPNext (buildErpChangePackage). It reads; it never writes. */
 export function erpPlanner(connection: ErpnextConnection, settings: ErpnextSettings): Planner {
   return async release => {
-    const plan = await planEcoRelease(connection, settings, release);
-    return {
-      packageJson: JSON.stringify(plan),
-      lines: plan.steps.length,
-      entered: plan.steps.filter(s => s.status === 'done').length,
-      conflicts: plan.steps.filter(s => s.status === 'conflict').length,
-      problems: plan.problems,
-    };
+    const pkg = await buildErpChangePackage(connection, settings, release);
+    return { packageJson: JSON.stringify(pkg), lines: pkg.counts.total, entered: pkg.counts.entered, conflicts: pkg.counts.conflict, problems: pkg.problems };
   };
 }
+
+/** The package without the time of the read, which changes on every read whatever the ERP holds. */
+const withoutReadAt = (json: string) => {
+  try {
+    const { readAt: _, ...rest } = JSON.parse(json) as Partial<ErpChangePackage> & Record<string, unknown>;
+    return JSON.stringify(rest);
+  } catch {
+    return json;
+  }
+};
 
 export type PackageOptions = {
   /** Where Norn's ECR pages are, for the trace on every line, e.g. https://norn.example.com. */
@@ -100,6 +104,9 @@ export async function packageOnce(conn: DbConnection, R: Client['R'], baselines:
       releasedOn: dayIn(eco.recordedAt.microsSinceUnixEpoch, opts.timeZone),
     });
     const planned = await planner(release);
+    // A read that finds what the last one found keeps the stored package, so no log row is added
+    // for it; erp_package.updatedAt says when it was last checked.
+    if (prev && prev.s2RunId === s2.id && withoutReadAt(prev.packageJson) === withoutReadAt(planned.packageJson)) planned.packageJson = prev.packageJson;
     await R.recordErpPackage({
       prId: pr.id,
       ecoNumber: eco.ecoNumber,
