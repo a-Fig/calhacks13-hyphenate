@@ -18,7 +18,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listEcrs, readChangeRequest, watchEcrs, type EcrListing, type PlmOptions } from '../../../connectors/plm/src/index.ts';
+import { PlmMappingError, listEcrs, readChangeRequest, watchEcrs, type EcrListing, type PlmOptions } from '../../../connectors/plm/src/index.ts';
 import type { Client } from '../connect.ts';
 // ingest.ts hands these in: it is the entry module, and importing it back from here would deadlock its top-level await.
 import type { IngestItem, ingestOnce as IngestOnce, itemOf as ItemOf } from '../ingest.ts';
@@ -58,25 +58,72 @@ export async function readItem(opts: PlmOptions, name: string, itemOf: typeof It
   return { ...itemOf(r.change as Record<string, any>, r.modified), title: r.record.title || name, description: r.record.text.description };
 }
 
+/** A mapping error is the ECR's own fault (a field the connector will not guess): retrying cannot help, a person must fix it. Anything else (network, timeout, 5xx, a failed report) is transient. */
+export const isTransient = (e: unknown) => !(e instanceof PlmMappingError);
+
 /**
- * Take in the ECRs found by the first listing, one at a time. One that cannot be read or mapped (a
- * `PlmMappingError`: a field the PLM filled in a way the connector will not guess) is logged by name
- * and skipped; the rest are still taken in and the watcher still starts.
+ * ECRs whose take-in failed for a transient reason, each retried with a growing wait until it
+ * succeeds. The watcher only reports ECRs changed after the first listing's newest stamp, so without
+ * this an ECR that failed at start-up would stay out until someone edited it or the process restarted.
  */
-export async function takeIn(names: string[], read: (name: string) => Promise<IngestItem>, report: (item: IngestItem) => Promise<void>, log: (m: string) => void): Promise<{ taken: string[]; skipped: string[] }> {
-  const taken: string[] = [];
-  const skipped: string[] = [];
+export class RetryQueue {
+  private waiting = new Map<string, { attempts: number; dueMs: number }>();
+  constructor(private baseMs = 1000, private maxMs = 60_000) {}
+  /** Note a failure (the first, or another); the next try waits baseMs, then double, up to maxMs. */
+  fail(name: string, nowMs: number): number {
+    const attempts = (this.waiting.get(name)?.attempts ?? 0) + 1;
+    this.waiting.set(name, { attempts, dueMs: nowMs + Math.min(this.maxMs, this.baseMs * 2 ** (attempts - 1)) });
+    return attempts;
+  }
+  done(name: string): void {
+    this.waiting.delete(name);
+  }
+  due(nowMs: number): string[] {
+    return [...this.waiting].filter(([, w]) => w.dueMs <= nowMs).map(([n]) => n);
+  }
+  get names(): string[] {
+    return [...this.waiting.keys()];
+  }
+}
+
+/**
+ * Take in ECRs one at a time. One that cannot be mapped (a `PlmMappingError`) is logged by name and
+ * skipped: the watcher delivers it again when someone fixes the ECR. One that fails for any other
+ * reason goes to the retry queue, and `retryDue` takes it in on a later tick. The rest are taken in
+ * either way, and the watcher still starts.
+ */
+export async function takeIn(
+  names: string[],
+  read: (name: string) => Promise<IngestItem>,
+  report: (item: IngestItem) => Promise<void>,
+  log: (m: string) => void,
+  retry = new RetryQueue(),
+  now: () => number = Date.now
+): Promise<{ taken: string[]; skipped: string[]; retrying: string[] }> {
+  const out = { taken: [] as string[], skipped: [] as string[], retrying: [] as string[] };
   for (const name of names) {
     try {
       await report(await read(name));
-      taken.push(name);
+      retry.done(name);
+      out.taken.push(name);
     } catch (e) {
-      skipped.push(name);
-      log(`${name}: not taken in, skipped: ${(e as Error).message}`);
+      if (isTransient(e)) {
+        const n = retry.fail(name, now());
+        out.retrying.push(name);
+        log(`${name}: not taken in yet (attempt ${n}), will retry: ${(e as Error).message}`);
+      } else {
+        retry.done(name);
+        out.skipped.push(name);
+        log(`${name}: not taken in, skipped until it is fixed in the PLM: ${(e as Error).message}`);
+      }
     }
   }
-  return { taken, skipped };
+  return out;
 }
+
+/** One tick: try again the ECRs that are due. */
+export const retryDue = (retry: RetryQueue, read: (name: string) => Promise<IngestItem>, report: (item: IngestItem) => Promise<void>, log: (m: string) => void, now: () => number = Date.now) =>
+  takeIn(retry.due(now()), read, report, log, retry, now);
 
 /** Run until the process ends. */
 export async function runPlmIngest(R: Client['R'], log: (m: string) => void, deps: { ingestOnce: typeof IngestOnce; itemOf: typeof ItemOf }, o = plmIngestOptionsFromEnv()): Promise<void> {
@@ -94,13 +141,22 @@ export async function runPlmIngest(R: Client['R'], log: (m: string) => void, dep
   const mark = all.at(-1)?.modified;
   const take = all.filter(e => wanted(o, e));
   log(`the PLM has ${all.length} ECR(s); ${take.length} to take in${o.only.length ? ` (only ${o.only.join(', ')})` : ''}: ${take.map(e => `${e.name} [${e.workflowState}]`).join(', ') || 'none'}`);
-  await takeIn(take.map(e => e.name), name => readItem(opts, name, deps.itemOf), report, log);
+  const read = (name: string) => readItem(opts, name, deps.itemOf);
+  const retry = new RetryQueue(o.intervalMs);
+  await takeIn(take.map(e => e.name), read, report, log, retry);
+  let retrying = false;
+  setInterval(() => {
+    if (retrying || retry.names.length === 0) return;
+    retrying = true;
+    retryDue(retry, read, report, log).catch(e => log(`PLM retry: ${(e as Error).message}`)).finally(() => (retrying = false));
+  }, o.intervalMs);
 
   const watcher = watchEcrs(
     opts,
     async change => {
       if (!wanted(o, change)) return;
       await report(await readItem(opts, change.name, deps.itemOf));
+      retry.done(change.name); // delivered fresh by the watcher: nothing left to retry
     },
     { intervalMs: o.intervalMs, since: mark, stateFile: o.stateFile, onError: e => log(`PLM watch: ${(e as Error).message}`) }
   );
