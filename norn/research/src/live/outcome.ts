@@ -164,6 +164,8 @@ export function buildOutcome(i: OutcomeInput): { outcome: Outcome; calls: { targ
 const MAX_COMMENT = 3900;
 const num = (x: number) => (Math.abs(x) >= 100 ? Math.round(x).toLocaleString('en-US') : String(r4(x)));
 const range = (p: Range3 | undefined, unit: Unit | null) => (p ? `${num(p.p50)} (p10 ${num(p.p10)}, p90 ${num(p.p90)}) ${unit === 'usd' ? 'USD' : unit === 'weeks' ? 'weeks' : 'as a share'}` : 'no usable value');
+/** Several messages as sentences: each ends in a full stop, so they do not run into one another on the page. */
+const sentences = (xs: string[]) => xs.map((x) => (/[.!?]$/.test(x.trim()) ? x.trim() : `${x.trim()}.`)).join(' ');
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function source(p: ProposalRecord): string {
@@ -193,13 +195,13 @@ export function commentFor(o: Outcome): string | null {
   if (held.length) {
     lines.push('', `Held for a person (${held.length}). Not used in the forecast:`);
     for (const p of held) {
-      lines.push(`- ${p.label ?? 'a question'}: ${range(p.proposed, p.unit)}. ${source(p)}. Why held: ${[...p.reasons.map((r) => r.message), ...p.flags.map((f) => f.message)].join(' ')}`);
+      lines.push(`- ${p.label ?? 'a question'}: ${range(p.proposed, p.unit)}. ${source(p)}. Why held: ${sentences([...p.reasons.map((r) => r.message), ...p.flags.map((f) => f.message)])}`);
       if (p.distJson && p.inputId) lines.push(`  To use it, record an assumption on ${p.inputId} with ${p.distJson}`);
     }
   }
   if (rejected.length) {
     lines.push('', `Rejected (${rejected.length}):`);
-    for (const p of rejected) lines.push(`- ${p.label ?? `proposal ${p.index + 1}`}: ${p.reasons.map((r) => r.message).join(' ')}`);
+    for (const p of rejected) lines.push(`- ${p.label ?? `proposal ${p.index + 1}`}: ${sentences(p.reasons.map((r) => r.message))}`);
   }
   if (o.unresolved.length) {
     lines.push('', `Not found (${o.unresolved.length}):`);

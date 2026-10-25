@@ -22,21 +22,31 @@ const company = bowman as unknown as Company;
 const AGENT = 'ab'.repeat(32);
 const PR = 7n;
 
-async function recorded(asRecorded = false) {
+type Fixture = 'accepted' | 'asRecorded' | 'blankFill';
+async function recorded(fixture: Fixture = 'accepted') {
   const rec = await loadRecording(here('../recordings/ecr-0417.recording.json'));
   const prep = prepare(company, { ecrId: rec.ecr, seed: rec.seed, n: rec.n, ...(rec.context ? { context: rec.context } : {}) });
-  // The recording shows the guardrails holding the researched share (it is 5 times below the current one) and nothing is
-  // applied. The worker's plumbing needs one accepted proposal, so the share here is one that agrees with the current value.
-  if (!asRecorded) {
+  // As recorded, the guardrails hold both researched figures (the share is five times below the current one and its quote
+  // does not state it; the labor quote does not state the derived figure) and nothing is applied. The worker's plumbing needs
+  // one accepted proposal, so the share here agrees with the current value and its quote, on a page of its own, states it.
+  if (fixture !== 'asRecorded') {
+    const url = 'https://example.test/scrap-recovery';
+    rec.pages = [...rec.pages, { url, text: 'Scrap recovery on aluminum machining averages 1.8% of the purchase price.', retrievedAt: rec.recordedOn }] as typeof rec.pages;
     const agentOutput = structuredClone(rec.agentOutput);
-    (agentOutput.proposals[0] as { dist: unknown }).dist = { kind: 'pert', min: 0.01, mode: 0.0178, max: 0.03 };
+    Object.assign(agentOutput.proposals[0] as object, { dist: { kind: 'pert', min: 0.01, mode: 0.018, max: 0.03 }, sourceUrl: url, quote: 'averages 1.8% of the purchase price', sourceDate: rec.recordedOn });
+    if (fixture === 'blankFill') {
+      // The second figure, on a page that states it, rated medium: the one thing left to hold it is that it fills a blank row.
+      const blank = 'https://example.test/retrofit-cost';
+      rec.pages = [...rec.pages, { url: blank, text: 'Re-inspection and test after a retrofit typically costs $4,500 per aircraft.', retrievedAt: rec.recordedOn }] as typeof rec.pages;
+      Object.assign(agentOutput.proposals[1] as object, { sourceUrl: blank, quote: 'typically costs $4,500 per aircraft', sourceDate: rec.recordedOn, confidence: 'medium' });
+    }
     rec.agentOutput = agentOutput;
   }
   const verdicts = await reviewProposals(rec.agentOutput.proposals, prep.targets, recordedFetcher(rec.pages), { today: rec.recordedOn, identifiers: prep.identifiers });
   return { rec, prep, verdicts };
 }
-const input = async (over: Partial<OutcomeInput> = {}, asRecorded = false): Promise<OutcomeInput> => {
-  const { rec, prep, verdicts } = await recorded(asRecorded);
+const input = async (over: Partial<OutcomeInput> = {}, fixture: Fixture = 'accepted'): Promise<OutcomeInput> => {
+  const { rec, prep, verdicts } = await recorded(fixture);
   return { mode: 'LIVE', key: 'ECR-0417@d1', ecr: 'ECR-0417', prId: PR, revision: 2, digest: 'd1', s2RunId: 11n, jobId: 'research-ECR-0417-r2-d1-a1', now: '2026-10-25T05:00:00.000Z', targets: prep.targets, agentOutput: rec.agentOutput, verdicts, existing: [], agentHex: AGENT, ...over };
 };
 
@@ -70,7 +80,7 @@ describe('accepted proposals as record_assumption calls', () => {
     assert.equal(call.args.source, 'agent_estimated');
     assert.deepEqual(call.args.affects, ['s2_cost']);
     assert.equal(call.args.expectedRev, 0);
-    assert.equal(call.args.distJson, '{"kind":"pert","min":0.01,"mode":0.0178,"max":0.03}');
+    assert.equal(call.args.distJson, '{"kind":"pert","min":0.01,"mode":0.018,"max":0.03}');
     assert.equal(typeof call.args.expectedRev, 'number');
     assert.equal(typeof call.args.prId, 'bigint');
     assert.equal(call.targetKey, 'T1');
@@ -80,8 +90,8 @@ describe('accepted proposals as record_assumption calls', () => {
   it('carries the URL, the quote, the source date, the retrieval date and the confidence in the rationale', async () => {
     const { calls } = buildOutcome(await input());
     const r = calls[0]!.args.rationale;
-    assert.match(r, /Source: https:\/\/rockawayrecycling\.com\/metal\/al-machine-cuts\//);
-    assert.match(r, /Quote: "[^"]*CURRENT PRICE \$0\.75\/lb[^"]*"/);
+    assert.match(r, /Source: https:\/\/example\.test\/scrap-recovery/);
+    assert.match(r, /Quote: "[^"]*averages 1\.8% of the purchase price[^"]*"/);
     assert.match(r, /Retrieved 2026-10-25/);
     assert.match(r, /confidence medium/);
     assert.match(r, /dated 2026-10-25/);
@@ -211,7 +221,8 @@ describe('what a person can see of what was not used', () => {
     assert.match(body, /Re-inspection and test after retrofit/);
     assert.match(body, /https:\/\/avbrief\.com\//);
     assert.match(body, /confidence low/);
-    assert.match(body, /Why held: the agent rates its own confidence as low/);
+    assert.match(body, /Why held: quote does not state the proposed value: the quote states 149 \(in usd\); the proposal is 4500\./);
+    assert.match(body, /the agent rates its own confidence as low/);
     assert.match(body, /record an assumption on cost:ECR-0417:retrofit:re-inspection-and-test-after-retrofit with \{"kind":"lognormal"/);
     assert.match(body, /Rejected \(2\)/);
     assert.match(body, /the quote does not appear in the page text/);
@@ -219,15 +230,26 @@ describe('what a person can see of what was not used', () => {
     assert.ok(body.length <= 4000);
   });
 
-  it('lists a proposal held because it was flagged, with the flag, and never records it', async () => {
-    // As recorded, the researched share is far below the current one: held for disagreeing, not applied.
-    const { outcome, calls } = buildOutcome(await input({}, true));
+  it('lists a proposal held because its quote does not state the value, and never records it', async () => {
+    // As recorded, the share's quote ("$0.75/lb") says nothing about a share, and the figure is far below the current one.
+    const { outcome, calls } = buildOutcome(await input({}, 'asRecorded'));
     assert.equal(calls.length, 0);
     const body = commentFor(outcome)!;
     assert.match(body, /Held for a person \(2\)/);
     assert.match(body, /Share of the purchase price recovered when scrapped parts are sold/);
-    assert.match(body, /Why held: not applied, flagged for disagrees_with_current p50 .* more than 3 times apart/);
+    assert.match(body, /Why held: quote does not state the proposed value: the quote states no figure \(in fraction\); the proposal is 0\.0036\./);
     assert.match(body, /record an assumption on recovery:BW-5120-210 with \{"kind":"pert"/);
+  });
+
+  it('lists a fill of a blank cost-page row as held, with the flag, and does not record it', async () => {
+    const { outcome, calls } = buildOutcome(await input({}, 'blankFill'));
+    assert.deepEqual(calls.map((c) => c.targetKey), ['T1'], 'only the share is recorded; the blank row waits for a person');
+    const held = outcome.proposals.find((p) => p.targetKey === 'T2')!;
+    assert.equal(held.status, 'needs_person');
+    assert.ok(held.flags.some((f) => f.code === 'replaces_blank_row'));
+    const body = commentFor(outcome)!;
+    assert.match(body, /Re-inspection and test after retrofit: 4,500/);
+    assert.match(body, /Why held: not applied, flagged for replaces_blank_row.* this fills a cost-page row that was blank/);
   });
 
   it('lists the questions the agent declared unresolved and the ones it did not answer at all, in the comment and the stored result', async () => {
