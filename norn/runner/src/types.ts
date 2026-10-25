@@ -47,8 +47,21 @@ export interface JobSpec {
    * `mcp__<server>__*`. A bare `*` is not accepted.
    */
   allowedTools: string[];
+  /**
+   * Checks on the real arguments of named tools, run before the call is sent (a `PreToolUse`
+   * hook). Keyed by the exact tool name (`mcp__<server>__<tool>`). A call is made only when its
+   * guard allows it; a guard that throws denies. Tools without a guard behave as before. Code
+   * only: functions do not survive a JSON job file.
+   */
+  toolInputGuards?: Record<string, ToolInputGuard>;
   identity: Identity;
 }
+
+/** What a tool-input guard decides about one call. The reason goes back to the model and into the log. */
+export type ToolInputVerdict = { allow: true } | { allow: false; reason: string };
+
+/** Sees the arguments the model gave a tool, before the tool runs. */
+export type ToolInputGuard = (input: unknown, call: { tool: string; toolUseId?: string }) => ToolInputVerdict | Promise<ToolInputVerdict>;
 
 export interface RunnerConfig {
   /** Default model for jobs that name none. */
