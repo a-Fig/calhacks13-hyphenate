@@ -3,7 +3,8 @@
 First draft of the Devpost story, written 2026-10-24 for Cal Hacks' Saturday-night draft (#46).
 Every claim is from what is merged on `main` that day, with the PR that shows it in brackets.
 Strip the brackets before pasting. Submitting needs Tyler's ask. The video and the demo script
-come later.
+come later. A **[confirm]** marks a number from an earlier live run: the rerun in `docs/DEMO.md`
+confirms or replaces each one before this is pasted (2026-10-25).
 
 ## Name
 
@@ -42,25 +43,25 @@ standing in for SAP.
 **ECR-0417, end to end.** An engineer files ECR-0417 in Bowman's PLM: a motor-controller bracket
 goes from Rev B to Rev C after it cracked in a vibration test. Norn picks it up, runs its checks
 against live ERPNext, and a Claude Haiku agent writes the Level 1 impact statement. The statement
-lands back on the ECR in the PLM about 35 seconds after the ECR reached Norn (#80, #112):
+lands back on the ECR in the PLM about 35 seconds **[confirm]** after the ECR reached Norn (#80, #112):
 
-- about +$415 per Vesper (p10 to p90: $407 to $432) and +$277 per Meridian;
-- a one-time cost of $142k to $156k, and a 12-month net of about $157k;
-- the top driver: whether to use up or scrap the old brackets, a $60.6k swing;
-- three blank cost lines, flagged for an estimate;
-- "Approve with conditions", from a stated rule that names those three gaps (#112);
+- about +$415 per Vesper (p10 to p90: $407 to $432) and +$277 per Meridian **[confirm]**;
+- a one-time cost of $142k to $156k, and a 12-month net of about $157k **[confirm]**;
+- the top driver: whether to use up or scrap the old brackets, a $60.6k swing **[confirm]**;
+- three blank cost lines, flagged for an estimate **[confirm]**;
+- "Approve with conditions", from a stated rule that names those three gaps (#112) **[confirm]**;
 - the route from Bowman's own configuration: the Change Control Board with a Technical Review
-  Committee review, because the p90 cost of about $164,556 is above Bowman's $150,000 limit (#112).
+  Committee review, because the p90 cost of about $164,556 **[confirm]** is above Bowman's $150,000 limit (#112).
 
 **When the change reaches the line, and who it collides with.** The timeline check puts ECR-0417's
-cut-in at 2027-02-16 at the median, 13 weeks later than the engineer stated, because the supplier
+cut-in at 2027-02-16 at the median, 13 weeks later than the engineer stated **[confirm]**, because the supplier
 quotes 14 weeks. The supply check reads every other open ECR: ECR-0419 and ECR-0421 buy from the
-same supplier, so with ECR-0419 filed ahead, ECR-0421's cut-in moves 13 weeks. Bundling the two
-saves about $180k at the median (#88).
+same supplier, so with ECR-0419 filed ahead, ECR-0421's cut-in moves 13 weeks **[confirm]**. Bundling the two
+saves about $180k at the median (#88) **[confirm]**.
 
 **Decisions the company sets.** Every write Norn's agents make passes a policy gate built from
 Bowman's configuration. In our tests on Bowman's unchanged configuration, the same agent request is
-approved on the fast track for ECR-0423, a small change at $622, and becomes "Norn recommends
+approved on the fast track for ECR-0423, a small change at $622 **[confirm]**, and becomes "Norn recommends
 approval" for ECR-0417, which is over the cost and schedule limits. Both decisions are stored with
 their reasons (#100).
 
@@ -122,7 +123,7 @@ shown are real database rows, and the package lines, problems and effects are ha
 
 ## Accomplishments that we're proud of
 
-- An ECR filed in a PLM gets a ranged, sourced impact statement back in about 35 seconds, and a
+- An ECR filed in a PLM gets a ranged, sourced impact statement back in about 35 seconds **[confirm]**, and a
   restart writes nothing twice (#80).
 - Every number on the statement traces to the change request revision and the ERP baseline it was
   computed from.
