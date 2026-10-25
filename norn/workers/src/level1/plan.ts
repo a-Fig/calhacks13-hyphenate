@@ -14,6 +14,8 @@
 //   - the attempt cap. A session that failed, or ended without a statement, may be tried again later,
 //     up to a limit, under a new job id (so the actor name and the events never collide).
 
+import { SIBLING_CACHE_GRACE_US } from './siblings.ts';
+
 /** One session, as the stored events describe it. */
 export interface JobRecord {
   jobId: string;
@@ -140,9 +142,9 @@ export function decide(e: EcrFacts, o: DecideOptions): Decision {
   if (!run) return skip(`no finished s2_cost run on change-request revision ${rev} yet`);
   if (run.mock) return skip('the s2_cost run is mock compute');
   // The timeline and supply checks (s3, s4) finish within seconds of the cost check, and the statement carries
-  // them, so wait for them, but only until the run's cutoff has strictly passed (siblings.ts says why): a hung or failed check must not hold Level 1 back
+  // them, so wait for them, but only until the run's cutoff plus a short grace has strictly passed (siblings.ts says why): a hung or failed check must not hold Level 1 back
   // (the statement then says that check is unavailable).
-  if (run.siblings?.pending && BigInt(o.nowMs) * 1000n <= run.siblings.cutoffUs) return skip(`waiting for the timeline and supply checks until ${new Date(Number(run.siblings.cutoffUs / 1000n)).toISOString()}`);
+  if (run.siblings?.pending && BigInt(o.nowMs) * 1000n <= run.siblings.cutoffUs + SIBLING_CACHE_GRACE_US) return skip(`waiting for the timeline and supply checks until ${new Date(Number((run.siblings.cutoffUs + SIBLING_CACHE_GRACE_US) / 1000n)).toISOString()}`);
 
   // A statement written from this revision's check run is this revision's statement (any level: a
   // Level 2 or 3 supersedes Level 1). One written for an earlier revision, however late it was posted, is not.

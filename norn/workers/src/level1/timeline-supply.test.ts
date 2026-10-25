@@ -12,7 +12,7 @@ import { CLAIM_MAX, SUPPLY_CLAIM, TIMELINE_CLAIM, jobPrompt, usd } from './promp
 import { gather } from './publisher.ts';
 import { deriveRecommendation, ruleInputOf, type RunRow } from './recommendation.ts';
 import { storedRows, storedSupplyRows, storedTimelineRows } from './routing-fixture.ts';
-import { SIBLING_WAIT_MS, siblingCutoffUs, siblingOf, waitingForSiblings } from './siblings.ts';
+import { SIBLING_CACHE_GRACE_US, SIBLING_WAIT_MS, siblingCutoffUs, siblingOf, waitingForSiblings } from './siblings.ts';
 import { ruleInputForRun, siblingsForRun } from './source.ts';
 import { headlineNumbers, isTimelineSupplyKey, likelihoodWord, ruleCheckOf, supplierName, tableNumbers, timelineSupplyFacts, type SiblingView, type StoredRow } from './timeline-supply.ts';
 
@@ -46,6 +46,9 @@ const s2 = run(3, 's2_cost', 'done', { createdUs: us(T0), startedUs: us(T0), fin
 const done = (id: number, stage: string, over: Partial<RunRow> = {}) => run(id, stage, 'done', { createdUs: us(T0), startedUs: us(T0), finishedUs: us(T0 + 11_000), completedUs: us(T0 + 11_000), ...over });
 const CUTOFF = siblingCutoffUs(s2);
 const CUTOFF_MS = Number(CUTOFF / 1000n);
+/** The last moment the dispatcher still waits for a missing sibling: the cutoff plus the cache grace. One microsecond later it goes ahead. */
+const GO = CUTOFF + SIBLING_CACHE_GRACE_US;
+const GO_MS = Number(GO / 1000n);
 
 test('a sibling is the s3 or s4 run on the same s1 and revision created no later than the s2 run: a later run is never eligible, however soon it finishes', () => {
   assert.equal(CUTOFF, us(T0 + 10_000 + SIBLING_WAIT_MS));
@@ -83,10 +86,11 @@ test("a stale run's results say when it completed, not its overwritten finishedA
 test('(b) a sibling created before s2 that completes after the cutoff is unavailable at dispatch once the cutoff has passed, and at publication even after it has finished', () => {
   const late = (status: string, finishedUs: bigint | null) => run(4, 's3_timeline', status, { createdUs: us(T0 - 1_000), finishedUs, ...(finishedUs ? { completedUs: finishedUs } : {}) });
   const s4 = done(5, 's4_supply');
-  // at dispatch: up to and including the cutoff the dispatcher still waits; only after it does it go ahead, and the check is unavailable
+  // at dispatch: up to and including the cutoff plus the grace the dispatcher still waits; only after it does it go ahead, and the check is unavailable
   assert.equal(waitingForSiblings([s2, late('running', null), s4], s2, CUTOFF - 1n), true);
   assert.equal(waitingForSiblings([s2, late('running', null), s4], s2, CUTOFF), true, 'at the cutoff itself it still waits (see below)');
-  assert.equal(waitingForSiblings([s2, late('running', null), s4], s2, CUTOFF + 1n), false);
+  assert.equal(waitingForSiblings([s2, late('running', null), s4], s2, GO), true, 'and through the grace');
+  assert.equal(waitingForSiblings([s2, late('running', null), s4], s2, GO + 1n), false);
   assert.equal(siblingOf([s2, late('running', null), s4], s2, 's3_timeline').state, 'pending');
   // at publication, later: the run has finished (after the cutoff). Same answer: unavailable.
   const finished = late('done', CUTOFF + 20_000_000n);
@@ -140,14 +144,28 @@ test('(d) a sibling that finishes or fails exactly at the cutoff resolves the sa
     // ends at the cutoff: counts. A dispatcher that looks at the cutoff before it has seen the end must not go ahead, so it cannot have told the agent "pending".
     assert.equal(atPublication(ended(status, CUTOFF)), inside, `${status} at the cutoff counts at publication`);
     assert.equal(atDispatch(stillRunning, CUTOFF), null, `${status} at the cutoff: a dispatcher looking at the cutoff still waits`);
+    assert.equal(atDispatch(stillRunning, GO), null, `${status} at the cutoff: and through the grace`);
     assert.equal(atDispatch(ended(status, CUTOFF), CUTOFF), inside, `${status} at the cutoff: and once it has seen the end it says the same as publication`);
-    // ends one microsecond after: too late. The dispatcher goes ahead only after the cutoff, when it is still running, and says pending; so does publication.
-    assert.equal(atDispatch(stillRunning, CUTOFF + 1n), 'pending');
+    // ends one microsecond after: too late. The dispatcher goes ahead only after the cutoff and the grace, when it is still running, and says pending; so does publication.
+    assert.equal(atDispatch(stillRunning, GO + 1n), 'pending');
     assert.equal(atPublication(ended(status, CUTOFF + 1n)), 'pending', `${status} 1 us after the cutoff is late at publication`);
     // ends one microsecond before: counts at both.
     assert.equal(atDispatch(ended(status, CUTOFF - 1n), CUTOFF - 1n), inside);
     assert.equal(atPublication(ended(status, CUTOFF - 1n)), inside);
   }
+});
+
+test('(g) a sibling that finished exactly at the cutoff but reaches the cache late, inside the grace, reads ready at dispatch and at publication', () => {
+  const s4 = done(5, 's4_supply');
+  const stillRunning = run(4, 's3_timeline', 'running', { createdUs: us(T0), startedUs: us(T0) });
+  const finished = run(4, 's3_timeline', 'done', { createdUs: us(T0), startedUs: us(T0), finishedUs: CUTOFF, completedUs: CUTOFF });
+  // What the dispatcher would tell the agent at `nowUs` given what its cache shows then (null: it keeps waiting).
+  const atDispatch = (s3: RunRow, nowUs: bigint) => (waitingForSiblings([s2, s3, s4], s2, nowUs) ? null : siblingOf([s2, s3, s4], s2, 's3_timeline').state);
+  // The run finished in the database at the cutoff; the cache still shows it running a millisecond later, and then catches up 1.5 s after.
+  assert.equal(atDispatch(stillRunning, CUTOFF + 1_000n), null, 'the cache has not caught up: inside the grace the dispatcher still waits');
+  assert.equal(atDispatch(finished, CUTOFF + 1_500_000n), 'ready', 'the cache has caught up: the dispatcher tells the agent ready');
+  assert.equal(atDispatch(finished, GO + 1n), 'ready', 'and the same had it looked only after the grace');
+  assert.equal(siblingOf([s2, finished, s4], s2, 's3_timeline').state, 'ready', 'publication reads ready too');
 });
 
 test('a queued or running sibling is not available, a failure or block is how it ended, and the newest eligible run decides', () => {
@@ -165,8 +183,8 @@ test('the dispatcher waits while a sibling is unavailable, and goes ahead when b
   const both = [s2, done(4, 's3_timeline'), done(5, 's4_supply')];
   assert.equal(waitingForSiblings(both, s2, us(T0 + 12_000)), false, 'both done: no waiting');
   assert.equal(waitingForSiblings([s2, done(4, 's3_timeline')], s2, us(T0 + 12_000)), true, 's4 not there yet');
-  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'running', { createdUs: us(T0) })], s2, CUTOFF), true, 'a hung s4 is waited for up to and including the cutoff');
-  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'running', { createdUs: us(T0) })], s2, CUTOFF + 1n), false, 'and not a microsecond longer');
+  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'running', { createdUs: us(T0) })], s2, GO), true, 'a hung s4 is waited for up to and including the cutoff plus the grace');
+  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'running', { createdUs: us(T0) })], s2, GO + 1n), false, 'and not a microsecond longer');
   assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'failed', { createdUs: us(T0) })], s2, us(T0 + 12_000)), false, 'a failed s4 is settled: no reason to wait');
   assert.equal(waitingForSiblings([s2, run(4, 's3_timeline', 'blocked', { createdUs: us(T0) }), done(5, 's4_supply')], s2, us(T0 + 12_000)), false);
   assert.equal(waitingForSiblings([s2], s2, us(T0 + 1_000_000)), false, 'neither ever ran: after the cutoff, go ahead');
@@ -190,10 +208,11 @@ test('decide: Level 1 waits for s3 and s4 until the cutoff, then starts whatever
   const cutoffUs = us(cutoff);
   const waiting = decide(ecrFacts({ pending: true, cutoffUs }), opts({ nowMs: T0 + 20_000 }));
   assert.equal(waiting.action, 'skip');
-  assert.match((waiting as { reason: string }).reason, /waiting for the timeline and supply checks until 2026-10-24T20:00:40/);
+  assert.match((waiting as { reason: string }).reason, /waiting for the timeline and supply checks until 2026-10-24T20:00:42/, 'the cutoff plus the 2 s grace');
   assert.equal(decide(ecrFacts({ pending: false, cutoffUs }), opts({ nowMs: T0 + 20_000 })).action, 'dispatch', 'settled: no waiting');
   assert.equal(decide(ecrFacts({ pending: true, cutoffUs }), opts({ nowMs: cutoff })).action, 'skip', 'at the cutoff itself it still waits: a sibling that finishes exactly then still counts');
-  assert.equal(decide(ecrFacts({ pending: true, cutoffUs }), opts({ nowMs: cutoff + 1 })).action, 'dispatch', 'a hung check does not hold Level 1 back');
+  assert.equal(decide(ecrFacts({ pending: true, cutoffUs }), opts({ nowMs: cutoff + 2_000 })).action, 'skip', 'through the grace it still waits');
+  assert.equal(decide(ecrFacts({ pending: true, cutoffUs }), opts({ nowMs: cutoff + 2_001 })).action, 'dispatch', 'a hung check does not hold Level 1 back');
   assert.equal(decide(ecrFacts(undefined), opts({ nowMs: T0 + 20_000 })).action, 'dispatch');
 });
 
@@ -566,7 +585,8 @@ test('(b) a sibling created before s2 that finishes after the cutoff is unavaila
   assert.deepEqual(f.siblings, { pending: true, cutoffUs: CUTOFF });
   assert.equal(decide({ ...ecrFacts(f.siblings) }, opts({ nowMs: CUTOFF_MS - 1 })).action, 'skip', 'before the cutoff it waits');
   assert.equal(decide({ ...ecrFacts(f.siblings) }, opts({ nowMs: CUTOFF_MS })).action, 'skip', 'at the cutoff it still waits');
-  assert.equal(decide({ ...ecrFacts(f.siblings) }, opts({ nowMs: CUTOFF_MS + 1 })).action, 'dispatch', 'after it, it goes');
+  assert.equal(decide({ ...ecrFacts(f.siblings) }, opts({ nowMs: GO_MS })).action, 'skip', 'and through the grace');
+  assert.equal(decide({ ...ecrFacts(f.siblings) }, opts({ nowMs: GO_MS + 1 })).action, 'dispatch', 'after it, it goes');
   const atDispatch = resolved(running);
   assert.deepEqual(atDispatch.states, ['pending', 'ready']);
   assert.deepEqual(atDispatch.told?.unavailable, [{ check: 'timeline', why: 'it had not finished in time' }]);

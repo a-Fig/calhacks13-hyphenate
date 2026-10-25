@@ -16,7 +16,8 @@
 //   - failed: its `finishedAt`; blocked: blocked.
 // A run that had not completed by the cutoff (the s2 run's completion plus a bounded wait) is unavailable, however
 // late it finishes afterwards. The cutoff doubles as the dispatcher's patience: it starts the session as soon as
-// both have settled, and otherwise only once the cutoff has strictly passed, so a hung check cannot hold Level 1 back.
+// both have settled, and otherwise only once the cutoff plus a short grace has strictly passed, so a hung check cannot
+// hold Level 1 back.
 //
 // Why strictly passed. A run that completes or fails exactly AT the cutoff counts as done (`<=`). If the dispatcher
 // went ahead at the cutoff while a sibling was still running, that sibling could then finish at the cutoff: pending
@@ -24,6 +25,11 @@
 // sibling still running when the dispatcher goes ahead completes after the cutoff, so it is pending at dispatch and
 // at publication alike. (The other way, remembering at dispatch what was pending, needs a record stored on the
 // statement; this needs none.)
+//
+// Why the grace. The dispatcher reads its client cache, which lags the database. A sibling that completed just before
+// the cutoff might not have reached the cache when the cutoff passes, so the dispatcher would tell the agent pending
+// while the publisher later reads ready. Going ahead only after `cutoff + SIBLING_CACHE_GRACE_US` leaves that sibling
+// 2 s to arrive. The cutoff itself, and so what counts as done, is unchanged.
 //
 // Every time here is a SpacetimeDB timestamp at full precision: bigint microseconds, never milliseconds (see `RunRow`).
 import type { RunRow } from './recommendation.ts';
@@ -40,6 +46,9 @@ export type SiblingStage = (typeof SIBLING_STAGES)[number];
  */
 export const SIBLING_WAIT_MS = 30_000;
 export const SIBLING_WAIT_US = BigInt(SIBLING_WAIT_MS) * 1000n;
+
+/** How long past the cutoff the dispatcher still waits for a missing sibling: the client cache lags the database by milliseconds, so 2 s is ample. */
+export const SIBLING_CACHE_GRACE_US = 2_000_000n;
 
 export type SiblingRunState = 'ready' | 'failed' | 'blocked' | 'pending';
 
@@ -74,11 +83,11 @@ export function siblingOf(runs: readonly RunRow[], s2: RunRow, stage: SiblingSta
 }
 
 /**
- * Whether the dispatcher should still wait: a sibling is not available yet and the cutoff has not strictly passed.
- * After it, it goes ahead whatever the state, and the statement says what is missing. `nowUs` is the clock in
+ * Whether the dispatcher should still wait: a sibling is not available yet and the cutoff plus the grace has not
+ * strictly passed. After that, it goes ahead whatever the state, and the statement says what is missing. `nowUs` is the clock in
  * microseconds; a clock read in whole milliseconds is never ahead of the true time, so it only errs towards waiting.
  */
 export function waitingForSiblings(runs: readonly RunRow[], s2: RunRow, nowUs: bigint): boolean {
-  if (nowUs > siblingCutoffUs(s2)) return false;
+  if (nowUs > siblingCutoffUs(s2) + SIBLING_CACHE_GRACE_US) return false;
   return SIBLING_STAGES.some(stage => siblingOf(runs, s2, stage).state === 'pending');
 }
