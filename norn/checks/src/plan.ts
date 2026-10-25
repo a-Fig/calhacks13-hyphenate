@@ -642,7 +642,8 @@ export function evaluateSchedules(scheds: Schedule[], d: Draws, contend: boolean
       t.parts[i] = parts;
       let cutIn = parts;
       const completion = new Map<string, number>([['decision', decision], ['parts', parts]]);
-      let retrofit = parts;
+      // Retrofit follows its own declared dependencies; unrelated production parts cannot delay it.
+      let retrofit = s.filedDay;
       s.tasks.forEach((task, k) => {
         const starts = Math.max(s.filedDay, ...task.after.map(id => completion.get(id)!));
         const finish = task.completedDay ?? (starts + WEEK * d.values.get(task.duration)![i]);

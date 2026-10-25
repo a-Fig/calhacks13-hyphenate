@@ -46,6 +46,15 @@ test('unknown gates and unsupported completion claims cannot establish implement
   assert.throws(() => timelineCheck(bowman, e, { seed }), /cycle/);
 });
 
+test('completed retrofit work is not delayed by unrelated production material arrivals', () => {
+  const e = ecr();
+  e.implementationPlan = { complete: true, tasks: [task(8), { id: 'retrofit_done', label: 'Retrofit completed', kind: 'test',
+    appliesTo: 'retrofit', owner: 'Maintenance', status: 'complete', after: ['decision'], completedOn: '2026-10-20', evidence: 'Signed work card', downtimeHoursPerUnit: 12 }] };
+  const r = timelineCheck(bowman, e, { seed });
+  assert.equal(r.retrofit!.date.p50, '2026-10-20');
+  assert.ok(r.retrofit!.day.p50 < r.cutIn.day!.p50);
+});
+
 test('cost assessment keeps requested costs separate and reprices the median readiness scenario', () => {
   const e = structuredClone(bowman.ecrs.find(e => e.id === 'ECR-0417')!);
   const first = costAssessment(bowman, e, { seed, windowMonths: 6 });
