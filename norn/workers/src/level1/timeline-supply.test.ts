@@ -6,19 +6,18 @@ import { test } from 'node:test';
 import { jobFactsOf, factsOf } from './dispatcher.ts';
 import { statementToPlmFields, type StatementDoc } from './format.ts';
 import { decide, type DecideOptions, type EcrFacts } from './plan.ts';
-import { SUPPLY_CLAIM, TIMELINE_CLAIM, jobPrompt } from './prompt.ts';
+import { CLAIM_MAX, SUPPLY_CLAIM, TIMELINE_CLAIM, jobPrompt } from './prompt.ts';
 import { gather } from './publisher.ts';
 import { deriveRecommendation, ruleInputOf, type RunRow } from './recommendation.ts';
 import { storedRows, storedSupplyRows, storedTimelineRows } from './routing-fixture.ts';
 import { SIBLING_WAIT_MS, siblingCutoffMs, siblingOf, waitingForSiblings } from './siblings.ts';
 import { siblingsForRun } from './source.ts';
-import { headlineNumbers, isTimelineSupplyKey, likelihoodWord, ruleCheckOf, supplierName, timelineSupplyFacts, type SiblingView, type StoredRow } from './timeline-supply.ts';
+import { headlineNumbers, isTimelineSupplyKey, likelihoodWord, ruleCheckOf, supplierName, tableNumbers, timelineSupplyFacts, type SiblingView, type StoredRow } from './timeline-supply.ts';
 
 // ---- runs ---------------------------------------------------------------------------------------------
 
 const T0 = Date.parse('2026-10-24T20:00:00Z');
 const S1 = 'hash-s1';
-let n = 0;
 const run = (id: number, stage: string, status: string, over: Partial<RunRow> = {}): RunRow => ({
   id: BigInt(id),
   stage,
@@ -31,55 +30,83 @@ const run = (id: number, stage: string, status: string, over: Partial<RunRow> = 
   revision: 1,
   ...over,
 });
-/** s2 finished at T0+10 s; s3 and s4 below default to finishing a second later. */
-const s2 = run(3, 's2_cost', 'done', { createdMs: T0, startedMs: T0, finishedMs: T0 + 10_000 });
-const done = (id: number, stage: string, over: Partial<RunRow> = {}) => run(id, stage, 'done', { createdMs: T0 + 10_000, startedMs: T0 + 10_000, finishedMs: T0 + 11_000, ...over });
+/** s2 was created at T0 (with s3 and s4, in one transaction) and completed at T0+10 s; the cutoff is 30 s after that. */
+const s2 = run(3, 's2_cost', 'done', { createdMs: T0, startedMs: T0, finishedMs: T0 + 10_000, completedMs: T0 + 10_000 });
+/** An s3 or s4 run created with s2 (the same timestamp) that completed at T0+11 s unless told otherwise. */
+const done = (id: number, stage: string, over: Partial<RunRow> = {}) => run(id, stage, 'done', { createdMs: T0, startedMs: T0, finishedMs: T0 + 11_000, completedMs: T0 + 11_000, ...over });
+const CUTOFF = siblingCutoffMs(s2);
 
-test('s3 and s4 are the newest runs on the same s1 and revision that had settled by the cutoff; a later run is not the statement\'s', () => {
-  const cutoff = siblingCutoffMs(s2);
-  assert.equal(cutoff, T0 + 10_000 + SIBLING_WAIT_MS);
-  const s3a = done(4, 's3_timeline');
-  const s4a = done(5, 's4_supply');
-  const runs = [s2, s3a, s4a];
+test('a sibling is the s3 or s4 run on the same s1 and revision created no later than the s2 run: a later run is never eligible, however soon it finishes', () => {
+  assert.equal(CUTOFF, T0 + 10_000 + SIBLING_WAIT_MS);
+  const runs = [s2, done(4, 's3_timeline'), done(5, 's4_supply')];
   assert.equal(siblingOf(runs, s2, 's3_timeline').run?.id, 4n);
   assert.equal(siblingOf(runs, s2, 's4_supply').state, 'ready');
-  // s4 re-runs because another ECR was filed, after the cutoff: the statement does not move
-  const rerun = done(9, 's4_supply', { finishedMs: cutoff + 1 });
-  assert.equal(siblingOf([...runs, rerun], s2, 's4_supply').run?.id, 5n, 'a run finished after the cutoff is not read');
-  // a re-run inside the window is the newer snapshot
-  const inside = done(9, 's4_supply', { finishedMs: cutoff - 1 });
-  assert.equal(siblingOf([...runs, inside], s2, 's4_supply').run?.id, 9n);
+  // s4 re-runs because another ECR was filed: created later, so not the statement's, finished inside or after the window
+  for (const completedMs of [T0 + 12_000, CUTOFF - 1, CUTOFF + 1]) {
+    const rerun = done(9, 's4_supply', { createdMs: T0 + 5_000, completedMs, finishedMs: completedMs });
+    assert.equal(siblingOf([...runs, rerun], s2, 's4_supply').run?.id, 5n, `a run created after s2 is not eligible (completed at +${completedMs - T0} ms)`);
+    assert.equal(siblingOf([...runs, rerun], s2, 's4_supply').state, 'ready');
+  }
+  // the run that was queued with s2 and went stale because of that re-run is still the statement's, with its own results
+  const staled = { ...done(5, 's4_supply'), status: 'stale', finishedMs: T0 + 5_000 /* overwritten when it went stale */ };
+  assert.equal(siblingOf([s2, done(4, 's3_timeline'), staled, done(9, 's4_supply', { createdMs: T0 + 5_000 })], s2, 's4_supply').run?.id, 5n);
+  assert.equal(siblingOf([s2, staled], s2, 's4_supply').state, 'ready');
   // another revision, another s1 run, and cancelled runs are not this snapshot's
   assert.equal(siblingOf([s2, done(4, 's3_timeline', { revision: 2 })], s2, 's3_timeline').state, 'pending');
   assert.equal(siblingOf([s2, done(4, 's3_timeline', { upstreamS1: 'other' })], s2, 's3_timeline').state, 'pending');
-  assert.equal(siblingOf([s2, run(4, 's3_timeline', 'cancelled')], s2, 's3_timeline').state, 'pending');
+  assert.equal(siblingOf([s2, run(4, 's3_timeline', 'cancelled', { createdMs: T0 })], s2, 's3_timeline').state, 'pending');
+  // eligible runs: the newest by id
+  assert.equal(siblingOf([s2, done(4, 's3_timeline'), done(8, 's3_timeline', { completedMs: T0 + 12_000 })], s2, 's3_timeline').run?.id, 8n);
 });
 
-test('a stale run still counts (a later input change made it stale), a queued or running one does not, and a failure or block is how it ended', () => {
-  assert.equal(siblingOf([s2, run(4, 's3_timeline', 'stale', { finishedMs: T0 + 11_000 })], s2, 's3_timeline').state, 'ready');
-  assert.equal(siblingOf([s2, run(4, 's3_timeline', 'running')], s2, 's3_timeline').state, 'pending');
-  assert.equal(siblingOf([s2, run(4, 's3_timeline', 'queued')], s2, 's3_timeline').state, 'pending');
-  assert.equal(siblingOf([s2, run(4, 's3_timeline', 'failed', { finishedMs: T0 + 12_000 })], s2, 's3_timeline').state, 'failed');
-  assert.equal(siblingOf([s2, run(4, 's3_timeline', 'blocked')], s2, 's3_timeline').state, 'blocked');
-  // the newest settled run is the answer: a failed re-run after a good one, and the reverse
-  assert.equal(siblingOf([s2, done(4, 's3_timeline'), run(8, 's3_timeline', 'failed', { finishedMs: T0 + 12_000 })], s2, 's3_timeline').state, 'failed');
-  assert.equal(siblingOf([s2, run(4, 's3_timeline', 'failed', { finishedMs: T0 + 12_000 }), done(8, 's3_timeline')], s2, 's3_timeline').state, 'ready');
-  // a re-run that is still running at the cutoff leaves the earlier good one standing
-  assert.equal(siblingOf([s2, done(4, 's3_timeline'), run(8, 's3_timeline', 'running')], s2, 's3_timeline').run?.id, 4n);
+test("a stale run's results say when it completed, not its overwritten finishedAt; the s2 run's cutoff does not move when it goes stale", () => {
+  // finishedAt was overwritten to a time far past the cutoff when it went stale; its results are from T0+11 s
+  const staleEarly = { ...done(4, 's3_timeline'), status: 'stale', finishedMs: CUTOFF + 99_000 };
+  assert.equal(siblingOf([s2, staleEarly], s2, 's3_timeline').state, 'ready');
+  // the s2 run itself is stale now (a baseline-only change): the cutoff does not move with its overwritten finishedAt
+  assert.equal(siblingCutoffMs({ ...s2, status: 'stale', finishedMs: T0 + 900_000 }), CUTOFF);
+  // a stale run with no results never completed
+  assert.equal(siblingOf([s2, { ...run(4, 's3_timeline', 'stale', { createdMs: T0 }), completedMs: undefined }], s2, 's3_timeline').state, 'pending');
+});
+
+test('(b) a sibling created before s2 that completes after the cutoff is unavailable at dispatch once the cutoff has passed, and at publication even after it has finished', () => {
+  const late = (status: string, finishedMs: number | null) => run(4, 's3_timeline', status, { createdMs: T0 - 1_000, finishedMs, ...(finishedMs ? { completedMs: finishedMs } : {}) });
+  const s4 = done(5, 's4_supply');
+  // at dispatch: before the cutoff the dispatcher still waits; at the cutoff it goes ahead and the check is unavailable
+  assert.equal(waitingForSiblings([s2, late('running', null), s4], s2, CUTOFF - 1), true);
+  assert.equal(waitingForSiblings([s2, late('running', null), s4], s2, CUTOFF), false);
+  assert.equal(siblingOf([s2, late('running', null), s4], s2, 's3_timeline').state, 'pending');
+  // at publication, later: the run has finished (after the cutoff). Same answer: unavailable.
+  const finished = late('done', CUTOFF + 20_000);
+  assert.equal(siblingOf([s2, finished, s4], s2, 's3_timeline').state, 'pending', 'completed after the cutoff');
+  assert.equal(siblingOf([s2, { ...finished, status: 'stale' }, s4], s2, 's3_timeline').state, 'pending', 'and still after it went stale');
+  assert.equal(siblingOf([s2, late('failed', CUTOFF + 5_000), s4], s2, 's3_timeline').state, 'pending', 'a failure after the cutoff likewise');
+  // one that completed exactly at the cutoff counts
+  assert.equal(siblingOf([s2, late('done', CUTOFF), s4], s2, 's3_timeline').state, 'ready');
+});
+
+test('a queued or running sibling is not available, a failure or block is how it ended, and the newest eligible run decides', () => {
+  assert.equal(siblingOf([s2, run(4, 's3_timeline', 'running', { createdMs: T0 })], s2, 's3_timeline').state, 'pending');
+  assert.equal(siblingOf([s2, run(4, 's3_timeline', 'queued', { createdMs: T0 })], s2, 's3_timeline').state, 'pending');
+  assert.equal(siblingOf([s2, run(4, 's3_timeline', 'failed', { createdMs: T0, finishedMs: T0 + 12_000 })], s2, 's3_timeline').state, 'failed');
+  assert.equal(siblingOf([s2, run(4, 's3_timeline', 'blocked', { createdMs: T0 })], s2, 's3_timeline').state, 'blocked');
+  assert.equal(siblingOf([s2, done(4, 's3_timeline'), run(8, 's3_timeline', 'failed', { createdMs: T0, finishedMs: T0 + 12_000 })], s2, 's3_timeline').state, 'failed');
+  assert.equal(siblingOf([s2, run(4, 's3_timeline', 'failed', { createdMs: T0, finishedMs: T0 + 12_000 }), done(8, 's3_timeline')], s2, 's3_timeline').state, 'ready');
   // a run that cannot be tied to the s2 run (no upstream recorded) binds nothing
   assert.equal(siblingOf([done(4, 's3_timeline')], { ...s2, upstreamS1: undefined }, 's3_timeline').state, 'pending');
 });
 
-test('the dispatcher waits while a sibling is unsettled, and goes ahead when both have settled or at the cutoff', () => {
-  const cutoff = siblingCutoffMs(s2);
+test('the dispatcher waits while a sibling is unavailable, and goes ahead when both have settled or at the cutoff', () => {
   const both = [s2, done(4, 's3_timeline'), done(5, 's4_supply')];
   assert.equal(waitingForSiblings(both, s2, T0 + 12_000), false, 'both done: no waiting');
   assert.equal(waitingForSiblings([s2, done(4, 's3_timeline')], s2, T0 + 12_000), true, 's4 not there yet');
-  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'running')], s2, cutoff - 1), true, 'a hung s4 is waited for up to the cutoff');
-  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'running')], s2, cutoff), false, 'and not a moment longer');
-  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'failed')], s2, T0 + 12_000), false, 'a failed s4 is settled: no reason to wait');
-  assert.equal(waitingForSiblings([s2, run(4, 's3_timeline', 'blocked'), done(5, 's4_supply')], s2, T0 + 12_000), false);
+  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'running', { createdMs: T0 })], s2, CUTOFF - 1), true, 'a hung s4 is waited for up to the cutoff');
+  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'running', { createdMs: T0 })], s2, CUTOFF), false, 'and not a moment longer');
+  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'failed', { createdMs: T0 })], s2, T0 + 12_000), false, 'a failed s4 is settled: no reason to wait');
+  assert.equal(waitingForSiblings([s2, run(4, 's3_timeline', 'blocked', { createdMs: T0 }), done(5, 's4_supply')], s2, T0 + 12_000), false);
   assert.equal(waitingForSiblings([s2], s2, T0 + 1_000_000), false, 'neither ever ran: after the cutoff, go ahead');
+  // a re-run created later does not make the dispatcher wait again
+  assert.equal(waitingForSiblings([...both, run(9, 's4_supply', 'running', { createdMs: T0 + 5_000 })], s2, T0 + 12_000), false);
 });
 
 const opts = (over: Partial<DecideOptions> = {}): DecideOptions => ({ nowMs: T0 + 60_000, maxAttempts: 2, retryDelayMs: 60_000, orphanMs: 330_000, running: new Set(), ...over });
@@ -111,35 +138,69 @@ const real = (ecr: string) => ({ timeline: view(rowsOf(storedTimelineRows(ecr)))
 const rule = (ecr: string, t: SiblingView, s: SiblingView) => deriveRecommendation(ruleInputOf(storedRows(ecr), [], { timeline: ruleCheckOf(t), supply: ruleCheckOf(s) }));
 const flagOnly = (flags: object[]): SiblingView => view([{ key: 'detail', label: 'd', unit: 'json', p10: 0, p50: 0, p90: 0, detailJson: JSON.stringify({ flags }) }]);
 
-test("ECR-0417 and ECR-0423 keep their outcomes with the real timeline and supply rows: its late cut-in and single source are findings, not conditions", () => {
+test("ECR-0417 keeps its outcome, Approve with conditions under rule 2, and its three blank cost lines first; the missed need date is a fourth condition and the single source is not", () => {
   const a = real('ECR-0417');
   const flags = [...(JSON.parse(a.timeline.rows.find(r => r.key === 'detail')!.detailJson).flags as { kind: string }[]), ...(JSON.parse(a.supply.rows.find(r => r.key === 'detail')!.detailJson).flags as { kind: string }[])].map(f => f.kind);
   assert.ok(flags.includes('likely_late') && flags.includes('single_source'), `the real checks do warn about it: ${flags}`);
   const d = rule('ECR-0417', a.timeline, a.supply);
   assert.equal(d.recommendation, 'Approve with conditions');
   assert.equal(d.rule, 2);
-  assert.equal(d.conditions.length, 3, 'still exactly its three blank cost lines');
-  assert.deepEqual(d.conditions, deriveRecommendation(ruleInputOf(storedRows('ECR-0417'), [])).conditions, 'the same three, in the same order');
+  assert.deepEqual(d.blockers, []);
+  const base = deriveRecommendation(ruleInputOf(storedRows('ECR-0417'), [])).conditions;
+  assert.equal(base.length, 3);
+  assert.deepEqual(d.conditions.slice(0, 3), base, 'the same three blank lines, in the same order');
+  assert.deepEqual(d.conditions.slice(3), ['CCB to accept the cut-in slip to 2027-02-16 (S/N 15) against the stated need (S/N 11 and subsequent), or expedite']);
+  // the recommendation claim as the agent writes it still fits the module's 600-character cap
+  const claim = `Recommendation: ${d.recommendation}. Rule ${d.rule}: ${d.conditions.map((c, i) => `(${i + 1}) ${c}`).join('; ')}.`;
+  assert.ok(claim.length <= CLAIM_MAX, `${claim.length} characters`);
+  assert.ok(!jobPrompt({ ...factsFor0417(), recommendation: d }).includes('would not fit one claim'), 'so the job does not ask for shortened conditions');
   const b = real('ECR-0423');
   const e = rule('ECR-0423', b.timeline, b.supply);
   assert.equal(e.recommendation, 'Approve');
   assert.equal(e.rule, 3);
+  assert.deepEqual(e.conditions, [], 'ECR-0423 has no stated need and no conflict: nothing is added');
 });
 
-test('a late cut-in, a single source, slot contention and exceeded capacity never move the recommendation', () => {
-  const findings = flagOnly(['likely_late', 'single_source', 'slot_contention', 'capacity_exceeded'].map(kind => ({ kind, severity: 'warn', message: `${kind} happened`, ref: 'X' })));
-  const d = rule('ECR-0423', findings, findings);
-  assert.equal(d.recommendation, 'Approve');
-  assert.deepEqual(d.conditions, []);
-  // the real ECR-0421 (late in every draw, one source at Orrin, a slot shared with ECR-0419) adds no condition for any of that;
-  // the one it does add is the supply check's own gap, a default raw-material share that a buyer should estimate
+test('a missed need date is a condition only past the 14-day bar; a single source is never one; a slot or capacity conflict with a named ECR is', () => {
+  const ready = (flags: object[], extra: object): SiblingView => ({ ...flagOnly(flags), ...extra });
+  const late = { kind: 'likely_late', severity: 'warn', ref: 'stated:E', message: 'late' };
+  const slip = (weeks: number, over: object = {}) => ruleCheckOf({ ...flagOnly([late]), rows: [{ key: 'late_weeks', label: 'l', unit: 'weeks', p10: weeks / 2, p50: weeks, p90: weeks, detailJson: '{}' }, ...flagOnly([late]).rows] , ...over });
+  const t = (weeks: number) => deriveRecommendation(ruleInputOf(storedRows('ECR-0423'), [], { timeline: slip(weeks) }));
+  assert.equal(t(1.5).recommendation, 'Approve', 'under two weeks at P90: below the bar, nothing to accept');
+  assert.equal(t(3).recommendation, 'Approve with conditions');
+  assert.match(t(3).conditions[0]!, /^CCB to accept the cut-in slip against the stated need, or expedite$/, 'no date known: the generic words');
+  // single source alone, on both checks
+  const single = flagOnly([{ kind: 'single_source', severity: 'warn', ref: 'BW-1', message: 'one source' }]);
+  assert.deepEqual(rule('ECR-0423', single, single).conditions, []);
+  // a conflict with another ECR: slot, capacity, or both in one condition, never duplicated
+  const supply = (kinds: string[], peers: string[]) => ruleCheckOf({ ...flagOnly(kinds.map(kind => ({ kind, severity: 'warn', message: kind }))), rows: [{ key: 'detail', label: 'd', unit: 'json', p10: 0, p50: 0, p90: 0, detailJson: JSON.stringify({ flags: kinds.map(kind => ({ kind, severity: 'warn', message: kind })), interaction: { peers: peers.map(ecr => ({ ecr })) } }) }] });
+  const s = (k: string[], p: string[]) => deriveRecommendation(ruleInputOf(storedRows('ECR-0423'), [], { supply: supply(k, p) })).conditions;
+  assert.deepEqual(s(['slot_contention'], ['ECR-0419']), ['Resolve the supplier slot conflict with ECR-0419']);
+  assert.deepEqual(s(['capacity_exceeded'], ['ECR-0419', 'ECR-0420']), ['Resolve the supplier capacity conflict with ECR-0419, ECR-0420']);
+  assert.deepEqual(s(['slot_contention', 'capacity_exceeded', 'slot_contention'], ['ECR-0419']), ['Resolve the supplier slot and capacity conflict with ECR-0419']);
+  assert.deepEqual(s(['capacity_exceeded'], []), [], 'no other ECR named: the ECR alone exceeding capacity is a finding');
+  assert.deepEqual(s(['likely_late'], ['ECR-0419']), [], "the supply check's own lateness is the timeline's, not a second condition");
+});
+
+test('ECR-0421 on the real rows: the slip, the slot conflict with ECR-0419 and the raw-material gap are its added conditions, after its cost ones', () => {
   const r = real('ECR-0421');
   const base = deriveRecommendation(ruleInputOf(storedRows('ECR-0421'), []));
-  const withSiblings = rule('ECR-0421', r.timeline, r.supply);
-  assert.equal(withSiblings.recommendation, base.recommendation);
-  assert.deepEqual(withSiblings.conditions.slice(0, base.conditions.length), base.conditions);
-  assert.equal(withSiblings.conditions.length, base.conditions.length + 1);
-  assert.match(withSiblings.conditions.at(-1)!, /^The raw-material share of a part's price is a default/);
+  const d = rule('ECR-0421', r.timeline, r.supply);
+  assert.equal(d.recommendation, 'Approve with conditions');
+  assert.deepEqual(d.conditions.slice(0, base.conditions.length), base.conditions);
+  const added = d.conditions.slice(base.conditions.length);
+  assert.equal(added.length, 3);
+  assert.equal(added[0], 'CCB to accept the cut-in slip to 2027-10-28 (S/N 2) against the stated need (from 2027-06-01), or expedite');
+  assert.match(added[1]!, /^The raw-material share of a part's price is a default/);
+  assert.equal(added[2], 'Resolve the supplier slot conflict with ECR-0419');
+});
+
+test('the recommendation claim must fit 600 characters: when the conditions written out would not, the job asks for each in a few words, keeping all of them', () => {
+  const many = deriveRecommendation({ detail: { flags: [{ kind: 'no_quote', severity: 'warn', message: 'x'.repeat(190) }, { kind: 'no_quote2', severity: 'warn', message: 'y'.repeat(190) }, { kind: 'no_quote3', severity: 'warn', message: 'z'.repeat(190) }] } });
+  assert.equal(many.conditions.length, 3);
+  const p = jobPrompt({ ...factsFor0417(), recommendation: many });
+  assert.match(p, /Written out in full they would not fit one claim \(600 characters\): name each condition in a few words, keeping every one and its date, serial or ECR\./);
+  assert.ok(!jobPrompt({ ...factsFor0417(), recommendation: deriveRecommendation({ detail: { flags: [{ kind: 'no_quote', severity: 'warn', message: 'short' }] } }) }).includes('would not fit'));
 });
 
 test('flags that say the check could not assess something are gaps, named briefly: Approve with conditions, never Send back', () => {
@@ -151,7 +212,7 @@ test('flags that say the check could not assess something are gaps, named briefl
     { kind: 'cut_in_beyond_plan', severity: 'warn', message: 'x' },
     { kind: 'unused_assumption', severity: 'warn', ref: 'a:1', message: 'Assumption a:1 was not applied: it has no distribution.' },
     { kind: 'shared_supplier', severity: 'info', message: 'info is neither' },
-    { kind: 'likely_late', severity: 'warn', message: 'a finding' },
+    { kind: 'single_source', severity: 'warn', ref: 'BW-3', message: 'a finding, not a gap' },
   ]);
   const d = rule('ECR-0423', gaps, view([]));
   assert.equal(d.recommendation, 'Approve with conditions');
@@ -241,10 +302,22 @@ test('ECR-0423: no deadline to miss and no conflict, so a short, quiet statement
   assert.equal(f.timeline[0], 'The change can first reach the line on 2027-09-09, from serial 28.');
   assert.equal(f.timeline[1], 'The ECR states no effectivity, so there is no deadline to miss.');
   assert.equal(f.supply.length, 1);
-  assert.match(f.supply[0]!, /^It shares Stratus with ECR-0406; neither the slots nor the capacity move its cut-in\.$/);
+  assert.equal(f.supply[0], 'It shares Stratus with ECR-0406; any shift of its cut-in is below the reporting threshold (14 days).');
 });
 
-test('the numbers to post are the checks\' own rows that clear Bowman\'s bars, capped by the room left under twelve', () => {
+test('item 5: a peer shift under the reporting threshold is said to be under it, never "no impact"', () => {
+  const shiftRow = (p90: number): StoredRow => ({ key: 'peer_cut_in_shift_weeks', label: 'shift', unit: 'weeks', p10: 0, p50: p90 / 2, p90, detailJson: '{}' });
+  const later: StoredRow = { key: 'p_cut_in_later_with_peers', label: 'later', unit: 'probability', p10: 0.3, p50: 0.3, p90: 0.3, detailJson: JSON.stringify({ peers: [{ ecr: 'ECR-0406', sharedSuppliers: ['SUP-STRATUS'] }] }) };
+  const f = timelineSupplyFacts(view([], 'failed'), view([shiftRow(1), later]));
+  assert.deepEqual(f.supply, ['It shares Stratus with ECR-0406; any shift of its cut-in is below the reporting threshold (14 days).']);
+  assert.ok(!f.supply.join(' ').includes('neither') && !f.supply.join(' ').includes('move its cut-in.'), 'no positive no-impact claim');
+  // a shift over the bar is reported as a shift
+  assert.match(timelineSupplyFacts(view([], 'failed'), view([shiftRow(3), later])).supply[0]!, /the cut-in moves 0 to 3 weeks later/);
+  // no shift row at all (nothing could be compared): the sharing is stated and nothing about its effect
+  assert.deepEqual(timelineSupplyFacts(view([], 'failed'), view([later])).supply, ['It shares Stratus with ECR-0406.']);
+});
+
+test('the table\'s numbers are the bound runs\' own rows that clear Bowman\'s bars', () => {
   const r17 = real('ECR-0417');
   assert.deepEqual(headlineNumbers(r17.timeline, r17.supply, 9).map(x => x.resultKey), ['cut_in_date', 'cut_in_serial', 'late_weeks', 'single_source_items']);
   const r21 = real('ECR-0421');
@@ -266,12 +339,10 @@ test('supplier codes are shown as a person would write them', () => {
 // ---- the dispatcher and publisher on a client cache ---------------------------------------------------------
 
 const at = (ms: number) => ({ microsSinceUnixEpoch: BigInt(ms) * 1000n });
-interface FakeRun extends RunRow {
-  inputs?: object;
-}
-/** Just enough of the client cache for factsOf, jobFactsOf and gather: check runs and results of one ECR (id 5). */
-function cache(o: { runs: RunRow[]; results: { id: number; run: number; row: { key: string; label: string; unit: string; p10: number; p50: number; p90: number; detailJson: string }; mock?: boolean }[]; statements?: any[]; ecr?: string }) {
-  const runRows = o.runs.map((r: FakeRun) => ({
+type Row = { key: string; label: string; unit: string; p10: number; p50: number; p90: number; detailJson: string };
+/** Just enough of the client cache for factsOf, jobFactsOf and gather: check runs and results of one ECR (id 5). A run's results are stamped when it completed. */
+function cache(o: { runs: RunRow[]; results: { id: number; run: number; row: Row; mock?: boolean }[]; statements?: any[] }) {
+  const runRows = o.runs.map(r => ({
     id: r.id,
     prId: 5n,
     stage: r.stage,
@@ -282,7 +353,8 @@ function cache(o: { runs: RunRow[]; results: { id: number; run: number; row: { k
     finishedAt: r.finishedMs === null ? undefined : at(r.finishedMs),
     inputsJson: JSON.stringify({ revision: r.revision, revisionSource: 'plm', erpBaseline: '2c02958e00', erpBaselineSource: 'erp', erpBaselineAsOf: '2026-10-24', ...(r.upstreamS1 ? { upstream: { s1_bom_delta: r.upstreamS1 } } : {}) }),
   }));
-  const resultRows = o.results.map(x => ({ ...x.row, id: BigInt(x.id), prId: 5n, checkRunId: BigInt(x.run), mock: x.mock ?? false }));
+  const completed = new Map(o.runs.map(r => [Number(r.id), r.completedMs ?? r.finishedMs ?? r.createdMs]));
+  const resultRows = o.results.map(x => ({ ...x.row, id: BigInt(x.id), prId: 5n, checkRunId: BigInt(x.run), mock: x.mock ?? false, createdAt: at(completed.get(x.run) ?? T0) }));
   const by = <T>(rows: T[]) => ({ filter: (id: bigint) => (id === 5n ? rows : []) });
   return {
     pullRequest: {},
@@ -296,17 +368,19 @@ function cache(o: { runs: RunRow[]; results: { id: number; run: number; row: { k
 }
 const pr5 = { id: 5n, plmEcrNumber: 'ECR-0417', title: 'Motor-controller mounting bracket', status: 'review', revision: 3 } as any;
 const withRun = (rows: object[], run: number, first: number) => rows.map((row: any, i) => ({ id: first + i, run, row }));
-/** The three finished runs of ECR-0417, with the real rows. s1 is run 2; s2 is run 3 (finished at T0+10 s). */
+const s1 = run(2, 's1_bom_delta', 'done', { createdMs: T0 });
+/** The finished runs of an ECR with the real rows: s1 is run 2, s2 run 3 (completed at T0+10 s), s3 run 4, s4 run 5. */
 function healthy(ecr = 'ECR-0417', extraRuns: RunRow[] = [], extraResults: ReturnType<typeof withRun> = []) {
   return cache({
-    runs: [run(2, 's1_bom_delta', 'done'), s2, done(4, 's3_timeline'), done(5, 's4_supply'), ...extraRuns],
+    runs: [s1, s2, done(4, 's3_timeline'), done(5, 's4_supply'), ...extraRuns],
     results: [...withRun(storedRows(ecr), 3, 1000), ...withRun(storedTimelineRows(ecr), 4, 2000), ...withRun(storedSupplyRows(ecr), 5, 3000), ...extraResults],
   });
 }
+const factsFor0417 = () => jobFactsOf(healthy(), pr5, 1, 3);
 
 test('factsOf: the dispatcher waits while s4 is running and starts once it has finished', () => {
-  const rows = [run(2, 's1_bom_delta', 'done'), s2, done(4, 's3_timeline')];
-  const waiting = cache({ runs: [...rows, run(5, 's4_supply', 'running')], results: [] });
+  const rows = [s1, s2, done(4, 's3_timeline')];
+  const waiting = cache({ runs: [...rows, run(5, 's4_supply', 'running', { createdMs: T0 })], results: [] });
   const f = factsOf(waiting, pr5, 'level1-statement').s2Done[0]!;
   assert.deepEqual(f.siblings, { pending: true, cutoffMs: siblingCutoffMs(s2) });
   assert.equal(decide({ ...ecrFacts(f.siblings), s2Done: [{ ...f, id: 3, inputsRevision: 1, mock: false }] }, opts({ nowMs: T0 + 20_000 })).action, 'skip');
@@ -314,75 +388,132 @@ test('factsOf: the dispatcher waits while s4 is running and starts once it has f
   assert.equal(settled.siblings?.pending, false);
 });
 
-test('jobFactsOf: ECR-0417 is asked for the cost numbers, then the cut-in, serial, weeks late and single source, and its conditions are unchanged', () => {
+test('jobFactsOf: the agent posts the cost numbers only, none of the timeline and supply ones; it gets their sentences, and ECR-0417 has four conditions', () => {
   const facts = jobFactsOf(healthy(), pr5, 1, 3);
   assert.deepEqual(
     facts.numbers.map(x => x.resultKey),
-    ['unit_cost_delta:vesper', 'unit_cost_delta:meridian', 'one_time_total', 'net_total_year_one', 'cut_in_date', 'cut_in_serial', 'late_weeks', 'single_source_items']
+    ['unit_cost_delta:vesper', 'unit_cost_delta:meridian', 'one_time_total', 'net_total_year_one'],
+    'the module never has a timeline or supply number to check against a newer run'
   );
+  assert.ok(facts.numbers.length <= 12);
   assert.equal(facts.recommendation?.recommendation, 'Approve with conditions');
   assert.equal(facts.recommendation?.rule, 2);
-  assert.equal(facts.recommendation?.conditions.length, 3);
+  assert.equal(facts.recommendation?.conditions.length, 4);
   assert.equal(facts.timelineSupply?.timeline.length, 2);
   const p = jobPrompt(facts);
-  assert.ok(p.includes('resultKey "cut_in_date"') && p.includes('resultKey "late_weeks"') && p.includes('resultKey "single_source_items"'));
+  assert.ok(!['cut_in_date', 'late_weeks', 'single_source_items', 'cut_in_serial'].some(k => p.includes(`resultKey "${k}"`)));
   assert.ok(p.includes(`One claim starting "${TIMELINE_CLAIM}" (evidence "computation")`) && p.includes(`One claim starting "${SUPPLY_CLAIM}" (evidence "computation")`));
   assert.ok(p.includes('The change can first reach the line on 2027-02-16') && p.includes('likelihood it is late: almost certain (95-99%)'));
   assert.ok(p.includes('and the median date it reaches the line'));
+  assert.ok(p.includes('CCB to accept the cut-in slip to 2027-02-16 (S/N 15)'));
   assert.ok(!/branch|merge|pull request/i.test(p.replace(/Never use:[^\n]*/, '')), 'business words only');
 });
 
-test('jobFactsOf: ECR-0423 gets Approve and a quiet pair of claims', () => {
+test('jobFactsOf: ECR-0423 gets Approve, no condition and a quiet pair of claims', () => {
   const facts = jobFactsOf(healthy('ECR-0423'), { ...pr5, plmEcrNumber: 'ECR-0423' }, 1, 3);
   assert.equal(facts.recommendation?.recommendation, 'Approve');
-  assert.deepEqual(facts.numbers.map(x => x.resultKey).filter(isTimelineSupplyKey), ['cut_in_date', 'cut_in_serial']);
+  assert.deepEqual(facts.recommendation?.conditions, []);
+  assert.deepEqual(facts.numbers.map(x => x.resultKey).filter(isTimelineSupplyKey), []);
 });
 
-test('a failed s4 does not stop Level 1: the agent is told the supply check is not available, asked for no supply number, and the rule names it', () => {
+test('a failed s4 does not stop Level 1: the agent is told the supply check is not available and the rule names it', () => {
   const c = cache({
-    runs: [run(2, 's1_bom_delta', 'done'), s2, done(4, 's3_timeline'), run(5, 's4_supply', 'failed', { finishedMs: T0 + 11_000 })],
+    runs: [s1, s2, done(4, 's3_timeline'), run(5, 's4_supply', 'failed', { createdMs: T0, finishedMs: T0 + 11_000 })],
     results: [...withRun(storedRows('ECR-0417'), 3, 1000), ...withRun(storedTimelineRows('ECR-0417'), 4, 2000)],
   });
   const facts = jobFactsOf(c, pr5, 1, 3);
   assert.deepEqual(facts.timelineSupply?.unavailable, [{ check: 'supply', why: 'it failed' }]);
-  assert.ok(!facts.numbers.some(x => x.resultKey === 'single_source_items'));
   assert.equal(facts.recommendation?.recommendation, 'Approve with conditions');
-  assert.equal(facts.recommendation?.conditions.length, 4);
-  assert.equal(facts.recommendation?.conditions[3], 'The supply check failed, so it is not assessed');
+  assert.equal(facts.recommendation?.conditions.length, 5, 'three cost lines, the slip, the missing check');
+  assert.equal(facts.recommendation?.conditions[4], 'The supply check failed, so it is not assessed');
   const p = jobPrompt(facts);
   assert.ok(p.includes('saying the supply check is not available because it failed'));
   assert.ok(p.includes('The change can first reach the line on 2027-02-16'), 'the timeline is still there');
 });
 
-test('an s3 that never settled by the cutoff (hung) is "not finished in time", and a run that finishes after the cutoff is never read', () => {
-  const late = cache({
-    runs: [run(2, 's1_bom_delta', 'done'), s2, done(4, 's3_timeline', { finishedMs: siblingCutoffMs(s2) + 5_000 }), done(5, 's4_supply')],
-    results: [...withRun(storedRows('ECR-0417'), 3, 1000), ...withRun(storedTimelineRows('ECR-0417'), 4, 2000), ...withRun(storedSupplyRows('ECR-0417'), 5, 3000)],
-  });
-  const facts = jobFactsOf(late, pr5, 1, 3);
-  assert.deepEqual(facts.timelineSupply?.unavailable, [{ check: 'timeline', why: 'it had not finished in time' }]);
-  assert.ok(!facts.numbers.some(x => x.resultKey === 'cut_in_date'));
-  assert.equal(facts.recommendation?.conditions[3], 'The timeline check had not finished when this assessment was made, so it is not assessed');
+// ---- the snapshot is frozen: Sol's case and its mirror -----------------------------------------------------
+
+/** What the dispatcher tells the agent and what the publisher shows, for one cache: run ids, rule, prompt sentences and the PLM text. */
+function resolved(c: any, statementAtMs = T0 + 120_000) {
+  const sib = siblingsForRun(c, 5n, 3n)!;
+  const facts = jobFactsOf(c, pr5, 1, 3);
+  const stmt = statementFor('ECR-0417');
+  c.impactStatement = { prId: { filter: () => [{ id: 12n, level: 1, prRevision: 3, checkRunId: 3n, createdAt: { toDate: () => new Date(statementAtMs) }, changeClass: 'Class I', route: 'r', headline: 'h', author: null, numbers: stmt.numbers, drivers: [], assumptions: [], claims: stmt.claims }] } };
+  const g = gather(c, pr5)!;
+  const html = statementToPlmFields(g.statement, g.ecr, g.prov, o).fields.impact_statement as string;
+  return { dispatchRuns: [sib.timeline.runId, sib.supply.runId], publishRuns: [g.prov.timelineRunId, g.prov.supplyRunId], states: [sib.timeline.state, sib.supply.state], conditions: facts.recommendation!.conditions, told: facts.timelineSupply, ruleConditions: deriveRecommendation(g.prov.ruleInput!).conditions, html };
+}
+
+test('(a) dispatch resolves run 5; a run 9 is created inside the window and finishes before the cutoff; publication still resolves run 5, with the same rows', () => {
+  const atDispatch = resolved(healthy());
+  assert.deepEqual(atDispatch.dispatchRuns, [4, 5]);
+  // later, a peer ECR changed: s4 re-ran (run 9, created after s2, completed inside the 30 s window) with other numbers
+  const rerunRows = withRun(storedSupplyRows('ECR-0421'), 9, 4000);
+  const rerun = done(9, 's4_supply', { createdMs: T0 + 2_000, startedMs: T0 + 2_000, finishedMs: T0 + 12_000, completedMs: T0 + 12_000 });
+  const staled5 = { ...done(5, 's4_supply'), status: 'stale', finishedMs: T0 + 2_000 }; // run 5 went stale when run 9 was queued
+  const later = resolved(cache({
+    runs: [s1, s2, done(4, 's3_timeline'), staled5, rerun],
+    results: [...withRun(storedRows('ECR-0417'), 3, 1000), ...withRun(storedTimelineRows('ECR-0417'), 4, 2000), ...withRun(storedSupplyRows('ECR-0417'), 5, 3000), ...rerunRows],
+  }));
+  assert.deepEqual(later.dispatchRuns, [4, 5], 'a dispatcher looking now still resolves run 5');
+  assert.deepEqual(later.publishRuns, [4, 5], 'and so does the publisher');
+  assert.deepEqual(later.states, ['ready', 'ready']);
+  assert.deepEqual(later.conditions, atDispatch.conditions);
+  assert.deepEqual(later.told, atDispatch.told);
+  assert.equal(later.html, atDispatch.html, 'the PLM text is byte for byte the one built from run 5');
+  assert.ok(!later.html.includes('bundle_saving') && !later.html.includes('Ordering together'), "none of run 9's numbers");
 });
 
-test('the statement\'s own s3 and s4 runs are read, not a newer rerun with other numbers', () => {
-  const rerunRows = withRun(storedSupplyRows('ECR-0421'), 9, 4000); // some other numbers, from a run after the cutoff
-  const c = healthy('ECR-0417', [done(9, 's4_supply', { finishedMs: siblingCutoffMs(s2) + 60_000 })], rerunRows);
-  const sib = siblingsForRun(c, 5n, 3n)!;
-  assert.equal(sib.supply.runId, 5);
-  assert.equal(sib.timeline.runId, 4);
-  assert.ok(!sib.supply.rows.some(r => r.key === 'bundle_saving:CON-ORRIN-UH-SLOT'));
+test('(b) a sibling created before s2 that finishes after the cutoff is unavailable at dispatch and at publication, even when publication is evaluated after it has finished', () => {
+  const late = (completedMs: number | null, status = 'done') => run(4, 's3_timeline', status, { createdMs: T0 - 1_000, startedMs: T0 - 1_000, finishedMs: completedMs, ...(completedMs ? { completedMs } : {}) });
+  const make = (s3: RunRow) => cache({ runs: [s1, s2, s3, done(5, 's4_supply')], results: [...withRun(storedRows('ECR-0417'), 3, 1000), ...(s3.completedMs ? withRun(storedTimelineRows('ECR-0417'), 4, 2000) : []), ...withRun(storedSupplyRows('ECR-0417'), 5, 3000)] });
+  // dispatch, once the cutoff has passed: still running. The dispatcher goes ahead and the timeline is unavailable.
+  const running = make(late(null, 'running'));
+  const f = factsOf(running, pr5, 'level1-statement').s2Done[0]!;
+  assert.deepEqual(f.siblings, { pending: true, cutoffMs: CUTOFF });
+  assert.equal(decide({ ...ecrFacts(f.siblings) }, opts({ nowMs: CUTOFF - 1 })).action, 'skip', 'before the cutoff it waits');
+  assert.equal(decide({ ...ecrFacts(f.siblings) }, opts({ nowMs: CUTOFF })).action, 'dispatch', 'at the cutoff it goes');
+  const atDispatch = resolved(running);
+  assert.deepEqual(atDispatch.states, ['pending', 'ready']);
+  assert.deepEqual(atDispatch.told?.unavailable, [{ check: 'timeline', why: 'it had not finished in time' }]);
+  assert.ok(atDispatch.html.includes('The timeline check had not finished when this assessment was made.'));
+  // publication, later: that run has since finished, 20 s after the cutoff. Still unavailable, the same words, the same conditions.
+  const finished = resolved(make(late(CUTOFF + 20_000)), CUTOFF + 60_000);
+  assert.deepEqual(finished.states, ['pending', 'ready']);
+  assert.deepEqual(finished.ruleConditions, atDispatch.ruleConditions);
+  assert.deepEqual(finished.conditions, atDispatch.conditions);
+  assert.ok(finished.html.includes('The timeline check had not finished when this assessment was made.'));
+  assert.ok(!finished.html.includes('Earliest cut-in date'), 'none of its numbers in the table, though it has finished since');
+  assert.equal(finished.conditions[3], 'The timeline check had not finished when this assessment was made, so it is not assessed');
+});
+
+test('the statement rests on its own runs when an unrelated later s4 failed, and on the failure when it had failed inside the window', () => {
+  const c = healthy('ECR-0417', [run(9, 's4_supply', 'failed', { createdMs: T0 + 2_000, finishedMs: CUTOFF + 2_000 })]);
+  const g = resolved(c);
+  assert.deepEqual(g.states, ['ready', 'ready']);
+  assert.ok(!g.html.includes('The supply check'));
+  const d = resolved(cache({
+    runs: [s1, s2, done(4, 's3_timeline'), run(5, 's4_supply', 'failed', { createdMs: T0, finishedMs: T0 + 11_000 })],
+    results: [...withRun(storedRows('ECR-0417'), 3, 1000), ...withRun(storedTimelineRows('ECR-0417'), 4, 2000)],
+  }));
+  assert.deepEqual(d.states, ['ready', 'failed']);
+  assert.ok(d.html.includes('The supply check failed.'));
+});
+
+test('siblingsForRun binds nothing for no run or a run that is not an s2_cost run', () => {
+  const c = healthy();
   assert.equal(siblingsForRun(c, 5n, 0n), undefined, 'no run, nothing bound');
   assert.equal(siblingsForRun(c, 5n, 4n), undefined, 'a run that is not an s2_cost run binds nothing');
 });
 
 // ---- the PLM text -------------------------------------------------------------------------------------------
 
+/** The statement an agent would post: the cost numbers (none of the timeline or supply ones) and its two claims. */
 const statementFor = (ecr: string, over: Partial<StatementDoc> = {}): StatementDoc => {
   const t = real(ecr);
-  const rows = [...storedRows(ecr), ...t.timeline.rows, ...t.supply.rows];
+  const rows = storedRows(ecr);
   const pick = (k: string) => rows.find(r => r.key === k)!;
-  const keys = ['unit_cost_delta:vesper', 'one_time_total', 'net_total_year_one', ...headlineNumbers(t.timeline, t.supply, 9).map(x => x.resultKey)].filter(k => rows.some(r => r.key === k));
+  const keys = ['unit_cost_delta:vesper', 'one_time_total', 'net_total_year_one'];
   const f = timelineSupplyFacts(t.timeline, t.supply);
   return {
     id: 12,
@@ -414,14 +545,17 @@ const provFor = (ecr: string, t = real(ecr), over = {}) => ({
   s2RunId: 3,
   timelineRunId: 4,
   supplyRunId: 5,
+  timelineSupplyNumbers: tableNumbers(t.timeline, t.supply),
   formulas: {},
   mock: false,
   ruleInput: ruleInputOf(storedRows(ecr), [], { timeline: ruleCheckOf(t.timeline), supply: ruleCheckOf(t.supply) }),
   ...over,
 });
 
-test('the PLM text has its own "Timeline and supply" section after the cost numbers: dates, weeks, serials, the single source and the two sentences', () => {
-  const f = statementToPlmFields(statementFor('ECR-0417'), ecr417, provFor('ECR-0417'), o);
+test('the PLM text has its own "Timeline and supply" section after the cost numbers, built from the bound runs, though the statement carries none of its numbers', () => {
+  const stmt = statementFor('ECR-0417');
+  assert.ok(!stmt.numbers.some(n => isTimelineSupplyKey(n.resultKey)), 'the agent posted none');
+  const f = statementToPlmFields(stmt, ecr417, provFor('ECR-0417'), o);
   const html = f.fields.impact_statement as string;
   const iCost = html.indexOf('Headline numbers');
   const iTs = html.indexOf('Timeline and supply</h5>');
@@ -429,14 +563,12 @@ test('the PLM text has its own "Timeline and supply" section after the cost numb
   assert.ok(iCost > 0 && iTs > iCost && iRests > iTs, 'after the headline numbers, before the class and route');
   const section = html.slice(iTs, html.indexOf('<h5', iTs + 10) > 0 ? html.indexOf('<h5', iTs + 10) : undefined);
   for (const w of ['Earliest cut-in date', '2027-01-13', '2027-02-16', '2027-04-11', 'S/N 15', 'S/N 13', 'S/N 18', '8.3 weeks', '13.1 weeks', '20.9 weeks', 'Changed parts with one qualified source', '1 part', 'same', 'Timeline: The change can first reach the line', 'Supply: BW-5120-210 (Halden)', 'almost certain (95-99%)']) assert.ok(section.includes(w), w);
-  // the cost table no longer carries them, and dates are never shown as day numbers
   const cost = html.slice(iCost, iTs);
   assert.ok(!cost.includes('Earliest cut-in date') && !cost.includes('Changed parts'));
   assert.ok(!/208\d\d/.test(html), 'no raw day numbers');
   assert.ok(!html.includes('Also noted'), 'the two claims are in their section, not repeated');
-  assert.ok(html.includes('Timeline and supply: computed by Norn\'s timeline and supply checks (timeline run 4, supply run 5)'));
+  assert.ok(html.includes("Timeline and supply: computed by Norn's timeline and supply checks (timeline run 4, supply run 5)"));
   assert.ok(!/\b(branch|merge|pull request)\b/i.test(html), 'business words only');
-  // the recommendation field is the rule's, unchanged for ECR-0417
   assert.equal(f.fields.impact_recommendation, 'Approve with conditions');
   assert.equal(f.overridden, undefined);
 });
@@ -444,11 +576,12 @@ test('the PLM text has its own "Timeline and supply" section after the cost numb
 test('a check that is not available is said so in its section from the run\'s state, whatever the agent wrote, and the recommendation names it', () => {
   const t = { timeline: real('ECR-0417').timeline, supply: view([], 'failed') };
   const claims = [{ text: 'Recommendation: Approve with conditions. Rule 2.', evidence: 'judgment' }];
-  const stmt = statementFor('ECR-0417', { claims, numbers: statementFor('ECR-0417').numbers.filter(x => !['single_source_items'].includes(x.resultKey)) });
+  const stmt = statementFor('ECR-0417', { claims });
   const f = statementToPlmFields(stmt, ecr417, provFor('ECR-0417', t as any), o);
   const html = f.fields.impact_statement as string;
   assert.ok(html.includes('The supply check failed.') && html.includes('No supplier finding is assessed.'));
   assert.ok(!html.includes('The timeline check'), 'only the check that is missing');
+  assert.ok(!html.includes('Changed parts with one qualified source'), 'no supply number from a check that is not there');
   assert.equal(f.fields.impact_recommendation, 'Approve with conditions');
   assert.equal(f.overridden, undefined, 'the agent agreed: its own words stand');
   assert.ok(deriveRecommendation(provFor('ECR-0417', t as any).ruleInput!).conditions.includes('The supply check failed, so it is not assessed'), 'and the rule names the missing check among its conditions');
@@ -457,42 +590,18 @@ test('a check that is not available is said so in its section from the run\'s st
 });
 
 test('a statement with no timeline or supply content has no such section (a Level 1 posted before this change)', () => {
-  const old = statementFor('ECR-0417', { numbers: statementFor('ECR-0417').numbers.slice(0, 3), claims: [{ text: 'Recommendation: Approve with conditions. Rule 2.', evidence: 'judgment' }] });
+  const old = statementFor('ECR-0417', { claims: [{ text: 'Recommendation: Approve with conditions. Rule 2.', evidence: 'judgment' }] });
   const html = statementToPlmFields(old, ecr417, { baseline: 'b', changeRequest: 'c', formulas: {}, mock: false }, o).fields.impact_statement as string;
   assert.ok(!html.includes('Timeline and supply'));
 });
 
-test('gather binds the statement to its own s3 and s4 runs: their ids, flags and the recommendation come from them, never from a later rerun', () => {
-  const stmtRow = (checkRunId: bigint) => ({
-    id: 12n, level: 1, prRevision: 3, checkRunId, createdAt: { toDate: () => new Date(T0 + 120_000) }, changeClass: 'Class I', route: 'r', headline: 'h', author: null,
-    numbers: statementFor('ECR-0417').numbers, drivers: [], assumptions: [], claims: statementFor('ECR-0417').claims,
-  });
-  // the statement's own runs are healthy; a later s4 failed (after the cutoff)
-  const c = healthy('ECR-0417', [run(9, 's4_supply', 'failed', { createdMs: siblingCutoffMs(s2) + 1_000, finishedMs: siblingCutoffMs(s2) + 2_000 })]);
-  c.impactStatement = { prId: { filter: () => [stmtRow(3n)] } };
-  const g = gather(c, pr5)!;
-  assert.equal(g.prov.timelineRunId, 4);
-  assert.equal(g.prov.supplyRunId, 5);
-  assert.equal(g.prov.ruleInput?.supply?.state, 'ready');
-  const f = statementToPlmFields(g.statement, g.ecr, g.prov, o);
-  assert.equal(f.fields.impact_recommendation, 'Approve with conditions');
-  assert.ok(!(f.fields.impact_statement as string).includes('The supply check'), 'a failure after the statement does not change it');
-  // the same ECR where s4 had already failed inside the window: the statement says so
-  const d = cache({
-    runs: [run(2, 's1_bom_delta', 'done'), s2, done(4, 's3_timeline'), run(5, 's4_supply', 'failed', { finishedMs: T0 + 11_000 })],
-    results: [...withRun(storedRows('ECR-0417'), 3, 1000), ...withRun(storedTimelineRows('ECR-0417'), 4, 2000)],
-  });
-  d.impactStatement = { prId: { filter: () => [stmtRow(3n)] } };
-  const g2 = gather(d, pr5)!;
-  assert.equal(g2.prov.ruleInput?.supply?.state, 'failed');
-  assert.ok((statementToPlmFields(g2.statement, g2.ecr, g2.prov, o).fields.impact_statement as string).includes('The supply check failed.'));
-});
-
-test('the dispatcher and the publisher read the same snapshot, so the agent is told what the PLM shows', () => {
-  const c = healthy('ECR-0417', [done(9, 's3_timeline', { finishedMs: siblingCutoffMs(s2) + 1 })], withRun(storedTimelineRows('ECR-0421'), 9, 4000));
-  const told = jobFactsOf(c, pr5, 1, 3).recommendation!;
-  c.impactStatement = { prId: { filter: () => [{ id: 12n, level: 1, prRevision: 3, checkRunId: 3n, createdAt: { toDate: () => new Date(T0 + 90_000) }, changeClass: 'Class I', route: 'r', headline: 'h', author: null, numbers: statementFor('ECR-0417').numbers, drivers: [], assumptions: [], claims: [] }] } };
-  const g = gather(c, pr5)!;
-  const shown = deriveRecommendation(g.prov.ruleInput!);
-  assert.deepEqual([told.recommendation, told.rule, told.conditions], [shown.recommendation, shown.rule, shown.conditions]);
+test('a timeline or supply number an older statement still carries is shown when no bound runs are given, and ignored when they are', () => {
+  const t = real('ECR-0417');
+  const row = t.timeline.rows.find(r => r.key === 'cut_in_serial')!;
+  const carried = { key: 'cut_in_serial', label: row.label, unit: row.unit, p10: row.p10, p50: row.p50, p90: row.p90, evidence: 'computation', resultKey: 'cut_in_serial' };
+  const stmt = statementFor('ECR-0417', { numbers: [...statementFor('ECR-0417').numbers, carried] });
+  const without = statementToPlmFields(stmt, ecr417, { baseline: 'b', changeRequest: 'c', formulas: {}, mock: false }, o).fields.impact_statement as string;
+  assert.ok(without.includes('First serial that can take the change') && without.includes('Timeline and supply</h5>'));
+  const withRuns = statementToPlmFields(stmt, ecr417, provFor('ECR-0417'), o).fields.impact_statement as string;
+  assert.equal(withRuns.split('First serial that can take the change').length - 1, 1, 'shown once, from the bound runs');
 });

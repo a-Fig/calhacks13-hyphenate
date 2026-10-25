@@ -73,6 +73,11 @@ export interface Provenance {
   /** The timeline (s3) and supply (s4) runs the statement rests on (siblings.ts), for the sources line. */
   timelineRunId?: number;
   supplyRunId?: number;
+  /**
+   * The numbers of the "Timeline and supply" table: the stored rows of those two runs (`tableNumbers`). The agent posts
+   * none of them. Absent (a caller with no bound runs): any such number the statement itself carries is shown.
+   */
+  timelineSupplyNumbers?: StatementNumber[];
 }
 
 export interface FormatOptions {
@@ -245,7 +250,7 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
     return t;
   };
   const costNumbers = s.numbers.filter(n => !isTimelineSupplyKey(n.resultKey));
-  const tsNumbers = s.numbers.filter(n => isTimelineSupplyKey(n.resultKey));
+  const tsNumbers = prov.timelineSupplyNumbers ?? s.numbers.filter(n => isTimelineSupplyKey(n.resultKey));
   out.push(`<h5 style="margin:12px 0 4px 0">Headline numbers</h5>`);
   out.push(...numberTable(costNumbers));
   out.push(`<p style="margin:4px 0 0 0;color:#555555;font-size:12px">A range, not a point: in 10 out of 100 simulated outcomes the cost is below the low figure, and in 10 out of 100 it is above the high one. Savings are in parentheses.</p>`);

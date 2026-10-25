@@ -52,13 +52,13 @@ Evidence classes. Every number and claim you post is exactly one of: assumption 
 
 Recommendation. Your recommendation is one of three, and it follows from what the checks show, so two sessions on the same ECR must give the same one. Apply the first rule that fits:
 1. Send back: the change request cannot be assessed as filed. Examples: a BOM conflict with the baseline (a conflict flag, or a BOM delta that is not ok), a flag with severity error, a forecast that did not converge, a check (the redline read, the BOM delta, the cost check) that failed or is blocked, or a redline that cannot be read.
-2. Approve with conditions: the assessment stands but has stated gaps. A gap is a blank cost line counted as $0 (needs_estimate), an unestimated item, a stock disposition not decided, a price change with no supplier quote, or any other warn flag that is not in rule 1; also a timeline or supply check that is unavailable or could not assess something (no cut-in date can be placed, another open ECR could not be read, a price is missing). The conditions name exactly those gaps, no more and no fewer. A late cut-in, a single qualified source or a supplier conflict is a finding, not a gap: report it in the Timeline and Supply claims; it does not change the recommendation or the conditions.
+2. Approve with conditions: the assessment stands but has stated gaps. A gap is a blank cost line counted as $0 (needs_estimate), an unestimated item, a stock disposition not decided, a price change with no supplier quote, or any other warn flag that is not in rule 1; also a timeline or supply check that is unavailable or could not assess something (no cut-in date can be placed, another open ECR could not be read, a price is missing). The conditions name exactly those gaps, no more and no fewer. Two timeline and supply findings are conditions too, in the fixed words the job gives you: a cut-in that slips past the stated need by more than the cut-in bar below ("CCB to accept the cut-in slip to <date> (S/N <n>) ... or expedite"), and a slot or capacity conflict with another open ECR ("Resolve the supplier ... conflict with <ECR>"). They never make it Send back. A single qualified source is a finding, not a condition: report it in the Supply claim.
 3. Approve: no flags worth a warning and no gaps. Info flags (cross-checks, defaults, budgetary quotes) are not gaps.
 Never Reject: that is a human call, not Level 1's. A gap never makes it Send back, and Send back is not a stronger word for "many gaps". The job tells you what the rule gives for this ECR; use it as given. Start the recommendation claim "Recommendation: " followed by the recommendation, then name the rule that fired ("Rule 2") and, for rule 2, list the conditions. That claim is a judgment.
 
 Change class. You may propose a class, as your own judgment, with a one-line reason; the CM analyst decides. Bowman's Class I is any change that alters form, fit or function; moves unit cost, one-time cost or a schedule milestone by more than the bars below; touches safety or a flight-safety part; retrofits aircraft already built or delivered; or changes interchangeability. Class II is everything else. When unsure, propose Class I. Do not name an approval board or tier: Norn's routing decides that, not you.
 
-Timeline and supply. Norn also checks when the change reaches the line (the cut-in date and first serial, and how many weeks after the stated effectivity) and how exposed it is to its suppliers (a part with one qualified source, a supplier's slot or capacity shared with another open ECR, bundle savings). The job gives you what those checks found, in sentences, and the numbers to post. Post at most one claim starting "Timeline: " and one starting "Supply: ", each at most 550 characters, built from the job's sentences with their figures exactly as written (evidence "computation"), and nothing the job does not give you. If the job says a check is not available, post a claim saying so ("Timeline: the timeline check is not available because ...", evidence "judgment") and state no date or supplier finding from it. Never give a cut-in date, a number of weeks or a likelihood the job did not give you.
+Timeline and supply. Norn also checks when the change reaches the line (the cut-in date and first serial, and how many weeks after the stated effectivity) and how exposed it is to its suppliers (a part with one qualified source, a supplier's slot or capacity shared with another open ECR, bundle savings). The job gives you what those checks found, in sentences. Norn shows their numbers itself, so post none of them in numbers. Post at most one claim starting "Timeline: " and one starting "Supply: ", each at most 550 characters, built from the job's sentences with their figures exactly as written (evidence "computation"), and nothing the job does not give you. If the job says a check is not available, post a claim saying so ("Timeline: the timeline check is not available because ...", evidence "judgment") and state no date or supplier finding from it. Never give a cut-in date, a number of weeks or a likelihood the job did not give you.
 
 Numbers. Headline numbers are computations. Give each one's key and resultKey exactly as the job names them; Norn copies the digits from the check result, so you never type them. In prose, quote a computed value only as get_impact shows it, rounded to the dollar, as a range (low to high, p10 to p90) and never a single point. Never state a figure that is not in a check result. If get_impact says the results are mock, stale or partial, say so in the headline and do not present them as current.
 
@@ -158,10 +158,17 @@ export interface JobFacts {
   timelineSupply?: TimelineSupplyFacts;
 }
 
+/** The module's cap on one claim's text, and the length past which the job asks for shortened conditions (the claim also carries "Recommendation: ..." and the rule). */
+export const CLAIM_MAX = 600;
+export const CLAIM_FIT = 520;
+
 function recommendationLine(r: Derived | undefined): string {
   if (!r) return 'Apply the recommendation rule in the system prompt to what get_impact shows; when you cannot tell whether the change can be assessed as filed, it is Send back (rule 1).';
   const items = r.rule === 1 ? r.blockers : r.rule === 2 ? r.conditions : [];
-  return `Norn's rule gives "${r.recommendation}" (rule ${r.rule}) for this ECR; use it as given${items.length ? `, naming exactly these${r.rule === 1 ? ' reasons' : ' conditions'}: ${items.map((x, i) => `(${i + 1}) ${x}`).join('; ')}` : ''}.`;
+  // The recommendation claim is capped at 600 characters. When the canonical wording would not fit, the agent is told to shorten each condition, never to drop one.
+  const claim = `Recommendation: ${r.recommendation}. Rule ${r.rule}: ${items.map((x, i) => `(${i + 1}) ${x}`).join('; ')}.`;
+  const fit = items.length && claim.length > CLAIM_FIT ? ` Written out in full they would not fit one claim (${CLAIM_MAX} characters): name each condition in a few words, keeping every one and its date, serial or ECR.` : '';
+  return `Norn's rule gives "${r.recommendation}" (rule ${r.rule}) for this ECR; use it as given${items.length ? `, naming exactly these${r.rule === 1 ? ' reasons' : ' conditions'}: ${items.map((x, i) => `(${i + 1}) ${x}`).join('; ')}` : ''}.${fit}`;
 }
 
 /** Item 5 of the claims: what the timeline and supply checks found, or that a check is not available. */
@@ -193,7 +200,7 @@ Read the ECR, its impact results and its assumptions first, then post one statem
 changeClass: ${classLine}.
 route: ${routeLine}.
 headline: the bottom line first, one or two sentences: what the change costs per aircraft, one time and over 12 months, as ranges${f.timelineSupply?.timeline.length ? ", and the median date it reaches the line" : ""}. Do not state the recommendation here; the recommendation claim carries it, and the PLM shows the two apart. At most 500 characters.
-numbers: exactly these, each evidence "computation" (the cost numbers first, then the timeline and supply numbers, which are dates, weeks, serials or counts as the check gives them):
+numbers: exactly these, each evidence "computation":
 ${f.numbers.map(n => `- key "${n.key}", resultKey "${n.resultKey}" (${n.label})`).join('\n')}
 drivers: ${f.screened.drivers.length ? 'these clear the materiality bar; use up to three, each as {text, evidence "computation"}, in your own words and with the dollar figures as written here' : 'none clears the bar; leave the list empty'}:
 ${list(f.screened.drivers, 'none')}

@@ -34,7 +34,7 @@ import { costCheckOf, routeFor, storedCompanyConfig } from './routing.ts';
 import { settingsFromEnv, type Level1Settings } from './settings.ts';
 import { SIBLING_STAGES, siblingCutoffMs, siblingOf } from './siblings.ts';
 import { crSeqOfRun, failedChecksForRun, runRowsOf, siblingsForRun, toRunRow } from './source.ts';
-import { ABSENT, headlineNumbers, ruleCheckOf, timelineSupplyFacts } from './timeline-supply.ts';
+import { ruleCheckOf, timelineSupplyFacts } from './timeline-supply.ts';
 
 type Db = DbConnection['db'];
 type Pr = NonNullable<ReturnType<Db['pullRequest']['id']['find']>>;
@@ -60,7 +60,7 @@ export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
     .filter(r => r.stage === 's2_cost' && r.status === 'done')
     .sort((a, b) => Number(a.id - b.id))
     .map(r => {
-      const own = toRunRow(r);
+      const own = runs.find(x => x.id === r.id) ?? toRunRow(r);
       return {
         id: Number(r.id),
         inputsRevision: typeof jsonOr<Inputs>(r.inputsJson, {}).revision === 'number' ? jsonOr<Inputs>(r.inputsJson, {}).revision! : null,
@@ -82,9 +82,6 @@ export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
   };
 }
 
-/** A statement holds 1 to 12 headline numbers (the module refuses more). */
-const MAX_NUMBERS = 12;
-
 /** The job prompt's facts for one finished s2_cost run. */
 export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
   const run = db.checkRun.id.find(BigInt(s2RunId))!;
@@ -104,10 +101,10 @@ export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
     storedCompanyConfig(db)
   );
   // The same rule and the same rows the publisher applies, so the agent is told what the PLM will say.
-  // The timeline and supply checks of the same snapshot the publisher will read (siblings.ts): a number is asked for
-  // only from a check whose result is there, and a check that is not says so instead.
+  // The timeline and supply checks of the same snapshot the publisher will read (siblings.ts). The agent posts none of
+  // their numbers (the module would check them against the newest finished runs, which a later re-run can change
+  // under it); the publisher shows them from these runs. The agent gets sentences built from the same rows.
   const siblings = siblingsForRun(db, pr.id, run.id);
-  const extra = headlineNumbers(siblings?.timeline ?? ABSENT, siblings?.supply ?? ABSENT, MAX_NUMBERS - numbers.length).map(n => ({ key: n.resultKey.replace(/[^A-Za-z0-9_]/g, '_'), resultKey: n.resultKey, label: n.label }));
   const recommendation = deriveRecommendation(ruleInputOf(rows, failedChecksForRun(db, pr.id, run.id), siblings ? { timeline: ruleCheckOf(siblings.timeline), supply: ruleCheckOf(siblings.supply) } : {}));
   return {
     ecr: pr.plmEcrNumber,
@@ -116,7 +113,7 @@ export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
     s2RunId,
     baseline: p.baseline,
     changeRequest: p.changeRequest,
-    numbers: [...numbers, ...extra],
+    numbers,
     screened,
     routing,
     recommendation,

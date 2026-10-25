@@ -71,8 +71,54 @@ export function flagsOf(v: SiblingView): NonNullable<SiblingCheck['flags']> {
   return Array.isArray(f) ? f.filter(x => x && typeof x.kind === 'string' && typeof x.severity === 'string' && typeof x.message === 'string') : [];
 }
 
-/** The rule's view of a check. */
-export const ruleCheckOf = (v: SiblingView): SiblingCheck => ({ state: v.state, ...(v.state === 'ready' ? { flags: flagsOf(v) } : {}) });
+/**
+ * The rule's view of a check: its state and flags, and what the conditions quote, all from the bound rows. The
+ * timeline gives the median cut-in date and serial, the stated need and how late at P90; the supply check gives the
+ * other open ECRs it shares a supplier with.
+ */
+export function ruleCheckOf(v: SiblingView): SiblingCheck {
+  if (v.state !== 'ready') return { state: v.state };
+  const out: SiblingCheck = { state: 'ready', flags: flagsOf(v) };
+  const d = detailOf(v);
+  const date = jsonOr(row(v, 'cut_in_date')?.detailJson ?? '{}').date?.p50;
+  const serial = row(v, 'cut_in_serial')?.p50;
+  const late = row(v, 'late_weeks');
+  if (date !== undefined || serial !== undefined || late || d.stated?.label)
+    out.cutIn = {
+      ...(typeof date === 'string' ? { date } : {}),
+      ...(typeof serial === 'number' ? { serial: Math.round(serial) } : {}),
+      ...(typeof d.stated?.label === 'string' ? { stated: d.stated.label } : {}),
+      ...(late ? { lateWeeksP90: late.p90 } : {}),
+    };
+  const peers = d.interaction?.peers;
+  if (Array.isArray(peers)) out.peers = peers.map((p: { ecr?: unknown }) => String(p.ecr)).filter(x => x && x !== 'undefined');
+  return out;
+}
+
+/** A number of the timeline or supply check as the statement's table shows it, from the bound rows. */
+export interface TableNumber {
+  key: string;
+  label: string;
+  unit: string;
+  p10: number;
+  p50: number;
+  p90: number;
+  evidence: 'computation';
+  resultKey: string;
+}
+
+/**
+ * The numbers the PLM text's "Timeline and supply" table shows, in order: the headline rows of the bound runs. The
+ * agent posts none of them, so they cannot fail the module's check against a newer run; they are the stored rows of
+ * the very runs the statement rests on.
+ */
+export function tableNumbers(timeline: SiblingView, supply: SiblingView): TableNumber[] {
+  const rows = [...timeline.rows, ...supply.rows];
+  return headlineNumbers(timeline, supply, 12).map(h => {
+    const r = rows.find(x => x.key === h.resultKey)!;
+    return { key: h.resultKey.replace(/[^A-Za-z0-9_]/g, '_'), label: r.label, unit: r.unit, p10: r.p10, p50: r.p50, p90: r.p90, evidence: 'computation' as const, resultKey: r.key };
+  });
+}
 
 // ---- words ------------------------------------------------------------------------------------------
 
@@ -185,7 +231,7 @@ function supplyFacts(v: SiblingView): string[] {
     const withLate = jsonOr(row(v, 'p_miss_effectivity_with_peers')?.detailJson ?? '{}').weeksLate;
     out.push(`With ${names || 'the other open ECRs'} ahead of it at ${shared || 'a shared supplier'}, the cut-in moves ${range(shift.p10, shift.p90, wk)} weeks later (${wk(shift.p50)} at the median); likelihood it moves: ${later ? likelihoodWord(later.p50) : 'not given'}${withLate && typeof withLate.p50 === 'number' ? `. It then reaches the line ${wk(withLate.p50)} weeks after the stated effectivity at the median` : ''}.`);
   } else if (peers.length) {
-    out.push(`It shares ${shared || 'a supplier'} with ${names}; neither the slots nor the capacity move its cut-in.`);
+    out.push(`It shares ${shared || 'a supplier'} with ${names}${shift ? `; any shift of its cut-in is below the reporting threshold (${MATERIALITY.cutInSlipDays} days)` : ''}.`);
   }
   const bundle = rowsWith(v, 'bundle_saving:').find(r => r.p50 > MATERIALITY.oneTimeCostUsd);
   if (bundle) {

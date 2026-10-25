@@ -38,13 +38,14 @@ export function crSeqOfRun(db: Db, checkRunId: bigint): number | null {
 export function failedChecksForRun(db: Db, prId: bigint, checkRunId: bigint): string[] {
   const run = checkRunId === 0n ? undefined : db.checkRun.id.find(checkRunId);
   if (!run) return [];
-  return failedChecksOf(runRowsOf(db, prId), toRunRow(run), runInputs(db, checkRunId)?.upstream?.s1_bom_delta);
+  const runs = [...db.checkRun.prId.filter(prId)].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map(r => toRunRow(r));
+  return failedChecksOf(runs, toRunRow(run), runInputs(db, checkRunId)?.upstream?.s1_bom_delta);
 }
 
 type RunRecord = ReturnType<Db['checkRun']['id']['find']> & object;
 
 /** A stored check run as the rules read it: times in milliseconds, and the s1 hash and revision its inputs name. */
-export function toRunRow(r: RunRecord): RunRow {
+export function toRunRow(r: RunRecord, completedMs?: number): RunRow {
   const inputs = jsonOr<Inputs>(r.inputsJson, {});
   return {
     id: r.id,
@@ -56,12 +57,19 @@ export function toRunRow(r: RunRecord): RunRow {
     finishedMs: r.finishedAt ? Number(r.finishedAt.microsSinceUnixEpoch / 1000n) : null,
     ...(typeof inputs.upstream?.s1_bom_delta === 'string' ? { upstreamS1: inputs.upstream.s1_bom_delta } : {}),
     ...(typeof inputs.revision === 'number' ? { revision: inputs.revision } : {}),
+    ...(completedMs !== undefined ? { completedMs } : {}),
   };
 }
 
 /** All of an ECR's check runs, oldest first. */
 export function runRowsOf(db: Db, prId: bigint): RunRow[] {
-  return [...db.checkRun.prId.filter(prId)].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map(toRunRow);
+  // When a run completed: its results are written in that transaction and never edited, unlike its `finishedAt` (reset when it goes stale).
+  const completed = new Map<bigint, number>();
+  for (const x of db.checkResult.prId.filter(prId)) {
+    const at = x.createdAt ? Number(x.createdAt.microsSinceUnixEpoch / 1000n) : undefined;
+    if (at !== undefined && (completed.get(x.checkRunId) ?? Infinity) > at) completed.set(x.checkRunId, at);
+  }
+  return [...db.checkRun.prId.filter(prId)].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map(r => toRunRow(r, completed.get(r.id)));
 }
 
 /**
@@ -73,7 +81,7 @@ export function siblingsForRun(db: Db, prId: bigint, s2RunId: bigint): { timelin
   const s2 = s2RunId === 0n ? undefined : db.checkRun.id.find(s2RunId);
   if (!s2 || s2.stage !== 's2_cost') return undefined;
   const runs = runRowsOf(db, prId);
-  const own = toRunRow(s2);
+  const own = runs.find(r => r.id === s2RunId) ?? toRunRow(s2);
   const results = [...db.checkResult.prId.filter(prId)];
   const view = (stage: SiblingStage): SiblingView => {
     const s = siblingOf(runs, own, stage);

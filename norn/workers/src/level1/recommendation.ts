@@ -11,12 +11,16 @@
 //   Rule 2, Approve with conditions: the assessment stands but has stated gaps (a blank cost line counted
 //     as $0, an unestimated item, an undecided stock disposition, a price change with no quote, any other
 //     warning; a timeline or supply check that is not available or could not assess something, #120). The
-//     conditions name exactly those gaps. A late cut-in, a single source or a supplier conflict is a finding the
-//     timeline and supply checks report: it is shown in the statement and moves neither the rule nor the conditions.
+//     conditions name exactly those gaps. A missed need date (the cut-in slips past the stated effectivity by more
+//     than 14 days) and a slot or capacity conflict with another open ECR are conditions too, in short fixed wording
+//     with the date, serial and ECR from the bound s3 and s4 rows: the CCB must answer them, but they never make it
+//     Send back. A single source is a finding the statement shows and no more.
 //   Rule 3, Approve: no blocker and no gap.
 //   Never Reject: that is a human call.
 //
 // Info flags (cross-checks, defaults, budgetary quotes) are neither: they are not gaps.
+
+import { MATERIALITY } from './prompt.ts';
 
 export const DERIVED_RECOMMENDATIONS = ['Send back', 'Approve with conditions', 'Approve'] as const;
 export type DerivedRecommendation = (typeof DERIVED_RECOMMENDATIONS)[number];
@@ -45,6 +49,10 @@ export interface RuleLine {
 export interface SiblingCheck {
   state: 'ready' | 'failed' | 'blocked' | 'pending' | 'mock';
   flags?: { kind: string; severity: string; message: string; ref?: string }[];
+  /** Timeline: the median cut-in as an ISO date and first serial, the stated need, and how late at P90 (weeks), from the bound rows. */
+  cutIn?: { date?: string; serial?: number; stated?: string; lateWeeksP90?: number };
+  /** Supply: the other open ECRs that share a supplier with this one, from the interaction the check stored. */
+  peers?: string[];
 }
 
 export interface RuleInput {
@@ -90,13 +98,15 @@ const BLOCKING_KINDS = new Set(['conflict', 'not_converged']);
 const short = (s: string, n = 200) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /**
- * Warn flags of the timeline and supply checks that are results, not gaps: the check assessed the change and found
- * that it is late, has one source, or fights another ECR for a supplier's slot or capacity. They are reported in the
- * statement and move neither the recommendation nor the conditions. Every other warn flag of these checks says the
- * check could not assess something (no date placed, a peer ECR unreadable, a price missing, an assumption not
- * applied) and is a gap, as a warn flag of the cost check is.
+ * How the timeline and supply checks' warn flags enter the rule.
+ *  - `single_source` is a finding: shown in the statement, never a condition.
+ *  - `likely_late`, `slot_contention` and `capacity_exceeded` are findings the CCB must answer, so each becomes one
+ *    condition (below), whose date and serial come from the bound s3 rows and whose peers come from the s4
+ *    interaction. They are conditions, never blockers: the assessment stands, and the board decides.
+ *  - Every other warn flag says the check could not assess something (no date placed, a peer ECR unreadable, a
+ *    price missing, an assumption not applied) and is a gap, as a warn flag of the cost check is.
  */
-const FINDING_KINDS = new Set(['likely_late', 'single_source', 'slot_contention', 'capacity_exceeded']);
+const NOT_GAPS = new Set(['single_source', 'likely_late', 'slot_contention', 'capacity_exceeded']);
 
 const UNAVAILABLE: Record<Exclude<SiblingCheck['state'], 'ready'>, string> = {
   failed: 'failed',
@@ -129,10 +139,22 @@ function siblingConditions(name: string, c: SiblingCheck | undefined): string[] 
   if (!c) return [];
   if (c.state !== 'ready') return [`The ${name} check ${UNAVAILABLE[c.state]}, so it is not assessed`];
   const out: string[] = [];
-  for (const f of c.flags ?? []) {
-    if (f.severity !== 'warn' || FINDING_KINDS.has(f.kind)) continue;
-    const text = siblingGap(f);
+  const add = (text: string) => {
     if (!out.includes(text)) out.push(text);
+  };
+  const flags = (c.flags ?? []).filter(f => f.severity === 'warn');
+  for (const f of flags) if (!NOT_GAPS.has(f.kind)) add(siblingGap(f));
+  // A missed need date: only the timeline check's own flag (the supply check's version of it is the same fact), and
+  // only a slip over Bowman's 14-day bar.
+  if (name === 'timeline' && flags.some(f => f.kind === 'likely_late') && (c.cutIn?.lateWeeksP90 === undefined || c.cutIn.lateWeeksP90 * 7 > MATERIALITY.cutInSlipDays)) {
+    const to = c.cutIn?.date ? ` to ${c.cutIn.date}${c.cutIn.serial !== undefined ? ` (S/N ${c.cutIn.serial})` : ''}` : '';
+    add(`CCB to accept the cut-in slip${to} against the stated need${c.cutIn?.stated ? ` (${c.cutIn.stated})` : ''}, or expedite`);
+  }
+  // An unresolved conflict with another open ECR over a supplier's slot or capacity. Capacity counts only when it
+  // is the interaction with a named peer that exceeds it.
+  if (name === 'supply' && c.peers?.length) {
+    const kinds = [flags.some(f => f.kind === 'slot_contention') ? 'slot' : '', flags.some(f => f.kind === 'capacity_exceeded') ? 'capacity' : ''].filter(Boolean);
+    if (kinds.length) add(`Resolve the supplier ${kinds.join(' and ')} conflict with ${c.peers.join(', ')}`);
   }
   return out;
 }
@@ -202,6 +224,11 @@ export interface RunRow {
   upstreamS1?: string;
   /** The change-request revision the run's inputs name. */
   revision?: number;
+  /**
+   * When the run completed, read from its results (written in the transaction that completes it, never edited). A run's
+   * `finishedAt` is overwritten when it goes stale, so it cannot say when a stale run finished.
+   */
+  completedMs?: number;
 }
 
 /**
