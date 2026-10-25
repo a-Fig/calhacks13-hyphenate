@@ -198,12 +198,13 @@ describe("what became of one record_assumption call (its own row in the action l
     assert.equal(callResult(a, REQ, [logRow()], [], AGENT).state, 'pending');
   });
 
-  it('recognises the one call that leaves no log row, a call that changed nothing, only on the final look and only for an identical row at the expected revision', async () => {
+  it('finds no log row for a call that changed nothing, and then reports it unconfirmed, not applied, only on the final look and only for an identical row at the expected revision', async () => {
     const a = { ...(await callArgs()), expectedRev: 3 };
     const same = rowFor(a, { rev: 3 });
     assert.equal(callResult(a, REQ, [], [same], AGENT).state, 'pending');
     const r = callResult(a, REQ, [], [same], AGENT, true);
-    assert.equal(r.state, 'unchanged');
+    assert.equal(r.state, 'unconfirmed', 'an identical row without a log row is not a success');
+    assert.match(r.state === 'unconfirmed' ? r.why : '', /^unconfirmed: .*logged no outcome for this call/);
     assert.equal(callResult(a, REQ, [], [{ ...same, rationale: 'different' }], AGENT, true).state, 'refused');
     assert.equal(callResult(a, REQ, [], [{ ...same, affects: ['s3_timeline'] }], AGENT, true).state, 'refused');
     assert.equal(callResult(a, REQ, [], [{ ...same, rev: 4 }], AGENT, true).state, 'refused');

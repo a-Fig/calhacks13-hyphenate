@@ -159,7 +159,7 @@ check('a call at the right revision with a new rationale is applied as revision 
 const same = { ...super2, expectedRev: 2 };
 await send(same, `fx5-nochange-${stamp}`);
 check('a call that changes nothing leaves no log row', logFor(`fx5-nochange-${stamp}`).length === 0);
-check('...so it is pending until the final look, then unchanged', callResult(same, `fx5-nochange-${stamp}`, [], rowsOf(E.id), agentHex).state === 'pending' && callResult(same, `fx5-nochange-${stamp}`, [], rowsOf(E.id), agentHex, true).state === 'unchanged');
+check('...so it is pending until the final look, then unconfirmed, not applied', callResult(same, `fx5-nochange-${stamp}`, [], rowsOf(E.id), agentHex).state === 'pending' && callResult(same, `fx5-nochange-${stamp}`, [], rowsOf(E.id), agentHex, true).state === 'unconfirmed');
 
 // ==================================================================================================
 // 1. Level 1 waits for the research result, then writes on the researched numbers
@@ -222,6 +222,11 @@ await A.R.recordAgentEvents({ checkRunId: b1.id, events: [input] });
 await until(() => factsFor(ecrNumber('B')).researched?.includes(1), 5000, "the dispatcher cache to see the research result");
 const released = decide(factsFor(ecrNumber('B')), opts(Number(b2.finishedAt!.toDate().getTime()) + T(1), true));
 check('the research result is stored: the session is released, on the NEW cost run (the researched numbers), not the first', released.action === 'dispatch' && released.s2RunId === Number(b2.id) && released.s2RunId !== Number(b1.id), JSON.stringify(released));
+
+const bf = factsFor(ecrNumber('B'));
+check('the wait counts from the FIRST cost run on the revision (now stale), not the re-run: the dispatcher reads it from the real cache', Math.abs(bf.firstS2FinishedMs! - run(b1.id).finishedAt!.toDate().getTime()) < 5 && bf.firstS2FinishedMs < bf.s2Done.at(-1)!.finishedMs!, `${bf.firstS2FinishedMs} vs run ${run(b1.id).finishedAt!.toDate().getTime()}, re-run ${bf.s2Done.at(-1)!.finishedMs}`);
+const afterRerun = decide({ ...bf, firstS2SeenMs: bf.firstS2FinishedMs! }, opts(bf.firstS2FinishedMs! + T(10), true));
+check('...so ten minutes after the first run it is released even though the re-run finished later', afterRerun.action === 'dispatch', afterRerun.action === 'skip' ? afterRerun.reason : afterRerun.action);
 
 // -- and a session started now can post, because its run still stands
 await earlyStatement(B.id, b2.id);

@@ -74,7 +74,7 @@ test("factsOf reads the research worker's stored results only when asked, for th
   const db = {
     ecrRevision: { prId: { filter: () => [{ seq: 2, current: true, createdAt: ts }] } },
     checkResult: { prId: { filter: () => [] } },
-    checkRun: { prId: { filter: () => [{ id: 7n, stage: 's2_cost', status: 'done', inputsJson: JSON.stringify({ revision: 2 }), finishedAt }] } },
+    checkRun: { prId: { filter: () => [{ id: 6n, stage: 's2_cost', status: 'stale', inputsJson: JSON.stringify({ revision: 2 }), finishedAt: { toDate: () => new Date('2026-10-24T20:00:05Z') } }, { id: 7n, stage: 's2_cost', status: 'done', inputsJson: JSON.stringify({ revision: 2 }), finishedAt }] } },
     agentEvent: { prId: { filter: () => events } },
     impactStatement: { prId: { filter: () => [] } },
   } as unknown as Db;
@@ -84,4 +84,5 @@ test("factsOf reads the research worker's stored results only when asked, for th
   const on = factsOf(db, pr, 'level1-statement', true);
   assert.deepEqual(on.researched, [2]);
   assert.equal(on.s2Done[0]!.finishedMs, Date.parse('2026-10-24T20:00:20Z'));
+  assert.equal(on.firstS2FinishedMs, Date.parse('2026-10-24T20:00:05Z'), 'the first finished run on the current revision, though it has since gone stale');
 });

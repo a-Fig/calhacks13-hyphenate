@@ -256,3 +256,27 @@ test('research job ids name their change-request revision, and only for their EC
   assert.equal(researchRevisionOfJobId(jobIdFor('ECR-0417', 3, 1, 1), 'ECR-0417'), null, "a Level 1 job id is not a research job's");
   assert.equal(researchRevisionOfJobId('research-ECR-0417-r3-0A1B2C3D-a2', 'ECR-0417'), null);
 });
+
+test('research on: reruns of the cost check do not move the end of the wait (it counts from the first finished run)', () => {
+  // Research and baseline changes re-run the check every few minutes; the newest run finished a minute ago, the first 10 minutes ago.
+  const reruns = finished({ firstS2FinishedMs: FINISHED, s2Done: [{ id: 31, inputsRevision: 1, mock: false, finishedMs: FINISHED + WAIT - 60_000 }] });
+  assert.equal(decide(reruns, researchOn({ nowMs: FINISHED + WAIT - 1 })).action, 'skip');
+  assert.deepEqual(decide(reruns, researchOn({ nowMs: FINISHED + WAIT })), { action: 'dispatch', revision: 1, attempt: 1, s2RunId: 31 });
+  // however often it re-runs, the end is first finish + the wait
+  for (const every of [60_000, 120_000, 300_000]) {
+    const last = FINISHED + Math.floor(WAIT / every) * every - every;
+    const f = finished({ firstS2FinishedMs: FINISHED, s2Done: [{ id: 40, inputsRevision: 1, mock: false, finishedMs: last }] });
+    assert.equal(decide(f, researchOn({ nowMs: FINISHED + WAIT })).action, 'dispatch', `re-run every ${every / 1000} s`);
+  }
+});
+
+test("research on: a cost run stamped in the future (the server's clock ahead of ours) cannot stretch the wait", () => {
+  const future = FINISHED + 3_600_000;
+  // First seen by this process at FINISHED (its own clock): released WAIT later, whatever the stamps say.
+  const f = finished({ firstS2FinishedMs: future, firstS2SeenMs: FINISHED, s2Done: [{ id: 7, inputsRevision: 1, mock: false, finishedMs: future }] });
+  assert.equal(decide(f, researchOn({ nowMs: FINISHED + WAIT - 1 })).action, 'skip');
+  assert.equal(decide(f, researchOn({ nowMs: FINISHED + WAIT })).action, 'dispatch');
+  // and without our own first sight, a future stamp counts as now: held, but only until the stamp's own time is no later than now + wait
+  const unseen = finished({ firstS2FinishedMs: future, s2Done: [{ id: 7, inputsRevision: 1, mock: false, finishedMs: future }] });
+  assert.match((decide(unseen, researchOn({ nowMs: FINISHED })) as any).reason, /goes ahead without it at/);
+});

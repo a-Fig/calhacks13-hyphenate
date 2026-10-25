@@ -29,7 +29,7 @@ export interface Level1Settings {
    * for the revision's research result. Off unless NORN_L1_WAIT_FOR_RESEARCH=1 (`npm run demo -- --research` sets it).
    */
   waitForResearch: boolean;
-  /** How long after the cost run finished the wait ends anyway (research failed, out of budget, or not running). */
+  /** How long after the first cost run on the revision finished the wait ends anyway (research failed, out of budget, or not running). */
   researchWaitMs: number;
   /** Only these ECRs are researched (the research worker's own limit, NORN_L1_RESEARCH_ECRS); empty: all. */
   researchEcrs: string[];

@@ -105,8 +105,12 @@ export interface LogRow {
 export type CallResult =
   /** The module applied this call and wrote this row. */
   | { state: 'applied'; row: AssumptionRow }
-  /** The module wrote nothing because the assumption already had exactly this content (revision unchanged). */
-  | { state: 'unchanged'; row: AssumptionRow }
+  /**
+   * No outcome for this call in the action log, but an identical current row of this agent is in the table. The module
+   * logs nothing for a call that changes nothing, so this may be that; it may also be a log row that never arrived. Not
+   * counted as recorded: the worker reports it as unconfirmed.
+   */
+  | { state: 'unconfirmed'; row: AssumptionRow; why: string }
   /** The module refused the call, or its outcome is not what was asked for. */
   | { state: 'refused'; why: string }
   /** No outcome for this call yet. */
@@ -122,8 +126,9 @@ export type CallResult =
  * happens to match, which is how a refusal used to be counted as a success.
  *
  * The one call that leaves no log row is one that changes nothing (the module returns early when the stored
- * assumption already has the same value, source, rationale and stages). With `final` set, that is recognised
- * from the table: this agent's current row, identical in every field, still at the revision the call expected.
+ * assumption already has the same value, source, rationale and stages). With `final` set and no log row, an identical
+ * current row of this agent at the revision the call expected is `unconfirmed`, not applied: the table cannot say
+ * whether this call did nothing or its log row is missing, and a success has to rest on the call's own outcome.
  */
 export function callResult(args: RecordAssumptionArgs, requestId: string, log: readonly LogRow[], rows: readonly AssumptionRow[], agentHex: string, final = false): CallResult {
   const mine = log.filter((l) => l.requestId === requestId && l.reducer === 'record_assumption').sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))[0];
@@ -138,6 +143,6 @@ export function callResult(args: RecordAssumptionArgs, requestId: string, log: r
   }
   if (!final) return { state: 'pending' };
   const same = rows.find((r) => r.prId === args.prId && r.key === args.key && r.current && r.createdBy === agentHex && r.source === args.source && r.distJson === args.distJson && r.rev === args.expectedRev && args.expectedRev > 0 && r.rationale === args.rationale && r.affects.join() === args.affects.join());
-  if (same) return { state: 'unchanged', row: same };
+  if (same) return { state: 'unconfirmed', row: same, why: `unconfirmed: an identical assumption (${same.key} revision ${same.rev}) is in the table, but the module logged no outcome for this call; it may have changed nothing, or the log row has not arrived. Not counted as recorded; see the action log` };
   return { state: 'refused', why: 'the module logged no outcome for this call; see the action log' };
 }

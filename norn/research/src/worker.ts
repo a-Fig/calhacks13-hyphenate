@@ -299,8 +299,8 @@ async function researchOne(pr: Pr, d: Extract<Decision, { action: 'research' }>)
       // A scoped call that the gate or the module refuses returns normally. The answer is this call's own row in the action log.
       const look = (final: boolean) => callResult(c.args, requestId, logRowsOf(requestId), assumptionsOf(pr.id), agentHex, final);
       const res = (await until(() => (look(false).state === 'pending' ? undefined : look(false)), 6000)) ?? look(true);
-      if (res.state === 'applied' || res.state === 'unchanged') outcome.recorded.push({ targetKey: c.targetKey, key: res.row.key, rev: res.row.rev, assumptionId: Number(res.row.id) });
-      else outcome.failed.push({ targetKey: c.targetKey, key: c.args.key, why: res.state === 'refused' ? res.why : 'no outcome for this call yet; see the action log' });
+      if (res.state === 'applied') outcome.recorded.push({ targetKey: c.targetKey, key: res.row.key, rev: res.row.rev, assumptionId: Number(res.row.id) });
+      else outcome.failed.push({ targetKey: c.targetKey, key: c.args.key, why: res.state === 'refused' || res.state === 'unconfirmed' ? res.why : 'no outcome for this call yet; see the action log' });
     }
     log(`${d.jobId}: recorded ${outcome.recorded.length}/${calls.length} assumption(s); held ${outcome.proposals.filter((p) => p.status === 'needs_person').length}, rejected ${outcome.proposals.filter((p) => p.status === 'rejected').length}${outcome.failed.length ? `, FAILED ${outcome.failed.length}` : ''}`);
 

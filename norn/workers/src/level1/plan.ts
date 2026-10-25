@@ -52,6 +52,13 @@ export interface EcrFacts {
    */
   researched?: number[];
   /**
+   * When the first s2_cost run on the current change-request revision finished, counting runs since made stale (each
+   * research or baseline change re-runs the check, and the wait must not start over with every one). Null or absent: unknown.
+   */
+  firstS2FinishedMs?: number | null;
+  /** When this process first saw a finished cost run on the current revision; the dispatcher's own clock, which a server timestamp cannot stretch. */
+  firstS2SeenMs?: number;
+  /**
    * Impact statements of any level. `crSeq` is the change-request revision of the check run a
    * statement was written from (the module records the run), or null when it rests on no run.
    */
@@ -69,7 +76,7 @@ export interface DecideOptions {
   running: ReadonlySet<string>;
   /**
    * Set when the research worker runs next to this dispatcher: the first session for a revision waits for
-   * the revision's research result, for at most `waitMs` after the cost run finished. Absent: no waiting,
+   * the revision's research result, for at most `waitMs` after the first cost run on the revision finished. Absent: no waiting,
    * exactly the behaviour before research existed.
    */
   research?: { waitMs: number; /** Only these ECRs are researched (the worker's own limit); absent or empty: all. */ ecrs?: readonly string[] };
@@ -121,12 +128,16 @@ export function researchRevisionOfJobId(jobId: string, ecrNumber: string): numbe
  * passed since the cost run finished (research failed, ran out of budget, or has nothing to say: never block
  * the statement for ever).
  */
-export function researchWait(e: Pick<EcrFacts, 'number' | 'crCreatedMs' | 'researched'>, run: { finishedMs?: number | null }, rev: number, o: Pick<DecideOptions, 'nowMs' | 'research'>): string | null {
+export function researchWait(e: Pick<EcrFacts, 'number' | 'crCreatedMs' | 'researched' | 'firstS2FinishedMs' | 'firstS2SeenMs'>, run: { finishedMs?: number | null }, rev: number, o: Pick<DecideOptions, 'nowMs' | 'research'>): string | null {
   const r = o.research;
   if (!r) return null;
   if (r.ecrs?.length && !r.ecrs.includes(e.number)) return null;
   if (e.researched?.includes(rev)) return null;
-  const releaseAt = (run.finishedMs ?? e.crCreatedMs ?? o.nowMs) + r.waitMs;
+  // From the FIRST finished cost run on this revision, not the newest: reruns (research's own, a baseline change) would
+  // otherwise keep moving the end. Never later than this process's own first sight of a finished run, and never in the
+  // future, so a server clock ahead of ours cannot stretch the wait.
+  const since = Math.min(e.firstS2FinishedMs ?? run.finishedMs ?? e.crCreatedMs ?? o.nowMs, e.firstS2SeenMs ?? o.nowMs, o.nowMs);
+  const releaseAt = since + r.waitMs;
   if (o.nowMs >= releaseAt) return null;
   return `waiting for the research on revision ${rev} (a statement written now would rest on numbers research is about to replace); goes ahead without it at ${new Date(releaseAt).toISOString()}`;
 }

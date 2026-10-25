@@ -245,8 +245,9 @@ and stores what passes the guardrails. It changes nothing in the other workers.
    request id it sent (`src/live/assumptions.ts` `callResult`): `applied` names the assumption the call wrote, which
    must be the key, value and revision asked for; `denied` and `rejected` carry the reason, and the call is reported
    as failed with it. An older assumption of the same value does not count. The one call that logs nothing is one
-   that changes nothing (the module returns early on an identical assumption); that is recognised from an identical
-   current row at the revision the call expected.
+   that changes nothing (the module returns early on an identical assumption). If no log row arrives within
+   6 seconds and an identical current row is in the table, the call is reported as unconfirmed, not recorded: the
+   ECR comment lists it under "Accepted but not recorded" and the `research_result` event under `failed`.
 
 **Do the researched numbers reach the impact page without a worker change?** Yes, by reading the code:
 `record_assumption` calls `reconcile` for the ECR (`../module/src/reducers.ts`, `recordAssumption`),
@@ -264,7 +265,7 @@ and a new `s2_cost` run is queued. The worker reads the assumptions the run name
   would have left the statement on the numbers from before for good, while the impact page moved on. So
   with `--research`, the dispatcher holds the first session for a revision until this worker has stored its
   `research_result` for it (`../workers/src/level1/plan.ts`, `researchWait`), or until
-  `NORN_L1_RESEARCH_WAIT_MS` (default 600000, ten minutes) after the cost run finished, whichever comes first.
+  `NORN_L1_RESEARCH_WAIT_MS` (default 600000, ten minutes) after the first cost run on the revision finished (later re-runs of the check, by research or a baseline change, do not move it, and neither does a server clock ahead of the dispatcher's), whichever comes first.
   The order of starting the processes does not matter. The real sequence is: cost run done, research runs
   (about 6 minutes at the longest with the defaults, see step 5), its assumptions re-run the cost check,
   the `research_result` is stored, the dispatcher starts the session on the re-run's numbers.

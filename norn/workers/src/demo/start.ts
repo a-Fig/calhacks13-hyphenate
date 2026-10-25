@@ -11,7 +11,7 @@
 // agent estimates. Off by default, because it spends Bright Data credits and a Claude session per ECR
 // revision; it needs BRIGHT_DATA_API_TOKEN in the environment or the .env. See norn/research/README.md.
 // With it, the Level 1 dispatcher is told to wait for each revision's research result before its first session
-// (NORN_L1_WAIT_FOR_RESEARCH, at most 10 minutes after the cost run finished), so the statement is written on the
+// (NORN_L1_WAIT_FOR_RESEARCH, at most 10 minutes after the first cost run on the revision finished), so the statement is written on the
 // researched numbers. Without it the dispatcher behaves as it always did.
 //
 // --ecrs limits the PLM ingest and the publisher to those ECRs (NORN_PLM_ECRS, NORN_PUBLISH_ECRS);

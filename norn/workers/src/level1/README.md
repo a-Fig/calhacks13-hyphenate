@@ -26,7 +26,7 @@ of the main checkout, which a worktree does not have). Run ONE dispatcher per da
   `NORN_L1_RETRY_DELAY_MS`, `NORN_L1_CONCURRENCY`, `NORN_L1_POLL_MS`.
 - With the research worker (`norn/research`, `npm run demo -- --research`): `NORN_L1_WAIT_FOR_RESEARCH=1`
   makes the first session for a revision wait for that revision's `research_result` event, at most
-  `NORN_L1_RESEARCH_WAIT_MS` (default 600000) after the cost run finished. Why: research re-runs the cost
+  `NORN_L1_RESEARCH_WAIT_MS` (default 600000) after the first cost run on the revision finished. Why: research re-runs the cost
   check on the same change request, and a statement written before that stays on the old numbers for
   good, since statements are keyed on the change-request revision. `NORN_L1_RESEARCH_ECRS` limits the wait
   to the ECRs the research worker covers. Unset, the dispatcher does not wait (`researchWait` in `plan.ts`).
