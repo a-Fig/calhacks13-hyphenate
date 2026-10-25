@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from 'react';
+import { Label } from '@primer/react';
 import { Tooltip } from '@primer/react/next';
 import type { Evidence, Figure } from '../assessment/types.ts';
 import { fig as figText } from './fmt.ts';
@@ -18,33 +19,30 @@ export const WhyContext = createContext<{ open: (traceId: string) => void; curre
 });
 export const useWhy = () => useContext(WhyContext);
 
-/** A shape per class, so colour is never the only cue: circle, diamond, square, triangle. */
-export function Glyph({ ev, size = 10 }: { ev: Evidence; size?: number }) {
-  return (
-    <svg className={`nx-glyph nx-ev-${ev}`} width={size} height={size} viewBox="0 0 10 10" aria-hidden="true">
-      {ev === 'fact' && <circle cx="5" cy="5" r="4.2" fill="var(--c)" />}
-      {ev === 'assumption' && <path d="M5 .6 9.4 5 5 9.4.6 5Z" fill="var(--c)" />}
-      {ev === 'computation' && <rect x=".9" y=".9" width="8.2" height="8.2" rx="1.3" fill="var(--c)" />}
-      {ev === 'judgment' && <path d="M5 .8 9.4 9H.6Z" fill="var(--c)" stroke="var(--c)" strokeWidth=".8" strokeLinejoin="round" />}
-    </svg>
-  );
+/** A small neutral text badge naming the evidence class. Neutral variant so it is not read as risk or severity. */
+export function EvidenceLabel({ ev }: { ev: Evidence }) {
+  return <Label variant="secondary" size="small" className="nx-evidence-label">{EV[ev].label}</Label>;
+}
+
+/** Highlight the value or passage itself, without adding words to the report. */
+export function Highlight({ ev, children }: { ev: Evidence; children: ReactNode }) {
+  return <mark className={`nx-highlight nx-ev-${ev}`}>{children}</mark>;
 }
 
 /**
- * A number or claim that has a "why". Quiet by default, as GitHub marks things: ink text with a thin
- * underline in the class colour, and a tooltip that names the class. The underline style says it too
- * (solid fact, dashed assumption, dotted computation, double judgment), so colour is never alone.
+ * A highlighted value or passage that opens its evidence. The tooltip and detail panel name its class.
  */
-export function Mark({ ev, id, children, className = '', claim = false }: { ev: Evidence; id: string; children: ReactNode; className?: string; claim?: boolean }) {
+export function Mark({ ev, id, children, className = '' }: { ev: Evidence; id: string; children: ReactNode; className?: string }) {
   const why = useWhy();
   return (
     <Tooltip text={`${EV[ev].label}: ${EV[ev].hint}`} direction="s" type="description">
       <button
         type="button"
-        className={`nx-mark nx-ev-${ev} ${claim ? 'claim' : ''} ${why.current === id ? 'open' : ''} ${className}`}
+        className={`nx-mark ${why.current === id ? 'open' : ''} ${className}`}
+        aria-haspopup="dialog"
         onClick={() => why.open(id)}
       >
-        {children}
+        <Highlight ev={ev}>{children}</Highlight>
       </button>
     </Tooltip>
   );
@@ -70,10 +68,9 @@ export function Legend({ counts }: { counts?: Record<Evidence, number> }) {
       <ul className="nx-legend-entries">
         {EV_ORDER.map(k => (
           <li key={k}>
-            <Glyph ev={k} size={12} />
             <div className="nx-legend-copy">
               <div className="nx-legend-label">
-                <b>{EV[k].label}</b>
+                <Highlight ev={k}>{EV[k].label}</Highlight>
                 {counts && <span className="n" aria-label={`${counts[k]} items`}>{counts[k]}</span>}
               </div>
               <span className="hint">{k === 'assumption' ? 'Assumed input' : EV[k].hint}</span>

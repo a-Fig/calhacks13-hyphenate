@@ -7,7 +7,7 @@ import { CheckStateIcon, MockTag, SavedRun } from '../ui/Bits.tsx';
 import { ImpactIcon } from '../ui/EngineeringIcons.tsx';
 import { SCurveChart, TornadoChart } from '../ui/Charts.tsx';
 import { Legend, Mark, Num } from '../ui/Evidence.tsx';
-import { range as rangeText, staleNote } from '../ui/fmt.ts';
+import { dateLong, range as rangeText, staleNote, usd } from '../ui/fmt.ts';
 import { evidenceCounts } from '../ui/trace.ts';
 import { Link, navigate } from '../router.tsx';
 
@@ -92,13 +92,16 @@ function CostCheck({ a }: { a: ImpactAssessment }) {
       )}
       <div className="nx-box">
         <div className="nx-box-title">
-          Cost page <SavedRun source={a.source} /> <span className="nx-fg-muted">&middot; {a.cost.window.label}, point estimates, savings in parentheses</span>
+          Cost page <SavedRun source={a.source} /> <span className="nx-fg-muted">&middot; {a.cost.scenarios ? `${a.cost.scenarios.requested}; ` : ''}{a.cost.window.label}, point estimates, savings in parentheses; Total is nonrecurring plus extended</span>
         </div>
-        <CostTable a={a} />
+        <div className="nx-table-scroll" role="region" aria-label="Cost page numbers" tabIndex={0}>
+          <CostTable a={a} />
+        </div>
         <div className="nx-foot">
           {a.cost.run.draws.toLocaleString('en-US')} paired draws, seed {a.cost.run.seed}, {a.cost.run.codeVersion}. Ranges are P10 to P90; the values are the point estimate, which adds up.
         </div>
       </div>
+      <ScenarioBox a={a} />
       {a.sCurve && (
         <div className="nx-box">
           <div className="nx-box-title">
@@ -119,42 +122,119 @@ function CostCheck({ a }: { a: ImpactAssessment }) {
   );
 }
 
-function CostTable({ a }: { a: ImpactAssessment }) {
+const isoDate = (s: string) => dateLong(Date.parse(`${s}T12:00:00Z`));
+
+/**
+ * The cost page costs the requested effectivity. When the timeline check forecasts a different one, the checks
+ * cost that too, conditional on the median forecast serial. The box says which is which, and what is not in either.
+ */
+function ScenarioBox({ a }: { a: ImpactAssessment }) {
+  const sc = a.cost.scenarios;
+  const need = a.cost.needsEstimate;
+  if (!sc && !need.length) return null;
+  const f = sc?.forecast;
+  const alt = sc?.alternative;
   return (
-    <table className="nx-table nx-cost">
-      <thead>
-        <tr>
-          <th>Item</th>
-          <th className="r">One-time</th>
-          <th className="r">Recurring</th>
-          <th className="r">Total</th>
-          <th className="r">P10 &ndash; P90</th>
-        </tr>
-      </thead>
-      <tbody>
-        {BLOCKS.map(b => {
-          const rows = a.cost.rows.filter(r => r.block === b.id);
-          const sub = a.cost.subtotals.find(s => s.block === b.id);
-          if (!rows.length || !sub) return null;
-          return <BlockRows key={b.id} label={b.label} rows={rows} sub={sub.total} />;
-        })}
-        <tr className="net">
-          <td>Net cost, {a.cost.window.label}</td>
-          <td className="r num"><Num f={a.cost.oneTime} /></td>
-          <td className="r num"><Num f={a.cost.recurring} /></td>
-          <td className="r num"><Num f={a.cost.net} /></td>
-          <td className="r num nx-fg-muted">{rangeText(a.cost.net, 'short')}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div className="nx-box">
+      <div className="nx-box-title">
+        Requested and forecast scenarios <span className="nx-fg-muted">&middot; the cost page above is the requested scenario</span>
+      </div>
+      {sc ? (
+        <ul className="nx-plain">
+          <li>
+            <span><b>Requested</b> <span className="nx-fg-muted">&middot; {sc.requested}. The cost page, the headline and the cost range assume this.</span></span>
+            <b className="num"><Num f={a.cost.net} /></b>
+          </li>
+          <li>
+            <span>
+              <b>Forecast</b>{' '}
+              <span className="nx-fg-muted">
+                &middot; {f && !f.placed ? 'the timeline check cannot place the change in the volume plan' : f?.date ? `${sc.readiness === 'materials_only' ? 'material readiness' : 'reaches the line'} ${isoDate(f.date.p50)} (${isoDate(f.date.p10)} – ${isoDate(f.date.p90)})` : 'no forecast date'}
+                {f?.serial ? `, from S/N ${Math.round(f.serial.p50)}` : ''}
+              </span>
+              {alt && <div className="nx-fg-muted nx-small">{alt.label}; {alt.window.label}. Conditional on that one serial, not a joint simulation of cost and date.</div>}
+            </span>
+            {alt ? <b className="num"><Num f={alt.net} /> <span className="nx-fg-muted nx-small">{rangeText(alt.net, 'short')}</span></b> : <span className="nx-fg-muted">Not costed</span>}
+          </li>
+          {alt && (
+            <li>
+              <span className="nx-fg-muted">Ongoing production at the forecast serial</span>
+              <b className="num"><Num f={alt.recurring} /></b>
+            </li>
+          )}
+        </ul>
+      ) : (
+        <p className="nx-fg-muted nx-small">The cost check did not cost a forecast scenario for this revision, so the only cost shown is the requested effectivity&rsquo;s.</p>
+      )}
+      {sc?.unavailable && <p className="nx-fg-muted nx-small">{sc.unavailable}</p>}
+      {alt?.flags.map((fl, i) => <p key={i} className={`nx-small ${fl.severity === 'warn' ? 'nx-fg-attention' : 'nx-fg-muted'}`}>{fl.message}</p>)}
+      {sc?.readiness === 'materials_only' && (
+        <p className="nx-small nx-fg-attention">The forecast date is material readiness only: qualification, release or retrofit work that is not assessed may make implementation later, and its cost is in neither scenario.</p>
+      )}
+      {need.length > 0 && (
+        <p className="nx-small nx-fg-attention">Not in either scenario: {need.length} line{need.length > 1 ? 's' : ''} without an estimate ({need.map(n => n.label).join('; ')}).</p>
+      )}
+      {sc?.note && <p className="nx-fg-muted nx-small">{sc.note}</p>}
+    </div>
+  );
+}
+
+/** The sum of a column's point estimates: the one number per column that adds up exactly. */
+const pointSum = (fs: (Figure | undefined)[]) => fs.reduce((t, f) => t + (f ? f.point ?? f.p50 : 0), 0);
+
+function CostTable({ a }: { a: ImpactAssessment }) {
+  const rows = a.cost.rows;
+  return (
+    <>
+      <table className="nx-table nx-cost">
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th className="r">Nonrecurring</th>
+            <th className="r">Unit cost &times; quantity</th>
+            <th className="r">Extended</th>
+            <th className="r">Total</th>
+            <th className="r">P10 &ndash; P90</th>
+          </tr>
+        </thead>
+        <tbody>
+          {BLOCKS.map(b => {
+            const own = rows.filter(r => r.block === b.id);
+            const sub = a.cost.subtotals.find(s => s.block === b.id);
+            if (!own.length || !sub) return null;
+            return <BlockRows key={b.id} label={b.label} rows={own} sub={sub.total} />;
+          })}
+          <tr className="net">
+            <td>Net cost, {a.cost.window.label}<div className="nx-fg-muted nx-small">Columns add the lines&rsquo; point estimates</div></td>
+            <td className="r num">{usd(pointSum(rows.map(r => r.nonrecurring)))}</td>
+            <td />
+            <td className="r num">{usd(pointSum(rows.map(r => r.extended)))}</td>
+            <td className="r num"><Num f={a.cost.net} /></td>
+            <td className="r num nx-fg-muted">{rangeText(a.cost.net, 'short')}</td>
+          </tr>
+        </tbody>
+      </table>
+      <ul className="nx-plain nx-cost-sums">
+        <li>
+          <span>Rollout budget <span className="nx-fg-muted">&middot; every line except ongoing production, retrofit and support unit costs &times; quantity included</span></span>
+          <b className="num"><Num f={a.cost.oneTime} /></b>
+        </li>
+        <li>
+          <span>Ongoing production <span className="nx-fg-muted">&middot; per-unit change &times; units built after the cut-in, {a.cost.window.label}</span></span>
+          <b className="num"><Num f={a.cost.recurring} /></b>
+        </li>
+      </ul>
+    </>
   );
 }
 
 function BlockRows({ label, rows, sub }: { label: string; rows: CostRow[]; sub: Figure }) {
+  const dash = <span className="nx-fg-muted">&ndash;</span>;
   return (
     <>
       <tr className="blk">
         <td>{label}</td>
+        <td />
         <td />
         <td />
         <td className="r num"><Num f={sub} /></td>
@@ -165,16 +245,17 @@ function BlockRows({ label, rows, sub }: { label: string; rows: CostRow[]; sub: 
           <td>
             <div>
               {r.label}
+              {r.recurring && <> <Label variant="secondary" size="small">Ongoing production</Label></>}
               {r.needsEstimate && <> <Label variant="attention" size="small">Needs an estimate</Label></>}
             </div>
-            <div className="nx-fg-muted nx-small">
-              {r.unitCost && r.quantity !== undefined && (<><Num f={r.unitCost} /> &times; {r.quantity.toLocaleString('en-US')} &middot; </>)}
-              {r.basis}
-            </div>
+            <div className="nx-fg-muted nx-small">{r.basis}</div>
           </td>
-          <td className="r num">{!r.recurring ? <Num f={r.total} /> : <span className="nx-fg-muted">&ndash;</span>}</td>
-          <td className="r num">{r.recurring ? <Num f={r.total} /> : <span className="nx-fg-muted">&ndash;</span>}</td>
-          <td />
+          <td className="r num">{r.nonrecurring ? <Num f={r.nonrecurring} /> : dash}</td>
+          <td className="r num">
+            {r.unitCost && r.quantity !== undefined ? <><Num f={r.unitCost} /> &times; {r.quantity.toLocaleString('en-US')}</> : dash}
+          </td>
+          <td className="r num">{r.extended ? <Num f={r.extended} /> : dash}</td>
+          <td className="r num"><Num f={r.total} /></td>
           <td className="r num nx-fg-muted">{r.needsEstimate ? '–' : rangeText(r.total, 'full') || 'exact'}</td>
         </tr>
       ))}
@@ -220,46 +301,167 @@ function Scenarios({ a }: { a: ImpactAssessment }) {
   );
 }
 
+function Flags({ flags }: { flags: { severity: 'info' | 'warn'; message: string }[] }) {
+  if (!flags.length) return null;
+  return (
+    <>
+      {flags.map((f, i) => (
+        <Flash key={i} variant={f.severity === 'warn' ? 'warning' : 'default'} className="nx-flash">{f.message}</Flash>
+      ))}
+    </>
+  );
+}
+
 function TimelineCheck({ a }: { a: ImpactAssessment }) {
   const c = a.cutIn;
   const est = c.estimate;
+  const t = c.timeline;
+  const stateWord = a.checks.find(x => x.id === 'timeline')?.state;
+  if (!t && !est) {
+    return <PendingCard>{stateWord === 'attention' ? 'The timeline check has no result to show; the summary above says why.' : 'The cut-in has no range yet.'} The cost check takes {monthLabel(c.month)}, which is {c.source === 'given' ? 'what the ECR states' : 'a default until the timeline check sets it'}.</PendingCard>;
+  }
   return (
     <>
+      {t?.stale && <Flash variant="warning" className="nx-flash"><b>{staleNote(t.stale)}</b> The timeline below is the previous revision&rsquo;s.</Flash>}
+      {t?.readiness === 'materials_only' && (
+        <Flash variant="warning" className="nx-flash">
+          <b>Material readiness, not implementation.</b> The date is when the parts and the assessed work allow the change. Qualification, release or retrofit work that is not assessed may make implementation later.
+        </Flash>
+      )}
+      {t && !t.placed && <Flash variant="warning" className="nx-flash"><b>No date can be placed.</b> The old stock runs past the end of the volume plan{t.serial ? `, so the first serial the change can take is S/N ${Math.round(t.serial.p50)}` : ''}.</Flash>}
+      {t && <Flags flags={t.flags} />}
       <div className="nx-stats">
         <Stat label={`Cut-in on ${c.program}, as ${c.source === 'given' ? 'filed' : 'assumed'}`} sub={`S/N ${c.serial}. ${c.rationale}`}>
           <Mark ev={c.source === 'given' ? 'fact' : 'assumption'} id="cutin">{monthLabel(c.month)}</Mark>
         </Stat>
         {est ? (
-          <Stat label={<>Rev C reaches the line <MockTag on={a.mock.includes('cutInEstimate')} /></>} sub={`${rangeText(est.figure, 'short')} · ${est.note}`}>
+          <Stat label={<>{est.label ?? 'Reaches the line'} <MockTag on={a.mock.includes('cutInEstimate')} /></>} sub={`${rangeText(est.figure, 'short')} · ${est.note}`}>
             <Num f={est.figure} use="p50" />
           </Stat>
         ) : null}
+        {t?.serial && (
+          <Stat label="First serial that can take it" sub={rangeText(t.serial, 'short')}>
+            <Num f={t.serial} use="p50" />
+          </Stat>
+        )}
         {est?.likelihood && (
-          <Stat label="Likelihood">
-            <Mark ev="assumption" id={est.figure.id}><b>{cap(est.likelihood.word)}</b> {est.likelihood.event}</Mark>
+          <Stat label="Likelihood" sub={t ? `Stated effectivity: ${t.stated.label}` : undefined}>
+            <Mark ev={a.mock.includes('cutInEstimate') ? 'assumption' : 'computation'} id={t ? 's3:p_late' : est.figure.id}><b>{cap(est.likelihood.word)}</b> {est.likelihood.event}</Mark>
+          </Stat>
+        )}
+        {t?.retrofit && (
+          <Stat label="Assessed retrofit completes" sub={`${rangeText(t.retrofit, 'short')} · separate from the production cut-in`}>
+            <Num f={t.retrofit} use="p50" />
           </Stat>
         )}
       </div>
-      {!est && <PendingCard>The cut-in has no range yet. The cost check takes the month above, which is {c.source === 'given' ? 'what the ECR states' : 'a default until the timeline check sets it'}.</PendingCard>}
+      {t && t.steps.length > 0 && (
+        <div className="nx-box">
+          <div className="nx-box-title">What the date waits for <span className="nx-fg-muted">&middot; the latest of these sets it; share is how often each does</span></div>
+          <ul className="nx-plain">
+            {t.steps.map(s => (
+              <li key={s.id}>
+                <span>
+                  {s.label}
+                  {s.status || s.owner || s.evidence ? <div className="nx-fg-muted nx-small">{[s.owner, s.status, s.evidence].filter(Boolean).join(' · ')}</div> : null}
+                  {s.downtimeHoursPerUnit !== undefined && <div className="nx-fg-muted nx-small">{s.downtimeHoursPerUnit} h downtime per unit{s.appliesTo ? `, ${s.appliesTo}` : ''}</div>}
+                </span>
+                <span className="num">
+                  {s.date ? <><Num f={s.date} use="p50" /> <span className="nx-fg-muted nx-small">{rangeText(s.date, 'short')}</span></> : <span className="nx-fg-muted">Past the volume plan</span>}
+                  {' '}<span className="nx-fg-muted nx-small">{Math.round(s.criticalShare * 100)}% sets it</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {!est && t && <PendingCard>The timeline check ran, but no date could be placed.</PendingCard>}
     </>
   );
 }
 
+const pctText = (p: number) => `${Math.round(p * 100)}%`;
+
 function SupplyCheck({ a }: { a: ImpactAssessment }) {
   const s = a.supply;
-  if (!s) return <PendingCard>Supply risk comes from the supply check, which is not built yet.</PendingCard>;
+  const state = a.checks.find(x => x.id === 'supply')?.state;
+  if (!s) return <PendingCard>{state === 'attention' ? 'The supply check has no result to show; the summary above says why.' : 'Supply risk comes from the supply check, which has not produced a result yet.'}</PendingCard>;
+  const d = s.detail;
   return (
     <>
+      {d?.stale && <Flash variant="warning" className="nx-flash"><b>{staleNote(d.stale)}</b> The supply page below is the previous revision&rsquo;s.</Flash>}
+      {d && <Flags flags={d.flags} />}
       <div className="nx-stats">
         <Stat label={<>Supply risk <MockTag on={a.mock.includes('supply')} /></>} sub={s.note}>
           <Mark ev={s.evidence} id={s.id}><Label variant={RISK[s.level]} size="large">{cap(s.level)}</Label></Mark>
         </Stat>
         {s.likelihood && (
-          <Stat label="Likelihood" sub="Outages are shown as scenarios, not blended into the range">
-            <Mark ev="computation" id={s.id}><b>{cap(s.likelihood.word)}</b> {s.likelihood.event}</Mark>
+          <Stat label="Likelihood" sub={d ? `Stated effectivity: ${d.stated}` : 'Outages are shown as scenarios, not blended into the range'}>
+            <Mark ev="computation" id={d ? 's4:p_miss' : s.id}><b>{cap(s.likelihood.word)}</b> {s.likelihood.event}</Mark>
+          </Stat>
+        )}
+        {d?.missWithPeers && (
+          <Stat label="With the other open ECRs" sub="Shared suppliers also compete for qualification slots and capacity">
+            <Mark ev="computation" id="s4:p_miss_peers">{pctText(d.missWithPeers.likelihood.probability)} {d.missWithPeers.likelihood.event}</Mark>
+          </Stat>
+        )}
+        {d?.spend && (
+          <Stat label="Spend on the changed parts, first year" sub={`${rangeText(d.spend.yearOne, 'short')} · ${usd(d.spend.singleSource.p50)} of it on single-source parts`}>
+            <Num f={d.spend.yearOne} use="p50" />
           </Stat>
         )}
       </div>
+      {d && d.parts.length > 0 && (
+        <div className="nx-box">
+          <div className="nx-box-title">Parts <span className="nx-fg-muted">&middot; weeks from order to parts in the building</span></div>
+          <ul className="nx-plain">
+            {d.parts.map(p => (
+              <li key={p.item}>
+                <span>
+                  <b className="mono">{p.item}</b> {p.name}
+                  {p.singleSource && <> <Label variant="attention" size="small">One qualified source</Label></>}
+                  <div className="nx-fg-muted nx-small">{[p.supplier, p.sources.length ? `sources: ${p.sources.join(', ')}` : '', p.leadFrom].filter(Boolean).join(' · ')}</div>
+                </span>
+                <span className="num"><Num f={p.leadWeeks} use="p50" /> <span className="nx-fg-muted nx-small">{rangeText(p.leadWeeks, 'short')}</span></span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {d && d.capacity.length > 0 && (
+        <div className="nx-box">
+          <div className="nx-box-title">Supplier capacity <span className="nx-fg-muted">&middot; this ECR&rsquo;s demand in the 12 months from the cut-in, as a share of a year</span></div>
+          <ul className="nx-plain">
+            {d.capacity.map(c => (
+              <li key={c.constraint}>
+                <span>{c.supplier} <span className="nx-fg-muted">&middot; {c.constraint}, {c.perYear.toLocaleString('en-US')} a year</span></span>
+                <span className="num"><Num f={c.utilization} use="p50" />{c.withPeers && <span className="nx-fg-muted nx-small"> · <Num f={c.withPeers} use="p50" /> with the other open ECRs</span>}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {d && (d.peers.length > 0 || d.peerCutInShift || d.bundles.length > 0 || d.unrelatedPeers.length > 0) && (
+        <div className="nx-box">
+          <div className="nx-box-title">Other open ECRs</div>
+          <ul className="nx-plain">
+            {d.peers.map(p => <li key={p.ecr}><span><b className="mono">{p.ecr}</b> shares {p.sharedSuppliers.join(', ')}</span></li>)}
+            {d.peerCutInShift && (
+              <li>
+                <span>Moves this cut-in <span className="nx-fg-muted">&middot; {pctText(d.peerCutInShift.later.probability)} chance it is later</span></span>
+                <span className="num"><Num f={d.peerCutInShift.weeks} use="p50" /></span>
+              </li>
+            )}
+            {d.bundles.map(b => (
+              <li key={b.constraint}>
+                <span>Bundle terms, {b.constraint} <span className="nx-fg-muted">&middot; {pctText(b.bundled.probability)} chance of qualifying within {b.withinWeeks} weeks of another ECR</span></span>
+                <span className="num"><Num f={b.ownSaving} use="p50" /> <span className="nx-fg-muted nx-small">this ECR</span></span>
+              </li>
+            ))}
+            {d.unrelatedPeers.length > 0 && <li><span className="nx-fg-muted">No shared supplier: {d.unrelatedPeers.join(', ')}</span></li>}
+          </ul>
+        </div>
+      )}
       <Scenarios a={a} />
     </>
   );
@@ -298,9 +500,11 @@ function ClassCheck({ a }: { a: ImpactAssessment }) {
               <span>
                 {s.state === 'approved' ? <CheckIcon size={16} className="nx-fg-success" /> : s.state === 'waiting' ? <ClockIcon size={16} className="nx-fg-muted" /> : <DotFillIcon size={16} className="nx-fg-attention" />}{' '}
                 <b>{s.person ?? s.role}</b> <span className="nx-fg-muted">{s.person ? s.role : ''}</span>
+                {s.by && <span className="nx-fg-muted nx-small"> &middot; {s.by}</span>}
+                {s.note && <div className="nx-fg-muted nx-small">{s.note}</div>}
               </span>
               <span className="nx-fg-muted">
-                {s.state === 'approved' ? `Approved ${s.when ?? ''}` : s.state === 'waiting' ? `Meets ${s.when ?? ''}` : s.state === 'not_required' ? 'Not needed' : 'Needed'}
+                {s.state === 'approved' ? `Approved ${s.when ?? ''}` : s.state === 'waiting' ? (s.when ? `Meets ${s.when}` : 'Not decided') : s.state === 'not_required' ? 'Not needed' : s.when ? 'Approval needs a re-check' : 'Needed'}
               </span>
             </li>
           ))}

@@ -180,6 +180,8 @@ export interface CostPageRow {
   /** A stable id for the row, from the PLM. Unset: a slug of the label. Assumptions find a row by it. */
   id?: string;
   label: string;
+  /** Explicit factor linkage, e.g. qualification, so unrelated rows cannot stand for its estimate. */
+  factor?: string;
   oneTime?: number;
   /**
    * Unit cost. On a production row, per part, with `quantity` the parts per finished unit (34.60 x 12
@@ -220,12 +222,38 @@ export interface ChangeRequest {
   filedOn: DateStr;
   /** `urgent` changes are decided faster than `routine` ones. Unset: routine. */
   priority?: string;
+  /** Prose is retained so an unmodeled qualification is reported, never silently assumed complete. */
+  testAndQualification?: string;
+  implementationPlan?: ImplementationPlan;
+  costFactors?: import('./completeness.ts').CostFactorDeclaration[];
   itemChanges: ItemChange[];
   bomChanges: BomChange[];
   supplierQuotes: SupplierQuote[];
   effectivity: { production: EffectivityPoint; retrofit?: EffectivityPoint; interchangeable: boolean };
   inventoryProposal: InventoryProposal[];
   costPage: CostPage;
+}
+
+/** Explicit release prerequisites. Durations are weeks; dependencies name tasks or `decision`/`parts`. */
+export interface ImplementationTask {
+  id: string;
+  label: string;
+  kind: 'qualification' | 'certification' | 'release' | 'installation' | 'test';
+  appliesTo: 'production' | 'retrofit' | 'both';
+  owner: string;
+  status: 'planned' | 'complete' | 'not_applicable' | 'unknown';
+  durationWeeks?: number | Range3;
+  after?: string[];
+  completedOn?: DateStr;
+  evidence?: string;
+  /** Aircraft unavailability per retrofit unit; independent of elapsed program duration. */
+  downtimeHoursPerUnit?: number;
+}
+
+export interface ImplementationPlan {
+  /** A person has confirmed that every applicable prerequisite is represented. */
+  complete: boolean;
+  tasks: ImplementationTask[];
 }
 
 // ---------------------------------------------------------------- traces
@@ -285,4 +313,4 @@ export interface Flag {
   ref?: string;
 }
 
-export const CHECKS_CODE_VERSION = 'checks-0.3.0';
+export const CHECKS_CODE_VERSION = 'checks-0.4.0';

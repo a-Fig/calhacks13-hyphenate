@@ -280,16 +280,23 @@ function costPage(s: PlmSettings, doc: PlmDoc): CostPage {
   const id = String(doc.name);
   const page = {} as CostPage;
   for (const block of COST_BLOCKS as readonly CostBlock[]) {
-    page[block] = rows(doc[COST_TABLE[block]]).map((r): CostPageRow => clean({
+    page[block] = rows(doc[COST_TABLE[block]]).map((r): CostPageRow => {
+      const oneTime = given(r.one_time, `${block} cost "${r.label}" one-time cost`);
+      const unitCost = given(r.unit_cost, `${block} cost "${r.label}" unit cost`);
+      const assessedZero = Number(r.assessed_zero) === 1;
+      if (assessedZero && (oneTime !== undefined || unitCost !== undefined)) throw new PlmMappingError(`${block} cost "${r.label}" is marked zero but states a nonzero cost`);
+      return clean({
       // The child row's own name: it stays with the row when the table is reordered.
       id: text(r.name),
       label: String(r.label ?? ''),
-      oneTime: given(r.one_time, `${block} cost "${r.label}" one-time cost`),
-      unitCost: given(r.unit_cost, `${block} cost "${r.label}" unit cost`),
+      factor: text(r.factor),
+      oneTime: assessedZero ? 0 : oneTime,
+      unitCost,
       quantity: given(r.quantity, `${block} cost "${r.label}" quantity`),
       basis: lookup(s.costBasis, r.basis, `${block} cost basis`, id),
       note: text(r.note),
-    }));
+      });
+    });
   }
   return page;
 }
@@ -332,6 +339,9 @@ function mapEcrDoc(s: PlmSettings, doc: PlmDoc, eco?: { name: string; released_o
     effectivity: effectivity(s, doc, warnings),
     inventoryProposal: inventory(s, doc),
     costPage: costPage(s, doc),
+    testAndQualification: String(doc.test_and_qualification ?? ''),
+    implementationPlan: implementationPlan(doc.implementation_plan, doc.implementation_plan_complete),
+    costFactors: costFactors(doc.cost_factors),
     eco: ecoName,
   });
   const names = s.reviewFunctions ?? {};
@@ -366,4 +376,56 @@ function mapEcrDoc(s: PlmSettings, doc: PlmDoc, eco?: { name: string; released_o
     warnings,
   });
   return { change, record, modified: record.dates.modified };
+}
+
+/** The PLM stores the plan as JSON, preserving explicit zero durations and completion evidence. */
+function implementationPlan(value: unknown, complete?: unknown): ChangeRequest['implementationPlan'] {
+  if (value === null || value === undefined || value === '') return undefined;
+  let plan: any;
+  try { plan = typeof value === 'string' ? JSON.parse(value) : value; }
+  catch { throw new PlmMappingError('implementation_plan must be valid JSON'); }
+  if (Array.isArray(plan)) {
+    if (!plan.length && !Number(complete)) return undefined;
+    plan = { complete: Number(complete) === 1, tasks: plan.map((t: any) => clean({
+      id: t.task_id, label: t.label, kind: t.kind, appliesTo: t.applies_to, owner: t.task_owner, status: t.status,
+      durationWeeks: taskDuration(t),
+      after: t.after_tasks ? String(t.after_tasks).split(',').map(x => x.trim()).filter(Boolean) : undefined,
+      completedOn: text(t.completed_on), evidence: text(t.evidence),
+      downtimeHoursPerUnit: Number(t.downtime_assessed) === 1 ? Number(t.downtime_hours_per_unit ?? 0) : undefined,
+    })) };
+  }
+  if (!plan || typeof plan !== 'object' || typeof plan.complete !== 'boolean' || !Array.isArray(plan.tasks)) throw new PlmMappingError('implementation_plan needs complete and tasks');
+  for (const task of plan.tasks) {
+    if (!task || typeof task.id !== 'string' || typeof task.label !== 'string' || typeof task.owner !== 'string'
+      || !['qualification', 'certification', 'release', 'installation', 'test'].includes(task.kind)
+      || !['production', 'retrofit', 'both'].includes(task.appliesTo)
+      || !['planned', 'complete', 'not_applicable', 'unknown'].includes(task.status)
+      || (task.after !== undefined && (!Array.isArray(task.after) || task.after.some((id: unknown) => typeof id !== 'string')))) throw new PlmMappingError('implementation_plan contains an invalid task');
+  }
+  return plan;
+}
+
+/** Frappe Float fields turn blank into zero. Zero needs explicit confirmation, just like zero costs. */
+function taskDuration(task: PlmDoc): number | { p10: number; p50: number; p90: number } | undefined {
+  const confirmed = Number(task.duration_assessed) === 1;
+  if (task.duration_basis === 'Exact') {
+    const weeks = Number(task.duration_weeks ?? 0);
+    return Number.isFinite(weeks) && (confirmed || weeks !== 0) ? weeks : undefined;
+  }
+  if (task.duration_basis === 'Range') {
+    const values = [task.duration_p10, task.duration_p50, task.duration_p90].map(v => Number(v ?? 0));
+    if (values.every(Number.isFinite) && (confirmed || values.some(v => v !== 0))) return { p10: values[0], p50: values[1], p90: values[2] };
+  }
+  return undefined;
+}
+
+function costFactors(value: unknown): ChangeRequest['costFactors'] {
+  if (value === null || value === undefined || value === '') return undefined;
+  let factors: any;
+  try { factors = typeof value === 'string' ? JSON.parse(value) : value; }
+  catch { throw new PlmMappingError('cost_factors must be valid JSON'); }
+  if (!Array.isArray(factors) || factors.some(f => !f || typeof f.factor !== 'string'
+    || !['assessed', 'not_applicable', 'unknown'].includes(f.status)
+    || (f.rows !== undefined && (!Array.isArray(f.rows) || f.rows.some((id: unknown) => typeof id !== 'string'))))) throw new PlmMappingError('cost_factors needs factor/status declarations');
+  return factors;
 }

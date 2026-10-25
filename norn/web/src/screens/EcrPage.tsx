@@ -79,7 +79,7 @@ function AssessmentView({ a, tab, check }: { a: ImpactAssessment; tab: Tab; chec
               <div className="nx-pr-sub">
                 <StateBadge status={e.status} />
                 <span>
-                  <b>{e.originator}</b> wants to change <code className="nx-chip-code">{e.change ?? e.partNumber ?? 'the design'}</code>
+                  {e.originator ? <><b>{e.originator}</b> wants to change</> : 'Change to'} <code className="nx-chip-code">{e.change ?? e.partNumber ?? 'the design'}</code>
                   {' '}&middot; filed {dayLabel(e.filedOn + 'T12:00:00-07:00')}
                 </span>
                 {a.level && <LevelLabel level={a.level} long />}
@@ -135,7 +135,7 @@ function SummaryOnly({ e }: { e: NonNullable<ReturnType<typeof useAssessment>['s
             <PageHeader.Description>
               <div className="nx-pr-sub">
                 <StateBadge status={e.status} />
-                <span><b>{e.originator}</b> filed {dayLabel(e.filedOn + 'T12:00:00-07:00')}</span>
+                <span>{e.originator ? <><b>{e.originator}</b> filed</> : 'Filed'} {dayLabel(e.filedOn + 'T12:00:00-07:00')}</span>
                 {e.level && <LevelLabel level={e.level} long />}
               </div>
             </PageHeader.Description>

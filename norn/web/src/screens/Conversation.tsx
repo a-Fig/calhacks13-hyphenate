@@ -9,14 +9,14 @@ import { monthLabel } from '../assessment/adapter.ts';
 import { DiffTable } from './Changes.tsx';
 import { CheckStateIcon, LevelLabel, MockTag, Person, SavedRun, StaleNote } from '../ui/Bits.tsx';
 import { BoardIcon, CaliperIcon, CostIcon, GaugeIcon, NcrIcon, ReleaseIcon } from '../ui/EngineeringIcons.tsx';
-import { Glyph, Mark, Num } from '../ui/Evidence.tsx';
+import { Highlight, Mark, Num } from '../ui/Evidence.tsx';
 import { ago, dateTime, dayLabel, dateShort, range as rangeText, usdK } from '../ui/fmt.ts';
 import { Link } from '../router.tsx';
 import { ApprovalRows, ApproverItems, ErpPackageCard, RecommendationRow, ReleaseFoot } from './GateBox.tsx';
 import type { AgentRun, StatementView } from '../assessment/types.ts';
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
-const kindOf = (e: ActivityEvent) => (e.actorKind === 'norn' ? 'norn' : e.actorKind === 'person_agent' ? 'agent' : 'person');
+const kindOf = (e: ActivityEvent) => (e.actorKind === 'norn' ? 'norn' : e.actorKind === 'person_agent' ? 'agent' : e.actorKind === 'system' ? 'team' : 'person');
 
 export function Conversation({ a }: { a: ImpactAssessment }) {
   const events = [...a.activity].sort((x, y) => x.at.localeCompare(y.at));
@@ -69,7 +69,7 @@ function OpeningComment({ a, filed }: { a: ImpactAssessment; filed: ActivityEven
     <Timeline.Item className="nx-t-comment">
       <div className="nx-av-col"><Person name={filed.actor} size={40} /></div>
       <Timeline.Body className="nx-t-body">
-        <CommentBox name={filed.actor} kind="person" time={filed.at} label={<><MockTag on={a.mock.includes('narrative')} title="Mock: a saved ECR text, not read from the PLM" /> <Label variant="secondary" size="small">Originator</Label></>}>
+        <CommentBox name={filed.actor} kind="person" time={filed.at} label={<><MockTag on={a.mock.includes('narrative')} title="Mock: a saved ECR text, not read from the PLM" /> {a.ecr.originator && <Label variant="secondary" size="small">Originator</Label>}</>}>
           {a.body.map(s => (
             <div key={s.heading}>
               <h4 className="nx-h4">{s.heading}</h4>
@@ -96,6 +96,7 @@ function BotComment({ a }: { a: ImpactAssessment }) {
         <CommentBox name="Norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? a.activity[a.activity.length - 1]?.at ?? ''} edited={a.source !== 'live'} right={a.level ? <LevelLabel level={a.level} long /> : undefined}>
           <h3 className="nx-h3">Impact assessment <SavedRun source={a.source} /></h3>
           {a.ecr.staleCost && <p className="nx-small"><StaleNote state={a.ecr.staleCost} /></p>}
+          <div className="nx-table-scroll" role="region" aria-label="Impact assessment numbers" tabIndex={0}>
           <table className="nx-bot-table">
             <thead>
               <tr><th /><th>Point estimate</th><th>P10 &ndash; P90</th><th>Likelihood</th></tr>
@@ -129,12 +130,12 @@ function BotComment({ a }: { a: ImpactAssessment }) {
               </tr>
               {a.cutIn.estimate && (
                 <tr>
-                  <td>Rev C reaches the line <MockTag on={a.mock.includes('cutInEstimate')} /></td>
+                  <td>{a.cutIn.estimate.label ?? 'Reaches the line'} <MockTag on={a.mock.includes('cutInEstimate')} /></td>
                   <td className="num"><Num f={a.cutIn.estimate.figure} use="p50" /></td>
                   <td className="num nx-fg-muted">{rangeText(a.cutIn.estimate.figure, 'short')}</td>
                   <td>
                     {a.cutIn.estimate.likelihood && (
-                      <Mark ev="assumption" id={a.cutIn.estimate.figure.id}><b>{cap(a.cutIn.estimate.likelihood.word)}</b> {a.cutIn.estimate.likelihood.event}</Mark>
+                      <Mark ev={a.cutIn.estimate.figure.evidence} id={a.cutIn.estimate.figure.id}><b>{cap(a.cutIn.estimate.likelihood.word)}</b> {a.cutIn.estimate.likelihood.event}</Mark>
                     )}
                   </td>
                 </tr>
@@ -153,6 +154,7 @@ function BotComment({ a }: { a: ImpactAssessment }) {
               </tr>
             </tbody>
           </table>
+          </div>
 
           <h4 className="nx-h4">
             {a.recommendation.verdict === 'wait' ? <ClockIcon size={16} className="nx-fg-attention" /> : <ShieldCheckIcon size={16} className="nx-fg-success" />}{' '}
@@ -162,8 +164,7 @@ function BotComment({ a }: { a: ImpactAssessment }) {
           <ul className="nx-reasons">
             {a.recommendation.reasons.map((r, i) => (
               <li key={i}>
-                <Glyph ev={r.evidence} />
-                {r.traceId ? <Mark ev={r.evidence} id={r.traceId} claim>{r.text}</Mark> : <span>{r.text}</span>}
+                {r.traceId ? <Mark ev={r.evidence} id={r.traceId}>{r.text}</Mark> : <Highlight ev={r.evidence}>{r.text}</Highlight>}
               </li>
             ))}
           </ul>
@@ -174,7 +175,7 @@ function BotComment({ a }: { a: ImpactAssessment }) {
               <ol className="nx-drivers">
                 {a.drivers.slice(0, 4).map(d => (
                   <li key={d.id}>
-                    <Glyph ev={d.evidence} /> <Mark ev={d.evidence} id={d.id} claim>{d.label}</Mark>
+                    <Mark ev={d.evidence} id={d.id}>{d.label}</Mark>
                     <span className="nx-fg-muted"> {d.lowLabel && d.highLabel ? `· ${d.lowLabel} to ${d.highLabel} ` : '· '}moves the net cost by </span>
                     <b className="num">{swing(d.low, d.high)}</b>
                   </li>
@@ -307,17 +308,17 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
 
       {a.gate?.approvals.length ? <ApprovalRows gate={a.gate} released={a.ecr.status === 'ECO released'} /> : decided ? (
         <MergeRow
-          icon={a.ecr.status === 'ECO released' ? <ReleaseIcon size={24} className="nx-fg-done" /> : <CheckCircleFillIcon size={24} className="nx-fg-success" />}
-          title={a.ecr.status === 'ECO released' ? 'ECO released' : 'Approved'}
-          sub={ccb && ccb.state === 'not_required' ? 'Within Norn’s limits, no CCB needed' : 'The CCB approved this ECR'}
+          icon={<ClockIcon size={24} className="nx-fg-attention" />}
+          title={a.ecr.status === 'ECO released' ? 'Marked released' : 'Marked approved'}
+          sub="The request status has changed, but no approval decision is recorded"
         />
       ) : (
         <MergeRow
           icon={<DotFillIcon size={24} className="nx-fg-attention" />}
           title={<>Review required <MockTag on={!!a.gate && a.mock.includes('route')} /></>}
-          sub={`${ccb ? 'CCB approval needed' : 'Approval needed'} · ${done} of ${reviewers.length} approved`}
+          sub={`${ccb ? 'CCB approval needed' : 'Approval needed'}${reviewers.length ? ` · ${done} of ${reviewers.length} approved` : ''}`}
         >
-          <div className="nx-merge-bar"><ProgressBar barSize="small" progress={reviewers.length ? (done / reviewers.length) * 100 : 0} aria-label="Approvals" /></div>
+          {reviewers.length > 0 && <div className="nx-merge-bar"><ProgressBar barSize="small" progress={(done / reviewers.length) * 100} aria-label="Approvals" /></div>}
         </MergeRow>
       )}
 
@@ -355,7 +356,7 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
   const steps = a.route.steps;
   const reviewers = steps.filter(s => s.role !== 'CCB' && s.state !== 'not_required');
   const done = reviewers.filter(s => s.state === 'approved').length;
-  const pct = a.gate?.approvals.length ? (a.gate.approvals.some(x => x.state !== 'withdrawn') ? 100 : 0) : reviewers.length ? (done / reviewers.length) * 100 : 100;
+  const pct = a.gate?.approvals.length ? (a.gate.approvals.some(x => x.state !== 'withdrawn' && x.state !== 'pending_recheck') ? 100 : 0) : reviewers.length ? (done / reviewers.length) * 100 : undefined;
   const people = [...new Map(events.map(x => [x.actor, x])).values()].slice(0, 8);
 
   return (
@@ -375,10 +376,12 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
         </ul>
       </section>
 
-      <section>
-        <h3>Originator</h3>
-        <div className="nx-side-one"><Person name={e.originator} size={20} /> <b>{e.originator}</b></div>
-      </section>
+      {e.originator && (
+        <section>
+          <h3>Originator</h3>
+          <div className="nx-side-one"><Person name={e.originator} size={20} /> <b>{e.originator}</b></div>
+        </section>
+      )}
 
       <section>
         <h3>Labels</h3>
@@ -394,10 +397,14 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
       <section>
         <h3>Milestone</h3>
         <div className="nx-side-one"><b>{a.meeting.label}</b></div>
-        <div className="nx-side-ms">
-          <ProgressBar barSize="small" progress={pct} aria-label="Approvals so far" />
-          <span className="nx-fg-muted nx-small">{Math.round(pct)}% approved &middot; {dayLabel(a.meeting.date + 'T12:00:00-07:00')}</span>
-        </div>
+        {(pct !== undefined || a.meeting.date) && (
+          <div className="nx-side-ms">
+            {pct !== undefined && <ProgressBar barSize="small" progress={pct} aria-label="Approvals so far" />}
+            <span className="nx-fg-muted nx-small">
+              {[pct !== undefined ? `${Math.round(pct)}% approved` : '', a.meeting.date ? dayLabel(a.meeting.date + 'T12:00:00-07:00') : ''].filter(Boolean).join(' · ')}
+            </span>
+          </div>
+        )}
       </section>
 
       {a.linked.length > 0 && (
@@ -475,21 +482,22 @@ function StatementComment({ a }: { a: ImpactAssessment }) {
             {st.outdated && <> <Label variant="attention" size="small">Out of date: the ECR has changed since</Label></>}
           </h3>
           <p className="nx-stmt-headline">{st.headline}</p>
+          <div className="nx-table-scroll" role="region" aria-label="Impact assessment numbers" tabIndex={0}>
           <table className="nx-bot-table">
             <thead>
-              <tr><th /><th>Median</th><th>P10 &ndash; P90</th><th>Basis</th></tr>
+              <tr><th /><th>Median</th><th>P10 &ndash; P90</th></tr>
             </thead>
             <tbody>
               {st.numbers.map(n => (
                 <tr key={n.key}>
                   <td>{n.label}</td>
-                  <td className="num">{n.traceId ? <Mark ev={n.evidence} id={n.traceId}>{fmtNumber(n, n.p50)}</Mark> : fmtNumber(n, n.p50)}</td>
+                  <td className="num">{n.traceId ? <Mark ev={n.evidence} id={n.traceId}>{fmtNumber(n, n.p50)}</Mark> : <Highlight ev={n.evidence}>{fmtNumber(n, n.p50)}</Highlight>}</td>
                   <td className="num nx-fg-muted">{n.p10 !== n.p90 ? `${fmtNumber(n, n.p10)} \u2013 ${fmtNumber(n, n.p90)}` : 'exact'}</td>
-                  <td className="nx-fg-muted"><Glyph ev={n.evidence} /> {cap(n.evidence)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
           {st.numbersNote && <p className="nx-fg-muted nx-small">{st.numbersNote}</p>}
           <div className="nx-stmt-line">
             <b>Change class</b> <Mark ev="judgment" id="stmt-class">{st.changeClass}</Mark>
@@ -500,7 +508,7 @@ function StatementComment({ a }: { a: ImpactAssessment }) {
               <h4 className="nx-h4">What moves it most</h4>
               <ul className="nx-reasons">
                 {st.drivers.map((d, i) => (
-                  <li key={i}><Glyph ev={d.evidence} /><Mark ev={d.evidence} id={d.traceId!} claim>{d.text}</Mark></li>
+                  <li key={i}><Mark ev={d.evidence} id={d.traceId!}>{d.text}</Mark></li>
                 ))}
               </ul>
             </>
@@ -510,7 +518,7 @@ function StatementComment({ a }: { a: ImpactAssessment }) {
               <h4 className="nx-h4">What Norn concludes</h4>
               <ul className="nx-reasons">
                 {st.claims.map((c, i) => (
-                  <li key={i}><Glyph ev={c.evidence} /><Mark ev={c.evidence} id={c.traceId!} claim>{c.text}</Mark></li>
+                  <li key={i}><Mark ev={c.evidence} id={c.traceId!}>{c.text}</Mark></li>
                 ))}
               </ul>
             </>
@@ -521,9 +529,8 @@ function StatementComment({ a }: { a: ImpactAssessment }) {
               <ul className="nx-reasons">
                 {st.assumptions.map(x => (
                   <li key={x.key}>
-                    <Glyph ev="assumption" />
                     <span>
-                      {x.traceId ? <Mark ev="assumption" id={x.traceId} claim>{x.label}</Mark> : x.label}
+                      {x.traceId ? <Mark ev="assumption" id={x.traceId}>{x.label}</Mark> : <Highlight ev="assumption">{x.label}</Highlight>}
                       <span className="nx-fg-muted"> &middot; {x.source === 'agent_estimated' ? 'agent estimate' : x.source}. {x.note}</span>
                     </span>
                   </li>

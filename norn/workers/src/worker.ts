@@ -65,7 +65,7 @@ await applyStartupConfig(client, startupConfig, log).catch(e => {
   client.close();
   process.exit(1);
 });
-const configured = conn.db.nornConfig.key.find('code_version')?.value ?? 'checks-0.3.0';
+const configured = conn.db.nornConfig.key.find('code_version')?.value ?? 'checks-0.4.0';
 if (configured !== CHECKS_CODE_VERSION)
   log(`WARNING: norn_config code_version is '${configured}' but the checks library is '${CHECKS_CODE_VERSION}': results of the old library still count as current. Set code_version to '${CHECKS_CODE_VERSION}'.`);
 

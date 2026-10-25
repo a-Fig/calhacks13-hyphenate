@@ -406,6 +406,8 @@ export interface CostLine {
   /** Who stands behind the number. `not_provided` rows are what Norn has to fill. */
   basis: 'supplier_quote' | 'engineer_estimate' | 'not_provided';
   note?: string;
+  /** The cost factor this row estimates, when its label alone does not say (Block 50: 'qualification', 'retrofit'). Norn reads it to tell an estimated factor from an omitted one. */
+  factor?: string;
 }
 
 export interface EcpCostPage {
@@ -456,6 +458,9 @@ export interface Ecr {
   failureData?: string;
   /** Testing or requalification the originator expects. */
   testAndQualification: string;
+  /** Optional assessed plan; omitted plans remain material-readiness estimates in Norn. */
+  implementationPlan?: import('../../norn/checks/src/types.ts').ImplementationPlan;
+  costFactors?: import('../../norn/checks/src/completeness.ts').CostFactorDeclaration[];
   /** Overlay on the baseline. */
   itemChanges: ItemChange[];
   bomChanges: BomChange[];

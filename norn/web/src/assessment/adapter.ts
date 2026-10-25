@@ -14,7 +14,7 @@ import type { CheckResultRow } from '../../../checks/src/rows.ts';
 import type { Flag, InputRecord, MonthStr } from '../../../checks/src/types.ts';
 import { fitQuantiles, likelihoodWord, Z90 } from './fit.ts';
 import type {
-  CostBlock, CostRow, CostSection, CutIn, Driver, Evidence, Figure, Headline, Origin, SCurve, Trace, TraceInput,
+  CostBlock, CostRow, CostScenarios, CostSection, CutIn, Driver, Evidence, Figure, Headline, Origin, SCurve, Trace, TraceInput,
   TraceSource,
 } from './types.ts';
 import { unitText, usdK } from '../ui/fmt.ts';
@@ -41,6 +41,8 @@ interface LineDetail {
   point: number; mean: number; trace: Money['trace'];
   block: CostBlock; recurring: boolean; basis: string; quantity: number | null;
   oneTime: Money | null; unitCost: Money | null; needsEstimate?: boolean;
+  /** Unit cost × quantity, when the checks state it. Otherwise it is derived from the two (a scaling of the same draws). */
+  extended?: Money | null;
 }
 interface DriverDetail { id: string; label: string; kind: 'input' | 'decision'; low: number; high: number; swing: number }
 interface Detail {
@@ -48,6 +50,13 @@ interface Detail {
   window: { from: MonthStr | null; months: number };
   inputs: InputRecord[]; flags: Flag[]; drivers: DriverDetail[];
   effectivity: { id: string; program: string; basis: string; cutInSerial: number; cutInMonth: MonthStr | null; source: Origin; rationale: string }[];
+  /** Present when the checks cost a forecast scenario beside the requested one (checks/src/assessment.ts). */
+  implementationScenario?: {
+    basis?: string;
+    forecast?: { readiness?: 'implementation' | 'materials_only'; date?: { p10: string; p50: string; p90: string } | null; serial?: { p10: number; p50: number; p90: number }; placed?: boolean };
+    alternative?: { label: string; window: { from: MonthStr | null; months: number }; net?: Money; recurring?: Money; flags?: Flag[] } | null;
+    note?: string;
+  };
 }
 
 const BLOCKS: CostBlock[] = ['production', 'retrofit', 'logisticsSupport', 'other'];
@@ -77,6 +86,15 @@ const BASIS_TEXT: Record<string, string> = {
   given: 'Given',
   computed: 'Computed from the BOM delta and the volume plan',
 };
+
+/** Unit cost × quantity. A non-negative quantity scales the quantiles; a negative one turns them over. */
+function extendedOf(m: Money, q: number): Money {
+  const [lo, hi] = [m.p10 * q, m.p90 * q];
+  return {
+    p10: Math.min(lo, hi), p50: m.p50 * q, p90: Math.max(lo, hi), mean: m.mean * q, point: m.point * q,
+    trace: { ...m.trace, formula: `unit cost × ${q.toLocaleString('en-US')}` },
+  };
+}
 
 function figure(r: CheckResultRow, id: string, evidence: Evidence): Figure {
   const d = JSON.parse(r.detailJson) as { point?: number; mean?: number };
@@ -118,10 +136,28 @@ export function describeInput(rec: InputRecord): { text: string; range?: string 
   return { text: rec.value ?? '' };
 }
 
-const sourceSystem = (ref = ''): TraceSource['system'] =>
+export const sourceSystem = (ref = ''): TraceSource['system'] =>
   /quote|^Q-/i.test(ref) ? 'Quote' : /^ECR|^NCR/.test(ref) ? 'PLM' : /baseline|dataset|ERP|sourcing|stock|volume/i.test(ref) ? 'ERP' : /default/i.test(ref) ? 'Policy' : 'Norn';
 
 // ---------------------------------------------------------------- the adapter
+
+/** An input record as its own trace: what it is, its value and range, where it came from. */
+export function inputTraceOf(tid: string, id: string, rec: InputRecord | undefined): Trace {
+  const d = rec ? describeInput(rec) : { text: '' };
+  const evidence: Evidence = rec?.source === 'given' ? 'fact' : 'assumption';
+  return {
+    id: tid,
+    title: (rec?.label ?? id) + (id.startsWith('row:') ? ', as filed' : ''),
+    evidence,
+    summary: rec?.rationale ?? (rec?.ref ? `Read from ${rec.ref}.` : ''),
+    value: { text: d.text, ...(d.range ? { range: d.range } : {}) },
+    sources: rec?.ref ? [{ system: sourceSystem(rec.ref), ref: rec.ref }] : undefined,
+    inputs: [],
+    assumptions: rec && rec.source !== 'given'
+      ? [{ label: rec.label, display: d.text + (d.range ? ` (${d.range})` : ''), origin: rec.source, source: rec.rationale ?? rec.ref ?? 'Norn configuration' }]
+      : [],
+  };
+}
 
 export function fromChecks(rows: CheckResultRow[]): ChecksView {
   const byKey = new Map(rows.map(r => [r.key, r]));
@@ -141,22 +177,7 @@ export function fromChecks(rows: CheckResultRow[]): ChecksView {
   // An input's own trace, so the panel can drill from a formula into what it used.
   const inputTrace = (id: string): string => {
     const tid = `in:${id}`;
-    if (traces[tid]) return tid;
-    const rec = inputs.get(id);
-    const d = rec ? describeInput(rec) : { text: '' };
-    const evidence: Evidence = rec?.source === 'given' ? 'fact' : 'assumption';
-    traces[tid] = {
-      id: tid,
-      title: (rec?.label ?? id) + (id.startsWith('row:') ? ', as filed' : ''),
-      evidence,
-      summary: rec?.rationale ?? (rec?.ref ? `Read from ${rec.ref}.` : ''),
-      value: { text: d.text, ...(d.range ? { range: d.range } : {}) },
-      sources: rec?.ref ? [{ system: sourceSystem(rec.ref), ref: rec.ref }] : undefined,
-      inputs: [],
-      assumptions: rec && rec.source !== 'given'
-        ? [{ label: rec.label, display: d.text + (d.range ? ` (${d.range})` : ''), origin: rec.source, source: rec.rationale ?? rec.ref ?? 'Norn configuration' }]
-        : [],
-    };
+    if (!traces[tid]) traces[tid] = inputTraceOf(tid, id, inputs.get(id));
     return tid;
   };
 
@@ -195,10 +216,19 @@ export function fromChecks(rows: CheckResultRow[]): ChecksView {
         basis: BASIS_TEXT[d.basis] ?? d.basis,
         ...(d.needsEstimate ? { needsEstimate: true } : {}),
       };
+      // The source cost page's columns, kept apart: the nonrecurring amount, and unit cost × quantity (the extended
+      // amount). A row can carry both; `recurring` only says the row is ongoing production.
+      if (d.oneTime) {
+        row.nonrecurring = makeFigure(`${r.key}#oneTime`, d.oneTime, d.oneTime.point, d.oneTime.mean, ev);
+        traceOf(`${r.key}#oneTime`, `${r.label}, nonrecurring`, ev, d.oneTime, 'The nonrecurring amount stated on the cost page.');
+      }
       if (d.unitCost && d.quantity !== null) {
         row.unitCost = makeFigure(`${r.key}#unit`, d.unitCost, d.unitCost.point, d.unitCost.mean, ev === 'fact' ? 'fact' : 'computation');
         row.quantity = d.quantity;
         traceOf(`${r.key}#unit`, `${r.label}, per unit`, row.unitCost.evidence, d.unitCost, 'The amount per unit.');
+        const ext = d.extended ?? extendedOf(d.unitCost, d.quantity);
+        row.extended = makeFigure(`${r.key}#extended`, ext, ext.point, ext.mean, row.unitCost.evidence);
+        traceOf(`${r.key}#extended`, `${r.label}, unit cost × quantity`, row.extended.evidence, ext, `The amount per unit times ${d.quantity.toLocaleString('en-US')}: the cost page's extended amount.`);
       }
       costRows.push(row);
       if (d.needsEstimate) needsEstimate.push({ label: r.label, rowId: r.key });
@@ -222,11 +252,42 @@ export function fromChecks(rows: CheckResultRow[]): ChecksView {
     return f;
   };
   const net = total('net_total_year_one', 'Net cost, first 12 months', 'Every line summed on the same paired draws, so the range is the range of the total, not a sum of the lines’ ranges.');
-  const oneTime = total('one_time_total', 'One-time cost', 'The one-time column of the cost page, summed on the same draws.');
-  const recurring = total('recurring_year_one', 'Recurring cost, first 12 months', 'Per-unit change times the units built after the cut-in in the window.');
+  const oneTime = total('one_time_total', 'Rollout budget', 'Every cost-page line except ongoing production, summed on the same draws: nonrecurring amounts and the retrofit and support lines’ unit cost × quantity. It is not the cost page’s nonrecurring column alone.');
+  const recurring = total('recurring_year_one', 'Ongoing production cost, first 12 months', 'Per-unit change times the units built after the cut-in in the window.');
 
   const from = detail.window.from;
   const window = { from, months: detail.window.months, label: from ? `${monthLabel(from)} to ${monthLabel(addMonths(from, detail.window.months - 1))}` : 'the first 12 months' };
+
+  // ---- the forecast implementation scenario, when the checks cost one. The cost page is the requested scenario.
+  const scen = detail.implementationScenario;
+  let scenarios: CostScenarios | undefined;
+  if (scen) {
+    const e = detail.effectivity[0];
+    const requested = `Requested effectivity: S/N ${e.cutInSerial}${e.cutInMonth ? `, ${monthLabel(e.cutInMonth)}` : ''}${e.source === 'given' ? '' : ' (assumed)'}`;
+    const alt = scen.alternative;
+    const scenarioFigure = (key: string, money: Money | undefined, title: string): Figure | undefined => {
+      const row = byKey.get(key);
+      const m = row ? { ...(JSON.parse(row.detailJson) as Money), p10: row.p10, p50: row.p50, p90: row.p90 } : money;
+      if (!m) return undefined;
+      traceOf(key, title, 'computation', m, 'A conditional scenario: the cost at the forecast serial, with everything else as on the cost page. It is not a joint simulation of cost and date.');
+      return makeFigure(key, m, m.point, m.mean, 'computation');
+    };
+    const net = alt ? scenarioFigure('scenario:forecast_net', alt.net, 'Net cost at the forecast serial') : undefined;
+    const rec = alt ? scenarioFigure('scenario:forecast_recurring', alt.recurring, 'Ongoing production cost at the forecast serial') : undefined;
+    const aw = alt?.window;
+    scenarios = {
+      requested, ...(scen.forecast?.readiness ? { readiness: scen.forecast.readiness } : {}),
+      forecast: { placed: scen.forecast?.placed !== false, ...(scen.forecast?.date ? { date: scen.forecast.date } : {}), ...(scen.forecast?.serial ? { serial: scen.forecast.serial } : {}) },
+      ...(alt && net && rec && aw ? {
+        alternative: {
+          label: alt.label, net, recurring: rec,
+          window: { from: aw.from, months: aw.months, label: aw.from ? `${monthLabel(aw.from)} to ${monthLabel(addMonths(aw.from, aw.months - 1))}` : 'the first 12 months' },
+          flags: (alt.flags ?? []).map(f => ({ severity: f.severity, message: f.message })),
+        },
+      } : { unavailable: 'The forecast implementation cannot be placed in the volume plan, so no cost is stated for it. The cost page assumes the requested effectivity.' }),
+      ...(scen.note ? { note: scen.note } : {}),
+    };
+  }
 
   // ---- headline
   const unitCost = rows.filter(r => r.key.startsWith('unit_cost_delta:')).map(r => {
@@ -301,7 +362,7 @@ export function fromChecks(rows: CheckResultRow[]): ChecksView {
   return {
     headline: { unitCost, year1: net, ...(year1Likelihood ? { year1Likelihood } : {}) },
     cost: {
-      rows: costRows, subtotals, net, oneTime, recurring, window, needsEstimate,
+      rows: costRows, subtotals, net, oneTime, recurring, window, needsEstimate, ...(scenarios ? { scenarios } : {}),
       run: { draws: detail.draws, seed: detail.seed, codeVersion: detail.codeVersion, correlation: detail.correlation },
     },
     cutIn, sCurve: sc, drivers, traces, flags: detail.flags, rowIds,

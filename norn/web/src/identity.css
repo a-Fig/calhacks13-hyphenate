@@ -69,7 +69,7 @@
   .nx-pr-head h1 { font-size: 24px; overflow-wrap: anywhere; }
   .nx-checks { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .nx-check-pane .nx-box, .nx-diff { overflow-x: auto; }
-  .nx-cost { min-width: 620px; }
+  .nx-cost { min-width: 760px; }
   .nx-checks-list { min-width: 0; }
   .nx-t-body { margin-left: 24px; }
   .nx-av-col { left: -4px; }
