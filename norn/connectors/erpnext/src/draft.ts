@@ -15,8 +15,12 @@
 // replacement in its parent BOMs (BOM Update Tool) and retiring the old BOM. A BOM whose line has to point at another new
 // BOM is not drafted either: ERPNext only lets a BOM name a submitted BOM, and the new one is still a draft.
 //
-// This file is the only place in the connector that sends anything but a GET, and the only thing it sends is an insert
-// of a new document with docstatus 0. Never logs or throws headers, keys or secrets.
+// One more repair: when a draft's "Fern decision" link differs from the package's (an earlier run used another address for
+// Fern's pages), that one field is set on the draft, and only after reading the document back as a draft (docstatus 0).
+//
+// This file is the only place in the connector that sends anything but a GET. It sends two things: an insert of a new
+// document with docstatus 0, and an update of the decision link on a document it has just read as a draft. ERPNext refuses
+// Fern any update of a submitted document anyway. Never logs or throws headers, keys or secrets.
 
 import { ErpnextClient, ErpnextError } from './client.ts';
 import type { DocRef } from './history.ts';
@@ -44,6 +48,8 @@ export interface DraftResult {
   skipped: { lineId: string; why: string }[];
   /** A save ERPNext refused. The line stays for a person. */
   failed: { lineId: string; why: string }[];
+  /** Drafts whose decision link was set to the package's. */
+  updated: (DocRef & { lineId: string; field: string })[];
 }
 
 const DRAFTABLE: Record<string, PlannedDraft['doctype']> = { bom: 'BOM', 'journal-entry': 'Journal Entry' };
@@ -93,14 +99,12 @@ class DraftClient extends ErpnextClient {
     this.#auth = `token ${c.apiKey}:${c.apiSecret}`;
   }
 
-  async insert(doctype: string, doc: Record<string, unknown>): Promise<string> {
-    if (doc.docstatus !== 0) throw new Error('Fern only saves drafts (docstatus 0)');
-    const path = `/api/resource/${encodeURIComponent(doctype)}`;
+  async #send(method: 'POST' | 'PUT', path: string, what: string, payload: Record<string, unknown>): Promise<any> {
     this.requests++;
     const r = await fetch(this.#base + path, {
-      method: 'POST',
+      method,
       headers: { Authorization: this.#auth, Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...doc, doctype }),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(30_000),
     });
     const text = await r.text();
@@ -109,12 +113,25 @@ class DraftClient extends ErpnextClient {
     if (!r.ok) {
       let msg = '';
       try { msg = JSON.parse(body._server_messages).map((m: string) => JSON.parse(m).message).join(' | ').replace(/<[^>]+>/g, ''); } catch { /* none */ }
-      throw new ErpnextError(r.status, doctype, [body?.exc_type, msg].filter(Boolean).join(' - '));
+      throw new ErpnextError(r.status, what, [body?.exc_type, msg].filter(Boolean).join(' - '));
     }
+    return body;
+  }
+
+  async insert(doctype: string, doc: Record<string, unknown>): Promise<string> {
+    if (doc.docstatus !== 0) throw new Error('Fern only saves drafts (docstatus 0)');
+    const body = await this.#send('POST', `/api/resource/${encodeURIComponent(doctype)}`, doctype, { ...doc, doctype });
     const name = body?.data?.name;
-    if (typeof name !== 'string') throw new ErpnextError(r.status, doctype, 'no document name in the answer');
+    if (typeof name !== 'string') throw new ErpnextError(200, doctype, 'no document name in the answer');
     if (body.data.docstatus !== 0) throw new Error(`ERPNext saved ${doctype} ${name} with docstatus ${body.data.docstatus}, not as a draft`);
     return name;
+  }
+
+  /** Set one field on a document read just before as a draft. */
+  async setOnDraft(doctype: string, name: string, field: string, value: string): Promise<void> {
+    const [doc] = await this.list(doctype, { filters: [['name', '=', name]], fields: ['name', 'docstatus'] });
+    if (doc?.docstatus !== 0) throw new Error(`${doctype} ${name} is not a draft; Fern leaves it alone`);
+    await this.#send('PUT', `/api/resource/${encodeURIComponent(doctype)}/${encodeURIComponent(name)}`, `${doctype} ${name}`, { [field]: value });
   }
 }
 
@@ -125,9 +142,25 @@ export async function draftErpChangePackage(conn: ErpnextConnection, settings: E
   const entryField = cf.journalEntry?.entry;
   if (!ecoField || !entryField || cf.journalEntry?.changeOrder !== ecoField) throw new Error('drafts need customFields.bom.changeOrder and journalEntry.changeOrder (the same field) and journalEntry.entry');
   const plan = planDrafts(pkg, ecoField, entryField);
-  const res: DraftResult = { created: [], existing: [], skipped: plan.skipped, failed: [] };
-  if (!plan.drafts.length) return res;
+  const res: DraftResult = { created: [], existing: [], skipped: plan.skipped, failed: [], updated: [] };
   const c = new DraftClient(conn);
+  // Drafts already there whose decision link is not the package's: set it (drafts only).
+  const decisionField = { BOM: cf.bom?.decision, 'Journal Entry': cf.journalEntry?.decision } as Record<string, string | undefined>;
+  for (const l of pkg.lines) {
+    const doctype = DRAFTABLE[l.kind];
+    const field = doctype && decisionField[doctype];
+    if (!field || !l.found || l.found.doctype !== doctype || (l.status !== 'drafted' && l.status !== 'conflict')) continue;
+    const want = valueOf(l, field);
+    if (typeof want !== 'string') continue;
+    const [doc] = await c.list(doctype, { filters: [['name', '=', l.found.name]], fields: ['name', 'docstatus', field] });
+    if (!doc || doc.docstatus !== 0 || doc[field] === want) continue;
+    try {
+      await c.setOnDraft(doctype, l.found.name, field, want);
+      res.updated.push({ lineId: l.id, doctype, name: l.found.name, field });
+    } catch (e) {
+      res.failed.push({ lineId: l.id, why: (e as Error).message });
+    }
+  }
   for (const d of plan.drafts) {
     const filters: [string, string, unknown][] = [...d.identity.map(([f, v]) => [f, '=', v] as [string, string, unknown]), ['docstatus', '<', 2]];
     if (d.doctype === 'BOM') filters.push(['company', '=', settings.company]);

@@ -15,11 +15,12 @@ import { buildErpChangePackage, draftErpChangePackage, type EcoRelease, type Erp
 import type { BaselineStore } from './baseline.ts';
 import type { Client } from './connect.ts';
 import { assumptionsOf, provenanceOf, type Inputs } from './impact.ts';
+import { nornUrl } from './level1/format.ts';
 import { releaseOf } from './release.ts';
 import { AbortedError } from './stages.ts';
 
 /** What the connector made of a release: the package as stored, and its counts. */
-export type PlannedPackage = { packageJson: string; lines: number; entered: number; conflicts: number; problems: string[] };
+export type PlannedPackage = { packageJson: string; lines: number; entered: number; conflicts: number; problems: string[]; drafted?: number };
 export type Planner = (release: EcoRelease) => Promise<PlannedPackage>;
 
 /**
@@ -32,10 +33,10 @@ export function erpPlanner(connection: ErpnextConnection, settings: ErpnextSetti
     let pkg = await buildErpChangePackage(connection, settings, release);
     if (settings.changePackage?.drafts !== false) {
       const d = await draftErpChangePackage(connection, settings, pkg);
-      if (d.created.length) pkg = await buildErpChangePackage(connection, settings, release);
+      if (d.created.length || d.updated.length) pkg = await buildErpChangePackage(connection, settings, release);
       for (const f of d.failed) pkg.warnings.push(`Fern could not save ${f.lineId} as a draft in ERPNext: ${f.why}`);
     }
-    return { packageJson: JSON.stringify(pkg), lines: pkg.counts.total, entered: pkg.counts.entered, conflicts: pkg.counts.conflict, problems: pkg.problems };
+    return { packageJson: JSON.stringify(pkg), lines: pkg.counts.total, entered: pkg.counts.entered, conflicts: pkg.counts.conflict, problems: pkg.problems, drafted: pkg.counts.drafted };
   };
 }
 
@@ -50,7 +51,7 @@ const withoutReadAt = (json: string) => {
 };
 
 export type PackageOptions = {
-  /** Where Norn's ECR pages are, for the trace on every line, e.g. https://norn.example.com. */
+  /** Where Fern's ECR pages are, for the trace on every line: the base the PLM's impact_norn_url uses (webBaseUrl, NORN_WEB_URL). */
   webUrl: string;
   /** The company's time zone, for the release day. */
   timeZone?: string;
@@ -152,7 +153,7 @@ export async function packageOnce(conn: DbConnection, R: Client['R'], baselines:
     const changed = !prev || prev.packageJson !== planned.packageJson || prev.s2RunId !== s2.id;
     if (changed) {
       out.built++;
-      log(`ERP change package for ${eco.ecoNumber} (${pr.plmEcrNumber}): ${planned.entered} of ${planned.lines} line(s) entered${planned.conflicts ? `, ${planned.conflicts} in conflict` : ''}${planned.problems.length ? `, ${planned.problems.length} problem(s)` : ''}`);
+      log(`ERP change package for ${eco.ecoNumber} (${pr.plmEcrNumber}): ${planned.entered} of ${planned.lines} line(s) entered${planned.drafted ? `, ${planned.drafted} drafted in the ERP and waiting to be submitted` : ''}${planned.conflicts ? `, ${planned.conflicts} in conflict` : ''}${planned.problems.length ? `, ${planned.problems.length} problem(s)` : ''}`);
     } else out.unchanged++;
   }
   return out;
@@ -162,7 +163,7 @@ export async function packageOnce(conn: DbConnection, R: Client['R'], baselines:
     if (typeof a === 'string') return a;
     const { release, notes } = releaseOf(a.cr, a.result, {
       eco: eco.ecoNumber,
-      decision: { id: `${pr.plmEcrNumber} (assessment run ${s2Id})`, url: `${opts.webUrl.replace(/\/+$/, '')}/ecr/${encodeURIComponent(pr.plmEcrNumber)}` },
+      decision: { id: `${pr.plmEcrNumber} (assessment run ${s2Id})`, url: nornUrl(opts.webUrl, pr.plmEcrNumber) },
       releasedOn: dayIn(eco.recordedAt.microsSinceUnixEpoch, opts.timeZone),
     });
     // A release that changes nothing the ERP holds has an empty package: nothing to ask the ERP.

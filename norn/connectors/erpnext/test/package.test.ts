@@ -104,6 +104,13 @@ function fakeErp() {
       if (doctype === 'Journal Entry') db[doctype].at(-1)!.total_debit = (accounts ?? []).reduce((s: number, r: Row) => s + (r.debit_in_account_currency ?? 0), 0);
       return json(200, { data: { name, docstatus: 0 } });
     }
+    if (init?.method === 'PUT' && api === 'api' && kind === 'resource' && docName && body) {
+      const row = (db[doctype] ?? []).find((r) => r.name === decodeURIComponent(docName));
+      if (!row || (row.docstatus ?? 1) !== 0) throw new Error(`the connector tried to update ${doctype} ${docName}, which is not a draft`);
+      if (Object.keys(body).length !== 1 || 'docstatus' in body) throw new Error(`the connector tried to update more than one field of ${docName}`);
+      Object.assign(row, body);
+      return json(200, { data: { ...row } });
+    }
     if (init?.method !== 'GET' || init.body !== undefined) throw new Error(`the connector sent ${init?.method} ${url.pathname}: Fern only reads and saves drafts`);
     const defaultStatus = doctype === 'Journal Entry' ? 0 : 1;
     const filters: any[] = JSON.parse(url.searchParams.get('filters') ?? '[]');
@@ -331,9 +338,12 @@ test('the connector writes only drafts: the client reads, and draft.ts alone ins
   for (const f of readdirSync(dir).filter((n) => n.endsWith('.ts'))) {
     const src = readFileSync(new URL(f, dir), 'utf8');
     if (f === 'draft.ts') {
-      assert.equal(src.match(/method\s*:\s*['"`]\w+['"`]/g)?.join(), "method: 'POST'", 'draft.ts sends one kind of write');
-      assert.doesNotMatch(src, /['"`](PUT|PATCH|DELETE)['"`]/, 'draft.ts names an update or delete');
+      assert.doesNotMatch(src, /['"`](PATCH|DELETE)['"`]/, 'draft.ts names a delete');
       assert.doesNotMatch(src, /frappe\.client|\/api\/method|docstatus\s*[:=]\s*[12]\b/, 'draft.ts calls a method or sets a submitted docstatus');
+      // The one update is on a document read back as a draft just before.
+      const put = src.slice(src.indexOf('async setOnDraft'));
+      assert.ok(put.indexOf('docstatus !== 0') >= 0 && put.indexOf('docstatus !== 0') < put.indexOf("'PUT'"), 'setOnDraft checks for a draft before it updates');
+      assert.equal(src.match(/#send\('PUT'/g)?.length, 1, 'one update call');
       continue;
     }
     assert.doesNotMatch(src, /method\s*:\s*['"`](?!GET\b)/, `${f} sets a method other than GET`);
@@ -399,6 +409,28 @@ test('Fern saves the drafts once: they read back as drafted, and a second run sa
   const again = await draft(pkg);
   assert.deepEqual([again.created, again.failed], [[], []]);
   assert.deepEqual(posts(), [], 'a re-run saves nothing');
+});
+
+test('a draft whose decision link is out of date gets the package link, and nothing else changes', async () => {
+  await draft(await build());
+  const bom = db.BOM.find((b) => b.eco === 'ECO-9' && b.docstatus === 0)!;
+  const je = db['Journal Entry'].find((j) => j.entry === 'scrap')!;
+  bom.decision = 'https://norn.bowman.example/decisions/DEC-ECR-0417';
+  je.decision = 'https://norn.bowman.example/decisions/DEC-ECR-0417';
+  const before = await build();
+  assert.equal(line(before, 'bom:A').status, 'conflict', 'the BOM read compares the decision link');
+  calls = [];
+  const r = await draft(before);
+  assert.deepEqual(r.updated.map((u) => [u.lineId, u.name, u.field]), [['bom:A', bom.name, 'decision'], ['journal-entry:scrap', je.name, 'decision']]);
+  assert.deepEqual(r.created, []);
+  assert.deepEqual(posts().map((c) => [c.method, c.body]), [['PUT', { decision: DECISION }], ['PUT', { decision: DECISION }]]);
+  assert.equal(line(await build(), 'bom:A').status, 'drafted');
+  // A submitted document is never touched.
+  bom.docstatus = 1;
+  bom.decision = 'x';
+  calls = [];
+  const again = await draft(await build());
+  assert.deepEqual([again.updated, posts()], [[], []]);
 });
 
 test('a restart that read ERPNext before the drafts landed still finds them by ECO and line, and saves nothing', async () => {

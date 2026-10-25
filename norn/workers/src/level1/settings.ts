@@ -43,6 +43,9 @@ const num = (v: string | undefined, d: number) => {
   return Number.isFinite(n) && n > 0 ? n : d;
 };
 
+/** Where Fern's pages are (NORN_WEB_URL): the base of the PLM's impact_norn_url and of the ERP drafts' decision link. */
+export const webBaseUrl = (env: NodeJS.ProcessEnv = process.env) => (env.NORN_WEB_URL || 'http://127.0.0.1:5173').replace(/\/+$/, '');
+
 export function settingsFromEnv(env: NodeJS.ProcessEnv = process.env): Level1Settings {
   const timeoutMs = num(env.NORN_L1_TIMEOUT_MS, 240_000);
   return {
@@ -56,7 +59,7 @@ export function settingsFromEnv(env: NodeJS.ProcessEnv = process.env): Level1Set
     orphanMs: num(env.NORN_L1_ORPHAN_MS, timeoutMs + 90_000),
     pollMs: num(env.NORN_L1_POLL_MS, 3_000),
     tokenTtlSeconds: num(env.NORN_L1_TOKEN_TTL_S, 900),
-    webBaseUrl: (env.NORN_WEB_URL || 'http://127.0.0.1:5173').replace(/\/+$/, ''),
+    webBaseUrl: webBaseUrl(env),
     publishComment: env.NORN_PUBLISH_COMMENT === '1',
     waitForResearch: env.NORN_L1_WAIT_FOR_RESEARCH === '1',
     settleMs: num(env.NORN_L1_SETTLE_MS, SETTLE_WAIT_MS),

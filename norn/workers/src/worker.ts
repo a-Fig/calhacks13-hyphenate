@@ -15,6 +15,7 @@ import { applyStartupConfig, loadStartupConfig, refusalLines } from './config.ts
 import { CHECKS_CODE_VERSION } from '../../checks/src/index.ts';
 import { REAL_STAGES, impactHandlers } from './impact.ts';
 import { GUARD_KEYS, erpPlanner, packageOnce } from './package.ts';
+import { webBaseUrl } from './level1/settings.ts';
 import { sleep } from './sim.ts';
 import { AbortedError, FatalRunError, HANDLERS as MOCK_HANDLERS, type Result, type RunCtx } from './stages.ts';
 
@@ -265,7 +266,8 @@ if (baselines.source?.erp) {
     ...GUARD_KEYS.map(k => `SELECT * FROM check_result WHERE key = '${k}'`),
   ]);
   const planner = erpPlanner(connection, settings);
-  const opts = { webUrl: process.env.NORN_WEB_URL ?? 'http://localhost:5173', timeZone: settings.timeZone, recheckMs: Number(process.env.NORN_PACKAGE_RECHECK_MS ?? 60_000) };
+  // The same base as the PLM's impact_norn_url (level1/settings.ts), so a draft's "Fern decision" link opens Fern's ECR page.
+  const opts = { webUrl: webBaseUrl(), timeZone: settings.timeZone, recheckMs: Number(process.env.NORN_PACKAGE_RECHECK_MS ?? 60_000) };
   let busy = false;
   const said = new Set<string>();
   const packages = async () => {

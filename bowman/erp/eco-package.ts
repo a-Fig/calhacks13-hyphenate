@@ -34,6 +34,7 @@ if (process.argv.includes('--draft')) {
   const d = await draftErpChangePackage(conn, erpnext, pkg);
   const say = (m: string) => console.error(m);
   for (const x of d.created) say(`drafted   ${x.lineId}: ${x.doctype} ${x.name}  ${deskUrl(pkg.erpUrl, x)}`);
+  for (const x of d.updated) say(`updated   ${x.lineId}: ${x.doctype} ${x.name} ${x.field} set to the package's decision link`);
   for (const x of d.existing) say(`existing  ${x.lineId}: ${x.doctype} ${x.name} (nothing saved)`);
   for (const x of d.skipped) say(`skipped   ${x.lineId}: ${x.why}`);
   for (const x of d.failed) say(`FAILED    ${x.lineId}: ${x.why}`);
