@@ -39,6 +39,8 @@ export function failedChecksForRun(db: Db, prId: bigint, checkRunId: bigint): st
     stage: r.stage,
     status: r.status,
     inputHash: r.inputHash,
+    createdMs: r.createdAt ? Number(r.createdAt.microsSinceUnixEpoch / 1000n) : 0,
+    startedMs: r.startedAt ? Number(r.startedAt.microsSinceUnixEpoch / 1000n) : null,
     finishedMs: r.finishedAt ? Number(r.finishedAt.microsSinceUnixEpoch / 1000n) : null,
   });
   const run = checkRunId === 0n ? undefined : db.checkRun.id.find(checkRunId);

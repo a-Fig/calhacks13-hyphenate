@@ -53,7 +53,19 @@ export interface PublishDeps {
   lease?: Lease;
   /** Post a short comment on the ECR after a write. */
   comment?: boolean;
+  /**
+   * Recording in Norn that the rule's recommendation replaced the agent's (see `recordOverride`). `recorded` is a
+   * cheap look at what this process knows; `record` runs under the lease, on the statement actually published, and
+   * re-reads Norn's comments itself before inserting.
+   */
+  override?: { recorded(f: Formatted): boolean; record(f: Formatted): Promise<unknown> };
   log: (m: string) => void;
+}
+
+/** The outcome, and the statement it is about: the one actually written or found in the PLM, which may be a newer one than was passed in. */
+export interface Published {
+  result: PublishResult;
+  f?: Formatted;
 }
 
 export interface Publication {
@@ -71,29 +83,51 @@ export interface Publication {
  * while it waited: it writes only what is still the newest and differs from what the PLM holds.
  */
 export async function publishStatement(d: PublishDeps, ecrNumber: string, f: Formatted, prov: Pick<Provenance, 'mock'>, latest?: () => Publication | null): Promise<PublishResult> {
-  const mock = () => {
+  return (await publishDetailed(d, ecrNumber, f, prov, latest)).result;
+}
+
+/** `publishStatement`, also saying which statement it wrote or found: under the lease it can switch to a newer one. */
+export async function publishDetailed(d: PublishDeps, ecrNumber: string, f: Formatted, prov: Pick<Provenance, 'mock'>, latest?: () => Publication | null): Promise<Published> {
+  const mock = (): Published => {
     d.log(`${ecrNumber}: not written to the PLM, the statement rests on mock numbers`);
-    return 'mock' as const;
+    return { result: 'mock' };
+  };
+  // An override is recorded in Norn under the same lease as the PLM write, on the statement actually published.
+  const record = async (p: Formatted) => {
+    if (!p.overridden || !d.override) return;
+    try {
+      await d.override.record(p);
+    } catch (e) {
+      d.log(`${ecrNumber}: could not record the override in Norn: ${(e as Error).message}`);
+    }
   };
   if (prov.mock) return mock();
   const current = await d.plm.readImpact(ecrNumber);
-  if (current === null) return 'missing';
-  if (alreadyPublished(current, f)) return 'unchanged';
-  if (d.lease && !(await d.lease.claim(Number(f.ref.split('.')[0])))) return 'busy';
+  if (current === null) return { result: 'missing' };
+  // Already in the PLM. Only an override Norn has not yet recorded is left to do, and that needs the lease too.
+  if (alreadyPublished(current, f) && !(f.overridden && d.override && !d.override.recorded(f))) return { result: 'unchanged', f };
+  if (!d.lease && alreadyPublished(current, f)) {
+    await record(f);
+    return { result: 'unchanged', f };
+  }
+  if (d.lease && !(await d.lease.claim(Number(f.ref.split('.')[0])))) return { result: 'busy' };
   try {
     let target = { f, prov };
     if (d.lease) {
       // Whoever held the lease before us may have written while we waited: choose again, look again, now that it is ours.
       if (latest) {
         const n = latest();
-        if (!n) return 'unchanged';
+        if (!n) return { result: 'unchanged' };
         if (n.f.ref !== f.ref) d.log(`${ecrNumber}: a newer statement (${n.f.ref}) took over from ${f.ref} while waiting for the lease`);
         target = n;
         if (n.prov.mock) return mock();
       }
       const again = await d.plm.readImpact(ecrNumber);
-      if (again === null) return 'missing';
-      if (alreadyPublished(again, target.f)) return 'unchanged';
+      if (again === null) return { result: 'missing' };
+      if (alreadyPublished(again, target.f)) {
+        await record(target.f);
+        return { result: 'unchanged', f: target.f };
+      }
     }
     const after = await d.plm.writeImpact(ecrNumber, target.f.fields);
     // Proof, not the status code: the PLM's answer holds our ref.
@@ -102,7 +136,8 @@ export async function publishStatement(d: PublishDeps, ecrNumber: string, f: For
       const rec = target.f.recommendation ? ` Recommendation: ${target.f.recommendation}.` : '';
       await d.plm.postComment(ecrNumber, `<p>Norn posted a Level ${target.f.fields.impact_report_level} impact statement on this ECR.${rec} See the Impact assessment tab.</p>`);
     }
-    return 'written';
+    await record(target.f);
+    return { result: 'written', f: target.f };
   } finally {
     await d.lease?.release().catch(() => {});
   }
@@ -111,14 +146,17 @@ export async function publishStatement(d: PublishDeps, ecrNumber: string, f: For
 // ---- recording an override in Norn ----------------------------------------------------------------
 
 /** What Norn's ECR page shows when the rule, not the agent, set the recommendation. Plain text: a comment. */
+/** The statement a formatted publication is for: the ref starts with its id. */
+export const statementIdOf = (f: Formatted): number => Number(f.ref.split('.')[0]);
+
 export function overrideComment(statementId: number, o: NonNullable<Formatted['overridden']>): string {
   const agent = o.agent ? `"${o.agent}"` : 'none';
   return `Norn's rule set the recommendation to ${o.derived.recommendation}; the Level 1 agent wrote ${agent} (rule ${o.derived.rule}, statement ${statementId}). ${o.derived.reasoning}`;
 }
 
 export interface OverrideDeps {
-  /** The bodies of the comments already on the ECR. */
-  existing(): string[];
+  /** The bodies of the comments on the ECR, read fresh: this runs under the publication lease. */
+  existing(): string[] | Promise<string[]>;
   /** Comment on the ECR as the publisher (add_comment). */
   add(body: string): Promise<void>;
 }
@@ -132,7 +170,7 @@ export interface OverrideDeps {
 export async function recordOverride(d: OverrideDeps, statementId: number, f: Formatted): Promise<boolean> {
   if (!f.overridden) return false;
   const body = overrideComment(statementId, f.overridden);
-  if (d.existing().includes(body)) return false;
+  if ((await d.existing()).includes(body)) return false;
   await d.add(body);
   return true;
 }
@@ -278,23 +316,34 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
               const g2 = gather(conn.db, conn.db.pullRequest.id.find(pr.id) ?? pr);
               return g2 ? { f: statementToPlmFields(g2.statement, g2.ecr, g2.prov, { nornBaseUrl: settings.webBaseUrl, config: storedCompanyConfig(conn.db) }), prov: g2.prov } : null;
             };
-            const r = await publishStatement({ plm, lease: leaseFor(pr.id), comment: settings.publishComment, log }, pr.plmEcrNumber, f, g.prov, latest);
-            if (r === 'written') log(`${pr.plmEcrNumber}: wrote Level ${g.statement.level} statement ${g.statement.id} to the PLM (ref ${f.ref}${f.recommendation ? `, ${f.recommendation}` : ''})`);
-            if ((r === 'written' || r === 'unchanged') && f.overridden) {
-              const overrideDeps: OverrideDeps = {
-                existing: () => [...posted, ...[...conn.db.comment.prId.filter(pr.id)].map(c => c.body)],
-                add: async body => {
-                  await R.addComment({ prId: pr.id, anchor: '', body });
-                  posted.add(body);
-                },
-              };
+            // Recording an override in Norn: under the lease, on the statement actually published, after re-reading the ECR's comments.
+            const cached = () => [...posted, ...[...conn.db.comment.prId.filter(pr.id)].map(c => c.body)];
+            const fresh = async () => {
+              const sub = await subscribe(conn, [`SELECT * FROM comment WHERE pr_id = ${pr.id}`]);
               try {
-                if (await recordOverride(overrideDeps, g.statement.id, f)) log(`${pr.plmEcrNumber}: recorded in Norn that the rule's recommendation replaced the agent's`);
-              } catch (e) {
-                log(`${pr.plmEcrNumber}: could not record the override in Norn: ${(e as Error).message}`);
+                return cached();
+              } finally {
+                sub.unsubscribe();
               }
-            }
-            if (r === 'written' && f.overridden) log(`${pr.plmEcrNumber}: the agent wrote ${f.overridden.agent ? `"${f.overridden.agent}"` : 'no recommendation'}; rule ${f.overridden.derived.rule} gives "${f.overridden.derived.recommendation}", which is what the PLM got`);
+            };
+            const overrideDeps: OverrideDeps = {
+              existing: fresh,
+              add: async body => {
+                await R.addComment({ prId: pr.id, anchor: '', body });
+                posted.add(body);
+              },
+            };
+            const override = {
+              recorded: (p: Formatted) => !p.overridden || cached().includes(overrideComment(statementIdOf(p), p.overridden)),
+              record: async (p: Formatted) => {
+                if (await recordOverride(overrideDeps, statementIdOf(p), p)) log(`${pr.plmEcrNumber}: recorded in Norn that the rule's recommendation replaced the agent's (statement ${statementIdOf(p)})`);
+              },
+            };
+            const out = await publishDetailed({ plm, lease: leaseFor(pr.id), comment: settings.publishComment, override, log }, pr.plmEcrNumber, f, g.prov, latest);
+            const r = out.result;
+            const w = out.f ?? f; // the statement actually written, which can be a newer one than was gathered
+            if (r === 'written') log(`${pr.plmEcrNumber}: wrote Level ${w.fields.impact_report_level} statement ${statementIdOf(w)} to the PLM (ref ${w.ref}${w.recommendation ? `, ${w.recommendation}` : ''})`);
+            if (r === 'written' && w.overridden) log(`${pr.plmEcrNumber}: the agent wrote ${w.overridden.agent ? `"${w.overridden.agent}"` : 'no recommendation'}; rule ${w.overridden.derived.rule} gives "${w.overridden.derived.recommendation}", which is what the PLM got`);
             if (r === 'busy') log(`${pr.plmEcrNumber}: another publisher is writing it; looking again later`);
             else if (r === 'missing') {
               missingUntil.set(pr.plmEcrNumber, Date.now() + 5 * 60_000);

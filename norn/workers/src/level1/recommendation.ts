@@ -121,12 +121,14 @@ export function deriveRecommendation(input: RuleInput): Derived {
   return { recommendation: 'Approve', rule: 3, blockers, conditions, reasoning: 'Rule 3 (no flags and no gaps).' };
 }
 
-/** A check run, as far as the rule needs it. `finishedMs` is null while unfinished. */
+/** A check run, as far as the rule needs it. The times are null while they have not happened. */
 export interface RunRow {
   id: bigint;
   stage: string;
   status: string;
   inputHash: string;
+  createdMs: number;
+  startedMs: number | null;
   finishedMs: number | null;
 }
 
@@ -134,7 +136,10 @@ export interface RunRow {
  * The checks that failed or are blocked, as of the statement's own input snapshot, never the ECR's latest runs:
  * a later failure of a re-run must not turn an unchanged statement's recommendation into Send back.
  *  - s2_cost: the statement's own run.
- *  - s1_bom_delta: the run whose input hash the s2 run names as its upstream (`inputs.upstream.s1_bom_delta`).
+ *  - s1_bom_delta: the run with the input hash the s2 run names as its upstream (`inputs.upstream.s1_bom_delta`) that
+ *    existed and had finished when the s2 run ran: created before it started and finished before it finished, the
+ *    newest such. The hash alone is not enough: if the inputs change and then revert, a later run with the same
+ *    hash is not what this statement was computed on.
  *  - s0_extract reads the ECR's text and nothing names it, so it counts as of the moment the s2 run finished: its
  *    latest run created before the s2 run, and only if it had already failed by then.
  */
@@ -144,7 +149,11 @@ export function failedChecksOf(runs: readonly RunRow[], run: RunRow, upstreamS1:
   const out: string[] = [];
   const s0 = live.filter(r => r.stage === 's0_extract' && r.id < run.id).at(-1);
   if (s0 && bad(s0.status) && (s0.status === 'blocked' || (s0.finishedMs !== null && run.finishedMs !== null && s0.finishedMs <= run.finishedMs))) out.push('s0_extract');
-  const s1 = upstreamS1 === undefined ? undefined : live.filter(r => r.stage === 's1_bom_delta' && r.inputHash === upstreamS1).at(-1);
+  const began = run.startedMs ?? run.createdMs;
+  const s1 =
+    upstreamS1 === undefined
+      ? undefined
+      : live.filter(r => r.stage === 's1_bom_delta' && r.inputHash === upstreamS1 && r.createdMs <= began && r.finishedMs !== null && run.finishedMs !== null && r.finishedMs <= run.finishedMs).at(-1);
   if (s1 && bad(s1.status)) out.push('s1_bom_delta');
   if (bad(run.status)) out.push('s2_cost');
   return out;

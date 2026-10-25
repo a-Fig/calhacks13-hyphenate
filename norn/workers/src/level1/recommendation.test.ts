@@ -49,7 +49,7 @@ test('a failed or blocked check, or no cost detail at all, is Send back', () => 
 
 // ---- the checks' state is read as of the statement's own run, never the ECR's latest runs -------------
 
-const run = (id: number, stage: string, status: string, inputHash = `h${id}`, finishedMs: number | null = id * 1000): RunRow => ({ id: BigInt(id), stage, status, inputHash, finishedMs });
+const run = (id: number, stage: string, status: string, inputHash = `h${id}`, finishedMs: number | null = id * 1000 + 100): RunRow => ({ id: BigInt(id), stage, status, inputHash, createdMs: id * 1000, startedMs: id * 1000, finishedMs });
 
 test("a failure after the statement's run does not change it: a later extraction failure leaves Approve as it was", () => {
   const s2 = run(3, 's2_cost', 'done');
@@ -72,13 +72,28 @@ test("a check that had failed when the statement was written, or its own upstrea
   assert.deepEqual(failedChecksOf([], run(3, 's2_cost', 'failed'), undefined), ['s2_cost']);
 });
 
+test('inputs that change and revert: a later failed s1 run with the same hash is not the one the statement was computed on', () => {
+  const s2 = run(3, 's2_cost', 'done');
+  const first = [run(1, 's0_extract', 'done'), run(2, 's1_bom_delta', 'done', 'S1'), s2];
+  // the request is edited (hash S2), then edited back (hash S1 again); the new s1 run for S1 fails
+  const reverted = [...first, run(5, 's1_bom_delta', 'done', 'S2'), run(8, 's1_bom_delta', 'failed', 'S1')];
+  assert.deepEqual(failedChecksOf(reverted, s2, 'S1'), [], "the later run was created after the s2 run started");
+  // one that had already failed, but only finished after the s2 run did, is not it either
+  assert.deepEqual(failedChecksOf([run(1, 's1_bom_delta', 'done', 'S1'), run(2, 's1_bom_delta', 'failed', 'S1', 9999), s2], s2, 'S1'), [], 'finished after the s2 run finished');
+  const d = (failed: string[]) => deriveRecommendation(ruleInputOf(storedRows('ECR-0423'), failed));
+  assert.equal(d(failedChecksOf(reverted, s2, 'S1')).recommendation, 'Approve');
+  // while the newest such run, if it had failed by then, still counts
+  assert.deepEqual(failedChecksOf([run(1, 's1_bom_delta', 'done', 'S1'), { ...run(2, 's1_bom_delta', 'failed', 'S1'), finishedMs: 2100 }, s2], s2, 'S1'), ['s1_bom_delta']);
+});
+
 test("failedChecksForRun reads the cache the same way: a later s0 failure on the ECR is not this statement's", () => {
   const at = (s: number) => ({ microsSinceUnixEpoch: BigInt(s) * 1_000_000n });
+  const created = (s: number) => ({ createdAt: at(s), startedAt: at(s) });
   const rows = [
-    { id: 1n, stage: 's0_extract', status: 'done', inputHash: 'a', inputsJson: '{}', finishedAt: at(1) },
-    { id: 2n, stage: 's1_bom_delta', status: 'done', inputHash: 'S1', inputsJson: '{}', finishedAt: at(2) },
-    { id: 3n, stage: 's2_cost', status: 'done', inputHash: 'c', inputsJson: JSON.stringify({ upstream: { s1_bom_delta: 'S1' } }), finishedAt: at(3) },
-    { id: 9n, stage: 's0_extract', status: 'failed', inputHash: 'z', inputsJson: '{}', finishedAt: at(9) },
+    { id: 1n, stage: 's0_extract', status: 'done', inputHash: 'a', inputsJson: '{}', finishedAt: at(1), ...created(1) },
+    { id: 2n, stage: 's1_bom_delta', status: 'done', inputHash: 'S1', inputsJson: '{}', finishedAt: at(2), ...created(2) },
+    { id: 3n, stage: 's2_cost', status: 'done', inputHash: 'c', inputsJson: JSON.stringify({ upstream: { s1_bom_delta: 'S1' } }), finishedAt: at(3), ...created(3) },
+    { id: 9n, stage: 's0_extract', status: 'failed', inputHash: 'z', inputsJson: '{}', finishedAt: at(9), ...created(9) },
   ];
   const db = { checkRun: { prId: { filter: () => rows }, id: { find: (id: bigint) => rows.find(r => r.id === id) } } } as any;
   assert.deepEqual(failedChecksForRun(db, 5n, 3n), []);
