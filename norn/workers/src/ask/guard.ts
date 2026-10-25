@@ -49,8 +49,10 @@ export interface Found {
   percent: boolean;
   /** -1 when the text says the number is negative (a minus, a saving, a reduction), +1 for an explicit plus or an increase, 0 when it doesn't say. */
   sign: -1 | 0 | 1;
-  /** A small count written as a plain word ("three"). Left unmarked unless a citation marker follows it. */
+  /** A small count written as a plain word ("three", "three-way"). Left unmarked unless a citation marker follows it. */
   count?: boolean;
+  /** Digits glued into a word with a hyphen ("12-month", "13-week"). With no marker after them, left unmarked only when some tool result holds the number. */
+  glued?: boolean;
 }
 
 export interface FindOptions {
@@ -374,12 +376,9 @@ export function findNumbers(text: string, opts: FindOptions = {}): Found[] {
       skipUntil = end;
       continue;
     }
-    if (GLUED.test(masked.slice(end)) && !prefixOf(text, start).money) {
-      skipUntil = end;
-      continue;
-    }
     const decimals = clean.includes('.') ? clean.length - clean.indexOf('.') - 1 : 0;
     push(start, end, { nominal: Number(clean), tolerance: 0.5 * 10 ** -decimals });
+    if (GLUED.test(masked.slice(end)) && !prefixOf(text, start).money && out.length) out[out.length - 1]!.glued = true;
     skipUntil = end;
   }
 
@@ -397,10 +396,9 @@ export function findNumbers(text: string, opts: FindOptions = {}): Found[] {
       // "one" alone is a pronoun or part of a word (one of, one-time) unless an amount word follows it.
       if (r.lone === 'one' && (text[r.end] === '-' || (sfx.end === r.end && sfx.reach === r.end))) continue;
       const money = prefixOf(text, m.index!).money;
-      if (!money && GLUED.test(text.slice(r.end))) continue;
       push(m.index!, r.end, { nominal: r.value, tolerance: r.tolerance });
-      // "three" or "two" on its own is a count of things, not a figure. It is checked only when a marker says it is one.
-      if (!money && r.lone !== null && r.lone !== 'one' && r.value >= 2 && r.value <= 10 && sfx.end === r.end && sfx.reach === r.end) out[out.length - 1]!.count = true;
+      // "three" on its own is a count of things, and "three-way" part of a word: soft, like a glued digit.
+      if (!money && (GLUED.test(text.slice(r.end)) || (r.lone !== null && r.lone !== 'one' && r.value >= 2 && r.value <= 10 && sfx.end === r.end && sfx.reach === r.end))) out[out.length - 1]!.count = true;
     }
   }
   return out.sort((a, b) => a.start - b.start);
@@ -563,6 +561,9 @@ function liftMarkers(raw: string): { clean: string; marks: { at: number; ids: st
  */
 export function guardAnswer(agent: AgentAnswer, results: ToolResultText[]): GuardResult {
   const roots = results.filter(r => r.content).map(r => parse(r.content));
+  // Every number any tool result holds: an uncited glued number ("13-week") passes only if it is one of them.
+  const anywhere: Hay[] = [];
+  collectNumbers(roots, anywhere);
   const known = results.map(r => r.content).join('\n').toLowerCase();
   const citations: AskCitation[] = [];
   const byId = new Map<string, { index: number; usable: boolean; hay: Hay[] }>();
@@ -601,7 +602,7 @@ export function guardAnswer(agent: AgentAnswer, results: ToolResultText[]): Guar
     // The markers that follow this number, with nothing but spaces between.
     const named = marks.filter(m => m.at >= f.reach && clean.slice(f.reach, m.at).trim() === '').flatMap(m => m.ids);
     const cited = [...new Set(named)].map(id => byId.get(id)).filter((c): c is NonNullable<typeof c> => c !== undefined);
-    if (f.count && named.length === 0) continue;
+    if (named.length === 0 && (f.count || (f.glued && f.parsed && found(f, anywhere)))) continue;
     const hay = cited.filter(c => c.usable).flatMap(c => c.hay);
     const ok = f.parsed && hay.length > 0 && found(f, hay);
     if (f.start > at) segments.push({ text: clean.slice(at, f.start) });

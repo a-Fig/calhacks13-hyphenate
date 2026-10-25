@@ -436,7 +436,7 @@ test('a driver also verifies where drivers sit under another result', () => {
 });
 
 test('a number glued into a word with a hyphen is part of the word', () => {
-  const t = (s: string) => findNumbers(s).map(f => f.text);
+  const t = (s: string) => findNumbers(s).filter(f => !f.glued && !f.count).map(f => f.text);
   assert.deepEqual(t('The 12-month net cost and a three-way match, a 30-day window.'), []);
   assert.deepEqual(t('Serial S/N 011-014 and 5-7 units.'), ['5', '7']);
   // amounts keep their magnitude, percent and currency words, with or without the hyphen
@@ -450,4 +450,13 @@ test('a small count written as a word is not marked unless a citation marker fol
   assert.deepEqual(guard('There are three quotes at ten percent, or eleven.', []).unverifiedNumbers, ['ten percent', 'eleven']);
   assert.deepEqual(guard('It is two dollars, three million.', []).unverifiedNumbers, ['two', 'three million']);
   assert.equal(guard('Three quotes.', []).segments.map(s => s.text).join(''), 'Three quotes.');
+});
+
+test('a glued number passes uncited only when a tool result holds it, and a stored glued number still vouches', () => {
+  // 12 is in the driver text ("12-month"), so "12-month" passes; no result holds 20, so a made-up "20-week delay" is marked
+  assert.deepEqual(rerun('The 12-month net cost.', []).unverifiedNumbers, []);
+  assert.deepEqual(rerun('A 20-week delay.', []).unverifiedNumbers, ['20']);
+  // a stored "13-week shift" still holds 13 for an answer that cites it
+  const g = guardOn([{ tool: 'mcp__norn__get_ecr', content: JSON.stringify({ ecr: 'X', statements: [{ id: 5, drivers: [{ text: 'ECR-0421 waits for a later slot: a 13-week shift.' }] }] }) }]);
+  assert.deepEqual(g('It moves 13 [c1] weeks.', [['c1', 'driver:5.1', '13']]).unverifiedNumbers, []);
 });
