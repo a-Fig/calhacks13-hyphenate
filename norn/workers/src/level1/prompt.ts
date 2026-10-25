@@ -4,6 +4,7 @@
 // The standards below are copied from bowman/norn-config/bowman.config.ts (#58) on 2026-10-24:
 // `materiality`, `postingStandards` and `vocabulary.avoid`. norn/config is not on this branch, so
 // they are constants here; when it lands, read them from the loaded config instead.
+import type { Derived } from './recommendation.ts';
 import { ROUTE_PENDING, type Routing } from './routing.ts';
 
 export const MATERIALITY = {
@@ -27,9 +28,15 @@ How to work
 1. Call get_ecr, get_impact and list_assumptions for the ECR you are given (together, in your first turn).
 2. Post exactly one statement with post_impact_statement, level 1. If the tool says what is wrong with it (a bad result key, a number that is not a current result), fix that and post again. If it says Norn's policy refused it, stop and report that. If it says the check run that started this session is out of date, stop too: post nothing and say the numbers changed.
 3. Finish with one plain sentence saying whether the statement was saved.
-Do not use any other tool. Do not propose assumptions or comment: that is for later levels.
+Do not use any other tool, except request_fast_track_approval where "Fast track" below says to. Do not propose assumptions or comment: that is for later levels.
 
 Evidence classes. Every number and claim you post is exactly one of: assumption (supposed in order to frame the analysis), computation (calculated by Norn's code, copied from get_impact) or judgment (your conclusion). You cannot post a fact: facts are what Norn itself holds from the ERP and the PLM, and an agent's say-so is not one. Never mark a judgment as a computation.
+
+Recommendation. Your recommendation is one of three, and it follows from what the checks show, so two sessions on the same ECR must give the same one. Apply the first rule that fits:
+1. Send back: the change request cannot be assessed as filed. Examples: a BOM conflict with the baseline (a conflict flag, or a BOM delta that is not ok), a flag with severity error, a forecast that did not converge, a check (the redline read, the BOM delta, the cost check) that failed or is blocked, or a redline that cannot be read.
+2. Approve with conditions: the assessment stands but has stated gaps. A gap is a blank cost line counted as $0 (needs_estimate), an unestimated item, a stock disposition not decided, a price change with no supplier quote, or any other warn flag that is not in rule 1. The conditions name exactly those gaps, no more and no fewer.
+3. Approve: no flags worth a warning and no gaps. Info flags (cross-checks, defaults, budgetary quotes) are not gaps.
+Never Reject: that is a human call, not Level 1's. A gap never makes it Send back, and Send back is not a stronger word for "many gaps". The job tells you what the rule gives for this ECR; use it as given. Start the recommendation claim "Recommendation: " followed by the recommendation, then name the rule that fired ("Rule 2") and, for rule 2, list the conditions. That claim is a judgment.
 
 Change class. You may propose a class, as your own judgment, with a one-line reason; the CM analyst decides. Bowman's Class I is any change that alters form, fit or function; moves unit cost, one-time cost or a schedule milestone by more than the bars below; touches safety or a flight-safety part; retrofits aircraft already built or delivered; or changes interchangeability. Class II is everything else. When unsure, propose Class I. Do not name an approval board or tier: Norn's routing decides that, not you.
 
@@ -49,6 +56,8 @@ Likelihood. State a probability only in these words: ${LIKELIHOOD_WORDS.join('; 
 Citing. When a judgment or assumption leans on something read from a source, name where it was read: the system, the record and the as-of date, in brackets. The job gives you the strings to use.
 
 Words. Use ECR, ECO, CCB, impact assessment, change class. Never use: ECN, change notice, branch, merge, pull request.
+
+Fast track. If get_impact has fastTrack and fastTrack.candidate is true, only your answers to its listed tests stand between this ECR and the fast track. After you have posted the statement, answer every test in fastTrack.tests honestly (holds true or false, with evidence drawn from what you read in get_ecr, get_impact and list_assumptions; never mark a test true without evidence), then call request_fast_track_approval exactly once with ecr and answers [{testId, holds, evidence}]. Report the gate's outcome (approved, approved with a draw, recommended to whom, or denied, and the reasons) in your final message. If fastTrack is absent or candidate is false, do not call it.
 
 Open with the bottom line. Plain sentences, no jargon, no filler.`;
 
@@ -121,6 +130,14 @@ export interface JobFacts {
   screened: Screened;
   /** What routing already decided, if anything. */
   routing: Routing;
+  /** What the recommendation rule gives for this ECR (recommendation.ts). */
+  recommendation?: Derived;
+}
+
+function recommendationLine(r: Derived | undefined): string {
+  if (!r) return 'Apply the recommendation rule in the system prompt to what get_impact shows; when you cannot tell whether the change can be assessed as filed, it is Send back (rule 1).';
+  const items = r.rule === 1 ? r.blockers : r.rule === 2 ? r.conditions : [];
+  return `Norn's rule gives "${r.recommendation}" (rule ${r.rule}) for this ECR; use it as given${items.length ? `, naming exactly these${r.rule === 1 ? ' reasons' : ' conditions'}: ${items.map((x, i) => `(${i + 1}) ${x}`).join('; ')}` : ''}.`;
 }
 
 export function jobPrompt(f: JobFacts): string {
@@ -138,14 +155,14 @@ Read the ECR, its impact results and its assumptions first, then post one statem
 
 changeClass: ${classLine}.
 route: ${routeLine}.
-headline: the bottom line first, one or two sentences: what the change costs per aircraft, one time and over 12 months, as ranges, and your recommendation in a few words. At most 500 characters.
+headline: the bottom line first, one or two sentences: what the change costs per aircraft, one time and over 12 months, as ranges. Do not state the recommendation here; the recommendation claim carries it, and the PLM shows the two apart. At most 500 characters.
 numbers: exactly these, each evidence "computation":
 ${f.numbers.map(n => `- key "${n.key}", resultKey "${n.resultKey}" (${n.label})`).join('\n')}
 drivers: ${f.screened.drivers.length ? 'these clear the materiality bar; use up to three, each as {text, evidence "computation"}, in your own words and with the dollar figures as written here' : 'none clears the bar; leave the list empty'}:
 ${list(f.screened.drivers, 'none')}
 assumptions: the keys from list_assumptions that this statement leans on, each with a short note; an empty list if list_assumptions returns none. Never invent a key.
 claims, each {text, evidence}:
-1. One judgment starting exactly "Recommendation: " followed by one of Approve, Approve with conditions, Send back, Reject, then a full stop and your reasoning in at most two sentences (evidence "judgment").${
+1. One judgment starting exactly "Recommendation: " followed by one of Approve, Approve with conditions, Send back, then a full stop, the rule that fired ("Rule 1", "Rule 2" or "Rule 3") and, in at most three sentences, why; for Approve with conditions, the conditions (evidence "judgment"). ${recommendationLine(f.recommendation)}${
     f.routing.class
       ? ''
       : `

@@ -244,6 +244,9 @@ try {
   console.error(`\nFAILED: ${(e as Error).message}`);
   for (const [name, lines] of logs) console.error(`--- ${name}\n${lines.slice(-6).join('\n')}`);
 } finally {
+  // Stop the publisher first: it sweeps every 15 s and would write the statement again after the clear.
+  for (const c of children) killTree(c);
+  await sleep(1_000);
   // Whatever happened, do not leave the demo ECR carrying a test statement unless asked.
   if (clear) {
     try {
@@ -256,7 +259,6 @@ try {
       console.error(`COULD NOT CLEAR ${ECR}: ${(e as Error).message}. Run: npx tsx src/level1/plm-impact.ts clear ${ECR}`);
     }
   }
-  for (const c of children) killTree(c);
   mkdirSync(tmp, { recursive: true });
   for (const [name, lines] of logs) writeFileSync(join(tmp, `${name}.log`), lines.join('\n'));
   console.log(`process logs: ${tmp}`);

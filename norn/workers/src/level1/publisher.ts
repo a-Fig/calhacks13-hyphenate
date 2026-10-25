@@ -28,6 +28,7 @@ import { connect, subscribe } from '../connect.ts';
 import { randomUUID } from 'node:crypto';
 import { provenanceOf } from '../impact.ts';
 import { alreadyPublished, statementToPlmFields, type Formatted, type Provenance, type StatementDoc } from './format.ts';
+import { failedChecksOf, ruleInputOf } from './recommendation.ts';
 import { plmFromConnector, plmOptionsFromEnv, type PlmApi } from './plm.ts';
 import { costCheckOf, storedCompanyConfig, type EcrRef } from './routing.ts';
 import { statementIsFor } from './plan.ts';
@@ -182,7 +183,9 @@ export function gather(db: DbConnection['db'], pr: Row<'pullRequest'>): { statem
   return {
     statement: doc,
     ecr: { number: pr.plmEcrNumber, title: pr.title, revision: crSeq },
-    prov: { baseline: p.baseline, changeRequest: p.changeRequest, codeVersion: detail.codeVersion, draws: detail.draws, s2RunId: run ? Number(run.id) : undefined, formulas, mock: matched.some(r => r.mock), costCheck: run ? costCheckOf(results.filter(r => r.checkRunId === run.id)) : undefined },
+    prov: { baseline: p.baseline, changeRequest: p.changeRequest, codeVersion: detail.codeVersion, draws: detail.draws, s2RunId: run ? Number(run.id) : undefined, formulas, mock: matched.some(r => r.mock), costCheck: run ? costCheckOf(results.filter(r => r.checkRunId === run.id)) : undefined,
+      // The recommendation rule reads the statement's own run, so it is derived only for a statement that has one.
+      ruleInput: run ? ruleInputOf(results.filter(r => r.checkRunId === run.id), failedChecksOf([...db.checkRun.prId.filter(pr.id)].sort((a, b) => Number(a.id - b.id)))) : undefined },
   };
 }
 
@@ -246,7 +249,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
             };
             const r = await publishStatement({ plm, lease: leaseFor(pr.id), comment: settings.publishComment, log }, pr.plmEcrNumber, f, g.prov, latest);
             if (r === 'written') log(`${pr.plmEcrNumber}: wrote Level ${g.statement.level} statement ${g.statement.id} to the PLM (ref ${f.ref}${f.recommendation ? `, ${f.recommendation}` : ''})`);
-            else if (r === 'busy') log(`${pr.plmEcrNumber}: another publisher is writing it; looking again later`);
+            if (r === 'written' && f.overridden) log(`${pr.plmEcrNumber}: the agent wrote ${f.overridden.agent ? `"${f.overridden.agent}"` : 'no recommendation'}; rule ${f.overridden.derived.rule} gives "${f.overridden.derived.recommendation}", which is what the PLM got`);
+            if (r === 'busy') log(`${pr.plmEcrNumber}: another publisher is writing it; looking again later`);
             else if (r === 'missing') {
               missingUntil.set(pr.plmEcrNumber, Date.now() + 5 * 60_000);
               log(`${pr.plmEcrNumber}: the PLM has no such ECR; not written (will look again in 5 minutes)`);

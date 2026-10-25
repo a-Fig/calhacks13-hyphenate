@@ -19,3 +19,14 @@ export function storedRows(ecrId: string) {
   if (!ecr) throw new Error(`no ${ecrId} in Bowman's data`);
   return costCheckRows(costCheck(bowman, ecr, { seed: 'norn-seed-1' }));
 }
+
+/**
+ * The rows for a change request that does not fit the baseline: ECR-0423 filed against a revision of
+ * BW-9440-030 the baseline is not at. The real check reports the BOM conflict; nothing here is hand-made.
+ */
+export function conflictRows() {
+  const base = bowman.ecrs.find(e => e.id === 'ECR-0423');
+  if (!base) throw new Error("no ECR-0423 in Bowman's data");
+  const ecr = { ...base, itemChanges: base.itemChanges.map(c => (c.op === 'revise' ? { ...c, fromRev: 'Z' } : c)) };
+  return costCheckRows(costCheck(bowman, ecr, { seed: 'norn-seed-1' }));
+}

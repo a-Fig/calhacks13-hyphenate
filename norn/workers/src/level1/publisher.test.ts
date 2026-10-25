@@ -221,7 +221,7 @@ function fakeDb(o: { current: { seq: number }; runs: { id: bigint; inputs: objec
   return {
     ecrRevision: { prId: by([{ seq: o.current.seq, current: true, createdAt: t(0), prId: 1n }], r => r.prId) },
     impactStatement: { prId: by(o.statements.map(s => ({ ...s, prId: 1n })), r => r.prId) },
-    checkRun: { id: { find: (id: bigint) => o.runs.map(r => ({ id: r.id, inputsJson: JSON.stringify(r.inputs) })).find(r => r.id === id) } },
+    checkRun: { prId: by(o.runs.map(r => ({ id: r.id, stage: 's2_cost', status: 'done', prId: 1n })), r => r.prId), id: { find: (id: bigint) => o.runs.map(r => ({ id: r.id, inputsJson: JSON.stringify(r.inputs) })).find(r => r.id === id) } },
     checkResult: { prId: by(o.results.map(r => ({ id: r.id, checkRunId: r.run, key: r.key, p10: r.p[0], p50: r.p[1], p90: r.p[2], mock: r.mock ?? false, detailJson: JSON.stringify(r.detail ?? {}), prId: 1n })), r => r.prId) },
   } as any;
 }

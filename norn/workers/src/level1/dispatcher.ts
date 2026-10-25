@@ -28,6 +28,7 @@ import { connect, subscribe } from '../connect.ts';
 import { provenanceOf, type Inputs } from '../impact.ts';
 import { agentEventWriter } from './agent-events.ts';
 import { actorFor, decide, jobIdFor, jobsFromEvents, spawnedByFor, supersededJobs, type EcrFacts, type EventRow } from './plan.ts';
+import { deriveRecommendation, failedChecksOf, ruleInputOf } from './recommendation.ts';
 import { SYSTEM_PROMPT, jobPrompt, screenDetail, type Detail, type HeadlineKey } from './prompt.ts';
 import { costCheckOf, routeFor, storedCompanyConfig } from './routing.ts';
 import { settingsFromEnv, type Level1Settings } from './settings.ts';
@@ -91,7 +92,9 @@ export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
     { numbers: Object.fromEntries(rows.filter(r => r.key !== 'detail').map(r => [r.key, { p10: r.p10, p50: r.p50, p90: r.p90, unit: r.unit }])), costCheck: costCheckOf(rows) },
     storedCompanyConfig(db)
   );
-  return { ecr: pr.plmEcrNumber, title: pr.title, revision, s2RunId, baseline: p.baseline, changeRequest: p.changeRequest, numbers, screened, routing };
+  // The same rule and the same rows the publisher applies, so the agent is told what the PLM will say.
+  const recommendation = deriveRecommendation(ruleInputOf(rows, failedChecksOf([...db.checkRun.prId.filter(pr.id)].sort((a, b) => Number(a.id - b.id)))));
+  return { ecr: pr.plmEcrNumber, title: pr.title, revision, s2RunId, baseline: p.baseline, changeRequest: p.changeRequest, numbers, screened, routing, recommendation };
 }
 
 export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; prompt: string; settings: Level1Settings; signingKey?: string; mcpUrl?: string }): JobSpec {
@@ -106,6 +109,9 @@ export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; 
     prompt: opts.prompt,
     identity,
     mcpServers: { [NORN_MCP_SERVER_NAME]: nornMcpFor(identity, { jobId: opts.jobId, role: opts.settings.role, ecrs: [opts.ecr], ttlSeconds: opts.settings.tokenTtlSeconds, signingKey: opts.signingKey, url: opts.mcpUrl }) },
+    // TODO(fast track): when the MCP tool `request_fast_track_approval` lands on main, add it here (nornTools(...,
+    // 'request_fast_track_approval')) so the agent can call it when get_impact's fastTrack.candidate is true. The
+    // system prompt already says when to call it. Until it is allowed, a candidate ECR's session cannot call it.
     allowedTools: LEVEL1_TOOLS,
   };
 }
