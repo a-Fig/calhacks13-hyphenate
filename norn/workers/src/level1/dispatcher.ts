@@ -70,6 +70,7 @@ export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
     status: pr.status,
     crSeq: cur?.seq ?? null,
     crCreatedMs: cur ? ms(cur.createdAt) : null,
+    ecrRevision: pr.revision,
     s2Done,
     // The revision of the run a statement was written from (the module records it), not of the moment it was posted.
     statements: [...db.impactStatement.prId.filter(pr.id)].map(s => ({ level: s.level, createdMs: ms(s.createdAt), crSeq: crSeqOfRun(db, s.checkRunId) })),
@@ -152,7 +153,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   let again = false;
 
   async function startJob(pr: Pr, revision: number, attempt: number, s2RunId: number) {
-    const jobId = jobIdFor(pr.plmEcrNumber, revision, attempt);
+    const jobId = jobIdFor(pr.plmEcrNumber, revision, attempt, pr.revision);
     running.add(jobId);
     runIdOf.set(jobId, BigInt(s2RunId));
     try {

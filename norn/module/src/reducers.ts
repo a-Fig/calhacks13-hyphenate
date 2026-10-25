@@ -661,7 +661,12 @@ export const addComment = write(
 
 function sessionRunId(ctx: Ctx, pr: Pr, spawnedBy: string, noMore: string): bigint {
   const started = parseSessionSpawn(spawnedBy);
-  if (!started) return 0n;
+  // A credential that names a check run must name it in the one form the dispatcher signs; anything else is not
+  // waved through as if no run had started it.
+  if (!started) {
+    if (/check_run:/.test(spawnedBy)) throw new Refusal(`this session's credential names a check run in a form Norn does not read ('${spawnedBy.slice(0, 80)}'). ${noMore}`);
+    return 0n;
+  }
   const run = ctx.db.checkRun.id.find(BigInt(started.runId));
   if (!run || run.prId !== pr.id) throw new Refusal(`this session was started by check run ${started.runId}, which is not a check run of ${pr.plmEcrNumber}`);
   if (started.revision !== undefined && started.revision !== pr.revision)
