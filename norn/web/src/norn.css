@@ -31,24 +31,22 @@ body { margin: 0; }
 
 .nx-container { max-width: 1280px; margin: 0 auto; padding: 0 32px; }
 
-/* Evidence classes: functional colours for chart fills and the why-panel accent border. */
+/* Evidence classes: subtle text highlights, with the same hue in charts and the detail panel. */
 :root, [data-color-mode] { --ev-fact: var(--fgColor-accent); --ev-assumption: var(--fgColor-severe); --ev-computation: var(--fgColor-success); --ev-judgment: var(--fgColor-sponsors); }
-.nx-ev-fact { --c: var(--ev-fact); }
-.nx-ev-assumption { --c: var(--ev-assumption); }
-.nx-ev-computation { --c: var(--ev-computation); }
-.nx-ev-judgment { --c: var(--ev-judgment); }
+.nx-ev-fact { --c: var(--ev-fact); --ev-bg: var(--bgColor-accent-muted); }
+.nx-ev-assumption { --c: var(--ev-assumption); --ev-bg: var(--bgColor-severe-muted); }
+.nx-ev-computation { --c: var(--ev-computation); --ev-bg: var(--bgColor-success-muted); }
+.nx-ev-judgment { --c: var(--ev-judgment); --ev-bg: var(--bgColor-sponsors-muted); }
+.nx-highlight { color: inherit; background: var(--ev-bg); padding: 0 2px; border-radius: 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 
 /* A marked number or claim: standard clickable treatment with hover/selected background and focus ring. */
 .nx-mark {
   appearance: none; border: 0; background: none; padding: 0; margin: 0; cursor: pointer;
   font: inherit; color: inherit; text-align: inherit; line-height: inherit; border-radius: 3px;
-  display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; max-width: 100%; white-space: normal;
+  max-width: 100%;
 }
-.nx-mark-value { min-width: 0; color: var(--fgColor-accent); }
 .nx-evidence-label { flex: none; vertical-align: baseline; }
-.num .nx-mark, .nx-mark.num { justify-content: flex-end; }
-.nx-mark.num .nx-mark-value { white-space: nowrap; }
-.nx-mark:hover, .nx-mark.open { background: var(--bgColor-neutral-muted); }
+.nx-mark:hover .nx-highlight, .nx-mark.open .nx-highlight { filter: brightness(0.94); }
 .nx-mark:focus-visible { outline: 2px solid var(--fgColor-accent); outline-offset: 1px; }
 
 /* ---------- GitHub's global header ---------- */

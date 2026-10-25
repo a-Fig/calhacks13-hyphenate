@@ -24,11 +24,15 @@ export function EvidenceLabel({ ev }: { ev: Evidence }) {
   return <Label variant="secondary" size="small" className="nx-evidence-label">{EV[ev].label}</Label>;
 }
 
+/** Highlight the value or passage itself, without adding words to the report. */
+export function Highlight({ ev, children }: { ev: Evidence; children: ReactNode }) {
+  return <mark className={`nx-highlight nx-ev-${ev}`}>{children}</mark>;
+}
+
 /**
- * A traceable number or claim, with an explicit evidence label and standard link-button treatment.
- * Hide the inline label only where the surrounding row already names the evidence class.
+ * A highlighted value or passage that opens its evidence. The tooltip and detail panel name its class.
  */
-export function Mark({ ev, id, children, className = '', showEvidence = true }: { ev: Evidence; id: string; children: ReactNode; className?: string; showEvidence?: boolean }) {
+export function Mark({ ev, id, children, className = '' }: { ev: Evidence; id: string; children: ReactNode; className?: string }) {
   const why = useWhy();
   return (
     <Tooltip text={`${EV[ev].label}: ${EV[ev].hint}`} direction="s" type="description">
@@ -38,8 +42,7 @@ export function Mark({ ev, id, children, className = '', showEvidence = true }: 
         aria-haspopup="dialog"
         onClick={() => why.open(id)}
       >
-        <span className="nx-mark-value">{children}</span>
-        {showEvidence && <EvidenceLabel ev={ev} />}
+        <Highlight ev={ev}>{children}</Highlight>
       </button>
     </Tooltip>
   );
@@ -67,7 +70,7 @@ export function Legend({ counts }: { counts?: Record<Evidence, number> }) {
           <li key={k}>
             <div className="nx-legend-copy">
               <div className="nx-legend-label">
-                <EvidenceLabel ev={k} />
+                <Highlight ev={k}>{EV[k].label}</Highlight>
                 {counts && <span className="n" aria-label={`${counts[k]} items`}>{counts[k]}</span>}
               </div>
               <span className="hint">{k === 'assumption' ? 'Assumed input' : EV[k].hint}</span>

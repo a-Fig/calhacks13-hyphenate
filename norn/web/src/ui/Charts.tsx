@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { Driver, SCurve } from '../assessment/types.ts';
 import { fitQuantiles, likelihoodWord } from '../assessment/fit.ts';
-import { EvidenceLabel, useWhy } from './Evidence.tsx';
+import { EV, Highlight, useWhy } from './Evidence.tsx';
 import { usdK } from './fmt.ts';
 
 function niceTicks(lo: number, hi: number, want = 6): number[] {
@@ -155,10 +155,11 @@ export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: numbe
               key={d.id}
               type="button"
               className="nx-tornado-row"
+              title={`${EV[d.evidence].label}: ${EV[d.evidence].hint}`}
               onClick={() => why.open(d.id)}
             >
               <span className="nx-tornado-heading">
-                <span className="nx-tornado-name"><EvidenceLabel ev={d.evidence} /><span>{d.label}</span></span>
+                <span className="nx-tornado-name"><span><Highlight ev={d.evidence}>{d.label}</Highlight></span></span>
                 <span className="nx-tornado-swing num">{usdK(swing)} swing</span>
               </span>
               <svg viewBox={`0 0 ${W} 36`} preserveAspectRatio="none" aria-hidden="true">

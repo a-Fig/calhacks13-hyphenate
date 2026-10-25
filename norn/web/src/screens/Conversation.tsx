@@ -8,7 +8,7 @@ import type { ActivityEvent, ErpPackage, EventKind, ImpactAssessment, RiskLevel,
 import { monthLabel } from '../assessment/adapter.ts';
 import { DiffTable } from './Changes.tsx';
 import { CheckStateIcon, LevelLabel, MockTag, Person, SavedRun, StaleNote } from '../ui/Bits.tsx';
-import { EvidenceLabel, Mark, Num } from '../ui/Evidence.tsx';
+import { Highlight, Mark, Num } from '../ui/Evidence.tsx';
 import { ago, dateTime, dayLabel, dateShort, range as rangeText, usdK } from '../ui/fmt.ts';
 import { Link } from '../router.tsx';
 import type { AgentRun, StatementView } from '../assessment/types.ts';
@@ -161,8 +161,7 @@ function BotComment({ a }: { a: ImpactAssessment }) {
           <ul className="nx-reasons">
             {a.recommendation.reasons.map((r, i) => (
               <li key={i}>
-                <EvidenceLabel ev={r.evidence} />
-                {r.traceId ? <Mark ev={r.evidence} id={r.traceId} showEvidence={false}>{r.text}</Mark> : <span>{r.text}</span>}
+                {r.traceId ? <Mark ev={r.evidence} id={r.traceId}>{r.text}</Mark> : <Highlight ev={r.evidence}>{r.text}</Highlight>}
               </li>
             ))}
           </ul>
@@ -173,7 +172,7 @@ function BotComment({ a }: { a: ImpactAssessment }) {
               <ol className="nx-drivers">
                 {a.drivers.slice(0, 4).map(d => (
                   <li key={d.id}>
-                    <EvidenceLabel ev={d.evidence} /> <Mark ev={d.evidence} id={d.id} showEvidence={false}>{d.label}</Mark>
+                    <Mark ev={d.evidence} id={d.id}>{d.label}</Mark>
                     <span className="nx-fg-muted"> {d.lowLabel && d.highLabel ? `· ${d.lowLabel} to ${d.highLabel} ` : '· '}moves the net cost by </span>
                     <b className="num">{swing(d.low, d.high)}</b>
                   </li>
@@ -473,15 +472,14 @@ function StatementComment({ a }: { a: ImpactAssessment }) {
           <div className="nx-table-scroll" role="region" aria-label="Impact assessment numbers" tabIndex={0}>
           <table className="nx-bot-table">
             <thead>
-              <tr><th /><th>Median</th><th>P10 &ndash; P90</th><th>Basis</th></tr>
+              <tr><th /><th>Median</th><th>P10 &ndash; P90</th></tr>
             </thead>
             <tbody>
               {st.numbers.map(n => (
                 <tr key={n.key}>
                   <td>{n.label}</td>
-                  <td className="num">{n.traceId ? <Mark ev={n.evidence} id={n.traceId} showEvidence={false}>{fmtNumber(n, n.p50)}</Mark> : fmtNumber(n, n.p50)}</td>
+                  <td className="num">{n.traceId ? <Mark ev={n.evidence} id={n.traceId}>{fmtNumber(n, n.p50)}</Mark> : <Highlight ev={n.evidence}>{fmtNumber(n, n.p50)}</Highlight>}</td>
                   <td className="num nx-fg-muted">{n.p10 !== n.p90 ? `${fmtNumber(n, n.p10)} \u2013 ${fmtNumber(n, n.p90)}` : 'exact'}</td>
-                  <td><EvidenceLabel ev={n.evidence} /></td>
                 </tr>
               ))}
             </tbody>
@@ -497,7 +495,7 @@ function StatementComment({ a }: { a: ImpactAssessment }) {
               <h4 className="nx-h4">What moves it most</h4>
               <ul className="nx-reasons">
                 {st.drivers.map((d, i) => (
-                  <li key={i}><EvidenceLabel ev={d.evidence} /><Mark ev={d.evidence} id={d.traceId!} showEvidence={false}>{d.text}</Mark></li>
+                  <li key={i}><Mark ev={d.evidence} id={d.traceId!}>{d.text}</Mark></li>
                 ))}
               </ul>
             </>
@@ -507,7 +505,7 @@ function StatementComment({ a }: { a: ImpactAssessment }) {
               <h4 className="nx-h4">What Norn concludes</h4>
               <ul className="nx-reasons">
                 {st.claims.map((c, i) => (
-                  <li key={i}><EvidenceLabel ev={c.evidence} /><Mark ev={c.evidence} id={c.traceId!} showEvidence={false}>{c.text}</Mark></li>
+                  <li key={i}><Mark ev={c.evidence} id={c.traceId!}>{c.text}</Mark></li>
                 ))}
               </ul>
             </>
@@ -518,9 +516,8 @@ function StatementComment({ a }: { a: ImpactAssessment }) {
               <ul className="nx-reasons">
                 {st.assumptions.map(x => (
                   <li key={x.key}>
-                    <EvidenceLabel ev="assumption" />
                     <span>
-                      {x.traceId ? <Mark ev="assumption" id={x.traceId} showEvidence={false}>{x.label}</Mark> : x.label}
+                      {x.traceId ? <Mark ev="assumption" id={x.traceId}>{x.label}</Mark> : <Highlight ev="assumption">{x.label}</Highlight>}
                       <span className="nx-fg-muted"> &middot; {x.source === 'agent_estimated' ? 'agent estimate' : x.source}. {x.note}</span>
                     </span>
                   </li>
