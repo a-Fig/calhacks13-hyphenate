@@ -4,7 +4,15 @@
 //   the Level 1 dispatcher and publisher, and the web screens (live).
 // Every process's output is printed with its name in front, and Ctrl-C stops them all.
 //
-//   npm run demo -w @norn/workers -- [--db norn] [--ecrs ECR-0417,ECR-0423] [--web-port 5180] [--check]
+//   npm run demo -w @norn/workers -- [--db norn] [--ecrs ECR-0417,ECR-0423] [--web-port 5180] [--check] [--research]
+//
+// --research also starts the research worker (norn/research, #148): it researches the cost check's own
+// assumptions on the public web through Bright Data and records the ones that pass its guardrails as
+// agent estimates. Off by default, because it spends Bright Data credits and a Claude session per ECR
+// revision; it needs BRIGHT_DATA_API_TOKEN in the environment or the .env. See norn/research/README.md.
+// With it, the Level 1 dispatcher is told to wait for each revision's research result before its first session
+// (NORN_L1_WAIT_FOR_RESEARCH, at most 10 minutes after the first cost run on the revision finished), so the statement is written on the
+// researched numbers. Without it the dispatcher behaves as it always did.
 //
 // --ecrs limits the PLM ingest and the publisher to those ECRs (NORN_PLM_ECRS, NORN_PUBLISH_ECRS);
 // without it every open ECR in the PLM is taken in and gets a statement. --check runs the checks only.
@@ -27,6 +35,7 @@ const ECRS = (arg('--ecrs') ?? '').split(',').map(s => s.trim()).filter(Boolean)
 const WEB_PORT = Number(arg('--web-port') ?? 5180);
 const MCP_PORT = Number(process.env.NORN_MCP_PORT ?? 3917);
 const CHECK_ONLY = process.argv.includes('--check');
+const RESEARCH = process.argv.includes('--research');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const workers = resolve(here, '..', '..');
@@ -89,6 +98,11 @@ for (const [name, key] of [['PLM', 'PLM_URL'], ['ERP', 'ERPNEXT_URL']] as const)
 for (const key of ['PLM_API_KEY', 'PLM_API_SECRET', 'ERPNEXT_API_KEY', 'ERPNEXT_API_SECRET', 'NORN_MCP_SIGNING_KEY']) {
   if (env(key)) fine(`${key} is set`);
   else bad(`${key} is not set in .env`);
+}
+
+if (RESEARCH) {
+  if (env('BRIGHT_DATA_API_TOKEN')) fine('BRIGHT_DATA_API_TOKEN is set (for --research)');
+  else bad('BRIGHT_DATA_API_TOKEN is not set in .env or the environment (needed by --research)');
 }
 
 // The Level 1 sessions use this machine's Claude Code login (norn/runner): its config directory, or a token.
@@ -174,10 +188,11 @@ try {
   start('worker', [tsxCli, 'src/worker.ts'], workers);
   await ready('worker', /read the baseline from ERPNext/);
   start('ingest', [tsxCli, 'src/ingest.ts'], workers);
-  start('dispatch', [tsxCli, 'src/level1/dispatcher.ts'], workers);
+  start('dispatch', [tsxCli, 'src/level1/dispatcher.ts'], workers, RESEARCH ? { NORN_L1_WAIT_FOR_RESEARCH: '1', ...(ECRS.length ? { NORN_L1_RESEARCH_ECRS: ECRS.join(',') } : {}) } : {});
   start('publish', [tsxCli, 'src/level1/publisher.ts'], workers);
+  if (RESEARCH) start('research', [tsxCli, 'src/worker.ts'], join(norn, 'research'), ECRS.length ? { NORN_RESEARCH_ECRS: ECRS.join(',') } : {});
   start('web', [viteCli, '--host', '127.0.0.1', '--port', String(WEB_PORT), '--strictPort'], join(norn, 'web'), { VITE_NORN_SOURCE: 'live', VITE_NORN_DB: DB });
-  await Promise.all([ready('ingest', /watching the PLM/), ready('dispatch', /watching '/), ready('publish', /publishing Level 1/), ready('web', /ready in/)]);
+  await Promise.all([ready('ingest', /watching the PLM/), ready('dispatch', /watching '/), ready('publish', /publishing Level 1/), ready('web', /ready in/), ...(RESEARCH ? [ready('research', /watching '/)] : [])]);
   say(`Norn is up on '${DB}'. Screens: http://127.0.0.1:${WEB_PORT}  (Ctrl-C stops everything)`);
 } catch (e) {
   say(`start-up failed: ${(e as Error).message}`);

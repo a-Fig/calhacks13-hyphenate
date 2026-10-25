@@ -25,4 +25,5 @@ export default {
   rationale: __t.string(),
   affects: __t.array(__t.string()),
   expectedRev: __t.u32(),
+  expectedCrRev: __t.option(__t.u32()),
 };

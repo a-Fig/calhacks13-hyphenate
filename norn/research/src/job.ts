@@ -174,6 +174,9 @@ export interface BuildJobOptions {
   allowTerms?: readonly string[];
   /** Told of every guarded call, allowed or refused (kinds only, never the text). */
   onToolCall?: (c: ToolCallRecord) => void;
+  /** Per-run budget. Defaults: 30 turns (about one web search or page read each) and 10 minutes. */
+  maxTurns?: number;
+  timeoutMs?: number;
 }
 
 /** Thrown when the token variable is missing. The message names the variable, never a value. */
@@ -194,8 +197,8 @@ export function buildResearchJob(targets: Target[], opts: BuildJobOptions): JobS
     systemPrompt: SYSTEM_PROMPT,
     ...(opts.model ? { model: opts.model } : {}),
     effort: 'medium',
-    maxTurns: 30,
-    timeoutMs: 10 * 60 * 1000,
+    maxTurns: opts.maxTurns ?? 30,
+    timeoutMs: opts.timeoutMs ?? 10 * 60 * 1000,
     mcpServers: {
       brightdata: {
         type: 'stdio',

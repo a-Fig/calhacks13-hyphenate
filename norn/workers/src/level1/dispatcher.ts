@@ -12,6 +12,10 @@
 //   NORN_L1_MAX_TURNS     default 12            NORN_L1_TIMEOUT_MS   default 240000
 //   NORN_L1_MAX_ATTEMPTS  default 2             NORN_L1_RETRY_DELAY_MS default 60000
 //   NORN_L1_CONCURRENCY   default 1
+//   NORN_L1_WAIT_FOR_RESEARCH=1  the research worker runs next to this: the first session for a revision waits for
+//                         its research result, at most NORN_L1_RESEARCH_WAIT_MS (default 600000) after the cost run
+//                         finished. NORN_L1_RESEARCH_ECRS limits the wait to the ECRs the research worker covers.
+//                         Unset: no waiting.
 //
 // What starts a session, and what stops a second one, is in plan.ts. In short: the ECR's current
 // change-request revision has a finished s2_cost run and no statement yet, and no session for that
@@ -27,7 +31,7 @@ import { Runner, jsonlFileSink, teeSink, type JobSpec } from '../../../runner/sr
 import { connect, subscribe } from '../connect.ts';
 import type { Inputs } from '../impact.ts';
 import { agentEventWriter } from './agent-events.ts';
-import { actorFor, decide, jobIdFor, jobsFromEvents, spawnedByFor, supersededJobs, type EcrFacts, type EventRow } from './plan.ts';
+import { actorFor, decide, jobIdFor, jobsFromEvents, researchRevisionOfJobId, spawnedByFor, supersededJobs, type EcrFacts, type EventRow } from './plan.ts';
 import { jobFactsOf } from './facts.ts';
 import { jobPrompt, systemPromptFor } from './prompt.ts';
 import { settingsFromEnv, type Level1Settings } from './settings.ts';
@@ -54,11 +58,20 @@ const jsonOr = <T>(s: string, d: T): T => {
  */
 export const LEVEL1_TOOLS = nornTools('get_ecr', 'get_impact', 'list_assumptions', 'post_impact_statement', 'request_fast_track_approval');
 
-/** What `decide` needs to know about one ECR, from the client cache. */
-export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
+/** The role and event the research worker stores its result under (research/src/live/plan.ts `ROLE`, `RESULT_EVENT`). */
+export const RESEARCH_ROLE = 'researcher';
+export const RESEARCH_RESULT_EVENT = 'research_result';
+/** The subscription that brings the research worker's stored results into this dispatcher's cache (only when it waits for research). */
+export const RESEARCH_RESULTS_QUERY = `SELECT * FROM agent_event WHERE role = '${RESEARCH_ROLE}' AND event_type = '${RESEARCH_RESULT_EVENT}'`;
+
+/** What `decide` needs to know about one ECR, from the client cache. `withResearch`: also read the research worker's stored results. */
+export function factsOf(db: Db, pr: Pr, role: string, withResearch = false): EcrFacts {
   const cur = [...db.ecrRevision.prId.filter(pr.id)].find(r => r.current);
   const results = [...db.checkResult.prId.filter(pr.id)];
   const runs = runRowsOf(db, pr.id);
+  // When a cost run finished: its results' time (a stale run's finishedAt is overwritten when it goes stale), else its finishedAt.
+  const finishedUsOf = (r: (typeof runs)[number]) => r.completedUs ?? (r.status === 'stale' ? null : r.finishedUs);
+  const usToMs = (us: bigint | null | undefined) => (us === null || us === undefined ? null : Number(us / 1000n));
   const s2Done = [...db.checkRun.prId.filter(pr.id)]
     .filter(r => r.stage === 's2_cost' && r.status === 'done')
     .sort((a, b) => Number(a.id - b.id))
@@ -68,6 +81,7 @@ export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
         id: Number(r.id),
         inputsRevision: typeof jsonOr<Inputs>(r.inputsJson, {}).revision === 'number' ? jsonOr<Inputs>(r.inputsJson, {}).revision! : null,
         mock: results.some(x => x.checkRunId === r.id && x.mock),
+        finishedMs: usToMs(finishedUsOf(own)),
         // Whether the timeline and supply checks of this run's snapshot have settled (siblings.ts).
         siblings: { pending: SIBLING_STAGES.some(stage => siblingOf(runs, own, stage).state === 'pending'), cutoffUs: siblingCutoffUs(own) },
       };
@@ -83,6 +97,18 @@ export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
     // The revision of the run a statement was written from (the module records it), not of the moment it was posted.
     statements: [...db.impactStatement.prId.filter(pr.id)].map(s => ({ level: s.level, createdMs: ms(s.createdAt), crSeq: crSeqOfRun(db, s.checkRunId) })),
     jobs: jobsFromEvents(events),
+    ...(withResearch
+      ? {
+          firstS2FinishedMs: runs
+            .filter(r => r.stage === 's2_cost' && (r.status === 'done' || r.status === 'stale') && r.revision === cur?.seq)
+            .map(r => usToMs(finishedUsOf(r)))
+            .reduce<number | null>((a, b) => (b === null ? a : a === null ? b : Math.min(a, b)), null),
+          researched: [...db.agentEvent.prId.filter(pr.id)]
+            .filter(e => e.role === RESEARCH_ROLE && e.eventType === RESEARCH_RESULT_EVENT)
+            .map(e => researchRevisionOfJobId(e.jobId, pr.plmEcrNumber))
+            .filter((n): n is number => n !== null),
+        }
+      : {}),
   };
 }
 
@@ -122,6 +148,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   // Only the events that mark a session's life, for Level 1 sessions: not every tool call of every job.
   const markers = ['job_queued', 'job_started', 'job_finished'].map(t => `SELECT * FROM agent_event WHERE role = '${settings.role}' AND event_type = '${t}'`);
   await subscribe(conn, markers);
+  if (settings.waitForResearch) await subscribe(conn, [RESEARCH_RESULTS_QUERY]);
 
   const logDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.cache', 'level1');
   mkdirSync(logDir, { recursive: true });
@@ -131,6 +158,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const runner = new Runner({ sink: teeSink(jsonl, writer.sink), config: { concurrency: settings.concurrency } });
 
   const running = new Set<string>();
+  /** ECR id and change-request revision -> when this process first saw a finished cost run on it (for the research wait). */
+  const firstSeen = new Map<string, number>();
   const lingering = new Map<string, NodeJS.Timeout>();
   // A session that cannot even start (no signing key, a bad spec) is not retried forever.
   const startFailures = new Map<string, number>();
@@ -169,10 +198,15 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
       do {
         again = false;
         for (const pr of conn.db.pullRequest.iter()) {
-          const facts = factsOf(conn.db, pr, settings.role);
+          const facts = factsOf(conn.db, pr, settings.role, settings.waitForResearch);
+          if (settings.waitForResearch && facts.crSeq !== null && facts.s2Done.some(r => r.inputsRevision === facts.crSeq)) {
+            const key = `${pr.id}:${facts.crSeq}`;
+            if (!firstSeen.has(key)) firstSeen.set(key, Date.now());
+            facts.firstS2SeenMs = firstSeen.get(key)!;
+          }
           // A session for an earlier revision is out of date the moment the next one arrives: stop it.
           for (const id of supersededJobs(facts, running)) if (runner.cancel(id)) log(`${id} stopped: ${pr.plmEcrNumber} is now on change-request revision ${facts.crSeq}`);
-          const d = decide(facts, { nowMs: Date.now(), maxAttempts: settings.maxAttempts, retryDelayMs: settings.retryDelayMs, orphanMs: settings.orphanMs, running });
+          const d = decide(facts, { nowMs: Date.now(), maxAttempts: settings.maxAttempts, retryDelayMs: settings.retryDelayMs, orphanMs: settings.orphanMs, running, ...(settings.waitForResearch ? { research: { waitMs: settings.researchWaitMs, ecrs: settings.researchEcrs } } : {}) });
           if (d.action !== 'dispatch') continue;
           if ((startFailures.get(`${pr.plmEcrNumber}:${d.revision}`) ?? 0) >= 3) continue; // gave up until a restart
           void startJob(pr, d.revision, d.attempt, d.s2RunId);
@@ -195,7 +229,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   } catch {
     log(`WARNING: Norn's MCP server is not answering at ${nornMcpUrl()}; sessions will start but cannot use their tools. Start it: NORN_DB=${process.env.NORN_DB ?? 'norn'} npm run start -w @norn/mcp`);
   }
-  log(`watching '${process.env.NORN_DB ?? 'norn'}' for ECR revisions with finished cost checks; model ${settings.model}, up to ${settings.maxTurns} turns and ${settings.timeoutMs / 1000} s, ${settings.maxAttempts} attempt(s) per revision`);
+  log(`watching '${process.env.NORN_DB ?? 'norn'}' for ECR revisions with finished cost checks; model ${settings.model}, up to ${settings.maxTurns} turns and ${settings.timeoutMs / 1000} s, ${settings.maxAttempts} attempt(s) per revision${settings.waitForResearch ? `; the first session for a revision waits for its research result, at most ${settings.researchWaitMs / 1000} s after the first cost run on the revision finished` : ''}`);
   for (const t of [conn.db.checkRun, conn.db.impactStatement, conn.db.ecrRevision, conn.db.agentEvent] as any[]) {
     t.onInsert(schedule);
     t.onUpdate?.(schedule);
