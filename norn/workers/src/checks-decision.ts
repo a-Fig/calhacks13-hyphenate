@@ -63,6 +63,7 @@ const as = (kind: Who['kind'], name: string, origin: Who['origin'], onBehalfOf?:
   connect({ kind, name, origin, spawnedBy: 'Norn', ...(onBehalfOf ? { onBehalfOf } : {}) }, { persistToken: false, quiet: true });
 const A = await as('agent', 'check-decision-ingest', 'norn'); // stands in for Norn's PLM ingest
 const dana = await as('person', 'Dana Okafor', 'human');
+const mallory = await as('person', 'Mallory Nobody', 'human'); // registers as a person the company does not list
 const outsider = await as('agent', 'check-decision-outsider', 'external', 'Dana Okafor'); // a person's own agent
 const scoped = await as('agent', 'check-decision-job', 'norn'); // one of Norn's agents, held to a job's scope
 await subscribe(A.conn, [...TABLES, 'SELECT * FROM ecr_revision', 'SELECT * FROM baseline_snapshot', 'SELECT * FROM approval', 'SELECT * FROM eco_release', 'SELECT * FROM erp_package']);
@@ -165,6 +166,9 @@ try {
   await statusIs(p5.id, 'merged');
   const l5 = decisionLogs(p5.id).at(-1)!;
   check('a person may report one: it is released, the log naming them as the reporter and Rafael as the approver', l5.actorKind === 'person' && l5.actorName === 'Dana Okafor' && approvals(p5.id).at(-1)?.approverName === 'Rafael Quintero' && /by Rafael Quintero .* reported by Dana Okafor/.test(l5.summary), l5.summary);
+  await report(mallory, 'ECR-D5', 'approved', RAFAEL);
+  await until(() => denied('Mallory Nobody').length === 1 || undefined, 5000, 'the refusal of the unlisted person');
+  check("a person the company's configuration does not list may not report one, whatever name they give the PLM approver", /Mallory Nobody is not a person in this configuration/.test(denied('Mallory Nobody')[0]!.summary) && denied('Mallory Nobody')[0]!.outcome === 'denied', denied('Mallory Nobody')[0]?.summary);
   const badValue = await rejects(report(A, 'ECR-D5', 'withdrawn'));
   const noEcr = await rejects(report(A, 'ECR-NOPE', 'approved'));
   check('a decision other than approved or rejected is refused, and so is an ECR Norn never opened', /decision must be one of approved, rejected/.test(badValue?.message ?? '') && /Norn has no ECR ECR-NOPE/.test(noEcr?.message ?? ''), `${badValue?.message}; ${noEcr?.message}`);
@@ -264,7 +268,7 @@ try {
   console.log(workerLog.join('').split('\n').slice(-30).join('\n'));
 } finally {
   worker?.kill();
-  for (const c of [A, dana, outsider, scoped]) c.close();
+  for (const c of [A, dana, mallory, outsider, scoped]) c.close();
   rmSync(tmp, { recursive: true, force: true });
 }
 const ok = finish();
