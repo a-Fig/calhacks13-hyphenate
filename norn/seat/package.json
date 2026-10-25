@@ -1,0 +1,7 @@
+{
+  "name": "@norn/seat",
+  "private": true,
+  "type": "module",
+  "description": "Norn holding a company seat: duties, who to ask, deadlines and escalation (#155).",
+  "scripts": { "test": "node --test test/*.test.ts", "demo": "node demo.ts" }
+}
