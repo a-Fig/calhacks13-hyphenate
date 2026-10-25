@@ -137,7 +137,7 @@ export function nornMcpFor(identity: JobIdentity, opts: NornMcpOptions): NornMcp
 // ---------------------------------------------------------------------------------------------
 
 export const READ_TOOLS = ['list_ecrs', 'get_ecr', 'get_impact', 'get_part', 'list_assumptions', 'get_ecr_history'] as const;
-export const WRITE_TOOLS = ['add_comment', 'propose_assumption', 'post_impact_statement'] as const;
+export const WRITE_TOOLS = ['add_comment', 'propose_assumption', 'post_impact_statement', 'request_fast_track_approval'] as const;
 export type NornToolName = (typeof READ_TOOLS)[number] | (typeof WRITE_TOOLS)[number];
 
 /** `mcp__norn__<tool>` names for a job's allowlist: `'read'` (all reads), `'write'` (all writes) or tool names. */

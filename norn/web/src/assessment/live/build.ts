@@ -2,19 +2,20 @@
 // subscribes to and builds an EcrSummary or an ImpactAssessment. Everything the checks produce goes
 // through fromChecks() (./adapter.ts), unchanged. The rest is read from the module's own tables: the
 // change request (ecr_revision), runs, impact statements, comments, the action log and the agent
-// event stream. What the module does not hold yet (reviewers, the approval route as steps) is a
-// labelled mock built from the change request's seats.
+// event stream. What the module does not hold yet is a labelled mock: the reviewer seats (named from the
+// change request's routing, with no per-seat review records) and the stand-in S3/S4 stages. The deciding
+// body's step comes from the approval rows alone.
 import type { CheckResultRow } from '../../../../checks/src/rows.ts';
 import { fromChecks, monthLabel, type ChecksView } from '../adapter.ts';
-import { likelihoodWord } from '../fit.ts';
 import type {
-  ActivityEvent, ActorKind, AgentRun, ChangeClass, Check, CutIn, EcrSummary, Evidence, Figure, ImpactAssessment,
+  ActivityEvent, ActorKind, AgentRun, ChangeClass, Check, CutIn, EcrSummary, Evidence, ImpactAssessment,
   MockSection, Origin, Revision, RouteStep, StatementView, Supply, Trace,
 } from '../types.ts';
 import { changedItems } from './changes.ts';
 import { dateTime, staleNote } from '../../ui/fmt.ts';
 import { personOf, SEATS } from './directory.ts';
-import { buildGate, plainOf, type GateRows } from './gate.ts';
+import { buildGate, plainOf, type ApprovalView, type GateRows, type GateView } from './gate.ts';
+import { readMockSupply, readMockTimeline, readSupply, readTimeline, type StageRow, type SupplyRead, type TimelineRead } from './stages.ts';
 import { plainReason } from './words.ts';
 
 // ---------------------------------------------------------------- the rows, as much of them as we read
@@ -110,6 +111,114 @@ function costFor(s: Snapshot, runs: RunRow[]): CostPick {
   return { run, stale, ...costViewOf(s.results.filter(r => r.checkRunId === run.id).map(toRow)) };
 }
 
+// ---------------------------------------------------------------- the S3/S4 runs behind a page
+
+interface StagePick {
+  /** The run whose rows the page shows: the newest finished one, else the newest replaced one that has rows. */
+  run?: RunRow;
+  rows: ResultRow[];
+  /** The rows are from a run an input change has replaced. */
+  stale?: 'rechecking' | 'failed';
+  /** The newest run that still stands, finished or not: it says what the check is doing now. */
+  latest?: RunRow;
+}
+
+/** Same rule as the cost page (costFor): keep the last numbers while a replacement waits, and say so. */
+function stageFor(s: Snapshot, runs: RunRow[], stage: string): StagePick {
+  const hasResults = (r: RunRow) => s.results.some(x => x.checkRunId === r.id);
+  const done = newest(runs, r => r.stage === stage && r.status === 'done');
+  const prev = done ? undefined : newest(runs, r => r.stage === stage && r.status === 'stale' && hasResults(r));
+  const run = done ?? prev;
+  const latest = newest(runs, r => r.stage === stage && live(r)) ?? newest(runs, r => r.stage === stage);
+  let stale: StagePick['stale'];
+  if (prev) stale = latest && latest.id !== prev.id && (latest.status === 'queued' || latest.status === 'running') ? 'rechecking' : 'failed';
+  return { run, latest, stale, rows: run ? s.results.filter(r => r.checkRunId === run.id) : [] };
+}
+
+const toStage = (r: ResultRow): StageRow => ({ key: r.key, label: r.label, unit: r.unit, p10: r.p10, p50: r.p50, p90: r.p90, detailJson: r.detailJson, mock: r.mock });
+
+/** Whether a finished real S3/S4 run asks for a look: a warning flag, or a date that is only a lower bound. */
+function stageNeedsLook(rows: ResultRow[]): boolean {
+  const detail = rows.find(r => r.key === 'detail' && !r.mock);
+  if (!detail) return false;
+  const d = parse(detail.detailJson);
+  return d.readiness === 'materials_only' || (Array.isArray(d.flags) ? d.flags : []).some((f: any) => f?.severity === 'warn');
+}
+
+/** A check with no usable rows: what it is doing, in words. */
+function waitingWords(name: string, r: RunRow | undefined): string {
+  if (!r) return 'Not assessed yet';
+  const note = r.note ? `: ${r.note.replace(/\s+/g, ' ').slice(0, 160)}` : '';
+  if (r.status === 'queued') return 'Waiting for a worker';
+  if (r.status === 'running') return 'Running';
+  if (r.status === 'failed') return `The ${name.toLowerCase()} check failed${note}. There is no result to show`;
+  if (r.status === 'blocked') return `The ${name.toLowerCase()} check is blocked${note}`;
+  if (r.status === 'done') return `The ${name.toLowerCase()} check finished with no result rows`;
+  return 'Not assessed yet';
+}
+
+/**
+ * A stage's check line. A finished run with usable rows is as good as its flags; a run that finished with
+ * nothing readable needs attention rather than passing; a stage with no rows says what it is doing instead.
+ */
+function stageCheck(id: 'timeline' | 'supply', name: string, pick: StagePick, read: { summary: string; attention: boolean } | undefined, why: string | undefined, mock: boolean): Check {
+  const by = id === 'timeline' ? 'Norn timeline check' : 'Norn supply check';
+  const staleLine = pick.stale ? ` ${staleNote(pick.stale)}` : '';
+  if (read) {
+    const newer = pick.latest && pick.run && pick.latest.id !== pick.run.id ? pick.latest : undefined;
+    const state = newer ? runState(newer) : read.attention ? 'attention' : 'passed';
+    return { id, name, state, mock: mock || undefined, summary: `${read.summary}${staleLine}`, by: mock ? undefined : by };
+  }
+  if (pick.run) {
+    const reason = pick.rows.length ? why ?? `The ${name.toLowerCase()} check's rows could not be read` : waitingWords(name, pick.run);
+    return { id, name, state: 'attention', summary: `${reason}${staleLine}`, by };
+  }
+  return { id, name, state: runState(pick.latest), summary: waitingWords(name, pick.latest), by: pick.latest ? by : undefined };
+}
+
+// ---------------------------------------------------------------- the approval route
+
+const when = (at: string) => dateTime(at);
+
+/**
+ * The route's steps from what is recorded. The reviewer seats (cost engineering, quality, ...) have no
+ * per-seat review records in the module, so each stays pending with a note saying so. The deciding body's
+ * step comes from the approval rows: the standing approval (who, when, on which revision), a withdrawn one,
+ * or nothing. A fast track is one approval by one actor, so no board step and no chair are added.
+ */
+export function routeSteps(routedTo: string[], gate: GateView, pr: PrRow): RouteStep[] {
+  const steps: RouteStep[] = routedTo.filter(r => SEATS[r]).map(r => ({
+    role: SEATS[r].role, person: SEATS[r].person, state: 'pending' as const, note: 'No review is recorded for this seat',
+  }));
+  const standing: ApprovalView | undefined = gate.approvals.find(a => a.state !== 'withdrawn');
+  const revWords = (n: number) => `revision ${n}`;
+  if (standing) {
+    const onBehalf = standing.onBehalfOf ? ` for ${standing.onBehalfOf}` : '';
+    const notes: string[] = [];
+    if (standing.fastTrack) notes.push('Fast track: no board decision is recorded');
+    if (standing.state === 'pending_recheck') notes.push(`Approved on ${revWords(standing.revision)}; the approval is waiting for a re-check`);
+    else if (standing.revision !== pr.revision) notes.push(`Approved on ${revWords(standing.revision)}; the ECR is now at ${revWords(pr.revision)}`);
+    steps.push({
+      role: standing.fastTrack ? 'Fast track' : /^(ccb|change control board)$/i.test(standing.role) ? 'CCB' : standing.role,
+      person: standing.who,
+      by: onBehalf ? `${standing.who}${onBehalf}` : undefined,
+      state: standing.state === 'pending_recheck' ? 'pending' : 'approved',
+      when: when(standing.at),
+      revision: revWords(standing.revision),
+      ...(notes.length ? { note: notes.join('. ') } : {}),
+    });
+    return steps;
+  }
+  const withdrawn = gate.approvals[0];
+  steps.push({
+    role: 'CCB', state: 'waiting',
+    note: withdrawn
+      ? `The approval by ${withdrawn.who} on ${revWords(withdrawn.revision)} was withdrawn${withdrawn.endedAt ? ` ${when(withdrawn.endedAt)}` : ''}${withdrawn.endedReason ? `: ${withdrawn.endedReason}` : ''}`
+      : pr.status === 'approved' || pr.status === 'merged' ? 'The ECR is marked approved, but no approval is recorded' : 'No decision is recorded',
+  });
+  return steps;
+}
+
 /** The reducers' status words, in the business's words. */
 const STATUS_WORD: Record<string, string> = { draft: 'submitted', review: 'in review', approved: 'approved', merged: 'released', closed: 'rejected' };
 const STATUS_RE = Object.keys(STATUS_WORD).join('|');
@@ -145,7 +254,13 @@ export function buildSummary(s: Snapshot, pr: PrRow): EcrSummary {
   const stmt = newest(s.statements.filter(x => x.prId === pr.id), () => true);
   const latest = newest(s.actions.filter(a => a.prId === pr.id && a.reducer !== 'report_progress' && a.reducer !== 'heartbeat_check'), () => true);
   const active = runs.filter(live);
-  const checks: EcrSummary['checks'] = active.some(r => r.status === 'queued' || r.status === 'running') ? 'running' : pick.why || pick.stale === 'failed' || need > 0 || d?.bomDelta?.ok === false ? 'attention' : s2 ? 'passed' : undefined;
+  // A real S3/S4 run that failed, finished with nothing readable, or flagged a warning also asks for a look.
+  const stageLook = ['s3_timeline', 's4_supply'].some(stage => {
+    const p = stageFor(s, runs, stage);
+    if (p.run) return !p.rows.some(r => r.mock) && (p.stale === 'failed' || !p.rows.some(r => r.key === 'detail') || stageNeedsLook(p.rows));
+    return p.latest?.status === 'failed';
+  });
+  const checks: EcrSummary['checks'] = active.some(r => r.status === 'queued' || r.status === 'running') ? 'running' : pick.why || pick.stale === 'failed' || need > 0 || d?.bomDelta?.ok === false || stageLook ? 'attention' : s2 ? 'passed' : undefined;
   const nComments = s.comments.filter(c => c.prId === pr.id).length;
   const companyClass = /Class\s+(I{1,2})\b/.exec(stmt?.changeClass ?? '')?.[1] ?? cr.companyClass ?? 'I';
   const faa = /\b(major|minor)\b/i.exec(stmt?.changeClass ?? '')?.[1]?.toLowerCase() ?? cr.faaClass ?? 'minor';
@@ -331,11 +446,30 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
   // ---- checks, from the runs of this revision
   const stageRun = (stage: string) => newest(runs, r => r.stage === stage && live(r)) ?? newest(runs, r => r.stage === stage);
   const resOf = (run: RunRow | undefined) => (run ? s.results.filter(r => r.checkRunId === run.id) : []);
-  const bomRun = stageRun('s1_bom_delta'), costRun = stageRun('s2_cost'), timeRun = stageRun('s3_timeline'), supplyRun = stageRun('s4_supply');
+  const bomRun = stageRun('s1_bom_delta'), costRun = stageRun('s2_cost');
   const bomRes = resOf(bomRun);
   const num = (k: string) => bomRes.find(r => r.key === k)?.p50 ?? 0;
-  const timeRes = resOf(timeRun).find(r => r.mock), supplyRes = resOf(supplyRun);
   const need = v.cost.needsEstimate.length;
+
+  // S3 and S4: the real checks' rows are read in full (./stages.ts); the stand-in stages' rows are labelled mock.
+  // Nothing is chosen by `mock` alone: a finished real run without a readable page says so instead of passing.
+  const timePick = stageFor(s, runs, 's3_timeline'), supplyPick = stageFor(s, runs, 's4_supply');
+  const srcOf = (pick: StagePick, check: string, actor: string) => ({ check, actor, at: iso(pick.run?.finishedAt ?? pick.run?.createdAt ?? s2.createdAt), note: pick.run ? `Run ${pick.run.id}` : '' });
+  const timeMock = timePick.rows.some(r => r.mock), supplyMock = supplyPick.rows.some(r => r.mock);
+  const whyOf = (e: unknown) => `Norn could not read the check's output (${e instanceof Error ? e.message : String(e)})`;
+  let timeRead: TimelineRead | undefined, timeWhy: string | undefined;
+  if (timePick.run && !timeMock) {
+    try { timeRead = readTimeline(timePick.rows.map(toStage), traces, srcOf(timePick, 'Time to the line (S3)', 'Norn timeline check'), timePick.stale); } catch (e) { timeWhy = whyOf(e); }
+  }
+  let supplyRead: SupplyRead | undefined, supplyWhy: string | undefined;
+  if (supplyPick.run && !supplyMock) {
+    try { supplyRead = readSupply(supplyPick.rows.map(toStage), traces, srcOf(supplyPick, 'Supply risk (S4)', 'Norn supply check'), supplyPick.stale); } catch (e) { supplyWhy = whyOf(e); }
+  }
+  const mockTime = timeMock ? timePick.rows.find(r => r.key === 'effectivity_weeks') : undefined;
+  const mockMiss = supplyMock ? supplyPick.rows.find(r => r.key === 'p_miss_effectivity') : undefined;
+  const mockRisk = supplyMock ? supplyPick.rows.find(r => r.key === 'cost_at_risk') : undefined;
+  const mockTimeSummary = mockTime ? { summary: `${Math.round(mockTime.p50)} weeks until the change reaches the line (mock compute)`, attention: false } : undefined;
+  const mockSupplySummary = mockMiss || mockRisk ? { summary: 'Chance of missing the effectivity date and the cost at risk (mock compute)', attention: false } : undefined;
   const checks: Check[] = [
     {
       id: 'bom', name: 'BOM delta', state: runState(bomRun) === 'passed' && num('conflicts') > 0 ? 'attention' : runState(bomRun),
@@ -344,17 +478,11 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
     },
     {
       id: 'cost', name: 'Cost', state: costRun && costRun.status !== 'done' ? runState(costRun) : need > 0 ? 'attention' : 'passed',
-      summary: `Net ${v.headline.year1.point !== undefined ? `$${Math.round(v.headline.year1.point).toLocaleString('en-US')}` : ''} in ${v.cost.window.label}${need ? `; ${need} line${need > 1 ? 's need' : ' needs'} an estimate` : ''}${pick.stale ? `. ${staleNote(pick.stale)}` : ''}`,
+      summary: `Net ${v.headline.year1.point !== undefined ? `$${Math.round(v.headline.year1.point).toLocaleString('en-US')}` : ''} in ${v.cost.window.label}${v.cost.scenarios ? ', at the requested effectivity' : ''}${need ? `; ${need} line${need > 1 ? 's need' : ' needs'} an estimate` : ''}${pick.stale ? `. ${staleNote(pick.stale)}` : ''}`,
       by: 'Norn cost check',
     },
-    {
-      id: 'timeline', name: 'Time to the line', state: timeRun ? runState(timeRun) : 'pending', mock: !!timeRes,
-      summary: timeRes ? `${Math.round(timeRes.p50)} weeks until the change reaches the line (mock compute)` : 'Not assessed yet',
-    },
-    {
-      id: 'supply', name: 'Supply risk', state: supplyRun ? runState(supplyRun) : 'pending', mock: supplyRes.some(r => r.mock),
-      summary: supplyRes.length ? 'Chance of missing the effectivity date and the cost at risk (mock compute)' : 'Not assessed yet',
-    },
+    stageCheck('timeline', 'Time to the line', timePick, timeRead ?? mockTimeSummary, timeWhy, timeMock),
+    stageCheck('supply', 'Supply risk', supplyPick, supplyRead ?? mockSupplySummary, supplyWhy, supplyMock),
     {
       id: 'class', name: 'Classification', state: statement ? 'passed' : 'pending',
       summary: statement ? `${statement.changeClass}; route: ${statement.route}` : 'Not assessed yet. It comes with the impact statement',
@@ -362,25 +490,20 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
     },
   ];
 
-  // ---- cut-in estimate and supply: the stages that are still mock compute, labelled so
+  // ---- cut-in estimate and supply: the real checks' pages, or the stand-in stages' numbers labelled mock
   const mock: MockSection[] = ['route'];
   const cutIn: CutIn = { ...v.cutIn };
-  if (timeRes) {
-    const f: Figure = { id: 'x:effectivity_weeks', unit: 'weeks', p10: timeRes.p10, p50: timeRes.p50, p90: timeRes.p90, evidence: 'computation' };
-    cutIn.estimate = { figure: f, note: 'Weeks until the change reaches the line, from the timeline stage (mock compute)' };
-    traces[f.id] = traceFor(f.id, 'Weeks until the change reaches the line', 'computation', 'Mock compute: the timeline stage is not built yet, and its numbers are made up.', { text: `${Math.round(timeRes.p50)} wk`, range: `${Math.round(timeRes.p10)} – ${Math.round(timeRes.p90)} wk` }, 'Norn worker', iso(timeRes.id ? s2.createdAt : s2.createdAt), 'Time to the line (S3, mock)');
+  if (timeRead) {
+    if (timeRead.estimate) cutIn.estimate = timeRead.estimate;
+    cutIn.timeline = timeRead.view;
+  } else if (mockTime) {
+    cutIn.estimate = readMockTimeline(mockTime, traces, iso(s2.createdAt));
     mock.push('cutInEstimate');
   }
   let supply: Supply | undefined;
-  const pMiss = supplyRes.find(r => r.key === 'p_miss_effectivity' && r.mock);
-  const atRisk = supplyRes.find(r => r.key === 'cost_at_risk' && r.mock);
-  if (pMiss) {
-    supply = {
-      id: 'supply', level: pMiss.p50 < 0.1 ? 'low' : pMiss.p50 < 0.3 ? 'moderate' : 'high', evidence: 'computation',
-      note: atRisk ? `Cost at risk about $${Math.round(atRisk.p50).toLocaleString('en-US')} per unit` : 'Supply risk (mock compute)',
-      likelihood: { word: likelihoodWord(pMiss.p50), event: 'of missing the effectivity date', probability: pMiss.p50 },
-    };
-    traces['supply'] = traceFor('supply', 'Supply risk', 'computation', 'Mock compute: the supply stage is not built yet, and its numbers are made up.', { text: cap(supply.level), range: supply.note }, 'Norn worker', iso(s2.createdAt), 'Supply risk (S4, mock)');
+  if (supplyRead) supply = supplyRead.view;
+  else if (mockMiss) {
+    supply = readMockSupply(mockMiss, mockRisk, traces, iso(s2.createdAt));
     mock.push('supply');
   }
 
@@ -390,10 +513,8 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
   const changeClass: ChangeClass = {
     company: cls as 'I' | 'II', companyWhy: statement ? '' : 'As filed by the originator', faa, faaWhy: '', evidence: 'judgment', traceId: statement ? 'stmt-class' : (Object.keys(traces)[0] ?? ''),
   };
-  const steps: RouteStep[] = ((cr.routedTo ?? []) as string[]).filter(r => SEATS[r]).map(r => ({
-    role: SEATS[r].role, person: SEATS[r].person, state: pr.status === 'approved' || pr.status === 'merged' ? 'approved' as const : 'pending' as const,
-  }));
-  steps.push({ role: 'CCB', person: 'Rafael Quintero, chair', state: pr.status === 'approved' || pr.status === 'merged' ? 'approved' : 'waiting' });
+  const gate = buildGate(s, pr);
+  const steps = routeSteps((cr.routedTo ?? []) as string[], gate, pr);
 
   // ---- the timeline: who did what, for whom, and why it was allowed
   const events: ActivityEvent[] = [];
@@ -403,7 +524,7 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
   const plain = plainOf(s);
   const sum = (t: string) => plain(plainSummary(t));
   events.push({
-    id: 'filed', at: cr.filedOn ? `${cr.filedOn}T12:00:00-07:00` : iso(pr.createdAt), actor: personOf(cr.originator), actorKind: 'person', kind: 'filed',
+    id: 'filed', at: cr.filedOn ? `${cr.filedOn}T12:00:00-07:00` : iso(pr.createdAt), actor: personOf(cr.originator) || 'Bowman PLM', actorKind: personOf(cr.originator) ? 'person' : 'system', kind: 'filed',
     text: 'filed the ECR', detail: cr.originatingNcr ? `From ${cr.originatingNcr}.` : undefined,
   });
   for (const a of s.actions.filter(x => x.prId === pr.id)) {
@@ -433,7 +554,6 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
     if (!CHECK_STAGES[r.stage]) continue;
     events.push({ id: `run-pending:${r.id}`, at: iso(r.createdAt), actor: 'Norn', actorKind: 'norn', kind: 'ran_checks', text: `${r.status === 'running' ? 'is running' : 'queued'} the ${CHECK_STAGES[r.stage].name.toLowerCase()} check`, state: 'running' });
   }
-  const gate = buildGate(s, pr);
   events.push(...gate.events, ...agentRuns(s, pr));
   events.sort((a, b) => a.at.localeCompare(b.at));
 

@@ -11,8 +11,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <header className="nx-masthead">
         <div className="nx-container nx-masthead-inner">
           <Link to="/" className="nx-brand" aria-label="Norn home">
-            <img src="/norn-mark.svg" width="36" height="36" alt="" />
-            <span>norn<span className="nx-brand-dot">.</span></span>
+            <span>Norn</span>
           </Link>
           <nav aria-label="Workspace" className="nx-workspace-nav">
             <Link to="/" aria-current={path === '/' ? 'page' : undefined}><EcrIcon size={18} /> Engineering changes</Link>

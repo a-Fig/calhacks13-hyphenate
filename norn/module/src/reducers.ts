@@ -11,7 +11,9 @@ import { SenderError, t } from 'spacetimedb/server';
 import { ScheduleAt } from 'spacetimedb';
 import spacetimedb, { StatementAssumption, StatementClaim, StatementNumber, TestAnswer, reaperSchedule } from './schema';
 import './scope'; // registers the job-scope rule with the policy gate
-import { assertReleasable, codeStagesNotDone, endApproval, recordApproval, recordRecommendation, settleApproval, standingApproval } from './gate'; // registers the company rule, after the job-scope rule
+import { assertReleasable, codeStagesNotDone, companyConfig, endApproval, recordApproval, recordPlmApproval, recordRecommendation, settleApproval, standingApproval } from './gate';
+import { parseSessionSpawn } from './gate-logic';
+import { PLM_DECISIONS, personForLogin, type PlmDecision } from './plm-decision'; // registers the rule for who may report a PLM decision // registers the company rule, after the job-scope rule
 import {
   CONFIG_DEFAULTS,
   OPEN_PR,
@@ -51,6 +53,8 @@ import {
   type Actor,
   type Call,
   type Ctx,
+  type Logged,
+  type Pr,
   type PrStatus,
 } from './core';
 import { COMPANY_CONFIG_KEY, checkCompanyConfig } from './company-config';
@@ -179,8 +183,10 @@ export const setConfig = write('set_config', { key: t.string(), value: t.string(
 // 'NORN-<id>' until the PLM assigns one.
 type RevisionIn = { changeRequestJson: string; source: string; sourceRef: string };
 
-// Open an ECR, with its first change request if one came with it, in the caller's transaction.
-function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description: string }, first?: RevisionIn, call?: Call) {
+// Open an ECR, with its first change request if one came with it, in the caller's transaction. It opens as a
+// draft, unless the caller says it is already filed for review: the ingest path only reports ECRs the PLM
+// has submitted, so Norn shows the status the change control board sees (the fast track decides ECRs in review).
+function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description: string }, first?: RevisionIn, call?: Call, status: PrStatus = 'draft') {
   const title = nonEmpty(a.title, 'title', 200);
   if (a.description.length > 20000) throw new SenderError('description is too long (max 20000 characters)');
   const plm = a.plmEcrNumber.trim();
@@ -196,7 +202,7 @@ function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description:
     plmEcrNumber: plm || `pending-${ctx.newUuidV4().toString()}`,
     title,
     description: a.description,
-    status: 'draft',
+    status,
     baseVersion: base,
     revision: 1,
     inputsDigest: '',
@@ -219,7 +225,7 @@ function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description:
   return {
     prId: pr.id,
     entity: `pull_request:${pr.id}`,
-    summary: `opened ECR '${title}' (${plm || `NORN-${pr.id}`}) on baseline v${base}${first ? ', change request rev 1' : ''}; ${outcome}${deep ? `; ${deep} deep run(s) requested by config` : ''}${others ? `; ${others} other open ECR(s) checked against it` : ''}`,
+    summary: `opened ECR '${title}' (${plm || `NORN-${pr.id}`}) ${status === 'review' ? 'in review' : 'as a draft'} on baseline v${base}${first ? ', change request rev 1' : ''}; ${outcome}${deep ? `; ${deep} deep run(s) requested by config` : ''}${others ? `; ${others} other open ECR(s) checked against it` : ''}`,
   };
 }
 
@@ -274,7 +280,8 @@ export const ingestEcr = write(
     const plm = nonEmpty(a.plmEcrNumber, 'plmEcrNumber', 64);
     const rev: RevisionIn = { changeRequestJson: a.changeRequestJson, source: a.source, sourceRef: a.sourceRef };
     const existing = ctx.db.pullRequest.plmEcrNumber.find(plm);
-    if (!existing) return openPr(ctx, { plmEcrNumber: plm, title: a.title, description: a.description }, rev, call);
+    // An ECR the PLM reports has been filed there for review, so it opens in review (a draft is one a person has not submitted).
+    if (!existing) return openPr(ctx, { plmEcrNumber: plm, title: a.title, description: a.description }, rev, call, 'review');
 
     const digest = checkedChangeRequest(a.changeRequestJson, plm);
     const title = nonEmpty(a.title, 'title', 200);
@@ -430,6 +437,58 @@ export const editPrText = write('edit_pr_text', { prId: t.u64(), description: t.
   return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: `edited the ECR text; ${reconcile(ctx, pr.id)}` };
 });
 
+// The move itself, once the checks on it have passed: the status, the approval record that follows it, and what a
+// release or a closing does to the checks and to the other open ECRs. setPrStatus and record_plm_decision both end here.
+// `onApproved` writes the approval row (setPrStatus: the gate's; a decision taken in the PLM: that person's).
+// Returns the summary of what moved.
+function applyTransition(ctx: Ctx, call: Call, pr: Pr, to: PrStatus, onApproved: () => void = () => recordApproval(ctx, call, pr, 'tier')): string {
+  const from = pr.status as PrStatus;
+  // Finish with this ECR's own row first, so the re-check of other ECRs below never touches it.
+  ctx.db.pullRequest.id.update({ ...pr, status: to, updatedAt: ctx.timestamp });
+  // The approval record follows the status: one is made when the ECR is approved, and one that
+  // stands ends when the ECR leaves 'approved' (a release ends it below, with the version it made).
+  if (to === 'approved') onApproved();
+  else if (from === 'approved' && to !== 'merged') {
+    const standing = standingApproval(ctx, pr.id);
+    if (standing) endApproval(ctx, standing, 'withdrawn', to === 'closed' ? 'the ECR was closed' : `moved back to ${to} by ${call.actor.name}`);
+  }
+
+  if (to === 'merged' || to === 'closed') {
+    // Nothing left to compute for an ECR that is released or abandoned.
+    for (const r of [...ctx.db.checkRun.prId.filter(pr.id)]) {
+      if (r.status === 'queued' || r.status === 'running' || r.status === 'blocked') {
+        ctx.db.checkRun.id.update({
+          ...r,
+          status: 'cancelled',
+          claimedBy: undefined,
+          leaseExpiresAt: undefined,
+          finishedAt: ctx.timestamp,
+          note: `ECR ${to}`,
+        });
+        clearProgress(ctx, r.id);
+      }
+    }
+  }
+  let extra = '';
+  if (to === 'merged') {
+    // The ECO is released: the baseline moves, and every other open ECR is re-checked against
+    // it, with a log row on each ECR whose state changed.
+    const row = appendMain(ctx, { cause: 'eco', mergedPrId: pr.id, note: `ECO from ECR ${pr.id}: ${pr.title}` });
+    ctx.db.pullRequest.id.update({ ...getPr(ctx, pr.id), mergedVersion: row.version });
+    const standing = standingApproval(ctx, pr.id);
+    if (standing) endApproval(ctx, standing, 'released', `released as baseline v${row.version}`);
+    const n = reconcileAllOpen(ctx, call, `ECR ${pr.id} released as baseline v${row.version}`);
+    extra = `; baseline v${row.parent} -> v${row.version}, re-checked ${n} other open ECR(s)`;
+  } else if (from === 'closed') {
+    // Reopening: move onto today's baseline and replace whatever went out of date meanwhile.
+    extra = `; ${reconcile(ctx, pr.id)}`;
+    reconcileAllOpen(ctx, call, `ECR ${pr.id} reopened`, pr.id); // its change request is a peer again
+  } else if (to === 'closed') {
+    reconcileAllOpen(ctx, call, `ECR ${pr.id} closed`, pr.id); // no longer a peer
+  }
+  return `${from} -> ${to}${extra}`;
+}
+
 export const setPrStatus = write(
   'set_pr_status',
   { prId: t.u64(), status: t.string() },
@@ -475,52 +534,99 @@ export const setPrStatus = write(
       }
     }
 
-    // Finish with this ECR's own row first, so the re-check of other ECRs below never touches it.
-    ctx.db.pullRequest.id.update({ ...pr, status: to, updatedAt: ctx.timestamp });
-    // The approval record follows the status: one is made when the ECR is approved, and one that
-    // stands ends when the ECR leaves 'approved' (a release ends it below, with the version it made).
-    if (to === 'approved') recordApproval(ctx, call, pr, 'tier');
-    else if (from === 'approved' && to !== 'merged') {
-      const standing = standingApproval(ctx, pr.id);
-      if (standing) endApproval(ctx, standing, 'withdrawn', to === 'closed' ? 'the ECR was closed' : `moved back to ${to} by ${call.actor.name}`);
-    }
-
-    if (to === 'merged' || to === 'closed') {
-      // Nothing left to compute for an ECR that is released or abandoned.
-      for (const r of [...ctx.db.checkRun.prId.filter(pr.id)]) {
-        if (r.status === 'queued' || r.status === 'running' || r.status === 'blocked') {
-          ctx.db.checkRun.id.update({
-            ...r,
-            status: 'cancelled',
-            claimedBy: undefined,
-            leaseExpiresAt: undefined,
-            finishedAt: ctx.timestamp,
-            note: `ECR ${to}`,
-          });
-          clearProgress(ctx, r.id);
-        }
-      }
-    }
-    let extra = '';
-    if (to === 'merged') {
-      // The ECO is released: the baseline moves, and every other open ECR is re-checked against
-      // it, with a log row on each ECR whose state changed.
-      const row = appendMain(ctx, { cause: 'eco', mergedPrId: pr.id, note: `ECO from ECR ${pr.id}: ${pr.title}` });
-      ctx.db.pullRequest.id.update({ ...getPr(ctx, pr.id), mergedVersion: row.version });
-      const standing = standingApproval(ctx, pr.id);
-      if (standing) endApproval(ctx, standing, 'released', `released as baseline v${row.version}`);
-      const n = reconcileAllOpen(ctx, call, `ECR ${pr.id} released as baseline v${row.version}`);
-      extra = `; baseline v${row.parent} -> v${row.version}, re-checked ${n} other open ECR(s)`;
-    } else if (from === 'closed') {
-      // Reopening: move onto today's baseline and replace whatever went out of date meanwhile.
-      extra = `; ${reconcile(ctx, pr.id)}`;
-      reconcileAllOpen(ctx, call, `ECR ${pr.id} reopened`, pr.id); // its change request is a peer again
-    } else if (to === 'closed') {
-      reconcileAllOpen(ctx, call, `ECR ${pr.id} closed`, pr.id); // no longer a peer
-    }
-    return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: `${from} -> ${to}${extra}` };
+    return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: applyTransition(ctx, call, pr, to) };
   },
   { downgradable: a => a.status === 'approved' || a.status === 'merged' }
+);
+
+// The PLM has decided the ECR: its board approved or rejected it there, and Norn mirrors that (the PLM is the system of
+// record for the decision). Approved: the ECR goes to approved and then merged, on the module's own rules for those moves
+// (set_pr_status), with the approval row naming the person the PLM names, not the connection that reported it. Rejected:
+// closed. When Norn cannot follow (the checks have not finished on current inputs, the baseline has moved, the ECR is
+// closed or already released, or the ECR's title, text or change request was edited in the PLM after Norn assessed it), it records that and why, and moves nothing: it never shows an ECR as released that it did
+// not release. The same decision again changes nothing. Who may report it is plm-decision.ts's rule.
+export const recordPlmDecision = write(
+  'record_plm_decision',
+  { plmEcrNumber: t.string(), decision: t.string(), decidedBy: t.string(), decidedOn: t.string(), title: t.string(), description: t.string(), changeRequestJson: t.string(), source: t.string(), sourceRef: t.string() },
+  (ctx, a, call) => {
+    const plm = nonEmpty(a.plmEcrNumber, 'plmEcrNumber', 64);
+    if (!PLM_DECISIONS.includes(a.decision as PlmDecision)) throw new SenderError(`decision must be one of ${PLM_DECISIONS.join(', ')}`);
+    const decision = a.decision as PlmDecision;
+    const decidedBy = nonEmpty(a.decidedBy, 'decidedBy', 128);
+    const decidedOn = nonEmpty(a.decidedOn, 'decidedOn', 40);
+    const source = nonEmpty(a.source, 'source', 32);
+    if (a.sourceRef.length > 200) throw new SenderError('sourceRef is too long (max 200 characters)');
+    const found = ctx.db.pullRequest.plmEcrNumber.find(plm);
+    if (!found) throw new SenderError(`Norn has no ECR ${plm}`);
+    const pr = getPr(ctx, found.id);
+
+    const loaded = companyConfig(ctx);
+    const person = loaded.state === 'ok' ? personForLogin(loaded.config.people, decidedBy) : undefined;
+    const where = source === 'plm' ? 'the PLM' : `${source} (a test feed, not the PLM)`;
+    const who = person ? `${person.name} (${decidedBy})` : decidedBy;
+    const headline = `${decision} in ${where} by ${who} on ${decidedOn}, reported by ${call.actor.name}`;
+    const detail = { decision, decidedBy, decidedOn, person: person?.id ?? null, source, sourceRef: a.sourceRef, reportedBy: call.actor.name };
+    // A decision Norn cannot follow is logged once: the same reason again adds no row.
+    const noFollow = (why: string): Logged | null => {
+      const summary = `${headline}; Norn did not follow it: ${why}`;
+      const last = [...ctx.db.actionLog.prId.filter(pr.id)].filter(l => l.reducer === 'record_plm_decision' && l.summary.startsWith(`${decision} in `)).sort((x, y) => Number(x.id - y.id)).at(-1);
+      if (last?.summary === summary) return null;
+      return { prId: pr.id, entity: `plm_decision:${pr.id}`, summary, detail, outcome: 'downgraded' };
+    };
+
+    if (decision === 'rejected') {
+      if (pr.status === 'closed') return null;
+      if (pr.status === 'merged') return noFollow(`ECR ${pr.id} is already released in Norn`);
+      const standing = standingApproval(ctx, pr.id);
+      if (standing) endApproval(ctx, standing, 'withdrawn', `rejected in ${where} by ${who}`);
+      const moved = applyTransition(ctx, call, pr, 'closed');
+      return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: `${headline}; ${moved}`, detail };
+    }
+
+    if (pr.status === 'merged') return null;
+    if (pr.status === 'closed') return noFollow(`ECR ${pr.id} is closed in Norn`);
+    // The decision is about the ECR as the PLM holds it now. If a person edited it after Norn's last read, what Norn assessed is
+    // not what was approved, and releasing it would release the old assessment. Rejecting needs no such check: it only closes.
+    const cur = currentRevision(ctx, pr.id);
+    if (!cur) return noFollow('Norn holds no change request for it, so it has nothing assessed to release');
+    // The same comparison ingest_ecr makes to see an ECR as changed: its title and text as well as its change request.
+    const edited = [
+      ...(nonEmpty(a.title, 'title', 200) !== pr.title ? ['title'] : []),
+      ...(a.description !== pr.description ? ['description'] : []),
+      ...(cur.digest !== checkedChangeRequest(a.changeRequestJson, plm) ? ['change request'] : []),
+    ];
+    if (edited.length)
+      return noFollow(`the ECR changed in the PLM after Norn assessed it (${edited.join(', ')}; Norn holds revision ${cur.seq}), so what was approved is not what Norn checked`);
+    const notReady = codeStagesNotDone(ctx, pr);
+    if (notReady.length) return noFollow(`its checks have not finished on current inputs (${notReady.join(', ')}), so Norn cannot release it`);
+    const main = currentMain(ctx);
+    if (pr.baseVersion !== main.version) return noFollow(`it is based on baseline v${pr.baseVersion} but the baseline is at v${main.version}, so it must be re-checked first`);
+
+    // From here the move is certain. The PLM's decision stands in for the approval; an approval Norn had given is replaced.
+    const standing = standingApproval(ctx, pr.id);
+    if (standing) endApproval(ctx, standing, 'withdrawn', `replaced by the approval taken in ${where} by ${who}`);
+    const record = () =>
+      recordPlmApproval(ctx, pr, {
+        name: person?.name ?? decidedBy,
+        decisionJson: JSON.stringify({
+          reason: `approved in ${where} by ${who}`,
+          route: { bodyName: person?.title ?? 'Approver in the PLM' },
+          reasons: [{ rule: 'plm', text: `Approved in ${where} by ${who} on ${decidedOn}. Norn mirrors the PLM's decision and applies no tier of its own to it.` }],
+          ...detail,
+        }),
+      });
+    let from = pr;
+    const moves: string[] = [];
+    if (pr.status === 'draft') {
+      from = { ...pr, status: 'review' };
+      ctx.db.pullRequest.id.update({ ...from, updatedAt: ctx.timestamp });
+      moves.push('draft -> review');
+    }
+    if (from.status === 'approved') record();
+    else moves.push(applyTransition(ctx, call, from, 'approved', record));
+    moves.push(applyTransition(ctx, call, getPr(ctx, pr.id), 'merged'));
+    return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: `${headline}; ${moves.join('; ')}`, detail };
+  }
 );
 
 export const addComment = write(
@@ -542,6 +648,51 @@ export const addComment = write(
 );
 
 // ---------------------------------------------------------------------------------------------
+// A session's freshness. A session started by a check run ('norn:check_run:7') may act on an ECR only
+// while that run still stands: the ECR's inputs have not changed since it read them. A session left
+// over from an earlier change-request revision (or baseline) is refused, even if some of its numbers
+// happen to match. spawnedBy comes from the signed credential, not from the agent. Posting a statement
+// and asking for the fast track both rest on what the session read, so both ask this. Returns the run's
+// id, or 0 when the call was not started by a check run (a person, or a session with no run to check).
+// The dispatcher also signs the ECR's own revision it started the session on ('norn:check_run:32:revision:2').
+// That revision is held to the ECR's current one: an edit outside the structured change request (the PLM
+// description) bumps the ECR's revision but leaves the cost run, and the change-request revision, as they were.
+// ---------------------------------------------------------------------------------------------
+
+function sessionRunId(ctx: Ctx, pr: Pr, spawnedBy: string, noMore: string): bigint {
+  const started = parseSessionSpawn(spawnedBy);
+  // A credential that names a check run must name it in the one form the dispatcher signs; anything else is not
+  // waved through as if no run had started it.
+  if (!started) {
+    if (/check_run:/.test(spawnedBy)) throw new Refusal(`this session's credential names a check run in a form Norn does not read ('${spawnedBy.slice(0, 80)}'). ${noMore}`);
+    return 0n;
+  }
+  const run = ctx.db.checkRun.id.find(BigInt(started.runId));
+  if (!run || run.prId !== pr.id) throw new Refusal(`this session was started by check run ${started.runId}, which is not a check run of ${pr.plmEcrNumber}`);
+  if (started.revision !== undefined && started.revision !== pr.revision)
+    throw new Refusal(
+      `This session assessed revision ${started.revision}; ${pr.plmEcrNumber} is now at revision ${pr.revision}. The ECR changed after the session read it (its text, change request, baseline or an assumption), so its numbers and answers are out of date. ${noMore}; Norn starts a new session on the current revision`
+    );
+  const nowRevision = currentRevision(ctx, pr.id)?.seq;
+  // 'done' is not enough on its own: the run must also stand on the ECR's inputs now.
+  const now = stageInfos(ctx, pr)[run.stage];
+  const moved = run.status === 'done' && now !== undefined && now.hash !== run.inputHash;
+  if (run.status !== 'done' || moved) {
+    let readRevision: unknown;
+    try {
+      readRevision = JSON.parse(run.inputsJson).revision;
+    } catch {
+      readRevision = undefined;
+    }
+    const which = typeof readRevision === 'number' && nowRevision !== undefined && readRevision !== nowRevision ? `This session read change-request revision ${readRevision}; ${pr.plmEcrNumber} is now at change-request revision ${nowRevision}. ` : '';
+    throw new Refusal(
+      `${which}Check run ${run.id}, which started this session, is ${moved ? 'no longer on the current inputs' : run.status}: ${pr.plmEcrNumber}'s inputs changed after the session read them (a new change-request revision, baseline or assumption), so its numbers are out of date. ${noMore}; Norn starts a new session on the current numbers`
+    );
+  }
+  return run.id;
+}
+
+// ---------------------------------------------------------------------------------------------
 // The fast track (#22, #43). An agent (or a person) asks to approve an ECR on the fast track and
 // brings its answers to the configuration's tests, with the classes it proposes. The gate decides
 // from the company's rules: approve, approve with a draw for the blind second check, recommend (to
@@ -559,6 +710,8 @@ export const requestFastTrackApproval = write(
   },
   (ctx, a, call) => {
     const pr = getPr(ctx, a.prId);
+    // The answers are about what the session read: a session from an earlier revision decides nothing now.
+    sessionRunId(ctx, pr, call.spawnedBy, 'Ask for nothing');
     if (pr.status !== 'review') throw new SenderError(`ECR ${pr.id} is ${pr.status}; the fast track decides ECRs in review`);
     if (call.decision.detail === undefined)
       throw new SenderError("no company configuration is stored: the fast track is the company's rule, and there is none to apply");
@@ -650,19 +803,8 @@ export const postImpactStatement = write(
       if (!EVIDENCE.includes(e)) throw new Refusal(`${what}: evidence must be one of ${EVIDENCE.join(', ')}`);
     };
 
-    // A session started by a check run ('norn:check_run:7') may post only while that run still stands:
-    // the ECR's inputs have not changed since it read them. A session left over from an earlier
-    // change-request revision (or baseline) is refused even if some of its numbers happen to match.
-    // spawnedBy comes from the signed credential, not from the agent.
-    let checkRunId = 0n;
-    const started = /(?:^|:)check_run:(\d+)$/.exec(call.spawnedBy);
-    if (started) {
-      const run = ctx.db.checkRun.id.find(BigInt(started[1]!));
-      if (!run || run.prId !== pr.id) throw new Refusal(`this session was started by check run ${started[1]}, which is not a check run of ${pr.plmEcrNumber}`);
-      if (run.status !== 'done')
-        throw new Refusal(`check run ${run.id}, which started this session, is ${run.status}: ${pr.plmEcrNumber}'s inputs changed after the session read them (a new change-request revision, baseline or assumption), so its numbers are out of date. Post nothing; Norn starts a new session on the current numbers`);
-      checkRunId = run.id;
-    }
+    // A session started by a check run may post only while that run still stands (sessionRunId).
+    let checkRunId = sessionRunId(ctx, pr, call.spawnedBy, 'Post nothing');
 
     // The newest result per key among runs that are still current ('done'; a stale run's are not).
     const current = new Map<string, { id: bigint; checkRunId: bigint; label: string; unit: string; p10: number; p50: number; p90: number }>();
