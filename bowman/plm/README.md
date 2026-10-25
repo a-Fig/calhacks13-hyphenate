@@ -11,7 +11,7 @@ to suit it: Norn talks to it only through the interfaces a real PLM exposes.
 
 ## Responsibilities
 
-- **Parts with revisions,** and the engineering BOM (EBOM) for each assembly: the aircraft as designed. ERPNext holds the MBOM, the same parts regrouped into build stations (#69, #70). Norn never writes to the ERP (#71, #72).
+- **Parts with revisions,** and the engineering BOM (EBOM) for each assembly: the aircraft as designed. ERPNext holds the MBOM, the same parts regrouped into build stations (#69, #70). Norn drafts a released ECO's BOMs and journal entries in ERPNext and people submit them (Tyler, 2026-10-25, reversing #71; #72).
 - **Change records:** NCRs, ECRs and ECOs, with Bowman's ECR form (#6) and the links between them
   (an ECR cites its NCR; an ECO releases an ECR).
 - **The approval workflow:** draft, submitted, in review, CCB decision (approve, reject, send back),

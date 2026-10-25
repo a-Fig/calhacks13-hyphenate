@@ -1,6 +1,7 @@
 // What a released ECO changes in the ERP, worked out from Norn's own assessment of its ECR (#72): the
 // ERPNext connector's EcoRelease, which the connector's planner turns into the ERP change package, the
-// lines a person enters. Norn never writes to the ERP (#71).
+// lines a person enters or submits. Fern saves the BOM versions and journal entries as drafts; people submit them
+// (Tyler, 2026-10-25, reversing #71).
 //
 // The amounts are the assessment's point estimates (every input at its stated value), rounded to cents
 // once per line. Ranges are for deciding; a ledger entry takes one number.

@@ -6,7 +6,8 @@
 //   eco_release     the change order number the PLM gave a released ECR (#72)
 //   erp_package     the lines a person enters in the ERP to carry the ECO out (#72)
 //
-// Norn never writes to the ERP (#71): everything here is for a person to read and act on. The shapes
+// Fern drafts, people submit (Tyler, 2026-10-25, reversing #71): Fern saves the package's BOM versions and journal
+// entries in the ERP as drafts, and everything here is for a person to read, submit and act on. The shapes
 // below are read from module/src/schema.ts and gate.ts, and for the package from the ERPNext connector's
 // ErpChangePackage (connectors/erpnext/src/package.ts) and the worker's release.ts. Anything a row holds
 // that is not in the shape expected is dropped quietly, except in the package, where a package the page
@@ -79,7 +80,7 @@ export interface RecommendationView {
   waitingForSecondCheck: boolean;
 }
 
-export type LineStatus = 'entered' | 'to_enter' | 'conflict';
+export type LineStatus = 'entered' | 'drafted' | 'to_enter' | 'conflict';
 export interface PackageLineView {
   id: string;
   title: string;
@@ -87,6 +88,8 @@ export interface PackageLineView {
   /** The words on the page: "Entered", "To enter in ERPNext", "Conflict". */
   statusText: string;
   seat: string;
+  /** Fern's draft of this line in ERPNext, waiting for a person to submit it. */
+  draft?: { doctype: string; name: string; url: string; waitingFor: string };
   instruction: string;
   doctype: string;
   note?: string;
@@ -103,7 +106,7 @@ export interface PackageBuilt {
   health: PackageHealth;
   /** One line that is true: never "nothing to enter" while there is a problem. */
   headline: string;
-  counts: { lines: number; entered: number; toEnter: number; conflicts: number; problems: number };
+  counts: { lines: number; entered: number; toEnter: number; conflicts: number; problems: number; drafted: number };
   problems: string[];
   warnings: string[];
   effects: { program: string; name: string; costDelta: number; basis: string }[];
@@ -263,7 +266,7 @@ const GROUPS: { id: string; title: string; kinds: string[] }[] = [
   { id: 'bom', title: 'Bills of materials', kinds: ['bom', 'bom-replace', 'bom-retire'] },
   { id: 'journal', title: 'Journal entries', kinds: ['journal-entry'] },
 ];
-const STATUS_TEXT: Record<LineStatus, string> = { entered: 'Entered', to_enter: 'To enter in ERPNext', conflict: 'Conflict: entered differently from the package' };
+const STATUS_TEXT: Record<LineStatus, string> = { entered: 'Entered', drafted: 'Draft in ERPNext', to_enter: 'To enter in ERPNext', conflict: 'Conflict: entered differently from the package' };
 
 /** The package row is not in a shape the page can read. Its reason is shown instead of a package. */
 class Unreadable extends Error {}
@@ -291,12 +294,21 @@ const fieldValue = (f: Record<string, any>): string => {
   return String(f.value);
 };
 
-function lineView(l: Record<string, any>, n: number): PackageLineView {
+function lineView(l: Record<string, any>, n: number, erpUrl: string): PackageLineView {
   const where = `line ${n + 1}`;
   const title = textOf(l.title, `${where} title`);
-  const status: LineStatus = l.status === 'entered' ? 'entered' : l.status === 'conflict' ? 'conflict' : l.status === 'to-enter' ? 'to_enter' : bad(`${where} has no known status`);
+  const status: LineStatus = l.status === 'entered' ? 'entered' : l.status === 'drafted' ? 'drafted' : l.status === 'conflict' ? 'conflict' : l.status === 'to-enter' ? 'to_enter' : bad(`${where} has no known status`);
+  const seat = typeof l.enteredBy === 'string' ? l.enteredBy : '';
+  const found = isObj(l.found) && typeof l.found.doctype === 'string' && typeof l.found.name === 'string' ? l.found as { doctype: string; name: string } : undefined;
+  const draft = status === 'drafted' && found && erpUrl
+    ? {
+        doctype: found.doctype, name: found.name,
+        url: `${erpUrl.replace(/\/+$/, '')}/app/${found.doctype.toLowerCase().replace(/\s+/g, '-')}/${encodeURIComponent(found.name)}`,
+        waitingFor: typeof l.person === 'string' && l.person ? `${l.person}${seat ? ` (${seat})` : ''}` : seat ? `the ${seat}` : 'a person',
+      }
+    : undefined;
   return {
-    id: String(l.id ?? title), title, status, statusText: STATUS_TEXT[status], seat: typeof l.enteredBy === 'string' ? l.enteredBy : '',
+    id: String(l.id ?? title), title, status, statusText: STATUS_TEXT[status], seat, ...(draft ? { draft } : {}),
     instruction: typeof l.instruction === 'string' ? l.instruction : '', doctype: typeof l.doctype === 'string' ? l.doctype : '',
     note: typeof l.note === 'string' && l.note ? l.note : undefined,
     fields: objectList(l, 'fields', where).map(f => ({ label: String(f.label ?? f.field ?? ''), value: fieldValue(f) })),
@@ -338,10 +350,12 @@ function builtView(row: ErpPackageRow): PackageBuilt {
   if (!Array.isArray(pkg.lines)) bad('The package has no list of lines');
   const problems = packageProblems(release, pkg, notes);
   const raw = pkg.lines as unknown[];
-  const all = raw.map((l, i) => lineView(isObj(l) ? l : bad(`line ${i + 1} is not a record`), i));
+  const erpUrl = typeof pkg.erpUrl === 'string' ? pkg.erpUrl : '';
+  const all = raw.map((l, i) => lineView(isObj(l) ? l : bad(`line ${i + 1} is not a record`), i, erpUrl));
   // The row's own counts are what the module checked; the lines are what the page can show. When they disagree, say so.
   if (row.lines !== all.length) problems.push(`The package row counts ${row.lines} line${row.lines === 1 ? '' : 's'}, but ${all.length} could be read from it. Treat the list below as incomplete.`);
-  const counts = { lines: row.lines, entered: row.entered, toEnter: Math.max(0, row.lines - row.entered - row.conflicts), conflicts: row.conflicts, problems: problems.length };
+  const drafted = all.filter(l => l.status === 'drafted').length;
+  const counts = { lines: row.lines, entered: row.entered, toEnter: Math.max(0, row.lines - row.entered - row.conflicts - drafted), conflicts: row.conflicts, problems: problems.length, drafted };
   const groups: PackageGroupView[] = [];
   const placed = new Set<PackageLineView>();
   for (const g of GROUPS) {
@@ -372,7 +386,7 @@ function builtView(row: ErpPackageRow): PackageBuilt {
     headline = `All ${plural(counts.lines, 'line')} entered in ERPNext.`;
   } else {
     health = 'to_enter';
-    headline = `${counts.entered} of ${plural(counts.lines, 'line')} entered, ${counts.toEnter} to enter in ERPNext.`;
+    headline = `${counts.entered} of ${plural(counts.lines, 'line')} entered${counts.drafted ? `, ${counts.drafted} drafted by Fern and waiting to be submitted` : ''}, ${counts.toEnter} to enter in ERPNext.`;
   }
   const effects = objectList(pkg, 'effects', 'package').map(e => ({ program: String(e.program ?? ''), name: String(e.name ?? ''), costDelta: Number(e.costDelta) || 0, basis: String(e.basis ?? '') }));
   return {

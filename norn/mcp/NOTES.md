@@ -7,8 +7,9 @@ starts (`norn/runner`), and they get the tools through the job's `mcpServers`. A
 person; that is M5 and only its shape is built. Every write goes through the module's reducers, so
 through its policy gate and its action log, with the actor, the person it acted for and what spawned it.
 
-Norn never writes to the ERP (Tyler, issues #71 and #72), not even drafts. Nothing here offers an ERP
-write, and the seam in `src/erp.ts` is for reads only.
+Until 2026-10-25 Norn never wrote to the ERP (Tyler, issues #71 and #72). Tyler reversed that on
+2026-10-25: the worker now drafts a released ECO's BOMs and journal entries (`norn/workers/README.md`).
+Agents still get no ERP write: nothing here offers one, and the seam in `src/erp.ts` is for reads only.
 
 ## Run it
 

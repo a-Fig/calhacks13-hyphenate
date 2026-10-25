@@ -4,7 +4,7 @@ Written 2026-10-24 (Saturday). Bowman's PLM, standing in for Siemens Teamcenter.
 
 ## EBOM and MBOM
 
-The PLM holds the **EBOM**, the aircraft as designed: the Engineering BOM records here (47 assemblies, 257 lines, labelled "Engineering BOM (EBOM)" in the sidebar, the list and the home page; the DocType keeps the name `Engineering BOM` because that is its API path). **ERPNext holds the MBOM** (#70, built separately): the same parts, with the top level regrouped into build stations. Norn never writes to the ERP (#71, #72); changes reach it by people or by the plant's own gateway. `verify.ts` checks that the PLM's EBOM equals `bowman/data`'s `bom` line for line (assembly, find number, part, quantity). #69.
+The PLM holds the **EBOM**, the aircraft as designed: the Engineering BOM records here (47 assemblies, 257 lines, labelled "Engineering BOM (EBOM)" in the sidebar, the list and the home page; the DocType keeps the name `Engineering BOM` because that is its API path). **ERPNext holds the MBOM** (#70, built separately): the same parts, with the top level regrouped into build stations. Norn only drafts in the ERP (BOMs and journal entries for a released ECO, which people submit; Tyler, 2026-10-25, reversing #71); every other change reaches it by people or by the plant's own gateway. `verify.ts` checks that the PLM's EBOM equals `bowman/data`'s `bom` line for line (assembly, find number, part, quantity). #69.
 
 ## What runs where
 

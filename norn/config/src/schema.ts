@@ -26,10 +26,13 @@ export const SCHEMA_VERSION = 1;
  * level: approved by the body of its tier, or approved on the fast track. A level and its limits say
  * how much of the work an agent does once that holds. They never stand in for the approval.
  *
- * Norn never writes to the ERP, not even a draft (#71). `write_bom`, `update_standard_cost`,
- * `draft_journal_entry` and `post_journal_entry` (ERP_ACTIONS) are what a person enters or posts in the
- * ERP, and Norn only recommends them: its recommendation is a line of the ERP change package on the
- * released ECO (#72), which goes to the role whose `can` holds the action. A rule for one of them sets
+ * Fern drafts, people submit (Tyler, 2026-10-25, reversing #71, which had Fern write nothing to the
+ * ERP). On a released ECO Fern saves the new BOM versions and the journal entries in the ERP as
+ * unsubmitted drafts; its ERP account cannot submit, cancel or delete, so nothing takes effect until a
+ * person submits. `write_bom`, `update_standard_cost`, `draft_journal_entry` and `post_journal_entry`
+ * (ERP_ACTIONS) are what a person enters, submits or posts in the ERP, and Fern only recommends them:
+ * its recommendation is a line of the ERP change package on the released ECO (#72), a draft where the
+ * ERP can hold one, which goes to the role whose `can` holds the action. A rule for one of them sets
  * the level `recommend` and no `limits`, `otherwise` or `carriesOutApproval`. `release_eco` is a PLM
  * action, so none of this applies to it.
  */
@@ -50,7 +53,7 @@ export const ACTIONS = {
 export type ActionId = keyof typeof ACTIONS;
 export const ACTION_IDS = Object.keys(ACTIONS) as ActionId[];
 
-/** The actions that change the ERP, which Norn never does (#71). They can only be recommended. See ACTIONS. */
+/** The actions that take effect in the ERP, which only a person does: Fern at most drafts them. They can only be recommended. See ACTIONS. */
 export const ERP_ACTIONS: readonly ActionId[] = ['write_bom', 'update_standard_cost', 'draft_journal_entry', 'post_journal_entry'];
 
 /**

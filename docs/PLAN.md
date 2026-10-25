@@ -44,14 +44,19 @@ Data flows both ways (Tyler, 2026-10-24):
   where engineers and the CCB already look.
 - **ERP to Norn:** costs, supplier prices and lead times, stock, open orders, and history: past
   BOM versions, price changes and journal entries.
-- **Norn to ERP: nothing.** Norn reads the ERP and never writes to it, not even a draft (Tyler,
-  2026-10-24, #71). The ERP is Bowman's system of record for cost and stock, kept by the people
-  who own it, and the Norn Agent user's token is read-only. When an ECO is released, Norn puts the
-  **ERP change package** on it instead (#72). The package lists every line a person enters: the
-  BOM lines, each item's new standard cost, and the journal entries for scrap and cancellation.
-  Each line comes with its values and is traced to the ECO and the assessment. The cost
-  accountant and the manufacturing engineer enter them. Norn's next read of the ERP shows which
-  lines have been entered.
+- **Norn to ERP: drafts, never submitted.** Until 2026-10-25 Norn never wrote to the ERP, not even
+  a draft (Tyler, 2026-10-24, #71). Tyler reversed that on 2026-10-25: Norn now drafts. The ERP is
+  still Bowman's system of record for cost and stock, kept by the people who own it. When an ECO is
+  released, Norn puts the **ERP change package** on it (#72): the BOM lines, each item's new
+  standard cost, and the journal entries for scrap and cancellation, each with its values and
+  traced to the ECO and the assessment. Norn also creates the new BOM versions and the journal
+  entries in ERPNext as unsubmitted drafts, tagged with the ECO and a link to its decision, and
+  checks for its own draft first so a re-run never makes a second. The Norn Agent role can create,
+  read and write BOM and Journal Entry, and only read everything else; it cannot submit, cancel or
+  delete. The cost accountant and the manufacturing engineer review and submit the drafts, and
+  enter by hand what ERPNext cannot hold as a draft: the new standard cost, the BOM replacement in
+  parent assemblies and retiring the old BOM. Norn's next read of the ERP shows each line as
+  drafted or entered.
 
 **Meet people where they are (#19).** Engineers stay in the PLM and finance stays in the ERP.
 Norn's results land inside those tools. People open Norn's own screens only for what those
@@ -81,7 +86,8 @@ start in Norn.
    may approve this kind of change, the approval goes through. If not, a person sees "Norn
    recommends approval" with everything ready. Larger changes go to the CCB.
 6. **ECO released.** Approval releases the ECO with its effectivity, and Norn puts the ERP change
-   package on it for finance and manufacturing to enter (§2).
+   package on it, drafts what ERPNext can hold as drafts, and finance and manufacturing submit and
+   enter the rest (§2).
 7. **Later: actuals.** Purchase price variance and real cut-in dates are compared against the
    forecast. This is the learning loop, deferred (`norn/ARCHITECTURE.md` §11).
 
@@ -160,8 +166,9 @@ Norn, deployed at Bowman, running live on real systems:
 4. Bowman's configuration routes it: Class I and over the fast-track limit, so the CCB decides.
    A trivial colour change elsewhere was approved by Norn on its own, within its limits.
 5. The CCB approves in the PLM. The ECO releases with its ERP change package: the new standard
-   cost and the scrap and cancellation entries, each linking back to the decision. The cost
-   accountant enters them in ERPNext, and the package shows them entered on Norn's next read.
+   cost and the scrap and cancellation entries, each linking back to the decision. The journal
+   entries wait in ERPNext as Norn's drafts; the cost accountant submits them and enters the
+   standard cost, and the package shows them entered on Norn's next read.
 6. A judge clicks any number and follows it to its source.
 
 ## 7. The first version: milestones
@@ -173,7 +180,7 @@ Priority follows the milestone. The order is by dependency.
 |---|---|---|
 | **M1 Foundations** | ERPNext, the PLM and Norn all run from the repo, seeded with Bowman's data, and Norn's skeleton passes the SpacetimeDB spike | immediate |
 | **M2 One ECR end to end** | Filing ECR-0417 in the PLM puts a Level 1 impact statement on it, and on Norn's own page, with cost ranges shaped like the ECP cost page | immediate |
-| **M3 Decision and write-back** | Bowman's configuration routes each ECR, the policy gate checks every write, and releasing the ECO puts a traceable ERP change package on it, which shows as entered once a person enters it in ERPNext (Norn never writes to the ERP, #71) | immediate |
+| **M3 Decision and write-back** | Bowman's configuration routes each ECR, the policy gate checks every write, and releasing the ECO puts a traceable ERP change package on it, with its BOMs and journal entries drafted in ERPNext, each shown as entered once a person submits or enters it (Norn drafts but never submits; Tyler, 2026-10-25, reversing #71) | immediate |
 | **M4 Depth and trust** | The full assessment runs on demand to Level 3 with adversarial review; every number is highlighted and traceable; timeline and supply risk are simulated | before demo |
 | **M5 Outside agents** | A person's own agent connects over MCP, acts on their behalf within the stricter limit, and its posts pass the post check | before demo |
 | **M6 Demo and submission** | The demo path is rehearsed on the machines and network it will run on; the video and the Devpost draft are done | before demo |

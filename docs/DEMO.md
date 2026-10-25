@@ -18,8 +18,10 @@ research on. The numbers below are from that run.
      their logins apart. People log in to the PLM with their Bowman address and `PLM_USER_PASSWORD` from `.env`.
 3. **Claude login** on this machine (`claude`, then `/login` once). Level 1 runs one Claude session per ECR revision.
 4. **From a worktree,** set `ENV_FILE` to the main checkout's `.env`: a worktree has none.
-5. **ERP account.** Fern's ERPNext account is read-only: `bowman/erp/bootstrap.mjs` was re-run on 2026-10-24 and
-   ERPNext refuses its writes. Fern's code has no ERP write path either way.
+5. **ERP account.** Fern's ERPNext account (role Norn Agent) can create, read and write BOMs and journal entries,
+   and only read everything else. It cannot submit, cancel or delete anything (Tyler, 2026-10-25, reversing #71; the
+   role is set by `bowman/erp/bootstrap.mjs`). `bowman/erp/prove-no-submit.ts` shows ERPNext refusing Fern's submit
+   with Fern's own credentials.
 
 ## Start
 
@@ -35,8 +37,8 @@ company config, which it stores in the database), the PLM ingest, the Level 1 di
 screens at **http://127.0.0.1:5180**. Each line of output starts with the process's name. Ctrl-C stops all of them;
 on Windows check afterwards that no `node` process from this checkout is left (the 2026-10-24 run left all six).
 
-What it writes: Fern's database, and in the PLM only the seven `impact_*` fields of each ECR it takes in. It never
-writes to the ERP.
+What it writes: Fern's database; in the PLM only the seven `impact_*` fields of each ECR it takes in; and in the ERP,
+when an ECO is released, unsubmitted drafts of the new BOMs and journal entries. It never submits them.
 
 ## The demo, in order
 
@@ -70,8 +72,11 @@ writes to the ERP.
 4. **A released ECO and its ERP change package (#129).** In the PLM: the CM analyst (Dana Okafor) runs "Start CM
    review" and "Send to CCB"; the CCB chair (Rafael Quintero) runs "Approve". The PLM releases the ECO and links it
    back within about 2.5 s. Fern records the decision with Rafael as approver, marks the ECR released, and puts
-   the ERP change package on it: every line a person enters in the ERP, with exact values, and which are already
-   entered. The ECR page shows "ECO released · Approved by Rafael Quintero", the package, its counts and its
+   the ERP change package on it: every line of the change, with exact values. Fern creates the new BOMs and journal
+   entries in ERPNext as drafts, each shown with a link and "Draft in ERPNext, waiting for <person> to submit". The
+   lines ERPNext cannot hold as drafts (the standard cost, the BOM replacement in parent assemblies, retiring the old
+   BOM) a person enters by hand. Each line shows whether it is drafted or entered. The ECR page shows "ECO
+   released · Approved by Rafael Quintero", the package, its counts and its
    problems (#114). Rehearsed on ECR-0412 (2026-10-25): ECO-0319 released, and the package followed 17 s later with
    8 lines (2 standard costs, 6 BOM steps), none entered yet, no problems.
    **An approval in the PLM cannot be undone** without rebuilding the PLM (which needs Tyler). So rehearse this step
@@ -125,7 +130,9 @@ Then, with the stack up (http://127.0.0.1:5180, the PLM at http://localhost:8082
 
 Step 4 consumes the ECR it is run on. It was rehearsed on **ECR-0412** (2026-10-25), which is now Approved with
 ECO-0319 for good. **ECR-0417** stays Submitted, to be approved live at the end of the demo, so the one ECR goes end
-to end. The rest of the rehearsal changes nothing that cannot be repeated: a rerun is the command list above again.
+to end. Step 4 also leaves Fern's draft BOMs and journal entries for the ECO in ERPNext;
+`node bowman/erp/reset-eco.ts <ECO>`, run as Administrator, deletes them with the rest of the ECO's lines. The rest of
+the rehearsal changes nothing that cannot be repeated: a rerun is the command list above again.
 
 **Placeholder, a live filing (#161's beat 4, #171).** If Tyler keeps the beat where a judge files a new ECR and Norn
 assesses or fast-tracks it in about a minute, the rerun also needs: a ready-to-file ECR in the PLM (the

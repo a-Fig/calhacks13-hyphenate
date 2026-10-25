@@ -461,8 +461,8 @@ export interface Meeting {
 }
 
 /**
- * What Norn hands a person when an ECO is released: the lines to enter in the ERP. Norn never writes
- * to the ERP; a person does, and ticks each line off.
+ * What Fern hands a person when an ECO is released: the lines to enter or submit in the ERP. Fern saves
+ * some as drafts; a person submits them, and ticks each line off.
  */
 export interface ErpPackage {
   system: string;

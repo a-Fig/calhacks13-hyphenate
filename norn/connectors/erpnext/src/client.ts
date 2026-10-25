@@ -1,5 +1,6 @@
-// A small ERPNext REST client: token auth and GET requests only, with list reads in one request each. It has no
-// way to send anything else: Norn never writes to the ERP (issue #71), and a test (test/package.test.ts) keeps it so.
+// A small ERPNext REST client: token auth and GET requests only, with list reads in one request each. It has no way to
+// send anything else. Fern's only write, saving drafts (draft.ts, Tyler 2026-10-25, reversing #71), lives in its own
+// file; a test (test/package.test.ts) keeps every other file to GET.
 // Never logs or throws headers, keys or secrets.
 
 import type { ErpnextConnection } from './options.ts';

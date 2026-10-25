@@ -18,7 +18,8 @@
 // --ecrs limits the PLM ingest and the publisher to those ECRs (NORN_PLM_ECRS, NORN_PUBLISH_ECRS);
 // without it every open ECR in the PLM is taken in and gets a statement. --check runs the checks only.
 // What it writes: Norn's database; in the PLM only the seven impact_* fields of each ECR (the publisher).
-// It never writes to the ERP. Level 1 starts one Claude session per ECR revision on this machine's login.
+// In the ERP it saves only drafts of a released ECO's BOMs and journal entries (when a worker reads the ERP); people submit
+// them. Level 1 starts one Claude session per ECR revision on this machine's login.
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { createConnection } from 'node:net';

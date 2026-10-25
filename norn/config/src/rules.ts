@@ -215,11 +215,12 @@ export const rules: Rule[] = [
         const path = `autonomy.actions[${i}]`;
         const levels = [rule.level, ...(rule.otherwise ? [rule.otherwise] : [])];
         const acts = rule.level === 'approve' || rule.level === 'approve_sampled';
-        // Norn never writes to the ERP, so these can only be recommended, to the person who enters them (#71, #72).
+        // Fern only drafts in the ERP and cannot submit (Tyler, 2026-10-25, reversing #71), so these can only be recommended,
+        // to the person who enters or submits them (#72).
         // The refusals here replace the checks on limits, fallbacks and carrying out an approval below, which would only repeat them.
         const erp = ERP_ACTIONS.includes(rule.action);
         if (erp) {
-          const because = `Fern never writes to the ERP (#71), so ${rule.action} can only be recommended, in the ERP change package for a person to enter (#72)`;
+          const because = `Fern only drafts in the ERP and cannot submit (#71, reversed 2026-10-25), so ${rule.action} can only be recommended, in the ERP change package for a person to enter or submit (#72)`;
           if (rule.level !== 'recommend') {
             issues.push({ path: `${path}.level`, message: `expected "recommend", because ${because}, got ${JSON.stringify(rule.level)}` });
           }

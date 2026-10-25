@@ -1,12 +1,13 @@
-// Undoes the lines a person entered for a released ECO in Bowman's ERPNext so the demo can run again, as Administrator.
-// It stays because the change package (norn/connectors/erpnext/src/package.ts) is entered by hand and a rehearsal is entered
-// more than once. Norn itself writes nothing to the ERP (issue #71); this script is for the person resetting the demo.
+// Undoes what was entered for a released ECO in Bowman's ERPNext so the demo can run again, as Administrator: the lines a
+// person entered and the drafts Fern saved. Fern drafts, people submit (Tyler, 2026-10-25, reversing #71); Fern's own
+// account cannot delete or cancel, so this script is for the person resetting the demo.
 //
 //   node bowman/erp/reset-eco.ts ECO-0319              undo it
 //   node bowman/erp/reset-eco.ts ECO-0319 --dry-run    say what it would do
 //
 // What it undoes (everything entered for the ECO and tagged with its number in the "Released by ECO" field):
-//   1. Journal entries: drafts are deleted. A submitted one has posted to the ledger, so it is left and reported; cancel it
+//   0. Draft BOMs (docstatus 0), Fern's or a person's: deleted.
+//   1. Journal entries: drafts (Fern's or a person's) are deleted. A submitted one has posted to the ledger, so it is left and reported; cancel it
 //      in ERPNext first.
 //   2. BOMs: the version before the ECO's is made active and default again, the ECO's version is replaced by it in the parent
 //      BOMs (ERPNext recosts the assemblies above), and the ECO's version is cancelled (after the BOM Update Logs that link it).
@@ -36,6 +37,13 @@ const list = async (doctype: string, filters: unknown[], fields: string[], order
   (await erp.get(`/api/resource/${enc(doctype)}`, { filters, fields, limit_page_length: 0, ...(order_by ? { order_by } : {}), ...(parent ? { parent } : {}) })).body.data;
 const dayBefore = (d: string) => new Date(Date.parse(d + "T00:00:00Z") - 864e5).toISOString().slice(0, 10);
 let problems = 0;
+
+// ---- 0. draft BOMs ----------------------------------------------------------------------------------
+// A draft is not in use anywhere (only a submitted BOM can be a parent's line or an item's default), so it is just deleted.
+for (const b of await list("BOM", [["bw_eco", "=", eco], ["company", "=", COMPANY], ["docstatus", "=", 0]], ["name", "item"])) {
+  say(`delete draft BOM ${b.name} (${b.item})`);
+  if (!dry) await erp.del(`/api/resource/BOM/${enc(b.name)}`);
+}
 
 // ---- 1. journal entries -----------------------------------------------------------------------------
 for (const je of await list("Journal Entry", [["bw_eco", "=", eco]], ["name", "docstatus", "total_debit", "bw_eco_entry"])) {

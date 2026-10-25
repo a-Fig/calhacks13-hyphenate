@@ -9,8 +9,9 @@ Processes that do Fern's work outside the database, through its reducers. Writte
     `mock: true`.
 - **The ingest loop** (`src/ingest.ts`) reports the ECRs a change-request source has to Fern, and the
   change order number once the PLM releases one.
-- **The ERP change package** (`src/package.ts`, in the worker) puts on each released ECO what a person
-  enters in the ERP to carry it out. Fern never writes to the ERP (#71, #72).
+- **The ERP change package** (`src/package.ts`, in the worker) puts on each released ECO every line
+  that carries it out in the ERP, and creates the new BOMs and journal entries in ERPNext as
+  unsubmitted drafts for a person to submit. Fern never submits (Tyler, 2026-10-25, reversing #71; #72).
 - **The company config** (`src/config.ts`): at start-up the worker loads and validates the file in
   `NORN_COMPANY_CONFIG`, refuses to start on a malformed one, and stores the config through
   `set_config` when it differs from what is stored. How it works and what the module checks are in
@@ -98,10 +99,17 @@ ERP builds the package and records it with `record_erp_package`, in `erp_package
    - **What the package leaves out** is in its notes, with the reason. Units on built aircraft are
      booked when the retrofit removes them. Undecided dispositions get no entry until decided.
      Rework is booked as it is done.
-2. **The lines** come from the ERPNext connector's planner, which reads the ERP and writes nothing. It
-   turns the release into lines a person enters, each with a status.
-3. **On each new ERP read** the worker checks the package again, so each line shows whether it has been
-   entered. The amounts stay the assessment's: an entered standard cost does not change what was decided.
+2. **The lines** come from the ERPNext connector's planner, which reads the ERP. It turns the release
+   into lines, each with a status.
+3. **The drafts.** The worker creates the new BOM versions and the journal entries in ERPNext as
+   unsubmitted drafts (docstatus 0), each carrying `bw_eco`, `bw_decision_url` and, on a journal entry,
+   `bw_eco_entry`. It looks for an existing draft by ECO number and line first, so a re-run or a worker
+   restart never makes a second one. A BOM whose new lines point at another new, unsubmitted
+   sub-assembly BOM is not drafted, because ERPNext only lets a BOM use a submitted BOM; a person makes
+   it. The standard cost, closing the old price row, the replacement in parent BOMs and retiring the old
+   BOM cannot be drafts and stay lines a person enters.
+4. **On each new ERP read** the worker checks the package again, so each line shows whether it is
+   `drafted` (Fern's draft found and matching) or `entered` (submitted). The amounts stay the assessment's: an entered standard cost does not change what was decided.
 
 For ECR-0417 the package gives BW-5120-210's new standard cost of 221.00 at Rev C from 2026-11-01. Its
 journal entries are 17,620.62 and 8,810.31 on hand, 11,012.88 at the supplier, and a 1,118.40

@@ -66,14 +66,19 @@ schedule limits, goes to the Change Control Board. Each decision is stored with 
 #128). When the board approves an ECR in the PLM, Fern records the decision with the approver's name
 (#129).
 
-**The ERP stays the people's.** Norn reads the ERP, and its code has no ERP write path. Norn's
-ERPNext account is read-only too: every write is refused by ERPNext itself (verified 2026-10-25).
-When an ECO is released,
-Fern puts the ERP change package on it: the new standard cost, the BOM lines and the journal entries
-for scrap and the supplier's cancellation charge, each traced to the ECO and the assessment. The
-cost accountant enters the costs and journal entries, and the manufacturing engineer enters the BOM
-lines. Fern's next read shows which lines are entered (#74, #114). In the PLM, Fern writes only its own seven impact fields and
-comments.
+**Fern drafts, people submit.** When an ECO is released, Fern puts the ERP change package on it:
+the new standard cost, the BOM lines and the journal entries for scrap and the supplier's
+cancellation charge, each traced to the ECO and the assessment. Fern also creates the new BOM
+versions and the journal entries in ERPNext as unsubmitted drafts, each tagged with the ECO and a
+link to Fern's decision. It checks for its own draft first, so a re-run never makes a second one.
+Fern's ERPNext account can create and edit BOMs and journal entries and only read everything else.
+It cannot submit, cancel or delete anything: ERPNext refuses its submit. So nothing Fern prepares
+posts to the ledger or becomes an active BOM until a named person reviews and submits it. The cost
+accountant submits the journal entries and enters the new standard cost by hand, and the
+manufacturing engineer submits the BOMs and replaces the old one in its parent assemblies. Fern's
+next read shows each line as drafted or entered (#74, #114). Until 2026-10-25 Fern never wrote to
+the ERP (#71); Tyler reversed that on 2026-10-25 so people review drafts instead of typing every
+line. In the PLM, Fern writes only its own seven impact fields and comments.
 
 **What's real and what's simulated.** Bowman, its people and its history are fictional, and the
 dataset marks each value `sourced` or `invented`. ERPNext is real software, seeded from that
@@ -128,7 +133,8 @@ its ECO, Fern recorded the decision, and 17 seconds later the ERP change package
 - Every number on the statement traces to the change request revision and the ERP baseline it was
   computed from.
 - The agents run under limits a finance team would accept: named seats, scoped tokens,
-  a read-only ERP account, code with no ERP write path, and a log the platform writes, not the agent.
+  an ERP account that can draft BOMs and journal entries but cannot submit, cancel or delete, and
+  a log the platform writes, not the agent.
 - Hundreds of offline tests and live checks against scratch databases, and fresh-context review
   rounds on the changes to money, routing and permissions.
 
@@ -137,8 +143,8 @@ its ECO, Fern recorded the decision, and 17 seconds later the ERP change package
 - Agents are good at reading a messy change request and explaining a forecast. Code should
   compute every number they report.
 - A recommendation people act on has to follow a rule they can read, or it drifts between runs.
-- Giving Fern no way to write to the ERP made the trust story one sentence a reviewer can check
-  in the code.
+- Letting Fern draft in the ERP but never submit keeps the trust story one sentence a reviewer
+  can check: ERPNext itself refuses Fern's submit, so a named person posts every entry.
 
 ## What's next for Fern
 

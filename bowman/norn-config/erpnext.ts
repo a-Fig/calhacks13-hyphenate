@@ -47,6 +47,8 @@ export const erpnext: ErpnextSettings = {
       inventoryReserve: '11420 - Reserve for Obsolete Inventory - BWA',
       accruedLiability: '21210 - Accrued Expenses - BWA',
     },
+    // Who submits Fern's drafts: the people in those seats in Bowman's dataset (bowman/data/company.ts, EMP-11 and EMP-18).
+    people: { 'cost accountant': 'Samir Vaidya', 'manufacturing engineer': 'Owen Tillery' },
   },
   // Bowman's purchasing team keeps its suppliers' limits in the custom doctype that bowman/erp/seed-constraints.ts creates.
   supplierConstraints: {

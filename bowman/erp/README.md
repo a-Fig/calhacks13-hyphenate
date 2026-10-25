@@ -21,12 +21,13 @@ What Bowman's finance and supply-chain people do here, as they would in SAP:
 ## What Norn does here
 
 - **Reads:** items, BOMs, prices, lead times, stock, open orders, GL entries and version history.
-- **Writes, when an ECO is released:** a new BOM (submitted; BOMs can't be edited after submit),
-  the old one made inactive and replaced, an updated standard cost, and draft journal entries for
-  scrap or revaluation. Whether Norn may also post a journal entry is Bowman's configuration
-  (#24).
-- **As whom:** a Norn API user with its own role, limited to what those reads and writes need. The
-  exact grants are in `NOTES.md`.
+- **Drafts, when an ECO is released:** the new BOM version(s) and the journal entries for scrap
+  and the supplier's cancellation charge, as unsubmitted drafts tagged with the ECO and Fern's
+  decision (Tyler, 2026-10-25, reversing #71). A person reviews and submits them. Norn cannot
+  submit, cancel or delete, so it cannot post to the ledger or make a BOM active. The new standard
+  cost, the replacement in parent BOMs and retiring the old BOM are entered by a person.
+- **As whom:** a Norn API user with its own role: create, read and write on BOM and Journal Entry,
+  read only on everything else. The exact grants are in `NOTES.md`.
 
 ## Where it runs
 

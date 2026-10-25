@@ -367,7 +367,7 @@ export const recordEcoRelease = write(
 );
 
 // The ERP change package on a released ECO (#72), from a worker: what a person enters in the ERP, with
-// each line's status on the ERP read named. Norn never writes to the ERP (#71). Recording the same
+// each line's status on the ERP read named. Fern drafts some lines in the ERP; people submit. Recording the same
 // package again on a new ERP read only moves erpBaseline, and adds no log row.
 export const recordErpPackage = write(
   'record_erp_package',

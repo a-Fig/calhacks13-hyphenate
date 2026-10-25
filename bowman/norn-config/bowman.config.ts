@@ -403,8 +403,9 @@ const config = {
   // approve_sampled: a second agent recomputes blind, and the sample is drawn from the ECR's PLM number,
   // the action and sampleSeed. recommend: the roles that hold the action receive it. The never-fast-track
   // rules above are checked first, so they win over the escalation triggers on approve_fast_track_ecr.
-  // Norn never writes to the ERP (#71), so the four ERP actions can only be recommended: each is a line
-  // of the ERP change package on the released ECO (#72), for the role that holds it to enter.
+  // Fern drafts in the ERP but cannot submit (Tyler, 2026-10-25, reversing #71), so the four ERP actions can only be
+  // recommended: each is a line of the ERP change package on the released ECO (#72), a draft where ERPNext can hold
+  // one, for the role that holds it to enter or submit.
   autonomy: {
     actingFor: 'stricter',
     // Bowman's own seed, apart from the forecast `seed` in the state layer, so re-seeding forecasts
@@ -471,7 +472,7 @@ const config = {
       {
         action: 'write_bom',
         level: 'recommend',
-        why: 'The ERP change package lists the BOM lines to change. The manufacturing engineer enters them in the ERP; Fern never writes there (#71).',
+        why: 'Fern saves the new BOM version in the ERP as a draft, with the ECO and its decision on it. The manufacturing engineer checks and submits it; Fern cannot submit (Tyler, 2026-10-25, reversing #71).',
       },
       {
         action: 'update_standard_cost',
@@ -481,7 +482,7 @@ const config = {
       {
         action: 'draft_journal_entry',
         level: 'recommend',
-        why: 'The package lists the journal entry lines: the scrap write-off, the purchase price variance on the first lot and the cancellation charge. The cost accountant enters them, because Fern saves no drafts in the ERP (#71).',
+        why: 'Fern saves the journal entries in the ERP as drafts: the scrap write-off, the stock finished at the supplier and the cancellation charge, with the ECO and its decision on each. The cost accountant checks and submits them; Fern cannot submit (Tyler, 2026-10-25, reversing #71).',
       },
       {
         action: 'post_journal_entry',

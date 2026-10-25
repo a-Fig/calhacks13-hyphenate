@@ -1,6 +1,6 @@
 # Bowman ERP (ERPNext) notes
 
-Written 2026-10-24, from the standup and a full verification run the same morning. Everything marked "verified" was run against the live instance as the Norn user, when that user still had write permissions; Tyler then decided Norn never writes to the ERP (#71), so the role is read-only in code now and the write calls below are what a person does, run as Administrator by `verify.mjs`. Docs: `docs/research/software-options.md` sections 2 and 5-7 are the pre-standup research this corrects.
+Written 2026-10-24, from the standup and a full verification run the same morning. Everything marked "verified" was run against the live instance as the Norn user, when that user still had write permissions; Tyler then decided Norn never writes to the ERP (#71), and on 2026-10-25 reversed that: Norn now creates BOMs and journal entries as unsubmitted drafts and a person submits them (section "The Norn Agent role and user"). The other write calls below are what a person does, run as Administrator by `verify.mjs`. Docs: `docs/research/software-options.md` sections 2 and 5-7 are the pre-standup research this corrects.
 
 ## What runs where
 
@@ -18,11 +18,12 @@ bowman/erp/up.sh            # copy compose.yml to the Mac, start the stack, wait
 bowman/erp/up.sh stop       # stop containers; volumes (all data) stay
 bowman/erp/up.sh status     # container state and a ping
 bowman/erp/up.sh tunnel     # laptop 127.0.0.1:8081 -> Mac 127.0.0.1:8081, runs until Ctrl-C
-node bowman/erp/bootstrap.mjs   # company, price list, read-only Norn role and user; turns off write permissions the role still holds (idempotent; tunnel must be open)
+node bowman/erp/bootstrap.mjs   # company, price list, Norn role and user (create/read/write on BOM and Journal Entry, read elsewhere, no submit/cancel/delete) (idempotent; tunnel must be open)
 node bowman/erp/verify.mjs      # the call sequence below as Administrator, Norn's reads and refused writes, then removes its test documents
 node bowman/erp/eco-setup.ts    # the ECO tag fields on BOM, Item Price and Journal Entry (editable), and the inventory reserve account
 node bowman/erp/eco-package.ts  # print the ERP change package of ECR-0417's ECO and which lines are already entered (reads only)
-node bowman/erp/reset-eco.ts ECO-0319  # undo the lines entered for an ECO, as Administrator, so the demo can run again
+node bowman/erp/reset-eco.ts ECO-0319  # undo the lines entered for an ECO and delete Norn's draft BOMs and journal entries for it, as Administrator, so the demo can run again
+node bowman/erp/prove-no-submit.ts     # with Norn's own credentials, try to submit Norn's draft and show ERPNext refusing it
 node bowman/erp/seed.ts         # load bowman/data/bowman.json as Administrator (re-runnable; phases can be named)
 node bowman/erp/verify-seed.ts  # read the seed back as Norn and compare with the dataset
 node bowman/erp/seed-mbom.ts     # the manufacturing BOM: build stations under each aircraft (after seed.ts; re-runnable)
@@ -41,13 +42,16 @@ With the tunnel open, browse `http://127.0.0.1:8081` and log in as `Administrato
 
 User `norn@bowman.example` (System User, only role `Norn Agent`, no password, API key and secret in `.env` as `ERPNEXT_API_KEY` / `ERPNEXT_API_SECRET`). Auth: `Authorization: token <key>:<secret>`. Permissions are added with the Role Permissions Manager endpoints (`frappe.core.page.permission_manager.permission_manager.add` and `.update`), which copy a doctype's stock permissions into Custom DocPerm before adding ours.
 
-**Norn only reads (Tyler, 2026-10-24, #71).** A released ECO carries an ERP change package: every line a person enters in ERPNext, with exact values, traced to the ECO and Norn's decision (`norn/connectors/erpnext/src/package.ts`, #72, #73). So the role holds `read` and nothing else, on these doctypes: Item, BOM, Item Price, Supplier, Supplier Quotation, Purchase Order, Purchase Receipt, Bin, Stock Ledger Entry, GL Entry, Journal Entry, Version, Company, Warehouse, Price List, Account, and (added by `seed-planning.ts`, #40) Workstation, Master Production Schedule and Serial No. Norn reads the custom fields it needs (the ECO tag fields) with the same read permission.
+**Norn drafts, people submit (Tyler, 2026-10-25, reversing #71).** A released ECO carries an ERP change package: every line, with exact values, traced to the ECO and Norn's decision (`norn/connectors/erpnext/src/package.ts`, #72, #73). Norn creates the new BOM versions and the journal entries as unsubmitted drafts (docstatus 0) carrying `bw_eco`, `bw_decision_url` and, on journal entries, `bw_eco_entry`; a person reviews and submits them. So the role holds create, read and write on BOM and Journal Entry, and no submit, cancel, amend or delete anywhere. On every other doctype it holds `read` and nothing else: Item, Item Price, Supplier, Supplier Quotation, Purchase Order, Purchase Receipt, Bin, Stock Ledger Entry, GL Entry, Version, Company, Warehouse, Price List, Account, and (added by `seed-planning.ts`, #40) Workstation, Master Production Schedule and Serial No. Norn reads the custom fields it needs (the ECO tag fields) with the same read permission.
 
 Until 2026-10-24 the role also held write, create and submit on BOM, write and create on Item Price, create on Journal Entry, and read, create and submit on BOM Update Log, as verified in the table below. `bootstrap.mjs` no longer grants them and now turns off any write, create, submit, cancel, amend or delete permission the role still holds, leaving read alone. **Not run against the live instance yet** (this change was made without contacting it): until `bootstrap.mjs` is run once more, the stored role keeps those old grants. `verify.mjs` step 7c checks that Norn's writes are refused (403), and has not been run either.
 
+From 2026-10-24 to 2026-10-25 the role held `read` only (#71). Since 2026-10-25 it holds create, read and write on BOM and Journal Entry again, and still no submit, cancel, amend or delete. ERPNext refuses Norn's submit with a permission error; `prove-no-submit.ts` shows this with Norn's own credentials.
+
 | Doctype | read | write | create | submit | cancel / amend / delete |
 |---|---|---|---|---|---|
-| Everything above | yes | no | no | no | no |
+| BOM, Journal Entry (since 2026-10-25) | yes | yes | yes | no | no |
+| Everything else above | yes | no | no | no | no |
 | Before 2026-10-24: BOM | yes | yes | yes | yes | no |
 | Before 2026-10-24: Item Price | yes | yes | yes | n/a | no |
 | Before 2026-10-24: Journal Entry | yes | no | yes | no | no |
@@ -57,7 +61,7 @@ Verified as the Norn user before the change: it could not submit a Journal Entry
 
 ## Verified call sequence (ECO release)
 
-The order in which an ECO's documents are entered, and why. A person does these in the ERPNext screens following the change package; the REST calls are what `verify.mjs` makes, as Administrator since 2026-10-24 (they were verified as the Norn user, when it could write). Base `ERPNEXT_URL`, JSON bodies; token auth for the reads in steps 1 and 8, a login session for the writes. Test items were a finished good `TOP` whose BOM uses a sub-assembly `SUB`, with purchased parts `P1-P3`.
+The order in which an ECO's documents are entered, and why. Since 2026-10-25 Norn creates steps 3 and 7 as drafts and a person submits them (a BOM whose rows point at another new, unsubmitted BOM is left for the person, because ERPNext only lets a BOM use a submitted BOM); a person does the rest in the ERPNext screens following the change package; the REST calls are what `verify.mjs` makes, as Administrator since 2026-10-24 (they were verified as the Norn user, when it could write). Base `ERPNEXT_URL`, JSON bodies; token auth for the reads in steps 1 and 8, a login session for the writes. Test items were a finished good `TOP` whose BOM uses a sub-assembly `SUB`, with purchased parts `P1-P3`.
 
 1. **Read.** `GET /api/resource/Item/<code>` gives `valuation_rate`, `last_purchase_rate`, `lead_time_days`, `min_order_qty`, `safety_stock`. Frappe leaves out null fields, so `default_bom` is absent until a BOM exists. `GET /api/resource/BOM?filters=[["item","=","SUB"],["docstatus","=",1]]&fields=["name","is_active","is_default","raw_material_cost","operating_cost","total_cost"]` works as in the research. Exploded BOM `GET /api/method/erpnext.manufacturing.doctype.bom.bom.get_bom_items?bom=&company=&qty=1&fetch_exploded=1` and `...bom.get_bom_diff?bom1=&bom2=` work for Norn.
 2. **Standard cost.** `POST /api/resource/Item Price` `{"item_code","price_list":"Standard Cost","price_list_rate":12,"buying":1,"currency":"USD","valid_from":"2026-07-01"}`. To supersede: `PUT /api/resource/Item Price/<name>` `{"valid_upto":"2026-06-30"}` first, then POST the new row (both accepted).
@@ -109,7 +113,7 @@ Mapping decisions:
 
 A supplier's limits on what Bowman can buy: Orrin qualifies one UH-grade part number per quarter, Vantage commits 180,000 cells for 2027, Aurelio has 2 turbogenerator build slots in 2028. A real maker's purchasing team keeps these where it keeps its suppliers, because they come out of supplier agreements and change when a buyer renegotiates. ERPNext has no doctype for them, so `seed-constraints.ts` (Administrator, REST, re-runnable) adds one, the way a customer would with the Customize UI:
 
-- **Supplier Constraint** (custom doctype, module Buying, named by its constraint id, e.g. `CON-ORRIN-UH-SLOT`): `supplier` (Link to Supplier), `kind` (`qualification_slot` or `capacity`), `items` (child table **Supplier Constraint Item**, one Link to Item per row), `description`, `window_from` and `window_to`, `capacity_per_year`, `slot_cadence_months`, and the bundle terms `bundle_within_weeks`, `bundle_second_qualification_discount`, `bundle_price_break` (fractions: 0.4 is 40%). Purchase Manager can edit, Purchase User and Norn Agent can read. Norn has read and nothing else, as on every other doctype.
+- **Supplier Constraint** (custom doctype, module Buying, named by its constraint id, e.g. `CON-ORRIN-UH-SLOT`): `supplier` (Link to Supplier), `kind` (`qualification_slot` or `capacity`), `items` (child table **Supplier Constraint Item**, one Link to Item per row), `description`, `window_from` and `window_to`, `capacity_per_year`, `slot_cadence_months`, and the bundle terms `bundle_within_weeks`, `bundle_second_qualification_discount`, `bundle_price_break` (fractions: 0.4 is 40%). Purchase Manager can edit, Purchase User and Norn Agent can read. Norn has read and nothing else, as on every doctype but BOM and Journal Entry.
 - **Seeded:** the dataset's 4 constraints (`CON-ORRIN-UH-SLOT`, `CON-ORRIN-UH-CAPACITY`, `CON-VANTAGE-ALLOC`, `CON-AURELIO-SLOT`), the supplier set to the ERPNext name ("Orrin Magnetics") by the id-to-name map `seed.ts` uses. A second run created nothing. The dataset has no cadence or bundle numbers, only the description text, so those fields are empty and the supply check reads the description. The provenance (`prov`, "invented") is not loaded.
 - The connector reads the doctype when `supplierConstraints` is set in the ERPNext settings (`bowman/norn-config/erpnext.ts`); `norn/connectors/erpnext/NOTES.md` has the read side. Adding the doctype changes the baseline hash: the baseline now carries `supplierConstraints`.
 - Not tested: whether the doctype survives a `bench migrate` or an app update (it is a custom doctype, stored in the database like a Custom Field, so it should); how it renders in the desk UI.

@@ -3,6 +3,7 @@
 // S1) until Norn's own assessment produces it; the connector (norn/connectors/erpnext/src/package.ts) takes any such release.
 //
 // The accounting for each entry is in norn/connectors/erpnext/NOTES.md ("Journal entries").
+import { webBaseUrl } from '../../norn/workers/src/level1/settings.ts';
 import assert from 'node:assert/strict';
 import { ecrs } from '../data/changes.ts';
 import { stock } from '../data/derive.ts';
@@ -15,7 +16,7 @@ const money = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 
 export interface Ecr0417Options {
   /** First day the new standard cost applies. */
   effectiveDate: string;
-  /** Where the decision is readable in Norn. A stand-in until norn/web has decision pages. */
+  /** Where the decision is readable: Fern's ECR page. Default: the same address the PLM's impact_norn_url uses (NORN_WEB_URL). */
   decisionUrl?: string;
   eco?: string;
 }
@@ -48,7 +49,7 @@ export function ecr0417Release(o: Ecr0417Options): { release: EcoRelease; notes:
   const release: EcoRelease = {
     eco: o.eco ?? 'ECO-0319',
     ecr: ecr.id,
-    decision: { id: `DEC-${ecr.id}`, url: o.decisionUrl ?? `https://norn.bowman.example/decisions/DEC-${ecr.id}` },
+    decision: { id: `DEC-${ecr.id}`, url: o.decisionUrl ?? `${webBaseUrl()}/ecr/${encodeURIComponent(ecr.id)}` },
     effectiveDate: o.effectiveDate,
     items: [{ item: change.item, rev: change.toRev, standardCost: newCost }],
     journals: [

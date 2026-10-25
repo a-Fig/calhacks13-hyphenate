@@ -7,7 +7,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { afterEach, beforeEach, test } from 'node:test';
 import { ErpnextClient } from '../src/client.ts';
 import * as connector from '../src/index.ts';
-import { buildErpChangePackage, formatErpChangePackage } from '../src/index.ts';
+import { buildErpChangePackage, draftErpChangePackage, formatErpChangePackage, planDrafts } from '../src/index.ts';
 import type { EcoRelease, ErpChangePackage, ErpnextConnection, ErpnextSettings } from '../src/index.ts';
 
 type Row = Record<string, any>;
@@ -65,10 +65,10 @@ const fixture = (): Db => ({
   'Journal Entry': [],
 });
 
-// ---- a miniature ERPNext that only answers GET ---------------------------------------------------------------------
+// ---- a miniature ERPNext that answers GET, and an insert of a draft (draft.ts) -----------------------------------------
 
 let db: Db;
-let calls: { method: string; path: string; hasBody: boolean }[];
+let calls: { method: string; path: string; hasBody: boolean; body?: Row }[];
 
 const test1 = (r: Row, [field, op, value]: [string, string, any]) => {
   const v = r[field];
@@ -88,11 +88,30 @@ const realFetch = globalThis.fetch;
 function fakeErp() {
   globalThis.fetch = (async (input: URL | string, init?: RequestInit) => {
     const url = new URL(String(input));
-    calls.push({ method: String(init?.method), path: decodeURIComponent(url.pathname), hasBody: init?.body !== undefined });
-    // Norn never writes to the ERP: anything but an explicit GET without a body fails the test that triggered it.
-    if (init?.method !== 'GET' || init.body !== undefined) throw new Error(`the connector sent ${init?.method} ${url.pathname}: Fern never writes to the ERP`);
-    const [, , , rawDoctype] = url.pathname.split('/');
-    const doctype = decodeURIComponent(rawDoctype);
+    const [, api, kind, rawDoctype, docName] = url.pathname.split('/');
+    const doctype = decodeURIComponent(rawDoctype ?? '');
+    const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Row : undefined;
+    calls.push({ method: String(init?.method), path: decodeURIComponent(url.pathname), hasBody: init?.body !== undefined, ...(body ? { body } : {}) });
+    // Fern's one write: inserting a new document as a draft. Anything else that is not an explicit GET without a body fails
+    // the test that triggered it: a submit, an update, a delete, a draft with another docstatus.
+    if (init?.method === 'POST' && api === 'api' && kind === 'resource' && !docName && body) {
+      if (body.docstatus !== 0 || body.doctype !== doctype) throw new Error(`the connector tried to save ${doctype} with docstatus ${body.docstatus}`);
+      const name = `${doctype === 'BOM' ? 'BOM-NEW' : 'JV-NEW'}-${(db[doctype] ?? []).length + 1}`;
+      const { items, accounts, ...head } = body;
+      (db[doctype] ??= []).push({ ...head, name, creation: '2026-09-01' });
+      for (const r of items ?? []) (db['BOM Item'] ??= []).push({ ...r, parent: name, docstatus: 0 });
+      for (const r of accounts ?? []) (db['Journal Entry Account'] ??= []).push({ debit_in_account_currency: 0, credit_in_account_currency: 0, ...r, parent: name });
+      if (doctype === 'Journal Entry') db[doctype].at(-1)!.total_debit = (accounts ?? []).reduce((s: number, r: Row) => s + (r.debit_in_account_currency ?? 0), 0);
+      return json(200, { data: { name, docstatus: 0 } });
+    }
+    if (init?.method === 'PUT' && api === 'api' && kind === 'resource' && docName && body) {
+      const row = (db[doctype] ?? []).find((r) => r.name === decodeURIComponent(docName));
+      if (!row || (row.docstatus ?? 1) !== 0) throw new Error(`the connector tried to update ${doctype} ${docName}, which is not a draft`);
+      if (Object.keys(body).length !== 1 || 'docstatus' in body) throw new Error(`the connector tried to update more than one field of ${docName}`);
+      Object.assign(row, body);
+      return json(200, { data: { ...row } });
+    }
+    if (init?.method !== 'GET' || init.body !== undefined) throw new Error(`the connector sent ${init?.method} ${url.pathname}: Fern only reads and saves drafts`);
     const defaultStatus = doctype === 'Journal Entry' ? 0 : 1;
     const filters: any[] = JSON.parse(url.searchParams.get('filters') ?? '[]');
     const rows = (db[doctype] ?? []).filter((r) => filters.every((f) => test1({ docstatus: defaultStatus, ...r }, f)));
@@ -152,7 +171,7 @@ test('the package lists every line a person enters, in the verified order, with 
     'standard-cost-close:P', 'standard-cost:P', 'bom:A', 'bom-replace:A', 'bom-retire:A', 'journal-entry:scrap', 'journal-entry:cancel',
   ]);
   assert.ok(pkg.lines.every((l) => l.status === 'to-enter'));
-  assert.deepEqual(pkg.counts, { total: 7, entered: 0, toEnter: 7, conflict: 0 });
+  assert.deepEqual(pkg.counts, { total: 7, entered: 0, toEnter: 7, conflict: 0, drafted: 0 });
   assert.deepEqual(pkg.lines.map((l) => l.enteredBy), ['cost accountant', 'cost accountant', 'manufacturing engineer', 'manufacturing engineer', 'manufacturing engineer', 'cost accountant', 'cost accountant']);
   for (const l of pkg.lines) assert.deepEqual(l.trace, { eco: 'ECO-9', ecr: 'ECR-9', decisionId: 'DEC-9', decisionUrl: DECISION });
   assert.equal(pkg.erpUrl, 'http://erp.test');
@@ -218,7 +237,7 @@ test('after a person enters every line as packaged, every line reads as entered'
   const pkg = await build();
   assert.deepEqual(pkg.problems, []);
   assert.ok(pkg.lines.every((l) => l.status === 'entered'), JSON.stringify(statuses(pkg)));
-  assert.deepEqual(pkg.counts, { total: 7, entered: 7, toEnter: 0, conflict: 0 });
+  assert.deepEqual(pkg.counts, { total: 7, entered: 7, toEnter: 0, conflict: 0, drafted: 0 });
   assert.deepEqual(line(pkg, 'standard-cost:P').found, { doctype: 'Item Price', name: 'ip-p2' });
   assert.deepEqual(line(pkg, 'bom:A').found, { doctype: 'BOM', name: 'BOM-A2' });
   assert.deepEqual(line(pkg, 'bom-replace:A').fields[1], { field: 'new_bom', label: 'New BOM', value: 'BOM-A2', from: 'bom:A' }, 'the new BOM is named once it exists');
@@ -260,17 +279,17 @@ test('what is entered but differs, or is not finished, is a conflict or still to
   db['Item Price'].find((p) => p.name === 'ip-p')!.valid_upto = '2025-06-30';
   assert.equal(line(await build(), 'standard-cost-close:P').status, 'conflict', 'closed before the day the new cost starts');
 
-  // A BOM that is saved but not submitted has not landed, and the parent BOM still uses the old one.
+  // A BOM that is saved but not submitted has not landed, and the parent BOM still uses the old one: drafted, not entered.
   enterBom(0);
   pkg = await build();
-  assert.equal(line(pkg, 'bom:A').status, 'to-enter');
+  assert.equal(line(pkg, 'bom:A').status, 'drafted');
   assert.match(line(pkg, 'bom:A').note!, /BOM-A2 is saved but not submitted/);
   assert.deepEqual(line(pkg, 'bom:A').found, { doctype: 'BOM', name: 'BOM-A2' });
 
   // Journal entries: a draft is not posted; a different amount or date is a conflict.
   enterJournals(0);
   pkg = await build();
-  assert.deepEqual([line(pkg, 'journal-entry:scrap').status, line(pkg, 'journal-entry:scrap').note], ['to-enter', 'ACC-JV-1 is saved as a draft; submit it to post']);
+  assert.deepEqual([line(pkg, 'journal-entry:scrap').status, line(pkg, 'journal-entry:scrap').note], ['drafted', 'ACC-JV-1 is saved as a draft; submit it to post']);
   db['Journal Entry'][0].total_debit = 99;
   db['Journal Entry'][1].posting_date = '2026-01-05';
   db['Journal Entry'][1].docstatus = 1;
@@ -310,17 +329,137 @@ test('the connector only reads: every request is an explicit GET without a body'
   assert.ok(calls.every((c) => !c.hasBody));
 });
 
-test('nothing in the connector can write: the client has two methods, and the exports name no write', async () => {
+test('the connector writes only drafts: the client reads, and draft.ts alone inserts, never submits, updates or deletes', async () => {
   assert.deepEqual(Object.getOwnPropertyNames(ErpnextClient.prototype).sort(), ['constructor', 'get', 'list']);
   assert.deepEqual(Object.keys(connector).filter((k) => /apply|write|post|put|submit|save/i.test(k)), []);
-  assert.deepEqual(Object.keys(connector.connect({ ...conn, ...settings })).filter((k) => /apply|write|post|put|submit|save/i.test(k)), []);
-  // No source file names an HTTP method other than GET.
+  assert.deepEqual(Object.keys(connector.connect({ ...conn, ...settings })).filter((k) => /apply|write|post|put|submit|save|draft/i.test(k)), []);
+  // No source file but draft.ts names an HTTP method other than GET; draft.ts names POST once and nothing else.
   const dir = new URL('../src/', import.meta.url);
   for (const f of readdirSync(dir).filter((n) => n.endsWith('.ts'))) {
     const src = readFileSync(new URL(f, dir), 'utf8');
+    if (f === 'draft.ts') {
+      assert.doesNotMatch(src, /['"`](PATCH|DELETE)['"`]/, 'draft.ts names a delete');
+      assert.doesNotMatch(src, /frappe\.client|\/api\/method|docstatus\s*[:=]\s*[12]\b/, 'draft.ts calls a method or sets a submitted docstatus');
+      // The one update is on a document read back as a draft just before.
+      const put = src.slice(src.indexOf('async setOnDraft'));
+      assert.ok(put.indexOf('docstatus !== 0') >= 0 && put.indexOf('docstatus !== 0') < put.indexOf("'PUT'"), 'setOnDraft checks for a draft before it updates');
+      assert.equal(src.match(/#send\('PUT'/g)?.length, 1, 'one update call');
+      continue;
+    }
     assert.doesNotMatch(src, /method\s*:\s*['"`](?!GET\b)/, `${f} sets a method other than GET`);
     assert.doesNotMatch(src, /['"`](POST|PUT|PATCH|DELETE)['"`]/, `${f} names a write method`);
   }
+});
+
+// ---- Fern's drafts (Tyler, 2026-10-25, reversing #71) ---------------------------------------------------------------
+
+const draft = (pkg: ErpChangePackage) => draftErpChangePackage(conn, settings, pkg);
+const posts = () => calls.filter((c) => c.method !== 'GET');
+
+test('the draft planner takes the BOM version and the journal entries, and leaves the rest for a person', async () => {
+  const plan = planDrafts(await build(), 'eco', 'entry');
+  assert.deepEqual(plan.drafts.map((d) => [d.lineId, d.doctype]), [['bom:A', 'BOM'], ['journal-entry:scrap', 'Journal Entry'], ['journal-entry:cancel', 'Journal Entry']]);
+  assert.deepEqual(plan.skipped, []);
+  const bom = plan.drafts[0];
+  assert.deepEqual(bom.identity, [['eco', 'ECO-9'], ['item', 'A']]);
+  assert.equal(bom.doc.docstatus, 0);
+  assert.deepEqual({ ...bom.doc, items: undefined }, {
+    item: 'A', quantity: 1, company: 'Co', is_active: 1, is_default: 1, rm_cost_as_per: 'Price List', buying_price_list: 'Cost',
+    eco: 'ECO-9', released_on: '2026-01-01', decision: DECISION, docstatus: 0, items: undefined,
+  });
+  assert.deepEqual(bom.doc.items, [{ item_code: 'P', qty: 3, uom: 'Nos' }, { item_code: 'Q', qty: 1, uom: 'Nos' }]);
+  const je = plan.drafts[1];
+  assert.deepEqual(je.identity, [['eco', 'ECO-9'], ['entry', 'scrap']]);
+  assert.equal(je.doc.eco, 'ECO-9');
+  assert.equal(je.doc.decision, DECISION);
+  assert.equal((je.doc.accounts as Row[]).length, 4);
+  assert.match(String(je.doc.user_remark), /Drafted by Fern for ECO-9/);
+});
+
+test('a line that waits on another new BOM, or that is already in ERPNext, is not planned', async () => {
+  const pkg = await build();
+  const bomLine = line(pkg, 'bom:A');
+  bomLine.tables[0].rows[0].push({ field: 'bom_no', label: 'BOM No', value: null, from: 'bom:P' });
+  line(pkg, 'journal-entry:scrap').status = 'drafted';
+  const plan = planDrafts(pkg, 'eco', 'entry');
+  assert.deepEqual(plan.drafts.map((d) => d.lineId), ['journal-entry:cancel']);
+  assert.deepEqual(plan.skipped, [{ lineId: 'bom:A', why: 'needs the document from bom:P submitted first' }]);
+});
+
+test('Fern saves the drafts once: they read back as drafted, and a second run saves nothing', async () => {
+  const first = await draft(await build());
+  assert.deepEqual(first.created.map((c) => [c.lineId, c.doctype]), [['bom:A', 'BOM'], ['journal-entry:scrap', 'Journal Entry'], ['journal-entry:cancel', 'Journal Entry']]);
+  assert.deepEqual(first.failed, []);
+  // Only inserts, each a draft carrying the ECO and the decision.
+  assert.deepEqual(posts().map((c) => [c.method, c.path, c.body?.docstatus, c.body?.eco, c.body?.decision]), [
+    ['POST', '/api/resource/BOM', 0, 'ECO-9', DECISION], ['POST', '/api/resource/Journal Entry', 0, 'ECO-9', DECISION], ['POST', '/api/resource/Journal Entry', 0, 'ECO-9', DECISION],
+  ]);
+  assert.deepEqual(posts().slice(1).map((c) => c.body?.entry), ['scrap', 'cancel']);
+
+  const pkg = await build();
+  assert.deepEqual(statuses(pkg), {
+    'standard-cost-close:P': 'to-enter', 'standard-cost:P': 'to-enter', 'bom:A': 'drafted', 'bom-replace:A': 'to-enter', 'bom-retire:A': 'to-enter',
+    'journal-entry:scrap': 'drafted', 'journal-entry:cancel': 'drafted',
+  });
+  assert.equal(pkg.counts.drafted, 3);
+  assert.equal(pkg.counts.entered, 0);
+  assert.deepEqual(line(pkg, 'bom:A').found, { doctype: 'BOM', name: first.created[0].name });
+
+  calls = [];
+  const again = await draft(pkg);
+  assert.deepEqual([again.created, again.failed], [[], []]);
+  assert.deepEqual(posts(), [], 'a re-run saves nothing');
+});
+
+test('a draft whose decision link is out of date gets the package link, and nothing else changes', async () => {
+  await draft(await build());
+  const bom = db.BOM.find((b) => b.eco === 'ECO-9' && b.docstatus === 0)!;
+  const je = db['Journal Entry'].find((j) => j.entry === 'scrap')!;
+  bom.decision = 'https://norn.bowman.example/decisions/DEC-ECR-0417';
+  je.decision = 'https://norn.bowman.example/decisions/DEC-ECR-0417';
+  const before = await build();
+  assert.equal(line(before, 'bom:A').status, 'conflict', 'the BOM read compares the decision link');
+  calls = [];
+  const r = await draft(before);
+  assert.deepEqual(r.updated.map((u) => [u.lineId, u.name, u.field]), [['bom:A', bom.name, 'decision'], ['journal-entry:scrap', je.name, 'decision']]);
+  assert.deepEqual(r.created, []);
+  assert.deepEqual(posts().map((c) => [c.method, c.body]), [['PUT', { decision: DECISION }], ['PUT', { decision: DECISION }]]);
+  assert.equal(line(await build(), 'bom:A').status, 'drafted');
+  // A submitted document is never touched.
+  bom.docstatus = 1;
+  bom.decision = 'x';
+  calls = [];
+  const again = await draft(await build());
+  assert.deepEqual([again.updated, posts()], [[], []]);
+});
+
+test('a restart that read ERPNext before the drafts landed still finds them by ECO and line, and saves nothing', async () => {
+  const stale = await build(); // read before the drafts existed: every line is to enter
+  await draft(await build());
+  calls = [];
+  const again = await draft(stale);
+  assert.deepEqual(again.created, []);
+  assert.deepEqual(again.existing.map((e) => e.lineId), ['bom:A', 'journal-entry:scrap', 'journal-entry:cancel']);
+  assert.deepEqual(posts(), []);
+});
+
+test('a refused save is reported for the line, and the other drafts are still saved', async () => {
+  const pkg = await build();
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (input: URL | string, init?: RequestInit) =>
+    init?.method === 'POST' && String(input).includes('BOM')
+      ? new Response(JSON.stringify({ exc_type: 'PermissionError', _server_messages: JSON.stringify([JSON.stringify({ message: 'No permission for BOM' })]) }), { status: 403 })
+      : real(input, init)) as typeof fetch;
+  const r = await draft(pkg);
+  assert.deepEqual(r.failed.map((f) => f.lineId), ['bom:A']);
+  assert.match(r.failed[0].why, /403.*PermissionError - No permission for BOM/);
+  assert.deepEqual(r.created.map((c) => c.lineId), ['journal-entry:scrap', 'journal-entry:cancel']);
+});
+
+test('the package names the person in each seat when the settings do', async () => {
+  const pkg = await build(release, { ...settings, changePackage: { ...settings.changePackage!, people: { 'cost accountant': 'Sam', 'manufacturing engineer': 'Olu' } } });
+  assert.equal(line(pkg, 'bom:A').person, 'Olu');
+  assert.equal(line(pkg, 'journal-entry:scrap').person, 'Sam');
 });
 
 test('BOM line changes go into the new version', async () => {
