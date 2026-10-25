@@ -38,11 +38,6 @@ const STATEMENT = `
 <p>See <a href="https://example.com/norn/ECR-0417">the full report</a>.</p>`;
 const TAGS = ['<table', '<thead', '<h4', '<b>', '<ul', '<li>', 'color:#b91c1c', '<a href'];
 
-async function setSeries(prefix: string, next: number) {
-  const cur = (await admin.get('/api/resource/Document Naming Settings/Document Naming Settings')).body.data;
-  await admin.post('/api/method/run_doc_method', { docs: JSON.stringify({ ...cur, transaction_type: 'x', prefix, current_value: next - 1 }), method: 'update_series_start' });
-}
-
 async function clear() {
   await norn.put('/api/resource/ECR/ECR-0417', Object.fromEntries(IMPACT_FIELDS.map((k) => [k, null])));
   await admin.login('Administrator', env.PLM_ADMIN_PASSWORD);
@@ -157,30 +152,55 @@ async function main() {
     try { ssh('docker rm -f bowman-plm-webhook-sink'); } catch { /* gone */ }
   }
 
-  // Steps 7 to 12 make throwaway records. Each step lists what it made, in creation order, as soon as it exists, and
-  // its finally block removes them and puts the naming series back. A failed delete is not ignored: the step fails and
-  // names the leftover, and no naming series is reset for the rest of the run, so a reset never hands out the number
-  // of a record that is still there.
+  // Steps 7 to 12 make throwaway records. Each step lists what it made, in creation order, as soon as it exists, and its
+  // finally block removes exactly those, plus what this run made on them: the release bot's ECO for a probe it approved,
+  // and comments by this run's users. Anything else found on a probe is left, with the probe, and fails the step by name.
+  // A failed delete is not ignored either. The naming series are never rewound here: Frappe winds a series back itself
+  // when the deleted record is the last in it, and a rewind of ours could hand out a number someone filed meanwhile.
   type Made = [doctype: string, name: string][];
-  const leftBehind: string[] = [];
+  const BOT = 'eco-release@bowman-aviation.example';
+  const runUsers = new Set(['Administrator', 'norn@bowman-aviation.example', 'jeff.hargrove@bowman-aviation.example', 'dana.okafor@bowman-aviation.example', 'rafael.quintero@bowman-aviation.example', BOT]);
   const reason = (e: unknown) => (e instanceof PlmError ? `HTTP ${e.status}` : String(e)).slice(0, 80);
   const removeProbes = async (made: Made) => {
     const left: string[] = [];
-    // An ECO cannot be deleted while an ECR links to it, and the release bot makes ECOs the step may not have recorded.
-    for (const [, nm] of made.filter(([dt]) => dt === 'ECR')) {
+    const keep = new Set<string>(); // probes left in place because they carry a record this run did not make
+    const comments: string[] = [];
+    // `made` grows while this runs: the bot's ECOs are added, and checked in turn.
+    for (let i = 0; i < made.length; i++) {
+      const [dt, nm] = made[i];
       try {
-        const r = await admin.get(`/api/resource/ECR/${enc(nm)}`, undefined, { allow: true });
+        const r = await admin.get(`/api/resource/${enc(dt)}/${enc(nm)}`, undefined, { allow: true });
         if (r.status === 404) continue;
-        if (r.status !== 200) throw new PlmError(r.status, 'GET', `/api/resource/ECR/${nm}`, r.body);
-        for (const x of await admin.list('ECO', { fields: ['name'], filters: [['ecr', '=', nm]] }))
-          if (!made.some(([d, n]) => d === 'ECO' && n === x.name)) made.push(['ECO', x.name]);
-        if (r.body.data.released_eco) await admin.put(`/api/resource/ECR/${enc(nm)}`, { released_eco: null });
-      } catch (e) { left.push(`ECR ${nm} (could not unlink its ECO: ${reason(e)})`); }
+        if (r.status !== 200) throw new PlmError(r.status, 'GET', `/api/resource/${dt}/${nm}`, r.body);
+        const since = r.body.data.creation as string; // the server's clock, comparable to the rows below
+        const foreign: string[] = [];
+        if (dt === 'ECR') {
+          for (const x of await admin.list('ECO', { fields: ['name', 'owner', 'creation'], filters: [['ecr', '=', nm]] })) {
+            if (made.some(([d, n]) => d === 'ECO' && n === x.name)) continue;
+            if (x.owner === BOT && x.creation >= since) made.push(['ECO', x.name]);
+            else foreign.push(`ECO ${x.name} by ${x.owner}`);
+          }
+        }
+        for (const c of await admin.list('Comment', { fields: ['name', 'owner', 'creation'], filters: [['reference_doctype', '=', dt], ['reference_name', '=', nm]] })) {
+          if (runUsers.has(c.owner) && c.creation >= since) comments.push(c.name);
+          else foreign.push(`Comment ${c.name} by ${c.owner}`);
+        }
+        if (foreign.length) { keep.add(`${dt} ${nm}`); left.push(`${dt} ${nm}, kept because it carries records this run did not make: ${foreign.join(', ')}`); }
+      } catch (e) { keep.add(`${dt} ${nm}`); left.push(`${dt} ${nm} (${reason(e)})`); }
     }
+    const ours = new Set(made.map(([d, n]) => `${d} ${n}`));
+    try {
+      for (const name of comments) await admin.del(`/api/resource/Comment/${enc(name)}`);
+      // An ECO cannot be deleted while an ECR links to it. Only a link to an ECO of this run's is cleared.
+      for (const [dt, nm] of made.filter(([d]) => d === 'ECR')) {
+        const r = await admin.get(`/api/resource/ECR/${enc(nm)}`, undefined, { allow: true });
+        const eco = r.status === 200 ? r.body.data.released_eco : undefined;
+        if (eco && ours.has(`ECO ${eco}`) && !keep.has(`ECO ${eco}`)) await admin.put(`/api/resource/${dt}/${enc(nm)}`, { released_eco: null });
+      }
+    } catch (e) { left.push(`comments or ECO links on this step's probes (${reason(e)})`); }
     for (const [dt, nm] of [...made].reverse()) {
+      if (keep.has(`${dt} ${nm}`)) continue;
       try {
-        for (const c of await admin.list('Comment', { fields: ['name'], filters: [['reference_doctype', '=', dt], ['reference_name', '=', nm]] }))
-          await admin.del(`/api/resource/Comment/${enc(c.name)}`);
         if (!(await admin.exists(dt, nm))) continue;
         await admin.del(`/api/resource/${enc(dt)}/${enc(nm)}`, { allow: true });
         if (await admin.exists(dt, nm)) left.push(`${dt} ${nm}`);
@@ -188,36 +208,9 @@ async function main() {
     }
     return left;
   };
-  // Puts each naming series the step took a number from back where it was: one below the lowest number taken. A series
-  // the step took nothing from is left alone, and so is one whose next number past the step's highest is already used:
-  // someone else filed a record meanwhile, and a reset would hand its number out again.
-  const restoreSeries = async (made: Made) => {
-    const taken = new Map<string, { doctype: string; nums: number[] }>();
-    for (const [dt, nm] of made) {
-      const m = /^([A-Z]+-)(\d{4})$/.exec(nm);
-      if (!m || m[1] !== `${dt}-`) continue;
-      const s = taken.get(m[1]) ?? { doctype: dt, nums: [] };
-      s.nums.push(Number(m[2]));
-      taken.set(m[1], s);
-    }
-    if (!taken.size) return;
-    if (leftBehind.length) { log(`  naming series not reset, because a probe record is still there: ${leftBehind.join(', ')}`); return; }
-    const done: string[] = [];
-    for (const [prefix, { doctype, nums }] of taken) {
-      const next = Math.min(...nums);
-      const after = `${prefix}${String(Math.max(...nums) + 1).padStart(4, '0')}`;
-      if (await admin.exists(doctype, after)) { log(`  naming series ${prefix} not reset: ${after} exists, filed by someone else during the run`); continue; }
-      await setSeries(prefix, next);
-      done.push(`next ${prefix}${String(next).padStart(4, '0')}`);
-    }
-    if (done.length) log(`  naming series restored (${done.join(', ')})`);
-  };
-  // `also` is removed too, but took no number from a naming series (a rename target).
-  const probeCleanup = async (made: Made, also: Made = []) => {
-    const left = await removeProbes([...made, ...also]);
-    leftBehind.push(...left);
-    check(left.length === 0, left.length ? `probe records left behind, remove by hand: ${left.join(', ')}` : `probe records removed (${made.map(([, n]) => n).join(', ') || 'none made'})`);
-    await restoreSeries(made);
+  const probeCleanup = async (made: Made) => {
+    const left = await removeProbes(made);
+    check(left.length === 0, left.length ? `probe records left behind, remove by hand: ${left.join('; ')}` : `probe records removed (${made.map(([, n]) => n).join(', ') || 'none made'})`);
   };
   const probeEcr = (title: string, extra: object = {}) => admin.post('/api/resource/ECR', { doctype: 'ECR', title, program: 'Vesper V4', priority: 'Routine', justification_code: 'D', company_class: 'Class I', faa_class: 'Minor', description: 'probe', need: 'probe', ...extra });
   const refusal = (r: { status: number; body: any }) => {
@@ -261,9 +254,14 @@ async function main() {
   try {
     const probe = (await probeEcr('Permission probe (deleted after the test)', { decision_note: 'CCB private deliberation (test)', ccb_meeting: '2026-11-12' })).body.data;
     made8.push(['ECR', probe.name]);
-    const rn = await norn.post('/api/method/frappe.client.rename_doc', { doctype: 'ECR', old_name: probe.name, new_name: 'ECR-9999' }, { allow: true });
-    log(`  rename_doc -> ${refusal(rn)}`);
-    check(rn.status >= 400 && (await admin.exists('ECR', probe.name)) && !(await admin.exists('ECR', 'ECR-9999')), 'rename refused, the ECR keeps its number');
+    // The rename target must be free beforehand, so a rename that worked is this run's record and is removed with the probe.
+    if (await admin.exists('ECR', 'ECR-9999')) check(false, 'the rename target ECR-9999 is free (it is not, so the rename was not tried)');
+    else {
+      const rn = await norn.post('/api/method/frappe.client.rename_doc', { doctype: 'ECR', old_name: probe.name, new_name: 'ECR-9999' }, { allow: true });
+      if (await admin.exists('ECR', 'ECR-9999')) made8.push(['ECR', 'ECR-9999']);
+      log(`  rename_doc -> ${refusal(rn)}`);
+      check(rn.status >= 400 && (await admin.exists('ECR', probe.name)) && !(await admin.exists('ECR', 'ECR-9999')), 'rename refused, the ECR keeps its number');
+    }
 
     const form = new FormData();
     form.append('file', new Blob(['probe'], { type: 'text/plain' }), 'probe.txt');
@@ -344,7 +342,6 @@ async function main() {
   // Document.rename(force=True) ignores allow_rename and skips Before Validate; the release bot holds write on ECR, a CM analyst on NCR.
   // The rename targets must be free beforehand; only names this run created (a rename that worked) are ever deleted.
   const made11: Made = [];
-  const renamed11: Made = [];
   try {
     const hdrs = (await admin.get('/api/resource/Webhook/ecr.approved')).body.data.webhook_headers as { key: string; value: string }[];
     const bot = new Plm(base, { token: hdrs.find((h) => h.key === 'Authorization')!.value.replace(/^token /, '') });
@@ -358,16 +355,16 @@ async function main() {
       const forceRename = (who: Plm, doc: any, to: string) =>
         who.post('/api/method/run_doc_method', { docs: JSON.stringify(doc), method: 'rename', args: JSON.stringify({ name: to, force: true }) }, { allow: true });
       const botTry = await forceRename(bot, (await bot.get(`/api/resource/ECR/${r11.name}`)).body.data, 'ECR-9999');
-      if (botTry.status < 400) renamed11.push(['ECR', 'ECR-9999']);
+      if (await admin.exists('ECR', 'ECR-9999')) made11.push(['ECR', 'ECR-9999']);
       const danaTry = await forceRename(dana, (await dana.get(`/api/resource/NCR/${n11.name}`)).body.data, 'NCR-9999');
-      if (danaTry.status < 400) renamed11.push(['NCR', 'NCR-9999']);
+      if (await admin.exists('NCR', 'NCR-9999')) made11.push(['NCR', 'NCR-9999']);
       const kept = (await admin.exists('ECR', r11.name)) && !(await admin.exists('ECR', 'ECR-9999')) && (await admin.exists('NCR', n11.name)) && !(await admin.exists('NCR', 'NCR-9999'));
       log(`  run_doc_method rename force=true: ECR ${r11.name} as the release bot -> ${refusal(botTry)}; NCR ${n11.name} as the CM analyst -> ${refusal(danaTry)}; names unchanged: ${kept}`);
       check(botTry.status === 403 && (await admin.exists('ECR', r11.name)) && !(await admin.exists('ECR', 'ECR-9999')), 'the release bot cannot rename an ECR, even forced');
       check(danaTry.status === 403 && (await admin.exists('NCR', n11.name)) && !(await admin.exists('NCR', 'NCR-9999')), 'a CM analyst cannot rename an NCR, even forced');
     }
   } finally {
-    await probeCleanup(made11, renamed11);
+    await probeCleanup(made11);
   }
 
   log('12. Child rows cannot be discarded or renamed, and a File cannot be moved onto an ECR (throwaway ECR, removed afterwards)');
