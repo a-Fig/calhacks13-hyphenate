@@ -30,6 +30,7 @@ Node 24, no dependencies, TypeScript with erasable syntax only. `check.ts` fails
 | Volume plan | every month 2026-10 to 2030-12 by program and site; 10 aircraft built so far | `volume.ts` |
 | Released ECOs | 10, each with forecast at approval and actual | `history.ts` |
 | Open NCRs / ECRs | 5 / 10, in engineer prose plus ECP fields | `changes.ts` |
+| Finance | a budget and a cost of a week of delay per program, cash and monthly burn; all invented | `finance.ts` |
 | Answer key | 5 planted scenarios and 3 background traps | `scenarios.ts` |
 
 Vesper V4 standard cost rolls up to $2,800,019 with shares of 20.0% avionics, 22.0% motors/inverters/propellers, 15.0% battery, 20.0% airframe, 10.0% actuation and thermal, 13.0% other. Labor is 14.0% ($392k). With the at-rate factors in `rateFactors` it falls to $1.797M against the $1.8M target. Meridian M6 rolls up to $5.007M and reuses 29 of 71 Vesper powertrain and battery items (40.8%).
@@ -72,6 +73,10 @@ Every record has `prov: { basis: 'sourced' | 'invented', ref?, note? }`. Section
 - **Standard cost is frozen at the roll-up.** `standardCostHistory` shows how it got from $3.46M to $2.8M; only the last point is derived.
 - **Emails use `bowman-aviation.example`.** Names are invented. Supplier names were chosen not to match real companies; Dunmore was renamed to Ferrow after a review found a real firm of that name.
 - **A fresh-context review found 21 issues** (contradictions between prose and data, ECO price history arriving after cut-in, real names in descriptions). All but the ECR-0417 priority question were fixed; priority stays urgent because the first aircraft reaches the held station in about three weeks (MIL-HDBK-61A: urgent means potential line stoppage within 30 days).
+
+## Finance
+
+`finance.ts` (invented, each record with its rationale): FY2027 (July to June) budgets of $72M for Vesper and $38M for Meridian with $20.4M and $13.2M spent by 2026-10-24; $236M cash and $10.4M a month of burn (22.7 months); and a weekly cost of delay, $20k/$32k/$55k (p10/p50/p90) for Vesper's line and $10k/$16k/$30k for Meridian's. Vesper's budget covers the 16 aircraft its period completes at the $2.8M standard cost plus about $27M of engineering and certification; burn is the two budgets plus $15M of overhead and plant build-out over 12 months. `check.ts` checks those relations. The ERP seed does not carry any of it yet.
 
 ## Known gaps
 

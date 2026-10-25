@@ -43,6 +43,10 @@
     },
     "history": {
       "basis": "invented"
+    },
+    "finance": {
+      "basis": "invented",
+      "note": "Invented books for the fictional company; each record carries its own rationale. Not in the ERP seed."
     }
   },
   "company": {
@@ -23459,7 +23463,8 @@
           {
             "label": "Qualification: vibration re-test on the endurance rig",
             "basis": "engineer_estimate",
-            "oneTime": 18500
+            "oneTime": 18500,
+            "factor": "qualification"
           },
           {
             "label": "Scrap and write-off of Rev B inventory",
@@ -23477,11 +23482,13 @@
             "label": "Installation labor, 12 h per aircraft at $110",
             "basis": "engineer_estimate",
             "unitCost": 1320,
-            "quantity": 10
+            "quantity": 10,
+            "factor": "retrofit_installation"
           },
           {
             "label": "Re-inspection and test after retrofit",
-            "basis": "not_provided"
+            "basis": "not_provided",
+            "factor": "retrofit_test"
           }
         ],
         "logisticsSupport": [
@@ -23743,7 +23750,8 @@
           },
           {
             "label": "Whirl-tower, flutter and noise testing",
-            "basis": "not_provided"
+            "basis": "not_provided",
+            "factor": "qualification"
           },
           {
             "label": "Hover performance flight test",
@@ -23995,7 +24003,8 @@
           {
             "label": "Qualification and soak testing (Hollis)",
             "basis": "supplier_quote",
-            "oneTime": 36000
+            "oneTime": 36000,
+            "factor": "qualification"
           },
           {
             "label": "Engineering and data revision",
@@ -24133,7 +24142,8 @@
           {
             "label": "Qualification (Hollis)",
             "basis": "supplier_quote",
-            "oneTime": 22000
+            "oneTime": 22000,
+            "factor": "qualification"
           },
           {
             "label": "Engineering and data revision",
@@ -24268,7 +24278,8 @@
           {
             "label": "Orrin qualification lot",
             "basis": "supplier_quote",
-            "oneTime": 96000
+            "oneTime": 96000,
+            "factor": "qualification"
           },
           {
             "label": "Engineering and testing",
@@ -24387,7 +24398,8 @@
           {
             "label": "Orrin qualification lot",
             "basis": "supplier_quote",
-            "oneTime": 142000
+            "oneTime": 142000,
+            "factor": "qualification"
           },
           {
             "label": "Engineering and testing",
@@ -24602,5 +24614,76 @@
         "note": "Background trap: cost reduction that cuts redundancy."
       }
     }
-  ]
+  ],
+  "finance": {
+    "budgets": [
+      {
+        "program": "vesper",
+        "period": {
+          "label": "FY2027 (Jul 2026 to Jun 2027)",
+          "from": "2026-07",
+          "to": "2027-06"
+        },
+        "budgetUsd": 72000000,
+        "spentToDateUsd": 20400000,
+        "asOf": "2026-10-24",
+        "prov": {
+          "basis": "invented",
+          "note": "16 aircraft in the period at the $2.8M standard cost ($44.8M) plus about $27M engineering, certification and line overhead; 28% spent after 31% of the year."
+        }
+      },
+      {
+        "program": "meridian",
+        "period": {
+          "label": "FY2027 (Jul 2026 to Jun 2027)",
+          "from": "2026-07",
+          "to": "2027-06"
+        },
+        "budgetUsd": 38000000,
+        "spentToDateUsd": 13200000,
+        "asOf": "2026-10-24",
+        "prov": {
+          "basis": "invented",
+          "note": "Development program, no aircraft completed in the period: engineering, test articles and certification work; 35% spent after 31% of the year (first-flight article procurement is front-loaded)."
+        }
+      }
+    ],
+    "delayCosts": [
+      {
+        "program": "vesper",
+        "perWeekUsd": {
+          "p10": 20000,
+          "p50": 32000,
+          "p90": 55000
+        },
+        "basis": "The controller-install station crew idle or redeployed (6 people x 40 h x about $100 per hour is $24k), carrying a held aircraft (1 held x $2.8M x 12% a year / 52 is $6.5k) and expediting.",
+        "prov": {
+          "basis": "invented",
+          "note": "Crew from the work-center rates in this dataset (WC-SYS $100 per hour); carrying cost at a 12% cost of capital; p10 assumes the crew is redeployed part of the week, p90 four held aircraft and overtime."
+        }
+      },
+      {
+        "program": "meridian",
+        "perWeekUsd": {
+          "p10": 10000,
+          "p50": 16000,
+          "p90": 30000
+        },
+        "basis": "The prototype build team waiting on the change (about 10 people x 40 h x $95 per hour is $38k at full idleness, so the p50 assumes a share of the week is redeployed) and test-article carrying cost.",
+        "prov": {
+          "basis": "invented",
+          "note": "Smaller than Vesper because no production aircraft is held; sized from the work-center rates in this dataset and a partial redeployment assumption."
+        }
+      }
+    ],
+    "cash": {
+      "cashOnHandUsd": 236000000,
+      "monthlyBurnUsd": 10400000,
+      "asOf": "2026-10-24",
+      "prov": {
+        "basis": "invented",
+        "note": "Pre-revenue: no sales yet (S/N 005 to 010 are in the hangar, undelivered). Burn is the two program budgets plus $15M overhead and Georgia plant build-out over 12 months; cash is 22.7 months of it."
+      }
+    }
+  }
 }
