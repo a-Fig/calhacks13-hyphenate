@@ -238,7 +238,26 @@ const ACTION_WORD: Record<string, string> = {
   edit_pr_text: 'edit the ECR text',
 };
 
-const principalName = (s: Snapshot, id: Id) => s.principals.find(p => p.identity.toHexString() === id.toHexString())?.name ?? id.toHexString().slice(0, 8);
+// An agent principal's name is its session identity (agent:norn/level1/l1-ECR-0417-r1-e1-a1); show people what it is.
+const readableName = (name: string) => {
+  const m = /^agent:norn\/([a-z]+?)(\d*)\//.exec(name);
+  if (!m) return name;
+  return m[1] === 'level' && m[2] ? `Fern Level ${m[2]} agent` : `Fern ${m[1]}${m[2]} agent`;
+};
+const principalName = (s: Snapshot, id: Id) => {
+  const name = s.principals.find(p => p.identity.toHexString() === id.toHexString())?.name;
+  return name ? readableName(name) : id.toHexString().slice(0, 8);
+};
+
+/** A statement line's panel title and text: a leading [tag] becomes words in the title, and the title is the line's subject. */
+function lineTrace(text: string, fallback: string): { title: string; summary: string } {
+  const tag = /^\[([a-z ]+)\]\s*/i.exec(text);
+  const summary = tag ? text.slice(tag[0].length) : text;
+  const subject = /^([^:.(]{3,60}?)\s*(?:\([^)]*\))?\s*:/.exec(summary)?.[1];
+  const label = tag ? tag[1].charAt(0).toUpperCase() + tag[1].slice(1) : '';
+  const title = label && subject ? `${label}: ${subject}` : label || subject || fallback;
+  return { title, summary };
+}
 
 // ---------------------------------------------------------------- the list
 
@@ -368,8 +387,8 @@ function statementView(s: Snapshot, st: StatementRow, pr: PrRow, src: StatementR
           ? n.resultKey
           : synth(`n${i}`, n.label, e(n.evidence), `Stated in Fern's Level ${st.level} impact statement. It is not a check result.`, { text: fmt(n, n.p50), range: n.p10 !== n.p90 ? `${fmt(n, n.p10)} – ${fmt(n, n.p90)}` : undefined }),
     })),
-    drivers: st.drivers.map((d, i) => ({ text: d.text, evidence: e(d.evidence), traceId: synth(`d${i}`, 'A driver', e(d.evidence), d.text) })),
-    claims: st.claims.map((c, i) => ({ text: c.text, evidence: e(c.evidence), traceId: synth(`c${i}`, 'A claim', e(c.evidence), c.text) })),
+    drivers: st.drivers.map((d, i) => { const l = lineTrace(d.text, 'A driver'); return { text: d.text, evidence: e(d.evidence), traceId: synth(`d${i}`, l.title, e(d.evidence), l.summary) }; }),
+    claims: st.claims.map((c, i) => { const l = lineTrace(c.text, 'A claim'); return { text: c.text, evidence: e(c.evidence), traceId: synth(`c${i}`, l.title, e(c.evidence), l.summary) }; }),
     assumptions: st.assumptions.map(a => ({
       key: a.key,
       label: traces[`in:${a.key}`]?.title ?? a.key,
