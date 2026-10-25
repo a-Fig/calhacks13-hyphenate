@@ -12,6 +12,9 @@
 //   NORN_L1_MAX_TURNS     default 12            NORN_L1_TIMEOUT_MS   default 240000
 //   NORN_L1_MAX_ATTEMPTS  default 2             NORN_L1_RETRY_DELAY_MS default 60000
 //   NORN_L1_CONCURRENCY   default 1
+//   NORN_L1_SETTLE_MS     default 180000: at most this long after the cost run finished the dispatcher holds a session back while
+//                         the ECR's timeline or supply check is queued, running or being re-run (every ECR filed re-runs its
+//                         peers' supply check); after that it goes ahead and the statement says supply is unavailable.
 //   NORN_L1_WAIT_FOR_RESEARCH=1  the research worker runs next to this: the first session for a revision waits for
 //                         its research result, at most NORN_L1_RESEARCH_WAIT_MS (default 600000) after the cost run
 //                         finished. NORN_L1_RESEARCH_ECRS limits the wait to the ECRs the research worker covers.
@@ -35,8 +38,8 @@ import { actorFor, decide, jobIdFor, jobsFromEvents, researchRevisionOfJobId, sp
 import { jobFactsOf } from './facts.ts';
 import { jobPrompt, systemPromptFor } from './prompt.ts';
 import { settingsFromEnv, type Level1Settings } from './settings.ts';
-import { SIBLING_STAGES, siblingCutoffUs, siblingOf } from './siblings.ts';
-import { crSeqOfRun, runRowsOf, toRunRow } from './source.ts';
+import { SETTLE_WAIT_MS, settleCapUs, siblingsUnsettled } from './siblings.ts';
+import { crSeqOfRun, runRowsOf, snapshotForRun, toRunRow } from './source.ts';
 
 export { jobFactsOf };
 
@@ -65,7 +68,7 @@ export const RESEARCH_RESULT_EVENT = 'research_result';
 export const RESEARCH_RESULTS_QUERY = `SELECT * FROM agent_event WHERE role = '${RESEARCH_ROLE}' AND event_type = '${RESEARCH_RESULT_EVENT}'`;
 
 /** What `decide` needs to know about one ECR, from the client cache. `withResearch`: also read the research worker's stored results. */
-export function factsOf(db: Db, pr: Pr, role: string, withResearch = false): EcrFacts {
+export function factsOf(db: Db, pr: Pr, role: string, withResearch = false, settleWaitMs = SETTLE_WAIT_MS): EcrFacts {
   const cur = [...db.ecrRevision.prId.filter(pr.id)].find(r => r.current);
   const results = [...db.checkResult.prId.filter(pr.id)];
   const runs = runRowsOf(db, pr.id);
@@ -82,8 +85,8 @@ export function factsOf(db: Db, pr: Pr, role: string, withResearch = false): Ecr
         inputsRevision: typeof jsonOr<Inputs>(r.inputsJson, {}).revision === 'number' ? jsonOr<Inputs>(r.inputsJson, {}).revision! : null,
         mock: results.some(x => x.checkRunId === r.id && x.mock),
         finishedMs: usToMs(finishedUsOf(own)),
-        // Whether the timeline and supply checks of this run's snapshot have settled (siblings.ts).
-        siblings: { pending: SIBLING_STAGES.some(stage => siblingOf(runs, own, stage).state === 'pending'), cutoffUs: siblingCutoffUs(own) },
+        // Whether the timeline and supply checks have settled, and when the dispatcher stops waiting for them (siblings.ts).
+        siblings: { pending: siblingsUnsettled(runs, own), cutoffUs: settleCapUs(own, BigInt(settleWaitMs) * 1000n) },
       };
     });
   const events: EventRow[] = [...db.agentEvent.prId.filter(pr.id)].filter(e => e.role === role).map(e => ({ jobId: e.jobId, eventType: e.eventType, tsMs: ms(e.ts), payloadJson: e.payloadJson }));
@@ -112,8 +115,8 @@ export function factsOf(db: Db, pr: Pr, role: string, withResearch = false): Ecr
   };
 }
 
-export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; ecrRevision: number; prompt: string; settings: Level1Settings; signingKey?: string; mcpUrl?: string }): JobSpec {
-  const identity = { actor: actorFor(opts.jobId), onBehalfOf: null, spawnedBy: spawnedByFor(opts.s2RunId, opts.ecrRevision) };
+export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; ecrRevision: number; snapshotUs?: bigint; prompt: string; settings: Level1Settings; signingKey?: string; mcpUrl?: string }): JobSpec {
+  const identity = { actor: actorFor(opts.jobId), onBehalfOf: null, spawnedBy: spawnedByFor(opts.s2RunId, opts.ecrRevision, opts.snapshotUs) };
   return {
     id: opts.jobId,
     role: opts.settings.role,
@@ -171,8 +174,11 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     running.add(jobId);
     runIdOf.set(jobId, BigInt(s2RunId));
     try {
-      const facts = jobFactsOf(conn.db, pr, revision, s2RunId);
-      const spec = jobSpecFor({ jobId, ecr: pr.plmEcrNumber, s2RunId, ecrRevision: pr.revision, prompt: jobPrompt(facts), settings, signingKey });
+      // The timeline and supply checks the session is told about, and the statement later shows, are frozen here: the same
+      // snapshot goes into the prompt and into the credential the post guard and the module read (siblings.ts).
+      const snapshotUs = snapshotForRun(conn.db, pr.id, BigInt(s2RunId));
+      const facts = jobFactsOf(conn.db, pr, revision, s2RunId, snapshotUs);
+      const spec = jobSpecFor({ jobId, ecr: pr.plmEcrNumber, s2RunId, ecrRevision: pr.revision, snapshotUs, prompt: jobPrompt(facts), settings, signingKey });
       log(`starting ${jobId} (${settings.model}) for ${pr.plmEcrNumber} revision ${revision}, attempt ${attempt}, on check run ${s2RunId}`);
       const r = await runner.run(spec);
       const stored = await writer.drain();
@@ -198,7 +204,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
       do {
         again = false;
         for (const pr of conn.db.pullRequest.iter()) {
-          const facts = factsOf(conn.db, pr, settings.role, settings.waitForResearch);
+          const facts = factsOf(conn.db, pr, settings.role, settings.waitForResearch, settings.settleMs);
           if (settings.waitForResearch && facts.crSeq !== null && facts.s2Done.some(r => r.inputsRevision === facts.crSeq)) {
             const key = `${pr.id}:${facts.crSeq}`;
             if (!firstSeen.has(key)) firstSeen.set(key, Date.now());

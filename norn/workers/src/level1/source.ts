@@ -5,7 +5,7 @@
 import type { DbConnection } from '@norn/bindings';
 import type { Inputs } from '../impact.ts';
 import { failedChecksOf, ruleInputOf, type RuleInput, type RunRow, type SiblingCheck } from './recommendation.ts';
-import { SIBLING_STAGES, siblingOf, type SiblingStage } from './siblings.ts';
+import { SIBLING_STAGES, siblingOf, siblingSnapshotUs, type SiblingStage } from './siblings.ts';
 import { ruleCheckOf, type SiblingView } from './timeline-supply.ts';
 
 type Db = DbConnection['db'];
@@ -74,18 +74,31 @@ export function runRowsOf(db: Db, prId: bigint): RunRow[] {
 }
 
 /**
- * The timeline and supply checks a statement on this s2 run rests on (siblings.ts), with their stored rows. A run that
- * is not an s2_cost run, or is not in the cache, binds nothing: undefined, and the rule then says nothing about them. Read the same
- * way by the dispatcher (what the agent is told) and the publisher (what the PLM shows).
+ * The snapshot a session started on this s2 run is told about (siblings.ts `siblingSnapshotUs`), read from the cache
+ * when the dispatcher starts the session; undefined when the run is not an s2_cost run in the cache. The dispatcher
+ * signs it into the credential, and the guard and the publisher bind from it.
  */
-export function siblingsForRun(db: Db, prId: bigint, s2RunId: bigint): { timeline: SiblingView; supply: SiblingView } | undefined {
+export function snapshotForRun(db: Db, prId: bigint, s2RunId: bigint): bigint | undefined {
+  const s2 = s2RunId === 0n ? undefined : db.checkRun.id.find(s2RunId);
+  if (!s2 || s2.stage !== 's2_cost') return undefined;
+  const runs = runRowsOf(db, prId);
+  return siblingSnapshotUs(runs, runs.find(r => r.id === s2RunId) ?? toRunRow(s2));
+}
+
+/**
+ * The timeline and supply checks a statement on this s2 run rests on (siblings.ts), with their stored rows, as of
+ * `snapshotUs` (the session's snapshot; absent or 0: the statement has none). A run that is not an s2_cost run, or is not
+ * in the cache, binds nothing: undefined, and the rule then says nothing about them. Read the same way by the dispatcher
+ * (what the agent is told), the guard (what it may say) and the publisher (what the PLM shows).
+ */
+export function siblingsForRun(db: Db, prId: bigint, s2RunId: bigint, snapshotUs?: bigint): { timeline: SiblingView; supply: SiblingView } | undefined {
   const s2 = s2RunId === 0n ? undefined : db.checkRun.id.find(s2RunId);
   if (!s2 || s2.stage !== 's2_cost') return undefined;
   const runs = runRowsOf(db, prId);
   const own = runs.find(r => r.id === s2RunId) ?? toRunRow(s2);
   const results = [...db.checkResult.prId.filter(prId)];
   const view = (stage: SiblingStage): SiblingView => {
-    const s = siblingOf(runs, own, stage);
+    const s = siblingOf(runs, own, stage, snapshotUs ? snapshotUs : undefined);
     if (!s.run) return { state: 'pending', rows: [] };
     if (s.state !== 'ready') return { state: s.state, runId: Number(s.run.id), rows: [] };
     const rows = results.filter(r => r.checkRunId === s.run!.id).sort((a, b) => Number(a.id - b.id));
@@ -109,11 +122,11 @@ export function ruleSiblingsOf(siblings: { timeline: SiblingView; supply: Siblin
  * as of its snapshot, and the timeline and supply checks bound to it. The dispatcher and the publisher assemble the same
  * input; the post tool's guard (guard.ts) uses this to check a statement's words against it before it is saved.
  */
-export function ruleInputForRun(db: Db, prId: bigint, s2RunId: bigint, ecr: string): { input: RuleInput; results: { p10: number; p50: number; p90: number; detailJson: string }[] } | undefined {
+export function ruleInputForRun(db: Db, prId: bigint, s2RunId: bigint, ecr: string, snapshotUs?: bigint): { input: RuleInput; results: { p10: number; p50: number; p90: number; detailJson: string }[] } | undefined {
   const run = s2RunId === 0n ? undefined : db.checkRun.id.find(s2RunId);
   if (!run || run.stage !== 's2_cost') return undefined;
   const rows = [...db.checkResult.prId.filter(prId)].filter(r => r.checkRunId === run.id);
-  const siblings = siblingsForRun(db, prId, run.id);
+  const siblings = siblingsForRun(db, prId, run.id, snapshotUs);
   const input = ruleInputOf(rows, failedChecksForRun(db, prId, run.id), ruleSiblingsOf(siblings, ecr));
   return { input, results: [...rows, ...(siblings ? [...siblings.timeline.rows, ...siblings.supply.rows] : [])] };
 }

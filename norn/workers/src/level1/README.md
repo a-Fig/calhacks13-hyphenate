@@ -49,25 +49,28 @@ of the main checkout, which a worktree does not have). Run ONE dispatcher per da
   publisher takes it only while the ECR is still at the `prRevision` the module recorded for it.
 - Sessions are keyed by ECR and revision (the job id names both), so another ECR's session never
   blocks this one.
-- Waiting for s3 and s4 (#120, `siblings.ts`). The statement carries the cut-in date and the supplier
-  findings, so the dispatcher starts the session once s3 and s4 have settled (done, failed or blocked), not
-  at s2 alone. Measured on Bowman's data (norn-seed-1, 10,000 draws, one process): s2 takes 0.5 to 1.0 s,
-  s3 0.06 to 0.13 s and s4 0.10 to 0.47 s, and the module queues all three at once once s1 is done, so
-  the wait is normally a second or two. The wait is bounded: `SIBLING_WAIT_MS` (30 s) after s2 finished.
-  Once the cutoff has strictly passed the session starts whatever their state (a finish exactly at the
-  cutoff still counts, so the dispatcher does not go ahead at the cutoff itself: see `siblings.ts`), and the
-  statement says that check is unavailable (failed, blocked, or not finished in time), never holds Level 1 back, and is never the
-  reason for a Send back. The cutoff is a constant, not a setting: the dispatcher and the publisher both
-  read it, because it decides which runs a statement counts as having had. The dispatcher goes ahead only
-  `SIBLING_CACHE_GRACE_US` (2 s) past the cutoff, so its mirror of the database can catch up with a sibling
-  that finished just before it. A mirror lagging by more than 2 s is a known, accepted risk: the statement
-  would then call a check unavailable that the publisher reads as ready.
-- Which s3 and s4 run a statement rests on. s2, s3 and s4 all read the same s1 run, so a run of s3 or s4
-  belongs to the statement's snapshot when it names the same `upstream.s1_bom_delta` hash and the same
-  change-request revision as the statement's own s2 run (`impact_statement.checkRunId`). Among those, the
-  newest that had settled by the cutoff (a stale run counts: it finished on those inputs and was made
-  stale later). A later run, such as s4 re-run because another ECR was filed, is never read. The
-  dispatcher and the publisher call the same `siblingsForRun` (`source.ts`).
+- Waiting for s3 and s4 to settle (#120, `siblings.ts`). The statement carries the cut-in date and the supplier
+  findings, so the dispatcher starts the session only once the ECR's s3 and s4 runs on its current change-request
+  revision have settled: none queued or running, and the newest of each not stale (a stale run's replacement is being
+  queued). Failed and blocked runs are settled. Why not just s2 plus a fixed wait: every ECR filed re-runs the supply
+  check of the ECRs it shares a supplier with, so in a batch of ten ingested within seconds an ECR's s4 is stale and
+  replaced several times before the last one completes (ECR-0417: s2 run 41, s4 runs 43, 60 and 71 stale, 83 done). The wait
+  is bounded: `SETTLE_WAIT_MS` (3 minutes, `NORN_L1_SETTLE_MS`) after s2 finished, plus `SIBLING_CACHE_GRACE_US` (2 s) for the
+  dispatcher's mirror to catch up. After that the session starts whatever their state, and the statement says that
+  check is unavailable (failed, blocked, or not finished in time); an unavailable check never holds Level 1 back and is never
+  the reason for a Send back.
+- Which s3 and s4 run a statement rests on: the snapshot. When it starts a session, the dispatcher records
+  `snapshotUs`, the newest database time it has seen on the ECR's s2 run and on its s3 and s4 runs for this s1 hash and
+  revision (`siblingSnapshotUs`; a database timestamp, no clock of the dispatcher's). It writes the prompt from it,
+  signs it into the session's credential (`spawnedBy` = `norn:check_run:<id>:revision:<n>:snap:<us>`, read by the module's
+  `parseSessionSpawn`), and the module stores it on the statement (`impact_statement.snapshotUs`, 0 for a statement
+  outside a session). The guard and the publisher read it from there. All three then call `siblingOf` with the same runs
+  and the same `atUs`: for each stage, the newest run of the same `upstream.s1_bom_delta` hash and change-request
+  revision created no later than the snapshot, and ready when it had completed by then (a stale run counts: it finished
+  on those inputs and went stale later; completion is read from its results, which are never edited). A re-run made after the
+  session started is never read, so the published table matches the agent's sentences and a later re-run never
+  changes a published statement. A statement with no snapshot (an older credential) binds at the #123 cutoff, 30 s after
+  its s2 run completed. This changes the module schema (`impact_statement.snapshot_us`): republish and wipe the database.
 - Times are compared at full precision: `RunRow` carries SpacetimeDB timestamps as bigint microseconds, never
   milliseconds, so a run created a few hundred microseconds after s2 is not mistaken for one of its siblings.
 - The agent's words against the rule (#123, `prose.ts`, `guard.ts`). The PLM text lists every derived

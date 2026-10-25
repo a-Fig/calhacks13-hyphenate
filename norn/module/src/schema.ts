@@ -272,6 +272,9 @@ export const StatementAssumption = t.object('StatementAssumption', {
 // run that started the session when the call's spawnedBy names one ('...check_run:<id>'), else the
 // run its first 'computation' number was copied from, else 0. That run's inputs name the
 // change-request revision and the ERP baseline, so a reader never has to guess them from numbers.
+// snapshotUs is the database time (microseconds since the epoch) the session's timeline and supply checks were read
+// at, taken from the signed credential's ':snap:' part: the publisher binds the same runs the session was told
+// about from it (workers/src/level1/siblings.ts). 0: none (a statement outside a session, or an older credential).
 const impactStatement = table(
   { name: 'impact_statement', public: true },
   {
@@ -280,6 +283,7 @@ const impactStatement = table(
     level: t.u8(), // 1 | 2 | 3
     prRevision: t.u32(),
     checkRunId: t.u64(), // 0: no check run behind it (judgment only, posted outside a session)
+    snapshotUs: t.u64(), // 0: no snapshot named; see above
     changeClass: t.string(),
     route: t.string(), // the proposed approval route
     headline: t.string(),

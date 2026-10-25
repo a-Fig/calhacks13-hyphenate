@@ -21,8 +21,8 @@ const jsonOr = <T>(s: string, d: T): T => {
   }
 };
 
-/** The job prompt's facts for one finished s2_cost run. */
-export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
+/** The job prompt's facts for one finished s2_cost run, with its timeline and supply checks as of `snapshotUs` (the session's snapshot, siblings.ts). */
+export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number, snapshotUs?: bigint) {
   const run = db.checkRun.id.find(BigInt(s2RunId))!;
   const inputs = jsonOr<Inputs>(run.inputsJson, {});
   const p = provenanceOf(inputs);
@@ -43,7 +43,7 @@ export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
   // The timeline and supply checks of the same snapshot the publisher will read (siblings.ts). The agent posts none of
   // their numbers (the module would check them against the newest finished runs, which a later re-run can change
   // under it); the publisher shows them from these runs. The agent gets sentences built from the same rows.
-  const siblings = siblingsForRun(db, pr.id, run.id);
+  const siblings = siblingsForRun(db, pr.id, run.id, snapshotUs);
   const recommendation = deriveRecommendation(ruleInputOf(rows, failedChecksForRun(db, pr.id, run.id), ruleSiblingsOf(siblings, pr.plmEcrNumber)));
   return {
     ecr: pr.plmEcrNumber,

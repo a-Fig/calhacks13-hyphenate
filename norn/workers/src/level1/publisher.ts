@@ -232,8 +232,8 @@ export function gather(db: DbConnection['db'], pr: Row<'pullRequest'>): { statem
   const results = [...db.checkResult.prId.filter(pr.id)];
   // The results behind the computation numbers (for the formulas and the mock flag): the same key
   // and digits, in the statement's own run first, else the newest such result.
-  // The timeline and supply checks the statement rests on (siblings.ts): the runs bound to its own s2 run, never a newer one.
-  const siblings = run ? siblingsForRun(db, pr.id, run.id) : undefined;
+  // The timeline and supply checks the statement rests on (siblings.ts): the runs bound at its session's snapshot (stored on the statement), never a newer one.
+  const siblings = run ? siblingsForRun(db, pr.id, run.id, s.snapshotUs) : undefined;
   const ownRuns = new Set([run?.id, siblings?.timeline.runId === undefined ? undefined : BigInt(siblings.timeline.runId), siblings?.supply.runId === undefined ? undefined : BigInt(siblings.supply.runId)].filter((x): x is bigint => x !== undefined));
   const matched = doc.numbers
     .filter(n => n.evidence === 'computation' && n.resultKey)

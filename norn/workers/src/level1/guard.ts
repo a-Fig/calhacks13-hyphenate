@@ -5,7 +5,8 @@
 //
 // The server (mcp/src/main.ts) passes this to `startServer`; the server itself knows nothing of the rule. It reads the
 // server's mirror of the database, for the check run that started the session (`spawnedBy`, "norn:check_run:7", or
-// "norn:check_run:7:revision:2" as the dispatcher signs it since #128), read with the module's own `parseSessionSpawn`.
+// "norn:check_run:7:revision:2" since #128, and "norn:check_run:7:revision:2:snap:<us>" with the snapshot its supply and timeline
+// sections were frozen at, as the dispatcher signs it), read with the module's own `parseSessionSpawn`.
 //
 // The module's freshness refusal (`sessionRunId` in reducers.ts) comes first: a session whose signed revision is
 // behind the ECR's, or whose run is no longer done, is not checked here, so the agent is told its numbers are out of
@@ -40,7 +41,7 @@ export function statementGuardFor(db: Db): StatementGuard {
     if (started.revision !== undefined && pr.revision !== undefined && started.revision !== pr.revision) return undefined;
     const run = db.checkRun.id.find(BigInt(started.runId));
     if (!run || run.status !== 'done') return undefined;
-    const found = ruleInputForRun(db, pr.id, run.id, pr.plmEcrNumber);
+    const found = ruleInputForRun(db, pr.id, run.id, pr.plmEcrNumber, started.snapshotUs);
     if (!found) return undefined;
     const derived = deriveRecommendation(found.input);
     const findings = findingsOf(found.input, derived);
@@ -63,7 +64,7 @@ export function statementGuardFor(db: Db): StatementGuard {
     const known = [...QUOTABLE_BARS, ...findings.flatMap(f => numbersIn(f))];
     // Without the facts (a mirror missing a table) fewer numbers are known, which only refuses more.
     try {
-      numbersIn(jobFactsOf(db, { title: '', ...pr } as Parameters<typeof jobFactsOf>[1], crSeqOfRun(db, run.id) ?? 0, Number(run.id)), known);
+      numbersIn(jobFactsOf(db, { title: '', ...pr } as Parameters<typeof jobFactsOf>[1], crSeqOfRun(db, run.id) ?? 0, Number(run.id), started.snapshotUs), known);
     } catch {
       /* the results above still count */
     }
