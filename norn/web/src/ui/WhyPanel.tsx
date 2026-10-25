@@ -64,10 +64,12 @@ export function WhyPanel({
       )}
     >
       <div className="nx-why" data-testid="why-panel" ref={body}>
-        <div className={`nx-why-value nx-ev-${t.evidence}`}>
-          <div className="v num">{value}</div>
-          {rg && <div className="r num">{rg}</div>}
-        </div>
+        {(value || rg) && (
+          <div className={`nx-why-value nx-ev-${t.evidence}`}>
+            <div className="v num">{value}</div>
+            {rg && <div className="r num">{rg}</div>}
+          </div>
+        )}
         <p className="nx-why-sum">{t.summary}</p>
 
         {t.formula && (
