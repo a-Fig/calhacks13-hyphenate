@@ -16,7 +16,7 @@ import { ApprovalRows, ApproverItems, ErpPackageCard, RecommendationRow, Release
 import type { AgentRun, StatementView } from '../assessment/types.ts';
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
-const kindOf = (e: ActivityEvent) => (e.actorKind === 'norn' ? 'norn' : e.actorKind === 'person_agent' ? 'agent' : 'person');
+const kindOf = (e: ActivityEvent) => (e.actorKind === 'norn' ? 'norn' : e.actorKind === 'person_agent' ? 'agent' : e.actorKind === 'system' ? 'team' : 'person');
 
 export function Conversation({ a }: { a: ImpactAssessment }) {
   const events = [...a.activity].sort((x, y) => x.at.localeCompare(y.at));
@@ -69,7 +69,7 @@ function OpeningComment({ a, filed }: { a: ImpactAssessment; filed: ActivityEven
     <Timeline.Item className="nx-t-comment">
       <div className="nx-av-col"><Person name={filed.actor} size={40} /></div>
       <Timeline.Body className="nx-t-body">
-        <CommentBox name={filed.actor} kind="person" time={filed.at} label={<><MockTag on={a.mock.includes('narrative')} title="Mock: a saved ECR text, not read from the PLM" /> <Label variant="secondary" size="small">Originator</Label></>}>
+        <CommentBox name={filed.actor} kind="person" time={filed.at} label={<><MockTag on={a.mock.includes('narrative')} title="Mock: a saved ECR text, not read from the PLM" /> {a.ecr.originator && <Label variant="secondary" size="small">Originator</Label>}</>}>
           {a.body.map(s => (
             <div key={s.heading}>
               <h4 className="nx-h4">{s.heading}</h4>
@@ -316,9 +316,9 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
         <MergeRow
           icon={<DotFillIcon size={24} className="nx-fg-attention" />}
           title={<>Review required <MockTag on={!!a.gate && a.mock.includes('route')} /></>}
-          sub={`${ccb ? 'CCB approval needed' : 'Approval needed'} · ${done} of ${reviewers.length} approved`}
+          sub={`${ccb ? 'CCB approval needed' : 'Approval needed'}${reviewers.length ? ` · ${done} of ${reviewers.length} approved` : ''}`}
         >
-          <div className="nx-merge-bar"><ProgressBar barSize="small" progress={reviewers.length ? (done / reviewers.length) * 100 : 0} aria-label="Approvals" /></div>
+          {reviewers.length > 0 && <div className="nx-merge-bar"><ProgressBar barSize="small" progress={(done / reviewers.length) * 100} aria-label="Approvals" /></div>}
         </MergeRow>
       )}
 
@@ -356,7 +356,7 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
   const steps = a.route.steps;
   const reviewers = steps.filter(s => s.role !== 'CCB' && s.state !== 'not_required');
   const done = reviewers.filter(s => s.state === 'approved').length;
-  const pct = a.gate?.approvals.length ? (a.gate.approvals.some(x => x.state !== 'withdrawn') ? 100 : 0) : reviewers.length ? (done / reviewers.length) * 100 : 100;
+  const pct = a.gate?.approvals.length ? (a.gate.approvals.some(x => x.state !== 'withdrawn') ? 100 : 0) : reviewers.length ? (done / reviewers.length) * 100 : undefined;
   const people = [...new Map(events.map(x => [x.actor, x])).values()].slice(0, 8);
 
   return (
@@ -376,10 +376,12 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
         </ul>
       </section>
 
-      <section>
-        <h3>Originator</h3>
-        <div className="nx-side-one"><Person name={e.originator} size={20} /> <b>{e.originator}</b></div>
-      </section>
+      {e.originator && (
+        <section>
+          <h3>Originator</h3>
+          <div className="nx-side-one"><Person name={e.originator} size={20} /> <b>{e.originator}</b></div>
+        </section>
+      )}
 
       <section>
         <h3>Labels</h3>
@@ -395,10 +397,14 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
       <section>
         <h3>Milestone</h3>
         <div className="nx-side-one"><b>{a.meeting.label}</b></div>
-        <div className="nx-side-ms">
-          <ProgressBar barSize="small" progress={pct} aria-label="Approvals so far" />
-          <span className="nx-fg-muted nx-small">{Math.round(pct)}% approved &middot; {dayLabel(a.meeting.date + 'T12:00:00-07:00')}</span>
-        </div>
+        {(pct !== undefined || a.meeting.date) && (
+          <div className="nx-side-ms">
+            {pct !== undefined && <ProgressBar barSize="small" progress={pct} aria-label="Approvals so far" />}
+            <span className="nx-fg-muted nx-small">
+              {[pct !== undefined ? `${Math.round(pct)}% approved` : '', a.meeting.date ? dayLabel(a.meeting.date + 'T12:00:00-07:00') : ''].filter(Boolean).join(' · ')}
+            </span>
+          </div>
+        )}
       </section>
 
       {a.linked.length > 0 && (
