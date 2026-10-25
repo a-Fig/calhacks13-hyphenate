@@ -152,7 +152,7 @@ export function pickTargets(cost: CostCheckResult, opts: PickOptions = {}): Targ
       current: blank ? { blank: true } : { p10: r4(quantileOf(d!, 0.1)), p50: r4(quantileOf(d!, 0.5)), p90: r4(quantileOf(d!, 0.9)) },
       currentNote: c.rec.needsEstimate
         ? 'Left blank on the cost page; counted as $0 until estimated.'
-        : `A Norn default${d && d.kind === 'pert' ? `, PERT(${pct(d.min)}, ${pct(d.mode)}, ${pct(d.max)})` : ''}.`,
+        : `A Fern default${d && d.kind === 'pert' ? `, PERT(${pct(d.min)}, ${pct(d.mode)}, ${pct(d.max)})` : ''}.`,
       swing: c.swing,
       swingBasis: c.basis,
     };

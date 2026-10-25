@@ -29,7 +29,7 @@ export function RequestNumber({ id }: { id: string }) {
 }
 
 export function LevelLabel({ level, long = false }: { level: ReportLevel; long?: boolean }) {
-  if (level === 3) return <Label variant="success">{long ? 'Level 3 · Norn’s final verdict' : 'Level 3'}</Label>;
+  if (level === 3) return <Label variant="success">{long ? 'Level 3 · Fern’s final verdict' : 'Level 3'}</Label>;
   if (level === 2) return <Label variant="accent">{long ? 'Level 2 · Reviewed once' : 'Level 2'}</Label>;
   return <Label variant="attention">{long ? 'Level 1 · Provisional' : 'Level 1'}</Label>;
 }
@@ -69,13 +69,13 @@ export function StaleNote({ state }: { state: 'rechecking' | 'failed' }) {
 export function SavedRun({ source = 'saved' }: { source?: 'saved' | 'live' }) {
   if (source === 'live') {
     return (
-      <span title="Read from Norn's database: the checks' stored results" className="nx-mock">
+      <span title="Read from Fern's database: the checks' stored results" className="nx-mock">
         <Label variant="success" size="small">Live</Label>
       </span>
     );
   }
   return (
-    <span title="Norn's checks run on Bowman's dataset and saved as a fixture; not a live run" className="nx-mock">
+    <span title="Fern's checks run on Bowman's dataset and saved as a fixture; not a live run" className="nx-mock">
       <Label variant="accent" size="small">Saved run</Label>
     </span>
   );

@@ -86,7 +86,7 @@ describe('loadStartupConfig', () => {
     assert.ok(lines.some((l) => l.includes('reviewDepth.deepReview.maxPasses')), lines.join('\n'));
     assert.ok(lines.some((l) => l.includes('surprise: unknown section')), lines.join('\n'));
     assert.equal(lines.length, 5);
-    assert.match(lines.at(-1)!, /^Norn did not start/);
+    assert.match(lines.at(-1)!, /^Fern did not start/);
   });
 
   it('says "1 problem" for one', () => {

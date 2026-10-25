@@ -80,16 +80,29 @@ const text = (unit: Unit, v: number) => (unit === 'date' ? dateLong(v) : unit ==
 const valueOf = (f: Figure): Trace['value'] => ({ text: text(f.unit, f.p50), ...(f.p10 !== undefined && f.p90 !== undefined ? { range: `${text(f.unit, f.p10)} – ${text(f.unit, f.p90)}` } : {}) });
 
 const parse = (s: string): any => JSON.parse(s);
-/** The check's flags, each message once; `omit` drops kinds the page already states as a figure. */
-const flagsOf = (d: any, omit: string[] = []): FlagLike[] => {
+/**
+ * Whether a flag is about another ECR. The supply check runs the peers' schedules through the same book as this ECR's,
+ * so its flags include theirs ("implementation_unestimated" at "implementation:ECR-0406" on ECR-0423's page): those are
+ * the peer's gaps, not this ECR's. A flag whose `ref` names ECR ids, none of them this one, is a peer's. Same rule as
+ * `aboutAnotherEcr` in workers/src/level1/timeline-supply.ts. `unreadable_peer` is the exception: its ref is the peer
+ * that could not be read, which is a gap in this ECR's own check. Flags with no ref (the shared-supplier and
+ * slot-contention lines) are this ECR's interaction with a peer and stay.
+ */
+const aboutAnotherEcr = (f: Flag, ecr: string): boolean => {
+  if (f.kind === 'unreadable_peer' || typeof f.ref !== 'string') return false;
+  const named = f.ref.match(/\bECR-\d+\b/g);
+  return !!named && !named.includes(ecr);
+};
+/** The check's flags about `ecr`, each message once; `omit` drops kinds the page already states as a figure. */
+const flagsOf = (d: any, ecr: string, omit: string[] = []): FlagLike[] => {
   const seen = new Set<string>();
-  return (Array.isArray(d?.flags) ? d.flags : []).filter((f: Flag) => !omit.includes(f.kind) && !seen.has(String(f.message)) && seen.add(String(f.message)))
+  return (Array.isArray(d?.flags) ? d.flags : []).filter((f: Flag) => !omit.includes(f.kind) && !aboutAnotherEcr(f, ecr) && !seen.has(String(f.message)) && seen.add(String(f.message)))
     .map((f: Flag) => ({ severity: f.severity === 'warn' ? 'warn' as const : 'info' as const, message: String(f.message) }));
 };
-/** The summary only counts warnings; the page lists each once, under the summary. */
+/** The summary counts the warnings the page lists under it, and names any notes listed with them apart from that count. */
 const warnLine = (flags: FlagLike[]) => {
-  const n = new Set(flags.filter(f => f.severity === 'warn').map(f => f.message)).size;
-  return n ? ` ${plural(n, 'warning')} below.` : '';
+  const n = flags.filter(f => f.severity === 'warn').length, notes = flags.length - n;
+  return n ? ` ${plural(n, 'warning')}${notes ? ` and ${plural(notes, 'note')}` : ''} below.` : '';
 };
 
 export interface StageRead<V> {
@@ -107,7 +120,7 @@ export interface TimelineRead extends StageRead<TimelineView> {
 }
 
 /** The real timeline check. Throws when the rows are not the checks' output; the caller says so on the page. */
-export function readTimeline(rows: StageRow[], traces: Record<string, Trace>, src: Source, stale?: TimelineView['stale']): TimelineRead {
+export function readTimeline(rows: StageRow[], traces: Record<string, Trace>, src: Source, ecr: string, stale?: TimelineView['stale']): TimelineRead {
   const by = new Map(rows.map(r => [r.key, r]));
   const detailRow = by.get('detail');
   if (!detailRow) throw new Error('the timeline rows have no `detail` row');
@@ -126,7 +139,7 @@ export function readTimeline(rows: StageRow[], traces: Record<string, Trace>, sr
 
   const readiness: Readiness | undefined = d.readiness === 'materials_only' || d.readiness === 'implementation' ? d.readiness : undefined;
   const placed = d.cutIn?.placed !== false && !!by.get('cut_in_date');
-  const flags = flagsOf(d, by.has('p_late') ? ['likely_late'] : []);
+  const flags = flagsOf(d, ecr, by.has('p_late') ? ['likely_late'] : []);
   const materialsOnly = readiness === 'materials_only';
 
   const cutInDate = stat('cut_in_date', 's3:cut_in_date', 'date', DAY, materialsOnly ? 'Material readiness date' : 'Earliest cut-in date',
@@ -197,14 +210,14 @@ export function readTimeline(rows: StageRow[], traces: Record<string, Trace>, sr
 export interface SupplyRead extends StageRead<Supply> {}
 
 /** The real supply check. Throws when the rows are not the checks' output. */
-export function readSupply(rows: StageRow[], traces: Record<string, Trace>, src: Source, stale?: SupplyDetail['stale']): SupplyRead {
+export function readSupply(rows: StageRow[], traces: Record<string, Trace>, src: Source, ecr: string, stale?: SupplyDetail['stale']): SupplyRead {
   const by = new Map(rows.map(r => [r.key, r]));
   const detailRow = by.get('detail');
   if (!detailRow) throw new Error('the supply rows have no `detail` row');
   const d = parse(detailRow.detailJson);
   const T = new Tracer(traces, d.inputs ?? [], 's4:', src);
   const stated = String(d.stated?.label ?? '');
-  const flags = flagsOf(d);
+  const flags = flagsOf(d, ecr);
 
   const fig = (id: string, unit: Unit, s: StatLike | null | undefined, title: string, summary: string, scale = 1): Figure | undefined => {
     if (!s) return undefined;
@@ -282,7 +295,7 @@ export function readSupply(rows: StageRow[], traces: Record<string, Trace>, src:
   if (single.length) bits.push(`${plural(single.length, 'part')} with one qualified source`);
   const note = bits.join('; ');
 
-  T.add('supply', 'Supply risk', `${cap(level)}: the worst chance of missing the stated effectivity${I?.late ? ' (alone or with the other open ECRs)' : ''} is ${pct(worst)}; below 10% is low, below 30% moderate, above that high. A part with one qualified source is at least moderate, and a cut-in that cannot be placed is high. The level is Norn’s reading of the checks’ numbers.`, undefined, { text: cap(level), range: note });
+  T.add('supply', 'Supply risk', `${cap(level)}: the worst chance of missing the stated effectivity${I?.late ? ' (alone or with the other open ECRs)' : ''} is ${pct(worst)}; below 10% is low, below 30% moderate, above that high. A part with one qualified source is at least moderate, and a cut-in that cannot be placed is high. The level is Fern’s reading of the checks’ numbers.`, undefined, { text: cap(level), range: note });
 
   const view: Supply = {
     id: 'supply', level, evidence: 'computation', note,
@@ -296,7 +309,7 @@ const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 // ---------------------------------------------------------------- the mock stages
 
-const mockProducedBy = (check: string, at: string) => ({ check, actor: 'Norn worker', at });
+const mockProducedBy = (check: string, at: string) => ({ check, actor: 'Fern worker', at });
 
 /** The mock timeline stage's one row: weeks until the change reaches the line. Made-up numbers, labelled so. */
 export function readMockTimeline(r: StageRow, traces: Record<string, Trace>, at: string): NonNullable<CutIn['estimate']> {

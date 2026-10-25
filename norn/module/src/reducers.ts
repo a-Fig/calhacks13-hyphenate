@@ -121,7 +121,7 @@ export const registerActor = write(
     const name = nonEmpty(a.name, 'name', 64);
     if (kind === 'person' && a.origin !== 'human') throw new SenderError(`a person has origin 'human'`);
     if (kind === 'agent' && a.origin !== 'norn' && a.origin !== 'external')
-      throw new SenderError(`an agent has origin 'norn' (Norn's own) or 'external' (a person's own agent)`);
+      throw new SenderError(`an agent has origin 'norn' (Fern's own) or 'external' (a person's own agent)`);
     const onBehalfOf = a.onBehalfOf?.trim() || undefined;
     if (kind === 'agent' && a.origin === 'external' && !onBehalfOf)
       throw new SenderError(`an external agent must say which person it acts for (onBehalfOf)`);
@@ -352,7 +352,7 @@ export const recordEcoRelease = write(
   (ctx, a) => {
     const plm = nonEmpty(a.plmEcrNumber, 'plmEcrNumber', 64);
     const found = ctx.db.pullRequest.plmEcrNumber.find(plm);
-    if (!found) throw new SenderError(`Norn has no ECR ${plm}`);
+    if (!found) throw new SenderError(`Fern has no ECR ${plm}`);
     const pr = getPr(ctx, found.id);
     const ecoNumber = nonEmpty(a.ecoNumber, 'ecoNumber', 64);
     const source = nonEmpty(a.source, 'source', 32);
@@ -557,7 +557,7 @@ export const recordPlmDecision = write(
     const source = nonEmpty(a.source, 'source', 32);
     if (a.sourceRef.length > 200) throw new SenderError('sourceRef is too long (max 200 characters)');
     const found = ctx.db.pullRequest.plmEcrNumber.find(plm);
-    if (!found) throw new SenderError(`Norn has no ECR ${plm}`);
+    if (!found) throw new SenderError(`Fern has no ECR ${plm}`);
     const pr = getPr(ctx, found.id);
 
     const loaded = companyConfig(ctx);
@@ -568,7 +568,7 @@ export const recordPlmDecision = write(
     const detail = { decision, decidedBy, decidedOn, person: person?.id ?? null, source, sourceRef: a.sourceRef, reportedBy: call.actor.name };
     // A decision Norn cannot follow is logged once: the same reason again adds no row.
     const noFollow = (why: string): Logged | null => {
-      const summary = `${headline}; Norn did not follow it: ${why}`;
+      const summary = `${headline}; Fern did not follow it: ${why}`;
       const last = [...ctx.db.actionLog.prId.filter(pr.id)].filter(l => l.reducer === 'record_plm_decision' && l.summary.startsWith(`${decision} in `)).sort((x, y) => Number(x.id - y.id)).at(-1);
       if (last?.summary === summary) return null;
       return { prId: pr.id, entity: `plm_decision:${pr.id}`, summary, detail, outcome: 'downgraded' };
@@ -576,7 +576,7 @@ export const recordPlmDecision = write(
 
     if (decision === 'rejected') {
       if (pr.status === 'closed') return null;
-      if (pr.status === 'merged') return noFollow(`ECR ${pr.id} is already released in Norn`);
+      if (pr.status === 'merged') return noFollow(`ECR ${pr.id} is already released in Fern`);
       const standing = standingApproval(ctx, pr.id);
       if (standing) endApproval(ctx, standing, 'withdrawn', `rejected in ${where} by ${who}`);
       const moved = applyTransition(ctx, call, pr, 'closed');
@@ -584,11 +584,11 @@ export const recordPlmDecision = write(
     }
 
     if (pr.status === 'merged') return null;
-    if (pr.status === 'closed') return noFollow(`ECR ${pr.id} is closed in Norn`);
+    if (pr.status === 'closed') return noFollow(`ECR ${pr.id} is closed in Fern`);
     // The decision is about the ECR as the PLM holds it now. If a person edited it after Norn's last read, what Norn assessed is
     // not what was approved, and releasing it would release the old assessment. Rejecting needs no such check: it only closes.
     const cur = currentRevision(ctx, pr.id);
-    if (!cur) return noFollow('Norn holds no change request for it, so it has nothing assessed to release');
+    if (!cur) return noFollow('Fern holds no change request for it, so it has nothing assessed to release');
     // The same comparison ingest_ecr makes to see an ECR as changed: its title and text as well as its change request.
     const edited = [
       ...(nonEmpty(a.title, 'title', 200) !== pr.title ? ['title'] : []),
@@ -596,9 +596,9 @@ export const recordPlmDecision = write(
       ...(cur.digest !== checkedChangeRequest(a.changeRequestJson, plm) ? ['change request'] : []),
     ];
     if (edited.length)
-      return noFollow(`the ECR changed in the PLM after Norn assessed it (${edited.join(', ')}; Norn holds revision ${cur.seq}), so what was approved is not what Norn checked`);
+      return noFollow(`the ECR changed in the PLM after Fern assessed it (${edited.join(', ')}; Fern holds revision ${cur.seq}), so what was approved is not what Fern checked`);
     const notReady = codeStagesNotDone(ctx, pr);
-    if (notReady.length) return noFollow(`its checks have not finished on current inputs (${notReady.join(', ')}), so Norn cannot release it`);
+    if (notReady.length) return noFollow(`its checks have not finished on current inputs (${notReady.join(', ')}), so Fern cannot release it`);
     const main = currentMain(ctx);
     if (pr.baseVersion !== main.version) return noFollow(`it is based on baseline v${pr.baseVersion} but the baseline is at v${main.version}, so it must be re-checked first`);
 
@@ -611,7 +611,7 @@ export const recordPlmDecision = write(
         decisionJson: JSON.stringify({
           reason: `approved in ${where} by ${who}`,
           route: { bodyName: person?.title ?? 'Approver in the PLM' },
-          reasons: [{ rule: 'plm', text: `Approved in ${where} by ${who} on ${decidedOn}. Norn mirrors the PLM's decision and applies no tier of its own to it.` }],
+          reasons: [{ rule: 'plm', text: `Approved in ${where} by ${who} on ${decidedOn}. Fern mirrors the PLM's decision and applies no tier of its own to it.` }],
           ...detail,
         }),
       });
@@ -664,14 +664,14 @@ function sessionRunId(ctx: Ctx, pr: Pr, spawnedBy: string, noMore: string): bigi
   // A credential that names a check run must name it in the one form the dispatcher signs; anything else is not
   // waved through as if no run had started it.
   if (!started) {
-    if (/check_run:/.test(spawnedBy)) throw new Refusal(`this session's credential names a check run in a form Norn does not read ('${spawnedBy.slice(0, 80)}'). ${noMore}`);
+    if (/check_run:/.test(spawnedBy)) throw new Refusal(`this session's credential names a check run in a form Fern does not read ('${spawnedBy.slice(0, 80)}'). ${noMore}`);
     return 0n;
   }
   const run = ctx.db.checkRun.id.find(BigInt(started.runId));
   if (!run || run.prId !== pr.id) throw new Refusal(`this session was started by check run ${started.runId}, which is not a check run of ${pr.plmEcrNumber}`);
   if (started.revision !== undefined && started.revision !== pr.revision)
     throw new Refusal(
-      `This session assessed revision ${started.revision}; ${pr.plmEcrNumber} is now at revision ${pr.revision}. The ECR changed after the session read it (its text, change request, baseline or an assumption), so its numbers and answers are out of date. ${noMore}; Norn starts a new session on the current revision`
+      `This session assessed revision ${started.revision}; ${pr.plmEcrNumber} is now at revision ${pr.revision}. The ECR changed after the session read it (its text, change request, baseline or an assumption), so its numbers and answers are out of date. ${noMore}; Fern starts a new session on the current revision`
     );
   // The snapshot is a database time the dispatcher read from its cache, so it cannot be ahead of this transaction.
   if (started.snapshotUs !== undefined && started.snapshotUs > ctx.timestamp.microsSinceUnixEpoch)
@@ -689,7 +689,7 @@ function sessionRunId(ctx: Ctx, pr: Pr, spawnedBy: string, noMore: string): bigi
     }
     const which = typeof readRevision === 'number' && nowRevision !== undefined && readRevision !== nowRevision ? `This session read change-request revision ${readRevision}; ${pr.plmEcrNumber} is now at change-request revision ${nowRevision}. ` : '';
     throw new Refusal(
-      `${which}Check run ${run.id}, which started this session, is ${moved ? 'no longer on the current inputs' : run.status}: ${pr.plmEcrNumber}'s inputs changed after the session read them (a new change-request revision, baseline or assumption), so its numbers are out of date. ${noMore}; Norn starts a new session on the current numbers`
+      `${which}Check run ${run.id}, which started this session, is ${moved ? 'no longer on the current inputs' : run.status}: ${pr.plmEcrNumber}'s inputs changed after the session read them (a new change-request revision, baseline or assumption), so its numbers are out of date. ${noMore}; Fern starts a new session on the current numbers`
     );
   }
   return run.id;
@@ -891,7 +891,7 @@ export const claimPublication = write(
   'claim_publication',
   { prId: t.u64(), statementId: t.u64(), processId: t.string(), leaseMs: t.u32() },
   (ctx, a, call) => {
-    if (!isNornAgent(call.actor)) throw new SenderError(`[forbidden] ${call.actor.name} is not one of Norn's own agents; only they publish to the PLM`);
+    if (!isNornAgent(call.actor)) throw new SenderError(`[forbidden] ${call.actor.name} is not one of Fern's own agents; only they publish to the PLM`);
     const pr = getPr(ctx, a.prId);
     if (!ctx.db.impactStatement.id.find(a.statementId)) throw new SenderError(`statement ${a.statementId} does not exist`);
     const processId = nonEmpty(a.processId, 'processId', 64);

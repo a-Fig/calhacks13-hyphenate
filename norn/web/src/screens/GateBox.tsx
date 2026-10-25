@@ -87,7 +87,7 @@ export function ApprovalRows({ gate, released }: { gate: GateView; released: boo
   } else if (live) {
     icon = <CheckCircleFillIcon size={24} className="nx-fg-success" />;
     title = live.fastTrack ? 'Approved on the fast track' : `Approved by ${names}`;
-    sub = live.fastTrack ? `${names}, within Norn’s limits · ${dateTime(live.at)}` : `${live.role}${live.tier ? `, ${live.tier} tier` : ''} · ${dateTime(live.at)}`;
+    sub = live.fastTrack ? `${names}, within Fern’s limits · ${dateTime(live.at)}` : `${live.role}${live.tier ? `, ${live.tier} tier` : ''} · ${dateTime(live.at)}`;
   } else {
     icon = <DotFillIcon size={24} className="nx-fg-attention" />;
     title = 'Review required';
@@ -228,7 +228,7 @@ export function ErpPackageCard({ gate }: { gate: GateView }) {
           <span className="nx-fg-muted">{p.ecoNumber}</span>
         </header>
         <Flash variant="danger" className="nx-pkg-flash nx-pkg-problems">
-          <AlertFillIcon size={16} /> <b>Norn could not read this ERP change package.</b> It is not empty: do not treat it as nothing to enter.
+          <AlertFillIcon size={16} /> <b>Fern could not read this ERP change package.</b> It is not empty: do not treat it as nothing to enter.
           <ul>
             <li>{p.why}</li>
             {p.rowLines > 0 && <li>The stored row counts {p.rowLines} line{p.rowLines === 1 ? '' : 's'}, {p.rowEntered} entered and {p.rowConflicts} in conflict.</li>}
@@ -251,7 +251,7 @@ export function ErpPackageCard({ gate }: { gate: GateView }) {
         <PackageIcon size={16} />
         <b>ERP change package</b>
         <MockTag on={!!p.mock} title={p.mock} />
-        <span className="nx-fg-muted">{p.ecoNumber} &middot; lines for a person to enter in {p.system}. Norn does not write to it.</span>
+        <span className="nx-fg-muted">{p.ecoNumber} &middot; lines for a person to enter in {p.system}. Fern does not write to it.</span>
         <span className="nx-sp" />
         <Label variant={p.counts.problems || p.counts.conflicts ? 'danger' : p.counts.entered === p.counts.lines && p.counts.lines ? 'success' : 'secondary'}>
           {p.counts.entered} of {p.counts.lines} entered

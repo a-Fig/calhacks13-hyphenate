@@ -1,9 +1,9 @@
-# Bowman's configuration of Norn
+# Bowman's configuration of Fern
 
-How Norn is tuned for Bowman. Norn is general (#34); this is the one place that makes it Bowman's.
+How Fern is tuned for Bowman. Fern is general (#34); this is the one place that makes it Bowman's.
 Written 2026-10-24, before the file existed.
 
-The configuration is a file in the repo, checked against Norn's config schema when Norn starts.
+The configuration is a file in the repo, checked against Fern's config schema when Fern starts.
 There is no settings screen: changing Bowman's setup is a reviewed change to this file, which is
 also how a real deployment team would keep it.
 
@@ -20,11 +20,11 @@ also how a real deployment team would keep it.
   starting point, plus the kinds of change that never fast-track.
 - **Roles and people.** Who can file, review and approve each kind of change.
 - **Agent autonomy** (#22, #24). Per kind of action (approve a fast-track ECR, write a BOM, post a
-  journal entry), whether Norn's agents may approve, approve with a sampled second check,
+  journal entry), whether Fern's agents may approve, approve with a sampled second check,
   recommend only, or escalate. An agent acting for a person is also held to that person's limits.
 - **Review depth** (#10, #26). Whether the full impact assessment starts on its own for some kinds
   of change, and how many deep passes an ECR may use.
-- **Materiality** (#30). How big a difference must be before Norn raises it.
+- **Materiality** (#30). How big a difference must be before Fern raises it.
 - **Posting standards** (#35). What every agent post must contain before it goes up: cited sources,
   evidence colours, ICD 203 likelihood words.
 

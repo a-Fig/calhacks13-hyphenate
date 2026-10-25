@@ -9,6 +9,7 @@ import { supplyCheck } from '../../checks/src/supply.ts';
 import { dateOf } from '../../checks/src/time.ts';
 import { fromChecks } from '../src/assessment/adapter.ts';
 import { buildAssessment, buildSummary, routeSteps, type PrRow, type ResultRow, type RunRow, type Snapshot } from '../src/assessment/live/build.ts';
+import { readSupply, readTimeline } from '../src/assessment/live/stages.ts';
 import { buildGate, type ApprovalRow } from '../src/assessment/live/gate.ts';
 
 type Row = { key: string; label: string; unit: string; p10: number; p50: number; p90: number; detailJson: string };
@@ -261,4 +262,69 @@ test('the assessment route comes from the approval rows, not the ECR status', ()
     buildAssessment(snap([costRun], COST, { revisions: [rev], approvals, prs: [pr({ status })] }), pr({ status }))!.route.steps;
   assert.ok(base('merged', []).every(x => x.state !== 'approved'));
   assert.equal(base('review', [appr()]).find(x => x.role === 'CCB')!.state, 'approved');
+});
+
+// ---------------------------------------------------------------- #151: a peer's flags are not this ECR's
+
+// The flags of the newest done S4 runs for ECR-0423 (run 121) and ECR-0421 (run 117) on the live stack, 2026-10-25, trimmed.
+const flag = (kind: string, severity: 'info' | 'warn', message: string, ref?: string) => ({ kind, severity, message, ...(ref ? { ref } : {}) });
+const IMPL = 'Qualification, release or retrofit prerequisites have not all been assessed. Dates show material readiness only; implementation may be later.';
+const NO_EFF = (e: string) => `${e} states no production effectivity by serial or date, so the feasible cut-in is shown without a deadline to miss.`;
+const supplyRows = (flags: unknown[]) => [{ key: 'detail', label: 'detail', unit: '', p10: 0, p50: 0, p90: 0, detailJson: JSON.stringify({ stated: { label: '' }, parts: [], capacity: [], flags }) }];
+const src151 = { check: 'c', actor: 'a', at: '2026-10-25T00:00:00Z', note: '' };
+const flagsOf0423 = [
+  flag('no_stated_effectivity', 'info', NO_EFF('ECR-0423'), 'stated:ECR-0423'),
+  flag('no_stated_effectivity', 'info', NO_EFF('ECR-0406'), 'stated:ECR-0406'),
+  flag('implementation_unestimated', 'warn', IMPL, 'implementation:ECR-0406'),
+  flag('shared_supplier', 'info', 'ECR-0423 shares Stratus Aerosystems with ECR-0406.'),
+];
+
+test('ECR-0423 supply page drops ECR-0406\'s flags and keeps its own', () => {
+  const r = readSupply(supplyRows(flagsOf0423), {}, src151, 'ECR-0423');
+  const msgs = r.view.detail!.flags.map(f => f.message);
+  assert.deepEqual(msgs, [NO_EFF('ECR-0423'), 'ECR-0423 shares Stratus Aerosystems with ECR-0406.']);
+  assert.ok(!r.summary.includes('warning'), `no warnings are left, so none is claimed: ${r.summary}`);
+  assert.equal(r.attention, false, 'no warning of its own, so no attention');
+});
+
+test('an unreadable peer stays: it is a gap in this ECR\'s own check; the count matches what is listed', () => {
+  const flags = [...flagsOf0423, flag('unreadable_peer', 'warn', 'ECR-0406 could not be read, so its demand is left out.', 'ECR-0406')];
+  const r = readSupply(supplyRows(flags), {}, src151, 'ECR-0423');
+  const listed = r.view.detail!.flags;
+  assert.equal(listed.filter(f => f.severity === 'warn').length, 1);
+  assert.ok(listed.some(f => /could not be read/.test(f.message)));
+  assert.match(r.summary, /1 warning and 2 notes below\.$/);
+  assert.equal(listed.length, 3);
+});
+
+test('ECR-0421 keeps its slot interaction with ECR-0419 and its own flags; ECR-0419\'s gaps go', () => {
+  const flags = [
+    flag('terms_from_text', 'info', 'CON-ORRIN-UH-SLOT: the slot terms were read from its description, not from structured fields.', 'CON-ORRIN-UH-SLOT'),
+    flag('implementation_unestimated', 'warn', IMPL, 'implementation:ECR-0421'),
+    flag('implementation_unestimated', 'warn', IMPL, 'implementation:ECR-0419'),
+    flag('implementation_unestimated', 'warn', 'Retrofit execution, installation/retest and aircraft downtime have not been assessed.', 'implementation:ECR-0419:retrofit'),
+    flag('single_source', 'warn', 'BW-M512-340 has one qualified source (Orrin Magnetics).', 'BW-M512-340'),
+    flag('shared_supplier', 'info', 'ECR-0421 shares Orrin Magnetics with ECR-0419.'),
+    flag('slot_contention', 'warn', 'With ECR-0419 filed ahead, ECR-0421 waits for a later qualification slot: its cut-in moves 13 weeks at the median.'),
+  ];
+  const r = readSupply(supplyRows(flags), {}, src151, 'ECR-0421');
+  const msgs = r.view.detail!.flags.map(f => f.message);
+  assert.equal(msgs.length, 5);
+  assert.ok(msgs.some(m => /With ECR-0419 filed ahead, ECR-0421 waits/.test(m)));
+  assert.ok(msgs.some(m => /ECR-0421 shares Orrin Magnetics with ECR-0419/.test(m)));
+  assert.ok(!msgs.some(m => /Retrofit execution/.test(m)));
+  assert.equal(msgs.filter(m => m === IMPL).length, 1, 'only ECR-0421\'s own implementation gap');
+  assert.match(r.summary, /3 warnings and 2 notes below\.$/);
+});
+
+test('the timeline page applies the same rule', () => {
+  const rows = s3.filter(r => r.key === 'detail').map(r => {
+    const d = JSON.parse(r.detailJson);
+    d.flags = [...(d.flags ?? []), flag('implementation_unestimated', 'warn', 'ECR-0999 is a peer with a gap of its own.', 'implementation:ECR-0999'), flag('shared_supplier', 'info', 'ECR-0417 shares X with ECR-0999.')];
+    return { ...r, detailJson: JSON.stringify(d) };
+  });
+  const r = readTimeline([...s3.filter(x => x.key !== 'detail'), ...rows], {}, src151, 'ECR-0417');
+  const msgs = r.view.flags.map(f => f.message);
+  assert.ok(!msgs.some(m => /ECR-0999 is a peer/.test(m)));
+  assert.ok(msgs.includes('ECR-0417 shares X with ECR-0999.'));
 });

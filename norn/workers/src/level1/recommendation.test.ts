@@ -161,7 +161,7 @@ const factsFor = (ecr: string, rows = storedRows(ecr)): JobFacts => {
 
 test("the job prompt gives the rule's recommendation, its number and the three blank lines as conditions", () => {
   const p = jobPrompt(factsFor('ECR-0417'));
-  assert.ok(p.includes('Norn\'s rule gives "Approve with conditions" (rule 2)'));
+  assert.ok(p.includes('Fern\'s rule gives "Approve with conditions" (rule 2)'));
   for (const label of ['Re-inspection and test after retrofit', 'Spares, maintenance manual task update, training', 'Delay cost of holding']) assert.ok(p.includes(label), label);
   assert.ok(!p.includes('and your recommendation in a few words'), 'the headline does not carry the recommendation');
   assert.ok(jobPrompt(factsFor('ECR-0423')).includes('"Approve" (rule 3)'));
@@ -192,7 +192,7 @@ const statement = (rec: string | null): StatementDoc => ({
   prRevision: 3,
   createdAtIso: '2026-10-24T20:42:11.000Z',
   changeClass: 'Class I',
-  route: "Pending Norn's routing",
+  route: "Pending Fern's routing",
   headline: 'ECR-0417 adds money.',
   numbers: [],
   drivers: [],
@@ -238,7 +238,7 @@ test('an override leaves one comment on the ECR, and a second sweep or a restart
   const deps = { existing: () => [...comments], add: async (b: string) => void comments.push(b) };
   assert.equal(await recordOverride(deps, 12, f), true);
   assert.equal(comments.length, 1);
-  assert.ok(comments[0]!.startsWith('Norn\'s rule set the recommendation to Approve with conditions; the Level 1 agent wrote "Send back" (rule 2, statement 12).'), comments[0]);
+  assert.ok(comments[0]!.startsWith('Fern\'s rule set the recommendation to Approve with conditions; the Level 1 agent wrote "Send back" (rule 2, statement 12).'), comments[0]);
   assert.equal(await recordOverride(deps, 12, f), false, 'the same statement and outcome');
   assert.equal(comments.length, 1);
   assert.equal(await recordOverride(deps, 13, f), true, 'a new statement is a new record');

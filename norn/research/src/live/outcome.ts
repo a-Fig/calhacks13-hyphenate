@@ -37,6 +37,8 @@ export interface ProposalRecord {
   rationale?: string;
   /** Whether the quote was found on the page the guardrails fetched themselves. */
   quoteVerified: boolean;
+  /** How the guardrails read the page the quote was checked on: a plain HTTPS fetch, or Bright Data when that failed. */
+  verifiedVia?: 'fetch' | 'brightdata' | 'recorded';
 }
 
 export interface Outcome {
@@ -109,6 +111,7 @@ export function buildOutcome(i: OutcomeInput): { outcome: Outcome; calls: { targ
       flags: v.flags,
       unit: t?.unit ?? null,
       quoteVerified: v.verifiedAgainst !== undefined,
+      ...(v.verifiedAgainst?.via ? { verifiedVia: v.verifiedAgainst.via } : {}),
     };
     if (v.dist) {
       rec.proposed = { p10: r4(quantileOf(v.dist, 0.1)), p50: r4(quantileOf(v.dist, 0.5)), p90: r4(quantileOf(v.dist, 0.9)) };

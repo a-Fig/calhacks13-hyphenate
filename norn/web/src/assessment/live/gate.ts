@@ -193,7 +193,7 @@ export function approvalView(a: ApprovalRow, names: Names = NO_NAMES): ApprovalV
   const state: ApprovalState = a.status === 'withdrawn' ? 'withdrawn' : a.status === 'standing' && a.pendingRecheck ? 'pending_recheck' : 'approved';
   return {
     id: String(a.id),
-    who: whoKind === 'norn' ? 'Norn' : a.approverName,
+    who: whoKind === 'norn' ? 'Fern' : a.approverName,
     whoKind,
     onBehalfOf: a.onBehalfOf || undefined,
     role: fastTrack ? 'Fast track' : bodyName ?? (a.bodyId ? roleWords(a.bodyId) : 'Approver'),
@@ -211,7 +211,7 @@ export function approvalView(a: ApprovalRow, names: Names = NO_NAMES): ApprovalV
 
 export function recommendationView(r: RecommendationRow, names: Names = NO_NAMES): RecommendationView {
   const whoKind = whoKindOf(r.recommenderOrigin, r.recommenderKind);
-  const by = whoKind === 'norn' ? 'Norn' : r.recommenderName;
+  const by = whoKind === 'norn' ? 'Fern' : r.recommenderName;
   const what = r.action === 'release_eco' ? 'release' : 'approval';
   const waiting = r.awaitingSecondCheck || r.outcome === 'sampled';
   const headline = waiting ? `${by} would approve, but this one is held for a second check`
@@ -249,7 +249,7 @@ function approvalEvents(a: ApprovalRow, v: ApprovalView): ActivityEvent[] {
   }
   if (v.state === 'withdrawn' && v.endedAt) {
     out.push({
-      id: `appr-end:${a.id}`, at: v.endedAt, actor: 'Norn', actorKind: 'norn', kind: 'changes_requested',
+      id: `appr-end:${a.id}`, at: v.endedAt, actor: 'Fern', actorKind: 'norn', kind: 'changes_requested',
       text: `withdrew the approval by ${v.who}`, detail: v.endedReason,
     });
   }
@@ -422,10 +422,10 @@ function packageFor(rows: GateRows, pr: GatePr): PackageView {
   const row = rows.erpPackages?.find(p => p.prId === pr.id);
   if (row) return packageView(row);
   if (pr.status !== 'merged') {
-    return { state: 'missing', code: 'not_released', why: `${pr.plmEcrNumber} is not released yet. Norn builds the ERP change package once its ECO is released.` };
+    return { state: 'missing', code: 'not_released', why: `${pr.plmEcrNumber} is not released yet. Fern builds the ERP change package once its ECO is released.` };
   }
   if (!eco) {
-    return { state: 'missing', code: 'no_eco_number', why: `${pr.plmEcrNumber} is released in Norn, but the PLM has not given its change order number yet. The package is built once it has.` };
+    return { state: 'missing', code: 'no_eco_number', why: `${pr.plmEcrNumber} is released in Fern, but the PLM has not given its change order number yet. The package is built once it has.` };
   }
   return {
     state: 'missing', code: 'building',

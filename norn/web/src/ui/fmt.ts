@@ -89,5 +89,5 @@ export const pointOf = (f: { point?: number; p50: number }) => f.point ?? f.p50;
 
 /** Said wherever cost numbers are shown that belong to the previous revision of an ECR. */
 export function staleNote(state: 'rechecking' | 'failed'): string {
-  return state === 'failed' ? 'From the previous revision; the re-check failed.' : 'From the previous revision; Norn is checking the changed ECR again.';
+  return state === 'failed' ? 'From the previous revision; the re-check failed.' : 'From the previous revision; Fern is checking the changed ECR again.';
 }

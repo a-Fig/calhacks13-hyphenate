@@ -138,35 +138,35 @@ try {
   await statement(A417, 'ECR-0417');
   const r417 = await call(A417, 'request_fast_track_approval', { ecr: 'ECR-0417', answers: answersFor(i417), regulatoryClass: 'minor' });
   check('ECR-0417: the agent gets a recommendation, not an approval, to a named role, with reasons', !r417.isError && r417.json?.decision === 'recommended' && r417.json.ecrStatus === 'review' && r417.json.recipients?.length > 0 && r417.json.reasons?.length > 0 && /NOT approved/.test(r417.json.summary), r417.text.slice(0, 400));
-  check('ECR-0417 stays in review, and Norn holds a recommendation by that agent', ecr('ECR-0417').status === 'review' && [...norn.db.recommendation.prId.filter(ecr('ECR-0417').id)].some(r => r.recommenderName.includes('/a417/')));
+  check('ECR-0417 stays in review, and Fern holds a recommendation by that agent', ecr('ECR-0417').status === 'review' && [...norn.db.recommendation.prId.filter(ecr('ECR-0417').id)].some(r => r.recommenderName.includes('/a417/')));
 
   // ---- ECR-0423: approved; the classes the agent left out are filled in and said so ------------------------
   const logged423 = () => [...norn.db.actionLog.prId.filter(ecr('ECR-0423').id)].filter(l => l.reducer === 'request_fast_track_approval').length;
   const beforeEarly = logged423();
   const early = await call(A423, 'request_fast_track_approval', { ecr: 'ECR-0423', answers: answersFor(i423), regulatoryClass: 'minor' });
-  check('before the agent posts a statement Norn has no class of its own: refused in words, nothing sent', early.isError && /Norn has no change class for this revision/.test(early.text) && /State the change class and the regulatory class, with evidence/.test(early.text) && logged423() === beforeEarly, early.text.slice(0, 300));
+  check('before the agent posts a statement Fern has no class of its own: refused in words, nothing sent', early.isError && /Fern has no change class for this revision/.test(early.text) && /State the change class and the regulatory class, with evidence/.test(early.text) && logged423() === beforeEarly, early.text.slice(0, 300));
   const earlyII = await call(A423, 'request_fast_track_approval', { ecr: 'ECR-0423', answers: answersFor(i423), companyClass: 'II', regulatoryClass: 'minor' });
-  check('and a Class II the agent states with no statement behind it is refused too', earlyII.isError && /Nothing was sent to Norn/.test(earlyII.text) && logged423() === beforeEarly, earlyII.text.slice(0, 300));
+  check('and a Class II the agent states with no statement behind it is refused too', earlyII.isError && /Nothing was sent to Fern/.test(earlyII.text) && logged423() === beforeEarly, earlyII.text.slice(0, 300));
   const st = await statement(A423, 'ECR-0423');
   check('the agent posts its Level 1 statement (the signal said to)', !st.isError && st.json?.saved === true, st.text.slice(0, 200));
   const bad = await call(A423, 'request_fast_track_approval', { ecr: 'ECR-0423', answers: [{ testId: 'not_a_test', holds: true, evidence: 'x' }] });
-  check('an unknown test id is refused before anything is sent, naming the valid ids', bad.isError && /Nothing was sent to Norn: 'not_a_test' is not one of the configuration's fast-track tests \(.*safety_part/.test(bad.text), bad.text.slice(0, 200));
+  check('an unknown test id is refused before anything is sent, naming the valid ids', bad.isError && /Nothing was sent to Fern: 'not_a_test' is not one of the configuration's fast-track tests \(.*safety_part/.test(bad.text), bad.text.slice(0, 200));
   const before423 = [...norn.db.actionLog.prId.filter(ecr('ECR-0423').id)].filter(l => l.reducer === 'request_fast_track_approval').length;
   const noReg = await call(A423, 'request_fast_track_approval', { ecr: 'ECR-0423', answers: answersFor(i423) });
   check('the FAA class is not filled in for the agent: left out, it is asked for', noReg.isError && /state the regulatory \(FAA\) class/.test(noReg.text) && logged423() === before423, noReg.text.slice(0, 250));
   const r423 = await call(A423, 'request_fast_track_approval', { ecr: 'ECR-0423', answers: answersFor(i423), regulatoryClass: 'minor' });
   check('ECR-0423: approved on the fast track, with the gate\'s reasons and limits', !r423.isError && r423.json?.decision === 'approved' && r423.json.ecrStatus === 'approved' && r423.json.reasons.length > 0 && r423.json.limits.every((l: any) => l.held) && /is approved on the fast track/.test(r423.json.summary), r423.text.slice(0, 400));
-  check('and it says where each class came from: the company class from the statement, the FAA class the agent\'s', r423.json?.classes?.company?.id === 'II' && r423.json.classes.company.source === 'statement' && r423.json.classes.regulatory.id === 'minor' && r423.json.classes.regulatory.source === 'agent' && /Norn's own, from the ECR's current statement/.test(r423.json.classesNote ?? ''), r423.json?.classesNote);
+  check('and it says where each class came from: the company class from the statement, the FAA class the agent\'s', r423.json?.classes?.company?.id === 'II' && r423.json.classes.company.source === 'statement' && r423.json.classes.regulatory.id === 'minor' && r423.json.classes.regulatory.source === 'agent' && /Fern's own, from the ECR's current statement/.test(r423.json.classesNote ?? ''), r423.json?.classesNote);
   const stored = JSON.parse([...norn.db.approval.prId.filter(ecr('ECR-0423').id)].find(a => a.status === 'standing')?.answersJson || '{}');
   check('the standing approval records the classes it was decided on and their sources', stored.classes?.company === 'II' && stored.classSources?.company === 'statement' && stored.classSources?.regulatory === 'agent', JSON.stringify(stored.classSources));
   const appr = [...norn.db.approval.prId.filter(ecr('ECR-0423').id)].find(a => a.status === 'standing');
-  check('Norn holds a standing fast-track approval by the agent, and the log has one more request', ecr('ECR-0423').status === 'approved' && appr?.kind === 'fast_track' && appr.approverName.includes('/a423/') && [...norn.db.actionLog.prId.filter(ecr('ECR-0423').id)].filter(l => l.reducer === 'request_fast_track_approval').length === before423 + 1);
+  check('Fern holds a standing fast-track approval by the agent, and the log has one more request', ecr('ECR-0423').status === 'approved' && appr?.kind === 'fast_track' && appr.approverName.includes('/a423/') && [...norn.db.actionLog.prId.filter(ecr('ECR-0423').id)].filter(l => l.reducer === 'request_fast_track_approval').length === before423 + 1);
   const again = await call(A423, 'request_fast_track_approval', { ecr: 'ECR-0423', answers: answersFor(i423), regulatoryClass: 'minor' });
   check('asking again on an approved ECR: refused as not in review, in words', again.isError && /BWM-ECR-0423|ECR-0423 is approved, not in review/.test(again.text) && /Nothing was changed/.test(again.text), again.text.slice(0, 200));
 
   // ---- out of scope ----------------------------------------------------------------------------------------
   const out = await call(A423, 'request_fast_track_approval', { ecr: 'ECR-0417', answers: answersFor(i417), regulatoryClass: 'minor' });
-  check('an agent scoped to ECR-0423 is refused on ECR-0417 by the policy gate, and told not to retry', out.isError && /Refused by Norn's policy gate: outside the scope of job/.test(out.text) && /Do not retry/.test(out.text), out.text.slice(0, 250));
+  check('an agent scoped to ECR-0423 is refused on ECR-0417 by the policy gate, and told not to retry', out.isError && /Refused by Fern's policy gate: outside the scope of job/.test(out.text) && /Do not retry/.test(out.text), out.text.slice(0, 250));
   check('the refusal is in the action log as denied, for ECR-0417', [...norn.db.actionLog.prId.filter(ecr('ECR-0417').id)].some(l => l.reducer === 'request_fast_track_approval' && l.outcome === 'denied' && l.actorName.includes('/a423/')));
 
   // ---- a draw for the blind second check; checks not finished ------------------------------------------------
@@ -186,9 +186,9 @@ try {
   check('and the signal now says the statement\'s class rules the fast track out', iSol2.fastTrack.candidate === false && /current statement proposes Class I/.test(iSol2.fastTrack.why), iSol2.fastTrack.why);
   const solAnswers = answersFor(iSol);
   const solOmitted = await call(ASol, 'request_fast_track_approval', { ecr: solId, answers: solAnswers, regulatoryClass: 'minor' });
-  check('a company class left out is the statement\'s (Class I): no approval, a recommendation, and the answer says the class was Norn\'s', !solOmitted.isError && solOmitted.json?.decision !== 'approved' && solOmitted.json?.ecrStatus === 'review' && solOmitted.json?.classes?.company?.id === 'I' && solOmitted.json.classes.company.source === 'statement', solOmitted.text.slice(0, 300));
+  check('a company class left out is the statement\'s (Class I): no approval, a recommendation, and the answer says the class was Fern\'s', !solOmitted.isError && solOmitted.json?.decision !== 'approved' && solOmitted.json?.ecrStatus === 'review' && solOmitted.json?.classes?.company?.id === 'I' && solOmitted.json.classes.company.source === 'statement', solOmitted.text.slice(0, 300));
   const solII = await call(ASol, 'request_fast_track_approval', { ecr: solId, answers: solAnswers, companyClass: 'II', regulatoryClass: 'minor' });
-  check('Class II passed explicitly over a Class I statement is refused in words, before anything is sent', solII.isError && /you proposed Class II, but the ECR's current statement proposes Class I/.test(solII.text) && /Nothing was sent to Norn/.test(solII.text), solII.text.slice(0, 300));
+  check('Class II passed explicitly over a Class I statement is refused in words, before anything is sent', solII.isError && /you proposed Class II, but the ECR's current statement proposes Class I/.test(solII.text) && /Nothing was sent to Fern/.test(solII.text), solII.text.slice(0, 300));
   // the module's gate does not rely on the tool: the same request made to the reducer directly is denied
   const solClaims = verifyToken(entries.get(ASol)!.headers.Authorization.slice('Bearer '.length), key);
   const solHandle = await norn.actorFor(solClaims);

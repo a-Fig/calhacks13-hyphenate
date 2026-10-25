@@ -17,7 +17,7 @@ import { parseArgs } from 'node:util';
 import { bowman } from '../../../bowman/data/index.ts';
 import { renderReport } from './report.ts';
 import { AgentOutputError, buildResearchJob, DEFAULT_TOKEN_ENV, MissingTokenError, parseAgentOutput, redactJob, type ToolCallRecord } from './job.ts';
-import { brightDataFetcher, recordedFetcher, type RecordedPage } from './pages.ts';
+import { brightDataFetcher, plainFetcher, recordedFetcher, urlLeakCheck, webFirstFetcher, type RecordedPage } from './pages.ts';
 import { loadRecording, type Recording } from './recording.ts';
 import { finish, prepare, type Company } from './run.ts';
 import type { PageFetcher } from './types.ts';
@@ -96,12 +96,12 @@ async function live(ecrId: string, o: { seed: string; n: number; printJob: boole
     if (e instanceof AgentOutputError) die(`LIVE: ${e.message}`, 1);
     throw e;
   }
-  // Fetch each page again through Bright Data, and keep what came back for --save-recording.
-  const base = brightDataFetcher({ today });
+  // Fetch each page again, by a plain HTTPS fetch first and through Bright Data when that fails, and keep what came back for --save-recording.
+  const base = webFirstFetcher(plainFetcher({ today, leakCheck: urlLeakCheck(prep.identifiers) }), brightDataFetcher({ today }));
   const seen: RecordedPage[] = [];
   const fetcher: PageFetcher = async (url) => {
     const r = await base(url);
-    if (r.ok && r.text !== undefined) seen.push({ url, retrievedAt: today, fetchedBy: 'Bright Data Web Unlocker (markdown), fetched by the guardrails', excerpt: false, text: r.text });
+    if (r.ok && r.text !== undefined) seen.push({ url, retrievedAt: today, fetchedBy: r.via === 'fetch' ? 'a plain HTTPS fetch (text of the HTML), fetched by the guardrails' : 'Bright Data Web Unlocker (markdown), fetched by the guardrails', excerpt: false, text: r.text });
     return r;
   };
   const refused = calls.filter((c) => !c.allowed);
@@ -110,7 +110,7 @@ async function live(ecrId: string, o: { seed: string; n: number; printJob: boole
     provenance: [
       LIVE_NOTICE,
       `web calls checked for company identifiers before they were sent: ${calls.length}; refused: ${refused.length}${refused.length ? ` (${refused.map((c) => `${c.tool.replace('mcp__brightdata__', '')}: ${c.kinds.join(', ') || 'malformed'}`).join('; ')})` : ''}`,
-      `agent: Claude Code session ${result.sessionId ?? '?'} (${result.model}) with Bright Data MCP (${DEFAULT_TOKEN_ENV} from the environment); pages re-fetched by the guardrails through Bright Data`,
+      `agent: Claude Code session ${result.sessionId ?? '?'} (${result.model}) with WebSearch and WebFetch first and Bright Data MCP as the fallback (${DEFAULT_TOKEN_ENV} from the environment); pages re-fetched by the guardrails by a plain HTTPS fetch first, through Bright Data when that fails`,
     ],
     agentOutput,
     fetcher,

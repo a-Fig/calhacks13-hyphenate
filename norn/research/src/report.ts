@@ -3,6 +3,7 @@
 
 import type { ResearchReport, Change } from './apply.ts';
 
+const VIA = { fetch: 'by a plain HTTPS fetch', brightdata: 'through Bright Data (the plain fetch failed or was blocked)', recorded: 'from the recording' } as const;
 const usd = (x: number) => `${x < 0 ? '-' : ''}$${Math.abs(Math.round(x * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: Math.abs(x) < 1000 ? 2 : 0 })}`;
 const fmt = (c: Change, r: { p10: number; p50: number; p90: number }) =>
   c.unit === 'USD' ? `${usd(r.p50)} [${usd(r.p10)} to ${usd(r.p90)}]` : `${r.p50} [${r.p10} to ${r.p90}] weeks`;
@@ -11,7 +12,7 @@ const q = (r: { p10: number; p50: number; p90: number }) => `p10 ${r.p10}, p50 $
 export function renderReport(r: ResearchReport): string {
   const out: string[] = [];
   const tag = r.mode;
-  out.push(`Norn research agent: ${r.ecr}, seed ${r.seed}  [${tag}]`);
+  out.push(`Fern research agent: ${r.ecr}, seed ${r.seed}  [${tag}]`);
   for (const p of r.provenance) out.push(`  ${p}`);
   out.push('', 'Research targets (ranked by swing of the year-one total)');
   for (const t of r.targets) {
@@ -23,7 +24,7 @@ export function renderReport(r: ResearchReport): string {
     const head = `  #${p.index + 1} ${p.targetKey ?? '?'}  ${p.status.toUpperCase()}`;
     out.push(`${head}${p.label ? `  (${p.label})` : ''}`);
     if (p.proposed) out.push(`      proposed: ${q(p.proposed)}`);
-    if (p.source) out.push(`      quote verified on ${p.source.url} (retrieved ${p.source.retrievedAt.slice(0, 10)})`);
+    if (p.source) out.push(`      quote verified on ${p.source.url} (retrieved ${p.source.retrievedAt.slice(0, 10)}${p.source.via ? `, read ${VIA[p.source.via]}` : ''})`);
     for (const x of p.reasons) out.push(`      ${p.status === 'rejected' ? 'rejected' : 'held for a person'} (${x.code}): ${x.message}`);
     for (const f of p.flags) out.push(`      flagged (${f.code}): ${f.message}`);
   }

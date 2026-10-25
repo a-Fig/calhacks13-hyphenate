@@ -2,7 +2,7 @@
 
 When an ECR's current change-request revision has a finished `s2_cost` check run, its timeline and supply
 checks (`s3_timeline`, `s4_supply`) have settled or been waited for (see below), and it has no Level 1
-statement, one Claude session reads Norn's impact numbers and posts a Level 1 statement. A publisher
+statement, one Claude session reads Fern's impact numbers and posts a Level 1 statement. A publisher
 then writes that statement onto the ECR in Bowman's PLM. Three processes, none of which writes to
 ERPNext:
 
@@ -12,7 +12,7 @@ ERPNext:
 | publisher | `npm run level1:publisher -w @norn/workers` | writes each statement to the PLM through `norn/connectors/plm` |
 | PLM ingest | `NORN_INGEST_SOURCE=plm npm run ingest -w @norn/workers` | `listEcrs()` then `watchEcrs()` and `readChangeRequest()` into the existing `ingest_ecr` path |
 
-They also need Norn's MCP server for the same database (`npm run start -w @norn/mcp`, same `NORN_DB`)
+They also need Fern's MCP server for the same database (`npm run start -w @norn/mcp`, same `NORN_DB`)
 and the PLM credentials (`PLM_URL`, `PLM_API_KEY`, `PLM_API_SECRET`; `ENV_FILE` points at the `.env`
 of the main checkout, which a worktree does not have). Run ONE dispatcher per database.
 
@@ -21,7 +21,7 @@ of the main checkout, which a worktree does not have). Run ONE dispatcher per da
 - Job: role `level1-statement` (the MCP server lets a role named `level<N>-...` post a statement at
   level N only), actor `agent:norn/level1/<jobId>`, no onBehalfOf, spawnedBy `norn: check_run <id>`.
   `mcpServers` come from `nornMcpFor()` (default `headersHelper` delivery, the token is never on the
-  command line), scoped to that ECR. `allowedTools` are Norn's MCP tools only.
+  command line), scoped to that ECR. `allowedTools` are Fern's MCP tools only.
 - Defaults: 12 turns, 240 s, 2 attempts per revision. Settings: `NORN_L1_MODEL` (default
   `claude-haiku-5-5`), `NORN_L1_MAX_TURNS`, `NORN_L1_TIMEOUT_MS`, `NORN_L1_MAX_ATTEMPTS`,
   `NORN_L1_RETRY_DELAY_MS`, `NORN_L1_CONCURRENCY`, `NORN_L1_POLL_MS`.
@@ -75,11 +75,11 @@ of the main checkout, which a worktree does not have). Run ONE dispatcher per da
   every post: a statement that says the checks are clean, or that there are no issues, while the rule has a
   condition or a check has a finding, is refused with the reason, and the agent posts again. So is one with a number
   that is not a computation (Level 1's numbers are exactly the job's), or a number in its prose that is none of: part
-  of an id or a date (ECR-0417, BW-5120-210, S/N 14-18, 2027-01-22, January 2027), at most 100, or a number Norn
+  of an id or a date (ECR-0417, BW-5120-210, S/N 14-18, 2027-01-22, January 2027), at most 100, or a number Fern
   produced for the ECR (results and the job's facts, `facts.ts`) at the precision shown, k or million applied. That
   is an allowlist: detecting money ("$", "USD", "kUSD", a label) was bypassed every round, so whatever currency sits
   beside a number does not matter. Text is NFKC-normalised first ("＄" is "$"). It reads every field the
-  agent wrote that the PLM page or Norn's page shows: headline, change class, route, the labels and units of
+  agent wrote that the PLM page or Fern's page shows: headline, change class, route, the labels and units of
   numbers that are not computations, drivers, assumption notes and claims. "The checks are not clean" passes, and
   so does "the cost check is clean" when the cost check found nothing. The guard reads the run id from the
   session's credential, `norn:check_run:N` or `norn:check_run:N:revision:M` (#128). The agent's prose is never
@@ -112,7 +112,7 @@ The route is the tier's approval body with the cost against its limit, e.g. "Cha
 Review Committee review (p90 cost about 164,489 USD, above 150,000 USD)". The class is returned only if the ECR
 was given one that routing used (no caller gives one yet), so it stays the agent's proposal, marked judgment.
 With no stored config (or one that does not validate) `routeFor` returns nothing and the route is
-"Pending Norn's routing". The headline rows alone cannot place a change for a company whose cost measure does not
+"Pending Fern's routing". The headline rows alone cannot place a change for a company whose cost measure does not
 let savings offset spend (Bowman's): the cost reads as unmeasured and the top tier, so the cost check's rows are used.
 
 ### The recommendation (`recommendation.ts`)
@@ -127,7 +127,7 @@ recommendation is a rule, not a mood. `deriveRecommendation` reads the cost chec
 3. **Approve**: no blocker, no gap. Info flags are neither.
 The timeline and supply checks (#120) add to rule 2 only, never to rule 1. A check that failed, is blocked,
 had not finished at the cutoff or has mock numbers is one condition ("The supply check failed, so it is not
-assessed"): the cost assessment stands, and sending the ECR back would ask the engineer to fix Norn. Their
+assessed"): the cost assessment stands, and sending the ECR back would ask the engineer to fix Fern. Their
 warn flags that say the check could not assess something are gaps with short fixed wording
 (`stock_beyond_plan`, `cut_in_beyond_plan`, `beyond_published_slots`, `unreadable_peer`, `no_price`, a raw-material
 share that is a default, an assumption not applied, and since #147 `implementation_unestimated`: "Qualification
@@ -144,8 +144,8 @@ in hand the rule reads them from it, so a copy is not a second condition. The co
 Never Reject (a human call). The system prompt states the rule, the job prompt tells the agent what it gives
 for this ECR (the agent states the rule that fired in its judgment claim), and the publisher applies it again:
 when the agent's recommendation differs or is missing, the PLM gets the rule's and the statement carries a note
-saying what the agent wrote, and the publisher leaves a comment on the ECR in Norn (once per statement and
-outcome) so Norn's page and the PLM agree. Every input is bound to the statement's own run: its `detail` and
+saying what the agent wrote, and the publisher leaves a comment on the ECR in Fern (once per statement and
+outcome) so Fern's page and the PLM agree. Every input is bound to the statement's own run: its `detail` and
 cost lines, the s1 run its inputs name, and an extraction failure only if it had happened when the run
 finished, so a later failure does not change an existing statement. Cost lines on an estimate or quote basis
 with no amount, and `no_disposition`, are gaps although the check does not warn about them. It overrides rather than refusing the post because the publisher cannot talk to
@@ -160,7 +160,7 @@ publisher still sweeping wrote the statement back after the clear.
 Writes the seven `impact_*` fields with the connector's `writeImpact()` and nothing else (a comment
 only if `NORN_PUBLISH_COMMENT=1`). `impact_statement` is self-contained HTML (inline styles, a table
 of headline numbers, a "Timeline and supply" section, drivers, assumptions, evidence tags) that reads
-without opening Norn. The section holds the s3/s4 numbers (dates as ISO dates, weeks, serials, counts), the
+without opening Fern. The section holds the s3/s4 numbers (dates as ISO dates, weeks, serials, counts), the
 agent's "Timeline:" and "Supply:" sentences, and a line for each check that is not available, written from
 the run's state whatever the agent said. A statement with none of these (a Level 1 from before #120) has no section. Its last
 line carries `Ref <statement id>.<digest>`.
@@ -179,8 +179,8 @@ Two publishers at once: read-then-write is not atomic and the PLM cannot refuse 
 write, so a write takes a lease first (`claim_publication` / `release_publication`, table
 `publication_claim`, one row per ECR, 60 s so a dead holder cannot block it). The holder is the
 caller's identity, taken by the module from the connection; only that identity (and process) can
-renew or release, and only Norn's own agents (principal kind agent, origin norn) can claim, which is
-as strong as the module's notion of "Norn" is (register_actor does not prove origin). Once it has the
+renew or release, and only Fern's own agents (principal kind agent, origin norn) can claim, which is
+as strong as the module's notion of "Fern" is (register_actor does not prove origin). Once it has the
 lease the publisher picks the newest statement again and reads the PLM again, and writes only if that
 statement is still newest and the PLM does not already show it. The PLM is read on every sweep: a
 remembered "published" ref is not trusted. A publisher that loses the claim writes nothing and
@@ -194,7 +194,7 @@ or mapped (a `PlmMappingError`) is logged by name and skipped (the watcher deliv
 and the rest are still taken in. An ECR that fails for any other reason (network, timeout, 5xx, a failed
 report) goes to a retry queue and is tried again every watch interval with a doubling wait (up to 60 s)
 until it is taken in, because the watcher only reports ECRs changed after the first listing. Then it watches the PLM
-(`NORN_PLM_INTERVAL_MS`, default 1000) and reports each changed ECR. Norn's own writes to the PLM
+(`NORN_PLM_INTERVAL_MS`, default 1000) and reports each changed ECR. Fern's own writes to the PLM
 are not offered back by the watcher. `ingest.ts` hands `ingestOnce` and `itemOf` in, because it is
 the entry module and importing it back would deadlock on its top-level await.
 
@@ -202,9 +202,9 @@ the entry module and importing it back would deadlock on its top-level await.
 through `ingest_ecr`, and no check or Level 1 run starts for it. The ingest reports it once with
 `record_plm_decision` (approver: the ECO's `released_by`, else the ECR's `modified_by`; date: `decided_on`),
 and then, for an Approved ECR with an ECO, `record_eco_release` as before. The decision carries the change
-request as the PLM holds it now, and the module compares it with the revision it assessed. Norn follows the
+request as the PLM holds it now, and the module compares it with the revision it assessed. Fern follows the
 decision only where it can: an approval on an ECR whose checks are not done, whose baseline moved, that is
-closed, or that was edited in the PLM after Norn assessed it, is logged as "not followed" and changes nothing.
+closed, or that was edited in the PLM after Fern assessed it, is logged as "not followed" and changes nothing.
 The ingest then reads the ECR's status (a subscription to the ECR table) and counts the decision as delivered
 only once the ECR is merged (approval) or closed (rejection); until then it stays in the retry queue and is
 sent again, with a fresh read, on the usual doubling wait. Every delivery path (start-up, retry, watcher,

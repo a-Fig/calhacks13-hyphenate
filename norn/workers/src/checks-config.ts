@@ -120,7 +120,7 @@ try {
   check('...the knobs from the config\'s review depth match it (deep_review_mode on_request, deep_review_limit 2)', knob('deep_review_mode') === 'on_request' && knob('deep_review_limit') === '2', `${knob('deep_review_mode')}, ${knob('deep_review_limit')}`);
   const first = aCfg[0]!;
   check('the action-log summary names the change by hash and size, and holds neither JSON text', first.summary.startsWith('company_config: ') && first.summary.includes(`-> ${configHash(t1)} (`) && first.summary.length < 400 && !first.summary.includes(t1.slice(0, 100)) && !first.detailJson.includes(t1.slice(0, 100)) && first.detailJson.length < 1000, `${first.summary.length} chars: ${first.summary}`);
-  check('...and the row names who stored it: the worker, as Norn', first.actorName === 'cfgcheck-a' && first.actorKind === 'agent' && first.actorOrigin === 'norn' && first.spawnedBy === 'Norn', `${first.actorName}/${first.actorKind}/${first.actorOrigin}, spawned by ${first.spawnedBy}`);
+  check('...and the row names who stored it: the worker, as Fern', first.actorName === 'cfgcheck-a' && first.actorKind === 'agent' && first.actorOrigin === 'norn' && first.spawnedBy === 'Norn', `${first.actorName}/${first.actorKind}/${first.actorOrigin}, spawned by ${first.spawnedBy}`);
 
   // B. a second start with the same file stores nothing
   const b0 = lastLogId();
@@ -145,7 +145,7 @@ try {
   const d = await startWorker('d', files.malformed);
   await settle();
   check('a malformed file stops the worker with exit code 1', d.code === 1, `exit ${d.code}`);
-  check('...printing the validator\'s problems, one per line, and saying Norn did not start', d.err.includes('2 problems') && d.err.includes('materiality: required section, but missing') && d.err.includes('reviewDepth.deepReview.maxPasses') && d.err.includes('Norn did not start'), d.err.trim().split('\n').join(' | '));
+  check('...printing the validator\'s problems, one per line, and saying Fern did not start', d.err.includes('2 problems') && d.err.includes('materiality: required section, but missing') && d.err.includes('reviewDepth.deepReview.maxPasses') && d.err.includes('Fern did not start'), d.err.trim().split('\n').join(' | '));
   check('...before it connected: no "connected" line, and not one new row in the action log (not even register_actor)', !d.out.includes('connected as') && anyRows(d0).length === 0, `${anyRows(d0).length} new rows`);
   check('...and the stored config is untouched', storedConfig() === t2);
   const missing = await startWorker('d2', join(dir, 'does-not-exist.json'));

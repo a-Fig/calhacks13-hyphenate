@@ -106,7 +106,7 @@ test('an ECR number cannot be cited to vouch for every number', () => {
 });
 
 test('an answer with no numbers needs none', () => {
-  assert.deepEqual(guard('Norn has no record of that. Ask the cost accountant.', []).unverifiedNumbers, []);
+  assert.deepEqual(guard('Fern has no record of that. Ask the cost accountant.', []).unverifiedNumbers, []);
 });
 
 test('mock results are reported', () => {
@@ -116,7 +116,7 @@ test('mock results are reported', () => {
 });
 
 test('a tool result that is not JSON backs nothing', () => {
-  const g = guardOn([{ tool: 'x', content: 'Norn hit an internal error' }])('It is 5 [c1].', [['c1', 'k', '5']]);
+  const g = guardOn([{ tool: 'x', content: 'Fern hit an internal error' }])('It is 5 [c1].', [['c1', 'k', '5']]);
   assert.deepEqual(g.unverifiedNumbers, ['5']);
 });
 
@@ -370,4 +370,93 @@ test('P1.1 no spelling of a different amount passes against a stored 2, and the 
     assert.notDeepEqual(unverified(other), [], other);
   for (const same of ['2', '2.0', '$2.00', 'two', 'USD2', '2 dollars', 'two dollars', '200 cents', '+2'])
     assert.deepEqual(unverified(same), [], same);
+});
+
+// The 2026-10-25 rerun on ECR-0417: "What moves the 12-month net cost most, and by how much?"
+const netRows = { ecr: 'BWM-ECR-0417', state: 'current', mock: false, stages: [{ stage: 's3_cost', results: [{ key: 'net_total_year_one', label: 'Net cost, year one', unit: 'usd', p10: 150682.41, p50: 156821.28, p90: 164556.34, mock: false }] }] };
+const statements = {
+  ecr: 'BWM-ECR-0417',
+  statements: [
+    {
+      id: 12,
+      level: 1,
+      drivers: [
+        { text: 'BW-5120-210: use up the old stock or scrap it moves the 12-month net cost between $96,233 and $156,821, a swing of $60,588.', evidence: 'computation' },
+        { text: 'The vibration re-test on the endurance rig is the largest forecast driver, $7,157.', evidence: 'computation' },
+        { text: 'Engineering hours come next, $5,946.', evidence: 'computation' },
+      ],
+    },
+  ],
+};
+const rerun = guardOn([
+  { tool: 'mcp__norn__get_impact', content: JSON.stringify(netRows) },
+  { tool: 'mcp__norn__get_ecr', content: JSON.stringify(statements) },
+]);
+const rerunAnswer =
+  "The biggest mover is the choice for the old BW-5120-210 bracket stock: use it up or scrap it. Fern's driver statement says this moves the 12-month net cost between $96,233 [c1] and $156,821 [c1], a swing of $60,588 [c1]. Those three figures come from the driver text. The upper end matches the point estimate of $156,821 [c2]. The overall forecast range is $150,682 [c3] to $164,556 [c4]. The vibration re-test swings the cost by $7,157 [c5], and engineering hours come next at $5,946 [c6]. The totals leave out several items that are counted as $0 until someone estimates them.";
+const rerunCites: Cite[] = [
+  ['c1', 'driver:12.1', '$60,588'],
+  ['c2', 'net_total_year_one', '$156,821'],
+  ['c3', 'net_total_year_one', '$150,682'],
+  ['c4', 'net_total_year_one', '$164,556'],
+  ['c5', 'driver:12.2', '$7,157'],
+  ['c6', 'driver:12.3', '$5,946'],
+];
+
+test('the rerun: driver numbers verify when their driver is cited, words are not numbers, a bare $0 stays unverified', () => {
+  const g = rerun(rerunAnswer, rerunCites);
+  assert.deepEqual(g.unverifiedNumbers, ['0']);
+  assert.ok(g.citations.every(c => c.verified));
+  assert.equal(g.citations[0]!.label.startsWith('BW-5120-210: use up the old stock'), true);
+  const shown = (t: string) => g.segments.find(s => s.text === t);
+  for (const n of ['96,233', '156,821', '60,588', '7,157', '5,946']) assert.equal(shown(n)?.unverified, undefined, n);
+  assert.deepEqual(shown('60,588')?.cites, ['c1']);
+  // "12-month" and "three" are in the text and are not numbers
+  assert.ok(!g.segments.some(s => s.text === '12' || s.text === 'three'));
+  assert.equal(g.segments.map(s => s.text).join(''), g.text);
+});
+
+test('the rerun: a driver number stays unverified unless that driver is cited and holds it', () => {
+  // the same figures with no citation, the wrong driver, a driver that does not exist, and the ECR id
+  assert.deepEqual(rerun('The swing is $60,588.', []).unverifiedNumbers, ['60,588']);
+  assert.deepEqual(rerun('The swing is $60,588 [c1].', [['c1', 'driver:12.2', '$60,588']]).unverifiedNumbers, ['60,588']);
+  assert.deepEqual(rerun('The swing is $60,588 [c1].', [['c1', 'driver:12.9', '$60,588']]).unverifiedNumbers, ['60,588']);
+  assert.deepEqual(rerun('The swing is $60,588 [c1].', [['c1', 'driver:99.1', '$60,588']]).unverifiedNumbers, ['60,588']);
+  assert.deepEqual(rerun('The swing is $60,588 [c1].', [['c1', 'BWM-ECR-0417', '$60,588']]).unverifiedNumbers, ['60,588']);
+  // a number no tool result holds, even with a driver cited
+  assert.deepEqual(rerun('The swing is $61,000 [c1].', [['c1', 'driver:12.1', '$61,000']]).unverifiedNumbers, ['61,000']);
+  assert.deepEqual(rerun('The swing is $60,589 [c1] and about $60k [c1].', [['c1', 'driver:12.1', '$60,588']]).unverifiedNumbers, ['60,589', '60k']);
+  // rounding stays as it was: the shown precision, no coarser
+  assert.deepEqual(rerun('The swing is $60,588 [c1] or $60.588k [c1].', [['c1', 'driver:12.1', '$60,588']]).unverifiedNumbers, []);
+});
+
+test('a driver also verifies where drivers sit under another result', () => {
+  const g = guardOn([{ tool: 'mcp__norn__get_impact', content: JSON.stringify({ ecr: 'X', statements: statements.statements }) }]);
+  assert.deepEqual(g('The swing is $5,946 [c1].', [['c1', 'driver:12.3', '$5,946']]).unverifiedNumbers, []);
+});
+
+test('a number glued into a word with a hyphen is part of the word', () => {
+  const t = (s: string) => findNumbers(s).filter(f => !f.glued && !f.count).map(f => f.text);
+  assert.deepEqual(t('The 12-month net cost and a three-way match, a 30-day window.'), []);
+  assert.deepEqual(t('Serial S/N 011-014 and 5-7 units.'), ['5', '7']);
+  // amounts keep their magnitude, percent and currency words, with or without the hyphen
+  assert.deepEqual(t('A $12-month charge, 10-percent, nine-million, 5-k'), ['12', '10', 'nine-million', '5']);
+  assert.deepEqual(t('It is 12-month [c1]'), []);
+});
+
+test('a small count written as a word is not marked unless a citation marker follows it', () => {
+  assert.deepEqual(guard('Three quotes and two suppliers, ten lines.', []).unverifiedNumbers, []);
+  assert.deepEqual(guard('Three [c1] quotes.', [['c1', 'one_time_total', '3']]).unverifiedNumbers, ['Three']);
+  assert.deepEqual(guard('There are three quotes at ten percent, or eleven.', []).unverifiedNumbers, ['ten percent', 'eleven']);
+  assert.deepEqual(guard('It is two dollars, three million.', []).unverifiedNumbers, ['two', 'three million']);
+  assert.equal(guard('Three quotes.', []).segments.map(s => s.text).join(''), 'Three quotes.');
+});
+
+test('a glued number passes uncited only when a tool result holds it, and a stored glued number still vouches', () => {
+  // 12 is in the driver text ("12-month"), so "12-month" passes; no result holds 20, so a made-up "20-week delay" is marked
+  assert.deepEqual(rerun('The 12-month net cost.', []).unverifiedNumbers, []);
+  assert.deepEqual(rerun('A 20-week delay.', []).unverifiedNumbers, ['20']);
+  // a stored "13-week shift" still holds 13 for an answer that cites it
+  const g = guardOn([{ tool: 'mcp__norn__get_ecr', content: JSON.stringify({ ecr: 'X', statements: [{ id: 5, drivers: [{ text: 'ECR-0421 waits for a later slot: a 13-week shift.' }] }] }) }]);
+  assert.deepEqual(g('It moves 13 [c1] weeks.', [['c1', 'driver:5.1', '13']]).unverifiedNumbers, []);
 });

@@ -233,7 +233,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   try {
     await fetch(nornMcpUrl(), { method: 'GET', signal: AbortSignal.timeout(3000) });
   } catch {
-    log(`WARNING: Norn's MCP server is not answering at ${nornMcpUrl()}; sessions will start but cannot use their tools. Start it: NORN_DB=${process.env.NORN_DB ?? 'norn'} npm run start -w @norn/mcp`);
+    log(`WARNING: Fern's MCP server is not answering at ${nornMcpUrl()}; sessions will start but cannot use their tools. Start it: NORN_DB=${process.env.NORN_DB ?? 'norn'} npm run start -w @norn/mcp`);
   }
   log(`watching '${process.env.NORN_DB ?? 'norn'}' for ECR revisions with finished cost checks; model ${settings.model}, up to ${settings.maxTurns} turns and ${settings.timeoutMs / 1000} s, ${settings.maxAttempts} attempt(s) per revision${settings.waitForResearch ? `; the first session for a revision waits for its research result, at most ${settings.researchWaitMs / 1000} s after the first cost run on the revision finished` : ''}`);
   for (const t of [conn.db.checkRun, conn.db.impactStatement, conn.db.ecrRevision, conn.db.agentEvent] as any[]) {

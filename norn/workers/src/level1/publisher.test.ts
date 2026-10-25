@@ -42,7 +42,7 @@ const statement = (id: number, headline = 'ECR-0417 costs about $157,000 over tw
   prRevision: 1,
   createdAtIso: '2026-10-24T20:42:11.000Z',
   changeClass: 'Class I',
-  route: "Pending Norn's routing",
+  route: "Pending Fern's routing",
   headline,
   numbers: [{ key: 'net_total_year_one', label: 'Net cost, year one', unit: 'USD', p10: 150665, p50: 157150, p90: 164489, evidence: 'computation', resultKey: 'net_total_year_one' }],
   drivers: [],
@@ -360,7 +360,7 @@ test('two publishers at the same moment record one override comment, because it 
   assert.equal(c.bodies.length, 1, 'the loser\'s next sweep finds the comment and adds none');
 });
 
-test('written to the PLM but never recorded in Norn (a crash between): the next sweep records it, once, under the lease', async () => {
+test('written to the PLM but never recorded in Fern (a crash between): the next sweep records it, once, under the lease', async () => {
   const plm = new FakePlm('ECR-0417');
   const claims = new FakeClaims();
   const f = fmtRule(12, 'Send back');

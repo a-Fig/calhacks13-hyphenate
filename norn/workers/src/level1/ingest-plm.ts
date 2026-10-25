@@ -151,14 +151,14 @@ export async function recordDecision(R: Pick<Client['R'], 'recordPlmDecision'>, 
     return;
   }
   if (followed && !(await followed(item.plmEcrNumber, d.decision))) {
-    const note = `${item.plmEcrNumber} ${d.decision} in the PLM by ${d.decidedBy}, but Norn has not followed it (the reason is in the ECR's log)`;
+    const note = `${item.plmEcrNumber} ${d.decision} in the PLM by ${d.decidedBy}, but Fern has not followed it (the reason is in the ECR's log)`;
     if (!unfollowedLogged.has(key)) log(note);
     unfollowedLogged.add(key);
     throw new DecisionNotFollowed(note);
   }
   unfollowedLogged.delete(key);
   sent.set(key, d.decision);
-  log(`${item.plmEcrNumber} ${d.decision} in the PLM by ${d.decidedBy}, reported to Norn and followed`);
+  log(`${item.plmEcrNumber} ${d.decision} in the PLM by ${d.decidedBy}, reported to Fern and followed`);
 }
 const unfollowedLogged = new Set<string>();
 

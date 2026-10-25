@@ -63,7 +63,7 @@ const hostStatus = await new Promise<number>((res, rej) => {
   r.end('{}');
 });
 check('a request for another host name: 403', hostStatus === 403);
-check('a token names an ECR Norn does not have: 403', (await post({ authorization: `Bearer ${signToken({ kind: 'job', jobId: `ghost-${stamp}`, role: 'r', actor: `agent:norn/ghost/${stamp}`, onBehalfOf: null, spawnedBy: 'norn', ecrs: ['BWM-ECR-9999'], ttlSeconds: 60 }, key)}` })).status === 403);
+check('a token names an ECR Fern does not have: 403', (await post({ authorization: `Bearer ${signToken({ kind: 'job', jobId: `ghost-${stamp}`, role: 'r', actor: `agent:norn/ghost/${stamp}`, onBehalfOf: null, spawnedBy: 'norn', ecrs: ['BWM-ECR-9999'], ttlSeconds: 60 }, key)}` })).status === 403);
 check('a person_agent token needs a person; "*" is for person agents only', (() => {
   try { signToken({ kind: 'person_agent', jobId: 'p', role: 'r', actor: 'a', onBehalfOf: null, spawnedBy: 's', ecrs: [], ttlSeconds: 60 }, key); return false; } catch { /* expected */ }
   try { signToken({ kind: 'job', jobId: 'p', role: 'r', actor: 'a', onBehalfOf: null, spawnedBy: 's', ecrs: ['*'], ttlSeconds: 60 }, key); return false; } catch { return true; }
@@ -163,7 +163,7 @@ const before418 = commentsOn418();
 const c2 = await call(A, 'add_comment', { ecr: 'BWM-ECR-0418', body: `gate check ${stamp}: this must be refused` });
 await sleep(300);
 const denied = [...norn.db.actionLog.prId.filter(ecr418.id)].find(l => l.actorName === actorA && l.outcome === 'denied');
-check('add_comment on another ECR returns a clear refusal, not a crash', c2.isError && c2.text.includes('Refused by Norn\'s policy gate') && c2.text.includes('outside the scope') && c2.text.includes('BWM-ECR-0418'), c2.text.slice(0, 160));
+check('add_comment on another ECR returns a clear refusal, not a crash', c2.isError && c2.text.includes('Refused by Fern\'s policy gate') && c2.text.includes('outside the scope') && c2.text.includes('BWM-ECR-0418'), c2.text.slice(0, 160));
 check('...nothing was written to that ECR', commentsOn418() === before418);
 check('...and the refusal is in the action log: denied, with the reason, the actor and who it was for', !!denied && denied.reducer === 'add_comment' && denied.policy.startsWith('deny: outside the scope of job ') && denied.onBehalfOf === 'person:jeff' && denied.spawnedBy === 'norn', denied?.policy);
 check('...and the refusal is visible in that ECR\'s history', (await call(A, 'get_ecr_history', { ecr: 'BWM-ECR-0418' })).json?.entries?.some((e: any) => e.outcome === 'denied' && e.by === actorA && e.policy));
@@ -199,7 +199,7 @@ const stored = [...norn.db.impactStatement.prId.filter(ecr417.id)][0];
 const wanted = [...norn.db.checkResult.prId.filter(ecr417.id)].find(r => r.key === resultKey)!;
 check('post_impact_statement stores a structured statement', !s1.isError && s1.json?.saved === true && stored?.level === 1 && stored.changeClass === 'Class I' && stored.numbers.length === 2 && stored.drivers.length === 1 && stored.claims.length === 1, s1.text.slice(0, 200));
 check('...a computation number is copied from the check result, to the digit', stored?.numbers[0]?.p10 === wanted.p10 && stored.numbers[0].p50 === wanted.p50 && stored.numbers[0].p90 === wanted.p90 && stored.numbers[0].evidence === 'computation');
-check('...assumption sources are the real ones, filled in by Norn', stored?.assumptions.find(a => a.key === 'requalification_weeks')?.source === 'agent_estimated' && stored.assumptions.find(a => a.key === 'tooling_cost_usd')?.source === 'given');
+check('...assumption sources are the real ones, filled in by Fern', stored?.assumptions.find(a => a.key === 'requalification_weeks')?.source === 'agent_estimated' && stored.assumptions.find(a => a.key === 'tooling_cost_usd')?.source === 'given');
 const g2 = await call(A, 'get_ecr', { ecr: 'BWM-ECR-0417' });
 check('get_ecr shows the statement, and that it is current for this revision', g2.json?.statements?.[0]?.level === 1 && g2.json.statements[0].current === true && g2.json.statements[0].postedBy?.name === actorA);
 const sBad = await call(A, 'post_impact_statement', { ...stmtArgs, numbers: [{ key: 'x', evidence: 'computation', resultKey: 'no_such_result' }] });
@@ -208,7 +208,7 @@ check('...and it lists the result keys that do exist', sBad.text.includes('Curre
 const sPref = await call(A, 'post_impact_statement', { ...stmtArgs, numbers: [{ key: 'unit_cost', evidence: 'computation', resultKey: 's2_cost.unit_cost_delta' }], assumptions: [] });
 check('a result key written with its stage in front (s2_cost.unit_cost_delta) is accepted', !sPref.isError && sPref.json?.saved === true, sPref.text.slice(0, 120));
 const sOut = await call(A, 'post_impact_statement', { ...stmtArgs, ecr: 'BWM-ECR-0418', assumptions: [], numbers: [{ key: 'j', evidence: 'judgment', p10: 1, p50: 2, p90: 3 }] });
-check('a statement on another ECR is refused by the gate and logged', sOut.isError && sOut.text.includes('Refused by Norn') && [...norn.db.actionLog.prId.filter(ecr418.id)].some(l => l.reducer === 'post_impact_statement' && l.outcome === 'denied'));
+check('a statement on another ECR is refused by the gate and logged', sOut.isError && sOut.text.includes('Refused by Fern') && [...norn.db.actionLog.prId.filter(ecr418.id)].some(l => l.reducer === 'post_impact_statement' && l.outcome === 'denied'));
 
 const raw = await rawClient();
 await raw.R.registerActor({ meta: meta('reg'), kind: 'agent', name: `gate-raw-${stamp}`, origin: 'norn', onBehalfOf: undefined });

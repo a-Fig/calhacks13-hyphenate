@@ -685,7 +685,7 @@ const statementFor = (ecr: string, over: Partial<StatementDoc> = {}): StatementD
     prRevision: 3,
     createdAtIso: '2026-10-24T20:42:11.000Z',
     changeClass: 'Class I',
-    route: "Pending Norn's routing",
+    route: "Pending Fern's routing",
     headline: 'ECR-0417 adds money, and the change reaches the line on 2027-02-16 at the median.',
     numbers: keys.filter(k => rows.some(r => r.key === k)).map(k => ({ key: k.replace(/[^A-Za-z0-9_]/g, '_'), label: pick(k).label, unit: pick(k).unit, p10: pick(k).p10, p50: pick(k).p50, p90: pick(k).p90, evidence: 'computation', resultKey: k })),
     drivers: [],
@@ -731,7 +731,7 @@ test('the PLM text has its own "Timeline and supply" section after the cost numb
   assert.ok(!cost.includes('Earliest cut-in date') && !cost.includes('Changed parts'));
   assert.ok(!/208\d\d/.test(html), 'no raw day numbers');
   assert.ok(!html.includes('Also noted'), 'the two claims are in their section, not repeated');
-  assert.ok(html.includes("Timeline and supply: computed by Norn's timeline and supply checks (timeline run 4, supply run 5)"));
+  assert.ok(html.includes("Timeline and supply: computed by Fern's timeline and supply checks (timeline run 4, supply run 5)"));
   assert.ok(!/\b(branch|merge|pull request)\b/i.test(html), 'business words only');
   assert.equal(f.fields.impact_recommendation, 'Approve with conditions');
   assert.equal(f.overridden, undefined);
@@ -812,7 +812,7 @@ test('(f) the post tool refuses clean wording and an invented figure while the r
   assert.equal(post(good, [claim('Recommendation: Approve with conditions. Rule 2. There is no conflict with other ECRs on the cut-in.')]), undefined, 'a specific negative is not "no issues"');
   // the clean wording is refused, with what was found, in words the agent can act on
   const clean = post('Checks are clean.')!;
-  assert.match(clean, /^Not posted\. Your headline says "clean", but Norn's checks found \d+ items for ECR-0421: \(1\) /);
+  assert.match(clean, /^Not posted\. Your headline says "clean", but Fern's checks found \d+ items for ECR-0421: \(1\) /);
   assert.ok(clean.includes('Resolve the supplier slot conflict with ECR-0419') && clean.includes('CCB to accept slip'), 'it names the derived conditions');
   assert.ok(clean.endsWith('post again.'));
   assert.ok(/no issues/.test(post(good, [claim('Recommendation: Approve with conditions. There are no issues.')])!));
@@ -966,7 +966,7 @@ test("(round 3) Sol's case and one per field: clean wording or an invented figur
   assert.equal(guard(pr0421, by, proseOfDoc(base)), undefined, 'the base statement is fine');
   // Sol's exact case: an existing assumption's note
   const sol = guard(pr0421, by, proseOfDoc({ ...base, assumptions: [{ key: 'baseline:scrap', source: 'default', note: 'Checks are clean. The change costs $999,999 a year.' }] }))!;
-  assert.match(sol, /^Not posted\. Your assumption 1 note says "clean", but Norn's checks found/);
+  assert.match(sol, /^Not posted\. Your assumption 1 note says "clean", but Fern's checks found/);
   assert.match(sol, /The \$999,999 in your assumption 1 note is not in any check result of ECR-0421/);
   const prov = provFor('ECR-0421');
   for (const [where, put] of Object.entries(fieldsWith('Checks are clean.'))) {

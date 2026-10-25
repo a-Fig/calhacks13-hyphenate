@@ -119,7 +119,7 @@ export function verifyToken(token: string, key: string | undefined, nowMs = Date
   const parts = token.split('.');
   // Strict shape first: base64url without padding or stray characters, so there is exactly one
   // string for a given signature and a lenient decoder cannot make an edited token verify.
-  if (parts.length !== 3 || parts[0] !== TOKEN_PREFIX || !B64URL.test(parts[1] ?? '') || !B64URL_SIG.test(parts[2] ?? '')) throw new TokenError('malformed', 'not a Norn token');
+  if (parts.length !== 3 || parts[0] !== TOKEN_PREFIX || !B64URL.test(parts[1] ?? '') || !B64URL_SIG.test(parts[2] ?? '')) throw new TokenError('malformed', 'not a Fern token');
   const given = Buffer.from(parts[2]!);
   const want = Buffer.from(b64(sign(k, `${parts[0]}.${parts[1]}`)));
   if (given.length !== want.length || !timingSafeEqual(given, want)) throw new TokenError('bad_signature', 'the token was not signed with this server\'s key');

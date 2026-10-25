@@ -86,17 +86,17 @@ export function createLiveSource(): AssessmentSource {
             refresh();
           })
           .onError(() => {
-            status = { state: 'error', message: `Norn refused the subscription on ${DB}` };
+            status = { state: 'error', message: `Fern refused the subscription on ${DB}` };
             notify();
           })
           .subscribe(QUERIES);
       })
       .onConnectError((_ctx, err) => {
-        status = { state: 'error', message: `Could not reach Norn at ${URI} (${err.message})` };
+        status = { state: 'error', message: `Could not reach Fern at ${URI} (${err.message})` };
         notify();
       })
       .onDisconnect((_ctx, err) => {
-        if (status.state !== 'error') status = { state: 'error', message: `Disconnected from Norn${err ? `: ${err.message}` : ''}` };
+        if (status.state !== 'error') status = { state: 'error', message: `Disconnected from Fern${err ? `: ${err.message}` : ''}` };
         notify();
       })
       .build();

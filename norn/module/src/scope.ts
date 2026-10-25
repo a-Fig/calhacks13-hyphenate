@@ -77,7 +77,7 @@ export const scopeRule: PolicyRule = (ctx, actor, reducer, args) => {
     if (level > s.maxLevel) return deny(`job ${s.jobId} may post up to Level ${s.maxLevel}, not Level ${level}`);
     const items: Evidenced[] = [...(args.numbers as Evidenced[]), ...(args.drivers as Evidenced[]), ...(args.claims as Evidenced[])];
     if (items.some(i => i.evidence === 'fact'))
-      return deny("an agent cannot mark its own number or claim as fact: a fact is read from a source Norn can check. Use computation (a check result), assumption or judgment");
+      return deny("an agent cannot mark its own number or claim as fact: a fact is read from a source Fern can check. Use computation (a check result), assumption or judgment");
   }
 
   return { effect: 'allow', reason: `job scope: job ${s.jobId} may write to ${ecrLabel(ctx, prId)}` };

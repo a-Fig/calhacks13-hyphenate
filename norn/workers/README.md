@@ -1,16 +1,16 @@
-# Norn's workers
+# Fern's workers
 
-Processes that do Norn's work outside the database, through its reducers. Written 2026-10-24.
+Processes that do Fern's work outside the database, through its reducers. Written 2026-10-24.
 
 - **The worker** (`src/worker.ts`) claims queued check runs and stores their results.
-  - s1 (BOM delta), s2 (cost), s3 (timeline) and s4 (supply) run Norn's impact checks
+  - s1 (BOM delta), s2 (cost), s3 (timeline) and s4 (supply) run Fern's impact checks
     (`../checks`) on ECRs that have a change request from the PLM.
   - Every other stage, and every ECR with no change request, is mock compute. Its results say
     `mock: true`.
-- **The ingest loop** (`src/ingest.ts`) reports the ECRs a change-request source has to Norn, and the
+- **The ingest loop** (`src/ingest.ts`) reports the ECRs a change-request source has to Fern, and the
   change order number once the PLM releases one.
 - **The ERP change package** (`src/package.ts`, in the worker) puts on each released ECO what a person
-  enters in the ERP to carry it out. Norn never writes to the ERP (#71, #72).
+  enters in the ERP to carry it out. Fern never writes to the ERP (#71, #72).
 - **The company config** (`src/config.ts`): at start-up the worker loads and validates the file in
   `NORN_COMPANY_CONFIG`, refuses to start on a malformed one, and stores the config through
   `set_config` when it differs from what is stored. How it works and what the module checks are in
@@ -30,13 +30,13 @@ NORN_DB=norn-gate-1 npm run check:gate                # end to end on a scratch 
 
 1. **Ingest.** `ingest_ecr` takes the PLM's ECR number, title, text and change request (the
    checks library's `ChangeRequest`, as JSON), in one transaction.
-   - It opens the ECR if Norn hasn't seen the number. Otherwise it records the change as a new
+   - It opens the ECR if Fern hasn't seen the number. Otherwise it records the change as a new
      `ecr_revision` and re-checks the ECR.
    - Reporting the same thing again writes nothing, so the loop just repeats.
 2. **Baseline.** The worker reads the baseline from the ERP when it starts and every
    `NORN_BASELINE_POLL_MS` (default 60 s). It records each read with `record_baseline`, by the
    connector's content hash.
-   - A hash Norn hasn't seen as current re-checks every open ECR.
+   - A hash Fern hasn't seen as current re-checks every open ECR.
    - The JSON stays on the workers, cached by hash in memory and in `.cache/baselines`.
 3. **Inputs.** Every code stage's inputs name what it reads: the change request (`revision` and its
    digest, `overlay`), the baseline hash (`erpBaseline`), the seed, and the assumptions.
@@ -81,7 +81,7 @@ moved under the same revision.
 
 ## The ERP change package (#72)
 
-When an ECR is released in Norn (status `merged`) and the PLM has given its change order number
+When an ECR is released in Fern (status `merged`) and the PLM has given its change order number
 (`record_eco_release`, which ingest calls when a change request carries `eco`), a worker that reads the
 ERP builds the package and records it with `record_erp_package`, in `erp_package`.
 
@@ -130,6 +130,6 @@ stated:
 | `NORN_BASELINE_CACHE_DIR` | worker | Where baselines are cached by hash (default `norn/workers/.cache/baselines`). |
 | `NORN_INGEST_SOURCE` | ingest | `plm`, which needs the PLM connector and isn't wired yet, or `stub`. |
 | `NORN_STUB_ECR_DIR` | ingest | For `stub`: a directory of change-request JSON files. A test feed, recorded with source `stub`. A file's `eco` field is the released change order's number. |
-| `NORN_WEB_URL` | worker | Where Norn's ECR pages are (default `http://localhost:5173`): the trace on every package line links there. |
+| `NORN_WEB_URL` | worker | Where Fern's ECR pages are (default `http://localhost:5173`): the trace on every package line links there. |
 | `NORN_PACKAGE_POLL_MS` | worker | How often a worker that reads the ERP looks for packages to build or check (default 15 s). |
 | `NORN_DB`, `NORN_URI` | both | The database, and the server (default `ws://127.0.0.1:3000`). |

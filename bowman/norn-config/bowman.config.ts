@@ -218,7 +218,7 @@ const config = {
           { id: 'program', label: 'Program', kind: 'program', required: 'draft' },
           { id: 'priority', label: 'Priority', kind: 'priority', required: 'submit' },
           { id: 'justification', label: 'Justification code', kind: 'justificationCode', required: 'submit' },
-          { id: 'company_class', label: 'Company class', kind: 'companyClass', required: 'submit', help: 'Norn proposes a class; the CM analyst has the final say.' },
+          { id: 'company_class', label: 'Company class', kind: 'companyClass', required: 'submit', help: 'Fern proposes a class; the CM analyst has the final say.' },
           { id: 'regulatory_class', label: 'FAA class', kind: 'regulatoryClass', required: 'submit', help: 'Your proposal. The certification lead has the final say.' },
           { id: 'ncr', label: 'Originating NCR', kind: 'ncr', required: 'optional' },
           { id: 'needed_by', label: 'Needed by', kind: 'date', required: 'optional' },
@@ -253,7 +253,7 @@ const config = {
       {
         id: 'cost',
         title: 'Cost page',
-        fields: [{ id: 'cost_page', label: 'Cost page', kind: 'costPage', required: 'submit', askedFor: ['I'], help: 'Fill what you know. Norn fills the rest and marks which is which.' }],
+        fields: [{ id: 'cost_page', label: 'Cost page', kind: 'costPage', required: 'submit', askedFor: ['I'], help: 'Fill what you know. Fern fills the rest and marks which is which.' }],
       },
     ],
     costPage: {
@@ -299,7 +299,7 @@ const config = {
       whenUnsure: 'I',
       proposedBy: ['originator', 'norn'],
       decidedBy: 'cm_analyst',
-      note: 'Norn proposes a class and the CM analyst has the final say, and can change it at any time. Whether Norn\'s class takes effect before the CM analyst has seen it is the autonomy level of set_company_class.',
+      note: 'Fern proposes a class and the CM analyst has the final say, and can change it at any time. Whether Fern\'s class takes effect before the CM analyst has seen it is the autonomy level of set_company_class.',
     },
     regulatory: {
       label: 'FAA class',
@@ -310,7 +310,7 @@ const config = {
       whenUnsure: 'major',
       proposedBy: ['originator', 'norn'],
       decidedBy: 'certification',
-      note: 'The originator proposes and Norn reviews. The certification lead has the final say, as the design approval holder, and the class does not take effect until the lead has set it (set_regulatory_class is recommend only).',
+      note: 'The originator proposes and Fern reviews. The certification lead has the final say, as the design approval holder, and the class does not take effect until the lead has set it (set_regulatory_class is recommend only).',
     },
     prov: src(`${PRACTICE} §4`, 'Company Class I/II after MIL-HDBK-61A Table 6-2; FAA major/minor from 14 CFR 21.93 and Order 8110.37G.'),
   },
@@ -414,12 +414,12 @@ const config = {
       {
         action: 'file_ecr',
         level: 'recommend',
-        why: 'Norn can draft an ECR from an NCR or from prose. A person files it.',
+        why: 'Fern can draft an ECR from an NCR or from prose. A person files it.',
       },
       {
         action: 'review_ecr',
         level: 'recommend',
-        why: 'Concurrence is a board member\'s signature. Norn\'s view comes as the impact statement and its recommendation.',
+        why: 'Concurrence is a board member\'s signature. Fern\'s view comes as the impact statement and its recommendation.',
       },
       {
         action: 'set_company_class',
@@ -427,12 +427,12 @@ const config = {
         sampleRate: 0.25,
         escalateOn: ['safety_part'],
         escalateTo: 'cm_analyst',
-        why: 'Classing is routine and checkable, so Norn does it and a quarter get a blind second read. A safety part goes to the CM analyst, because a filing can claim Class II on one.',
+        why: 'Classing is routine and checkable, so Fern does it and a quarter get a blind second read. A safety part goes to the CM analyst, because a filing can claim Class II on one.',
       },
       {
         action: 'set_regulatory_class',
         level: 'recommend',
-        why: 'Bowman is the design approval holder, so the certification lead decides FAA major or minor. Norn recommends with its reasoning.',
+        why: 'Bowman is the design approval holder, so the certification lead decides FAA major or minor. Fern recommends with its reasoning.',
       },
       {
         action: 'post_impact_statement',
@@ -449,12 +449,12 @@ const config = {
         otherwise: 'recommend',
         escalateOn: ['safety_part', 'new_supplier', 'conflicting_open_ecr', 'shared_supplier_exposure', 'linchpin_assumption_agent_estimated', 'sources_conflict', 'stale_data', 'checker_disagrees'],
         escalateTo: 'cm_analyst',
-        why: 'Most changes are small and CMII fast-tracks 75 to 85 percent of them. Within the limits Norn approves and a fifth get a blind second read. Past a limit it recommends; on any named trigger the CM analyst gets it with the work done.',
+        why: 'Most changes are small and CMII fast-tracks 75 to 85 percent of them. Within the limits Fern approves and a fifth get a blind second read. Past a limit it recommends; on any named trigger the CM analyst gets it with the work done.',
       },
       {
         action: 'approve_ecr_at_tier',
         level: 'recommend',
-        why: 'The approval bodies decide. Norn files its recommendation first, so the body opens a finished package.',
+        why: 'The approval bodies decide. Fern files its recommendation first, so the body opens a finished package.',
       },
       {
         action: 'release_eco',
@@ -466,12 +466,12 @@ const config = {
         // tier still covers the change at today's cost. If a re-quote lifts it past the tier, the limits
         // apply again.
         carriesOutApproval: true,
-        why: 'Releasing carries out an approval that already had authority. While the body that approved the ECR still covers the change at today\'s cost, Norn releases at any cost. If the ECR was approved another way, as on the fast track, or a re-quote has lifted the cost past that body\'s tier, it releases within 25,000 and the CM analyst does above.',
+        why: 'Releasing carries out an approval that already had authority. While the body that approved the ECR still covers the change at today\'s cost, Fern releases at any cost. If the ECR was approved another way, as on the fast track, or a re-quote has lifted the cost past that body\'s tier, it releases within 25,000 and the CM analyst does above.',
       },
       {
         action: 'write_bom',
         level: 'recommend',
-        why: 'The ERP change package lists the BOM lines to change. The manufacturing engineer enters them in the ERP; Norn never writes there (#71).',
+        why: 'The ERP change package lists the BOM lines to change. The manufacturing engineer enters them in the ERP; Fern never writes there (#71).',
       },
       {
         action: 'update_standard_cost',
@@ -481,7 +481,7 @@ const config = {
       {
         action: 'draft_journal_entry',
         level: 'recommend',
-        why: 'The package lists the journal entry lines: the scrap write-off, the purchase price variance on the first lot and the cancellation charge. The cost accountant enters them, because Norn saves no drafts in the ERP (#71).',
+        why: 'The package lists the journal entry lines: the scrap write-off, the purchase price variance on the first lot and the cancellation charge. The cost accountant enters them, because Fern saves no drafts in the ERP (#71).',
       },
       {
         action: 'post_journal_entry',
@@ -533,7 +533,7 @@ const config = {
       { check: 'quote_matches_source', appliesTo: ['impact_statement', 'recommendation', 'escalation'], enforcement: 'block', reason: 'a quotation does not appear word for word in the source it cites' },
       { check: 'evidence_class', appliesTo: ['impact_statement', 'recommendation', 'escalation'], enforcement: 'block', reason: 'a number or claim is not marked fact, assumption, computation or judgment' },
       { check: 'numbers_are_ranges', appliesTo: ['impact_statement'], enforcement: 'block', reason: 'a forecast number is a single point: give it as a range' },
-      { check: 'numbers_from_computation', appliesTo: ['impact_statement', 'recommendation'], enforcement: 'block', reason: 'a figure in the text is not one of Norn\'s computed values' },
+      { check: 'numbers_from_computation', appliesTo: ['impact_statement', 'recommendation'], enforcement: 'block', reason: 'a figure in the text is not one of Fern\'s computed values' },
       { check: 'likelihood_words', appliesTo: ['impact_statement', 'recommendation', 'escalation'], enforcement: 'block', reason: 'a probability is not stated in the likelihood scale\'s words, or likelihood and confidence share a sentence' },
       { check: 'flag_assumptions', appliesTo: ['impact_statement'], enforcement: 'block', reason: 'an assumption an agent estimated is not marked as one, with its rationale' },
       { check: 'label_outside_evidence', appliesTo: ['impact_statement', 'recommendation', 'comment'], enforcement: 'block', reason: 'evidence from an outside agent is not marked as reported by that agent' },

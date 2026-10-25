@@ -230,8 +230,8 @@ export function resolveClasses(
     return {
       ok: false,
       why: statementCompany
-        ? `you proposed ${label(given.company)}, but the ECR's current statement proposes ${label(statementCompany)}; Norn does not decide on a class more permissive than its own proposal`
-        : `the ECR's current statement proposes no company class, so Norn has nothing to check ${label(given.company)} against; Norn does not decide on a class it has not proposed`,
+        ? `you proposed ${label(given.company)}, but the ECR's current statement proposes ${label(statementCompany)}; Fern does not decide on a class more permissive than its own proposal`
+        : `the ECR's current statement proposes no company class, so Fern has nothing to check ${label(given.company)} against; Fern does not decide on a class it has not proposed`,
     };
   }
   const reg = given.regulatory;
@@ -443,8 +443,8 @@ export function fastTrackSignal(
   if (d.outcome === 'approve' || d.outcome === 'approve_sampled') {
     const held = (d.limits ?? []).map((l) => l.text).join(' ');
     const classNote = input.statementCompany
-      ? ' State the FAA class you can support with evidence; Norn takes the company class from your statement.'
-      : ` Your statement must propose ${config.changeClasses.company.values.find((v) => v.id === classes!.company)?.label ?? 'the change class the tests need'}, which is the company class the tests need (Norn takes the company class from it), and you state the FAA class with evidence.`;
+      ? ' State the FAA class you can support with evidence; Fern takes the company class from your statement.'
+      : ` Your statement must propose ${config.changeClasses.company.values.find((v) => v.id === classes!.company)?.label ?? 'the change class the tests need'}, which is the company class the tests need (Fern takes the company class from it), and you state the FAA class with evidence.`;
     return out(true, `Only your answers to the tests stand between this ECR and the fast track. ${held}${postFirst ? ` Post your Level ${postFirst} statement first.` : ''}${classNote}`.trim());
   }
   const failed = (d.limits ?? []).filter((l) => !l.held).map((l) => l.text);
