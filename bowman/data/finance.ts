@@ -37,7 +37,7 @@ export const finance: Finance = {
     {
       program: 'vesper',
       perWeekUsd: { p10: 20_000, p50: 32_000, p90: 55_000 },
-      basis: 'The controller-install station crew idle or redeployed (6 people x 40 h x about $100 per hour is $24k), carrying the held aircraft (2 held x $2.8M x 12% a year / 52 is $6.5k) and expediting.',
+      basis: 'The controller-install station crew idle or redeployed (6 people x 40 h x about $100 per hour is $24k), carrying a held aircraft (1 held x $2.8M x 12% a year / 52 is $6.5k) and expediting.',
       prov: inv('Crew from the work-center rates in this dataset (WC-SYS $100 per hour); carrying cost at a 12% cost of capital; p10 assumes the crew is redeployed part of the week, p90 four held aircraft and overtime.'),
     },
     {

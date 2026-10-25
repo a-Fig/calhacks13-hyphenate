@@ -561,7 +561,13 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const DELAY_ROW = /delay|holding|idle|stand[- ]?down|stoppage/i;
   const delayBasis = baseline.finance?.delayCosts.find((x) => x.program === ecr.program);
   let delayInfo = null as { weeks: string; weekly: string; perWeek: Range3; stated: string; notComputed?: string } | null;
-  if (delayBasis) {
+  // Only a change that holds the line has a schedule exposure: one whose cost page carries a delay or holding line.
+  const holdsLine = COST_BLOCKS.some((b) => ecr.costPage[b].some((r: CostPageRow) => DELAY_ROW.test(r.label)));
+  if (delayBasis && !holdsLine) {
+    noExposure = `${ecr.id}'s cost page has no delay or holding line, so no line is held waiting for the change.`;
+    flags.push({ kind: 'exposure_not_computed', severity: 'info', message: `No schedule exposure: ${noExposure}` });
+  }
+  if (delayBasis && holdsLine) {
     const book = new Book(options.assumptions ?? [], mergePlanDefaults());
     const sched = gatherSchedule(book, baseline, ecr, { baseline: fromBaseline, changeRequest: fromEcr });
     const statedDay = sched.stated.day;
@@ -576,7 +582,8 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
       for (const rec of book.reg.values()) if (!reg.has(rec.id)) reg.set(rec.id, rec);
       for (const v of book.vars.values()) vars.set(v.id, v);
       for (const a of options.assumptions ?? []) if (book.wasUsed(a.id)) usedOverrides.add(a.id);
-      flags.push(...book.flags);
+      // The schedule's own flags belong to the timeline check, which reports them; repeating them here would feed the
+      // recommendation rule conditions that are not about cost.
       const w = delayBasis.perWeekUsd;
       const weekly = variable({
         id: `finance:${ecr.program}:delay-per-week`, label: `Cost of a week's delay on ${ecr.program}`, source: 'given', groups: ['labor:internal'],

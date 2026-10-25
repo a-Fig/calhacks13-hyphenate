@@ -23463,7 +23463,8 @@
           {
             "label": "Qualification: vibration re-test on the endurance rig",
             "basis": "engineer_estimate",
-            "oneTime": 18500
+            "oneTime": 18500,
+            "factor": "qualification"
           },
           {
             "label": "Scrap and write-off of Rev B inventory",
@@ -23481,11 +23482,13 @@
             "label": "Installation labor, 12 h per aircraft at $110",
             "basis": "engineer_estimate",
             "unitCost": 1320,
-            "quantity": 10
+            "quantity": 10,
+            "factor": "retrofit_installation"
           },
           {
             "label": "Re-inspection and test after retrofit",
-            "basis": "not_provided"
+            "basis": "not_provided",
+            "factor": "retrofit_test"
           }
         ],
         "logisticsSupport": [
@@ -23747,7 +23750,8 @@
           },
           {
             "label": "Whirl-tower, flutter and noise testing",
-            "basis": "not_provided"
+            "basis": "not_provided",
+            "factor": "qualification"
           },
           {
             "label": "Hover performance flight test",
@@ -23999,7 +24003,8 @@
           {
             "label": "Qualification and soak testing (Hollis)",
             "basis": "supplier_quote",
-            "oneTime": 36000
+            "oneTime": 36000,
+            "factor": "qualification"
           },
           {
             "label": "Engineering and data revision",
@@ -24137,7 +24142,8 @@
           {
             "label": "Qualification (Hollis)",
             "basis": "supplier_quote",
-            "oneTime": 22000
+            "oneTime": 22000,
+            "factor": "qualification"
           },
           {
             "label": "Engineering and data revision",
@@ -24272,7 +24278,8 @@
           {
             "label": "Orrin qualification lot",
             "basis": "supplier_quote",
-            "oneTime": 96000
+            "oneTime": 96000,
+            "factor": "qualification"
           },
           {
             "label": "Engineering and testing",
@@ -24391,7 +24398,8 @@
           {
             "label": "Orrin qualification lot",
             "basis": "supplier_quote",
-            "oneTime": 142000
+            "oneTime": 142000,
+            "factor": "qualification"
           },
           {
             "label": "Engineering and testing",
@@ -24648,7 +24656,7 @@
           "p50": 32000,
           "p90": 55000
         },
-        "basis": "The controller-install station crew idle or redeployed (6 people x 40 h x about $100 per hour is $24k), carrying the held aircraft (2 held x $2.8M x 12% a year / 52 is $6.5k) and expediting.",
+        "basis": "The controller-install station crew idle or redeployed (6 people x 40 h x about $100 per hour is $24k), carrying a held aircraft (1 held x $2.8M x 12% a year / 52 is $6.5k) and expediting.",
         "prov": {
           "basis": "invented",
           "note": "Crew from the work-center rates in this dataset (WC-SYS $100 per hour); carrying cost at a 12% cost of capital; p10 assumes the crew is redeployed part of the week, p90 four held aircraft and overtime."
