@@ -10,13 +10,16 @@
 //   "Recommendation: Approve with conditions. <reasoning>"   -> impact_recommendation + the reasoning
 //   "Proposed change class: Class I. <reason>"               -> the class, shown as a proposal
 //   evidence "assumption", text "[default] ..." / "[agent estimate] ..." / "[needs estimate] ..."
+//   "Timeline: ..." and "Supply: ..." claims, and the numbers of the timeline and supply checks -> their own section
 // A statement that does not follow them still renders; it just has no recommendation field.
 import { createHash } from 'node:crypto';
 import type { ImplementationScenario } from '../../../checks/src/assessment.ts';
 import type { CompanyConfig, CostCheckHeadline } from '../../../config/src/index.ts';
 import { routeFor, ROUTE_PENDING, type AssessmentRef, type EcrRef } from './routing.ts';
 import type { ImpactFields } from './plm.ts';
-import { deriveRecommendation, type Derived, type RuleInput } from './recommendation.ts';
+import { cleanClaims, findingsByCheck, findingsOf } from './prose.ts';
+import { deriveRecommendation, type Derived, type RuleInput, type SiblingCheck } from './recommendation.ts';
+import { isTimelineSupplyKey } from './timeline-supply.ts';
 
 export interface StatementNumber {
   key: string;
@@ -70,6 +73,14 @@ export interface Provenance {
    * on no run) the agent's stands.
    */
   ruleInput?: RuleInput;
+  /** The timeline (s3) and supply (s4) runs the statement rests on (siblings.ts), for the sources line. */
+  timelineRunId?: number;
+  supplyRunId?: number;
+  /**
+   * The numbers of the "Timeline and supply" table: the stored rows of those two runs (`tableNumbers`). The agent posts
+   * none of them. Absent (a caller with no bound runs): any such number the statement itself carries is shown.
+   */
+  timelineSupplyNumbers?: StatementNumber[];
 }
 
 export interface FormatOptions {
@@ -109,6 +120,17 @@ export function parseClassProposal(claims: StatementClaim[]): { cls: string; rea
   return null;
 }
 
+/** A claim of the timeline and supply section: it starts "Timeline:" or "Supply:" (prompt.ts). */
+export const isTsClaim = (text: string): boolean => /^\s*(timeline|supply)\s*[:–-]/i.test(text);
+
+/** Why a timeline or supply check has no result in the statement's snapshot. */
+const UNAVAILABLE_TEXT: Record<Exclude<SiblingCheck['state'], 'ready'>, string> = {
+  failed: 'failed',
+  blocked: 'is blocked by a check it depends on',
+  pending: 'had not finished when this assessment was made',
+  mock: 'has only placeholder numbers',
+};
+
 export type AssumptionTag = 'default' | 'agent estimate' | 'needs estimate' | 'given';
 export function parseTag(text: string): { tag: AssumptionTag | null; body: string } {
   const m = /^\s*\[(given|default|agent[ _-]?estimate(?:d)?|needs[ _-]?estimate)\]\s*([\s\S]*)$/i.exec(text);
@@ -125,8 +147,18 @@ export function money(n: number): string {
   return Math.round(n) < 0 ? `($${r})` : `$${r}`;
 }
 
+const WEEKS = (n: number) => (Math.round(n * 10) / 10).toLocaleString('en-US', { maximumFractionDigits: 1 });
+
+/** A day number since 1970-01-01 as an ISO date: the timeline check's date rows are stored that way. */
+export const isoDay = (n: number): string => new Date(Math.round(n) * 86_400_000).toISOString().slice(0, 10);
+
 export function show(n: number, unit: string): string {
   if (unit === 'USD') return money(n);
+  if (unit === 'day') return isoDay(n);
+  if (unit === 'weeks') return `${WEEKS(n)} weeks`;
+  if (unit === 'serial') return `S/N ${Math.round(n)}`;
+  if (unit === 'parts') return `${Math.round(n)} ${Math.round(n) === 1 ? 'part' : 'parts'}`;
+  if (unit === 'fraction' || unit === 'probability') return `${Math.round(n * 100)}%`;
   const v = Number.isInteger(n) ? n.toLocaleString('en-US') : n.toLocaleString('en-US', { maximumFractionDigits: 2 });
   return unit ? `${v} ${unit}` : v;
 }
@@ -205,16 +237,38 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
       : '';
     out.push(`<p style="margin:0 0 8px 0"><b>Recommendation: ${esc(rec.value)}</b> ${tag('judgment')}${rec.reasoning ? `<br>${esc(rec.reasoning)}` : ''}${note}</p>`);
   }
-
-  // Headline numbers.
-  out.push(`<h5 style="margin:12px 0 4px 0">Headline numbers</h5>`);
-  out.push(`<table style="border-collapse:collapse"><thead><tr><th ${TH}>Measure</th><th ${THR}>Low (p10)</th><th ${THR}>Median (p50)</th><th ${THR}>High (p90)</th><th ${TH}>Where it comes from</th></tr></thead><tbody>`);
-  for (const n of s.numbers) {
-    const formula = n.resultKey ? prov.formulas[n.resultKey] : undefined;
-    const basis = n.evidence === 'computation' ? `Norn's check ${esc(n.resultKey)}${formula ? `: ${esc(formula)}` : ''}` : `${esc((EVIDENCE[n.evidence] ?? { label: n.evidence }).label)}, stated by the agent`;
-    out.push(`<tr><td ${TD}>${esc(n.label)} ${tag(n.evidence)}</td><td ${TDR}>${esc(show(n.p10, n.unit))}</td><td ${TDR}><b>${esc(show(n.p50, n.unit))}</b></td><td ${TDR}>${esc(show(n.p90, n.unit))}</td><td ${TD}>${basis}</td></tr>`);
+  // What the rule found is shown by code, whatever the agent wrote (its reasoning may leave a condition out). When the
+  // reasoning is the rule's own it already names every one, so the lists are for the agent's reasoning.
+  if (derived && rec?.reasoning !== derived.reasoning) {
+    const list = (title: string, items: string[]) => {
+      if (!items.length) return;
+      out.push(`<p style="margin:0 0 4px 0"><b>${esc(title)}</b> ${tag('computation')}</p><ul style="margin:0 0 8px 0">${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>`);
+    };
+    list("Why it cannot be assessed as filed (Norn's rule)", derived.blockers);
+    list("Conditions for the CCB (Norn's rule)", derived.conditions);
   }
-  out.push(`</tbody></table>`);
+  // The agent's words are never rewritten; where they say nothing was found although the checks found something, the page says so.
+  if (derived && cleanClaims(s, findingsOf(prov.ruleInput, derived), findingsByCheck(prov.ruleInput, derived)).length)
+    out.push(`<p style="margin:0 0 8px 0;color:#555555"><i>Norn's checks found the items named under the recommendation. Wording elsewhere in this statement that says there are none is the agent's, and the checks stand.</i></p>`);
+
+  // Headline numbers: the cost's. The timeline and supply checks' numbers have their own section below.
+  const numberTable = (nums: StatementNumber[]) => {
+    const t: string[] = [];
+    t.push(`<table style="border-collapse:collapse"><thead><tr><th ${TH}>Measure</th><th ${THR}>Low (p10)</th><th ${THR}>Median (p50)</th><th ${THR}>High (p90)</th><th ${TH}>Where it comes from</th></tr></thead><tbody>`);
+    for (const n of nums) {
+      const formula = n.resultKey ? prov.formulas[n.resultKey] : undefined;
+      const basis = n.evidence === 'computation' ? `Norn's check ${esc(n.resultKey)}${formula ? `: ${esc(formula)}` : ''}` : `${esc((EVIDENCE[n.evidence] ?? { label: n.evidence }).label)}, stated by the agent`;
+      // A count or a certain date has one value: the low and high say "same" rather than repeat it.
+      const same = n.p10 === n.p50 && n.p50 === n.p90;
+      t.push(`<tr><td ${TD}>${esc(n.label)} ${tag(n.evidence)}</td><td ${TDR}>${same ? 'same' : esc(show(n.p10, n.unit))}</td><td ${TDR}><b>${esc(show(n.p50, n.unit))}</b></td><td ${TDR}>${same ? 'same' : esc(show(n.p90, n.unit))}</td><td ${TD}>${basis}</td></tr>`);
+    }
+    t.push(`</tbody></table>`);
+    return t;
+  };
+  const costNumbers = s.numbers.filter(n => !isTimelineSupplyKey(n.resultKey));
+  const tsNumbers = prov.timelineSupplyNumbers ?? s.numbers.filter(n => isTimelineSupplyKey(n.resultKey));
+  out.push(`<h5 style="margin:12px 0 4px 0">Headline numbers</h5>`);
+  out.push(...numberTable(costNumbers));
   out.push(`<p style="margin:4px 0 0 0;color:#555555;font-size:12px">A range, not a point: in 10 out of 100 simulated outcomes the cost is below the low figure, and in 10 out of 100 it is above the high one. Savings are in parentheses.</p>`);
   if (prov.implementationScenario) {
     const scenario = prov.implementationScenario;
@@ -225,6 +279,30 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
       out.push(`<p><b>${esc(a.label)}</b>: ${esc(show(a.net.p10, 'USD'))} to ${esc(show(a.net.p90, 'USD'))}, median ${esc(show(a.net.p50, 'USD'))}, for ${a.window.months} months from ${esc(a.window.from ?? 'an unplaced cut-in')}.</p>`);
     } else out.push('<p>Implementation cannot be placed in the volume plan; its cost is unknown.</p>');
     if (scenario.forecast.readiness === 'materials_only') out.push('<p>Material readiness only: qualification, release or retrofit prerequisites remain unassessed. The alternative is conditional and excludes unestimated delay and support costs.</p>');
+  }
+
+  // Timeline and supply: when the change reaches the line and how exposed it is to its suppliers. The numbers are the
+  // checks' own; the sentences are the agent's "Timeline:" and "Supply:" claims; and a check that is not available is
+  // said so here from the run's state, whatever the agent wrote.
+  const tsClaims = s.claims.filter(c => isTsClaim(c.text));
+  const off: { text: string; effect: string }[] = [];
+  for (const [name, c, effect] of [
+    ['timeline', prov.ruleInput?.timeline, 'No cut-in date is assessed.'],
+    ['supply', prov.ruleInput?.supply, 'No supplier finding is assessed.'],
+  ] as const)
+    if (c && c.state !== 'ready') off.push({ text: `The ${name} check ${UNAVAILABLE_TEXT[c.state]}.`, effect });
+  if (tsNumbers.length || tsClaims.length || off.length) {
+    out.push(`<h5 style="margin:12px 0 4px 0">Timeline and supply</h5>`);
+    for (const o of off) out.push(`<p style="margin:0 0 4px 0"><b>${esc(o.text)}</b> ${o.effect}</p>`);
+    if (tsNumbers.length) {
+      out.push(...numberTable(tsNumbers));
+      out.push(`<p style="margin:4px 0 0 0;color:#555555;font-size:12px">Dates are the earliest the change can reach the line. Low and high are the 10th and 90th of 100 simulated outcomes.</p>`);
+    }
+    if (tsClaims.length) {
+      out.push(`<ul style="margin:4px 0 0 0">`);
+      for (const c of tsClaims) out.push(`<li>${esc(c.text.trim())} ${tag(c.evidence)}</li>`);
+      out.push(`</ul>`);
+    }
   }
 
   if (s.drivers.length) {
@@ -251,7 +329,7 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
 
   // Everything else the agent claimed (facts, further judgments), minus what is shown above.
   const shown = new Set<StatementClaim>([...assumed]);
-  for (const c of s.claims) if (/^\s*recommendation\s*[:–-]/i.test(c.text) || /^\s*proposed change class\s*[:–-]/i.test(c.text)) shown.add(c);
+  for (const c of s.claims) if (/^\s*recommendation\s*[:–-]/i.test(c.text) || /^\s*proposed change class\s*[:–-]/i.test(c.text) || isTsClaim(c.text)) shown.add(c);
   const other = s.claims.filter(c => !shown.has(c));
   if (other.length) {
     out.push(`<h5 style="margin:12px 0 4px 0">Also noted</h5><ul style="margin:0">`);
@@ -272,6 +350,8 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
   out.push(`<li>Baseline (costs, BOMs, stock, volume plan): ${esc(prov.baseline)}.</li>`);
   out.push(`<li>The request: ${esc(prov.changeRequest)} (${esc(ecr.number)}, filed in the PLM).</li>`);
   out.push(`<li>Numbers: computed by Norn's cost check${prov.codeVersion ? ` (${esc(prov.codeVersion)}` : ''}${prov.draws ? `, ${prov.draws.toLocaleString('en-US')} simulated outcomes` : ''}${prov.codeVersion ? ')' : ''}${prov.s2RunId ? `, run ${prov.s2RunId}` : ''}. The ERP was only read.</li>`);
+  const tsRuns = [prov.timelineRunId ? `timeline run ${prov.timelineRunId}` : '', prov.supplyRunId ? `supply run ${prov.supplyRunId}` : ''].filter(Boolean);
+  if (tsNumbers.length) out.push(`<li>Timeline and supply: computed by Norn's timeline and supply checks${tsRuns.length ? ` (${tsRuns.join(', ')})` : ''}, on the same baseline and change request.</li>`);
   out.push(`</ul>`);
 
   const body = out.join('\n');

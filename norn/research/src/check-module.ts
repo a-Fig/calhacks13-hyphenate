@@ -224,7 +224,7 @@ const released = decide(factsFor(ecrNumber('B')), opts(Number(b2.finishedAt!.toD
 check('the research result is stored: the session is released, on the NEW cost run (the researched numbers), not the first', released.action === 'dispatch' && released.s2RunId === Number(b2.id) && released.s2RunId !== Number(b1.id), JSON.stringify(released));
 
 const bf = factsFor(ecrNumber('B'));
-check('the wait counts from the FIRST cost run on the revision (now stale), not the re-run: the dispatcher reads it from the real cache', Math.abs(bf.firstS2FinishedMs! - run(b1.id).finishedAt!.toDate().getTime()) < 5 && bf.firstS2FinishedMs < bf.s2Done.at(-1)!.finishedMs!, `${bf.firstS2FinishedMs} vs run ${run(b1.id).finishedAt!.toDate().getTime()}, re-run ${bf.s2Done.at(-1)!.finishedMs}`);
+check('the wait counts from the FIRST cost run on the revision (now stale), not the re-run: the dispatcher reads it from the real cache', Math.abs(bf.firstS2FinishedMs! - run(b1.id).finishedAt!.toDate().getTime()) < 5 && bf.firstS2FinishedMs! < bf.s2Done.at(-1)!.finishedMs!, `${bf.firstS2FinishedMs} vs run ${run(b1.id).finishedAt!.toDate().getTime()}, re-run ${bf.s2Done.at(-1)!.finishedMs}`);
 const afterRerun = decide({ ...bf, firstS2SeenMs: bf.firstS2FinishedMs! }, opts(bf.firstS2FinishedMs! + T(10), true));
 check('...so ten minutes after the first run it is released even though the re-run finished later', afterRerun.action === 'dispatch', afterRerun.action === 'skip' ? afterRerun.reason : afterRerun.action);
 

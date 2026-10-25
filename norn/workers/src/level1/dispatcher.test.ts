@@ -70,11 +70,13 @@ test("factsOf reads the research worker's stored results only when asked, for th
     ev('research-ECR-0423-r1-0a1b2c3d-a1', 'researcher', 'research_result'), // another ECR's
     ev('l1-ECR-0417-r1-e3-a1', 'level1-statement', 'job_started'),
   ];
-  const finishedAt = { toDate: () => new Date('2026-10-24T20:00:20Z') };
+  const at = (iso: string) => ({ toDate: () => new Date(iso), microsSinceUnixEpoch: BigInt(Date.parse(iso)) * 1000n });
+  const finishedAt = at('2026-10-24T20:00:20Z');
   const db = {
     ecrRevision: { prId: { filter: () => [{ seq: 2, current: true, createdAt: ts }] } },
-    checkResult: { prId: { filter: () => [] } },
-    checkRun: { prId: { filter: () => [{ id: 6n, stage: 's2_cost', status: 'stale', inputsJson: JSON.stringify({ revision: 2 }), finishedAt: { toDate: () => new Date('2026-10-24T20:00:05Z') } }, { id: 7n, stage: 's2_cost', status: 'done', inputsJson: JSON.stringify({ revision: 2 }), finishedAt }] } },
+    // run 6 completed at 20:00:05 (its results say so); its finishedAt was overwritten when it went stale
+    checkResult: { prId: { filter: () => [{ id: 1n, checkRunId: 6n, createdAt: at('2026-10-24T20:00:05Z') }] } },
+    checkRun: { prId: { filter: () => [{ id: 6n, stage: 's2_cost', status: 'stale', inputsJson: JSON.stringify({ revision: 2 }), finishedAt: at('2026-10-24T20:09:00Z') }, { id: 7n, stage: 's2_cost', status: 'done', inputsJson: JSON.stringify({ revision: 2 }), finishedAt }] } },
     agentEvent: { prId: { filter: () => events } },
     impactStatement: { prId: { filter: () => [] } },
   } as unknown as Db;

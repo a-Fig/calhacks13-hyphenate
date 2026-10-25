@@ -29,14 +29,16 @@ import type { DbConnection } from '@norn/bindings';
 import { NORN_MCP_SERVER_NAME, loadSigningKey, nornMcpFor, nornMcpUrl, nornTools } from '../../../mcp/src/index.ts';
 import { Runner, jsonlFileSink, teeSink, type JobSpec } from '../../../runner/src/index.ts';
 import { connect, subscribe } from '../connect.ts';
-import { provenanceOf, type Inputs } from '../impact.ts';
+import type { Inputs } from '../impact.ts';
 import { agentEventWriter } from './agent-events.ts';
 import { actorFor, decide, jobIdFor, jobsFromEvents, researchRevisionOfJobId, spawnedByFor, supersededJobs, type EcrFacts, type EventRow } from './plan.ts';
-import { deriveRecommendation, ruleInputOf } from './recommendation.ts';
-import { jobPrompt, systemPromptFor, screenDetail, type Detail, type HeadlineKey } from './prompt.ts';
-import { costCheckOf, routeFor, storedCompanyConfig } from './routing.ts';
+import { jobFactsOf } from './facts.ts';
+import { jobPrompt, systemPromptFor } from './prompt.ts';
 import { settingsFromEnv, type Level1Settings } from './settings.ts';
-import { crSeqOfRun, failedChecksForRun } from './source.ts';
+import { SIBLING_STAGES, siblingCutoffUs, siblingOf } from './siblings.ts';
+import { crSeqOfRun, runRowsOf, toRunRow } from './source.ts';
+
+export { jobFactsOf };
 
 type Db = DbConnection['db'];
 type Pr = NonNullable<ReturnType<Db['pullRequest']['id']['find']>>;
@@ -64,18 +66,26 @@ export const RESEARCH_RESULTS_QUERY = `SELECT * FROM agent_event WHERE role = '$
 
 /** What `decide` needs to know about one ECR, from the client cache. `withResearch`: also read the research worker's stored results. */
 export function factsOf(db: Db, pr: Pr, role: string, withResearch = false): EcrFacts {
-  const allS2 = [...db.checkRun.prId.filter(pr.id)].filter(r => r.stage === 's2_cost' && (r.status === 'done' || r.status === 'stale') && r.finishedAt);
   const cur = [...db.ecrRevision.prId.filter(pr.id)].find(r => r.current);
   const results = [...db.checkResult.prId.filter(pr.id)];
+  const runs = runRowsOf(db, pr.id);
+  // When a cost run finished: its results' time (a stale run's finishedAt is overwritten when it goes stale), else its finishedAt.
+  const finishedUsOf = (r: (typeof runs)[number]) => r.completedUs ?? (r.status === 'stale' ? null : r.finishedUs);
+  const usToMs = (us: bigint | null | undefined) => (us === null || us === undefined ? null : Number(us / 1000n));
   const s2Done = [...db.checkRun.prId.filter(pr.id)]
     .filter(r => r.stage === 's2_cost' && r.status === 'done')
     .sort((a, b) => Number(a.id - b.id))
-    .map(r => ({
-      id: Number(r.id),
-      inputsRevision: typeof jsonOr<Inputs>(r.inputsJson, {}).revision === 'number' ? jsonOr<Inputs>(r.inputsJson, {}).revision! : null,
-      mock: results.some(x => x.checkRunId === r.id && x.mock),
-      finishedMs: r.finishedAt ? ms(r.finishedAt) : null,
-    }));
+    .map(r => {
+      const own = runs.find(x => x.id === r.id) ?? toRunRow(r);
+      return {
+        id: Number(r.id),
+        inputsRevision: typeof jsonOr<Inputs>(r.inputsJson, {}).revision === 'number' ? jsonOr<Inputs>(r.inputsJson, {}).revision! : null,
+        mock: results.some(x => x.checkRunId === r.id && x.mock),
+        finishedMs: usToMs(finishedUsOf(own)),
+        // Whether the timeline and supply checks of this run's snapshot have settled (siblings.ts).
+        siblings: { pending: SIBLING_STAGES.some(stage => siblingOf(runs, own, stage).state === 'pending'), cutoffUs: siblingCutoffUs(own) },
+      };
+    });
   const events: EventRow[] = [...db.agentEvent.prId.filter(pr.id)].filter(e => e.role === role).map(e => ({ jobId: e.jobId, eventType: e.eventType, tsMs: ms(e.ts), payloadJson: e.payloadJson }));
   return {
     number: pr.plmEcrNumber,
@@ -89,7 +99,10 @@ export function factsOf(db: Db, pr: Pr, role: string, withResearch = false): Ecr
     jobs: jobsFromEvents(events),
     ...(withResearch
       ? {
-          firstS2FinishedMs: allS2.filter(r => jsonOr<Inputs>(r.inputsJson, {}).revision === cur?.seq).map(r => ms(r.finishedAt!)).reduce<number | null>((a, b) => (a === null ? b : Math.min(a, b)), null),
+          firstS2FinishedMs: runs
+            .filter(r => r.stage === 's2_cost' && (r.status === 'done' || r.status === 'stale') && r.revision === cur?.seq)
+            .map(r => usToMs(finishedUsOf(r)))
+            .reduce<number | null>((a, b) => (b === null ? a : a === null ? b : Math.min(a, b)), null),
           researched: [...db.agentEvent.prId.filter(pr.id)]
             .filter(e => e.role === RESEARCH_ROLE && e.eventType === RESEARCH_RESULT_EVENT)
             .map(e => researchRevisionOfJobId(e.jobId, pr.plmEcrNumber))
@@ -97,29 +110,6 @@ export function factsOf(db: Db, pr: Pr, role: string, withResearch = false): Ecr
         }
       : {}),
   };
-}
-
-/** The job prompt's facts for one finished s2_cost run. */
-export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
-  const run = db.checkRun.id.find(BigInt(s2RunId))!;
-  const inputs = jsonOr<Inputs>(run.inputsJson, {});
-  const p = provenanceOf(inputs);
-  const rows = [...db.checkResult.prId.filter(pr.id)].filter(r => r.checkRunId === run.id);
-  const numbers: HeadlineKey[] = rows
-    .filter(r => r.key.startsWith('unit_cost_delta:') || r.key === 'one_time_total' || r.key === 'net_total_year_one')
-    .sort((a, b) => Number(a.id - b.id))
-    .map(r => ({ key: r.key.replace(/[^A-Za-z0-9_]/g, '_'), resultKey: r.key, label: r.label }));
-  const year = rows.find(r => r.key === 'net_total_year_one');
-  const detail = jsonOr<Detail>(rows.find(r => r.key === 'detail')?.detailJson ?? '{}', {});
-  const screened = screenDetail(detail, year ? year.p90 - year.p10 : 0);
-  const routing = routeFor(
-    { number: pr.plmEcrNumber, title: pr.title, revision },
-    { numbers: Object.fromEntries(rows.filter(r => r.key !== 'detail').map(r => [r.key, { p10: r.p10, p50: r.p50, p90: r.p90, unit: r.unit }])), costCheck: costCheckOf(rows) },
-    storedCompanyConfig(db)
-  );
-  // The same rule and the same rows the publisher applies, so the agent is told what the PLM will say.
-  const recommendation = deriveRecommendation(ruleInputOf(rows, failedChecksForRun(db, pr.id, run.id)));
-  return { ecr: pr.plmEcrNumber, title: pr.title, revision, s2RunId, baseline: p.baseline, changeRequest: p.changeRequest, numbers, screened, routing, recommendation };
 }
 
 export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; ecrRevision: number; prompt: string; settings: Level1Settings; signingKey?: string; mcpUrl?: string }): JobSpec {

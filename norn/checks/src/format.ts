@@ -58,6 +58,32 @@ export function renderCostPage(r: CostCheckResult): string {
   out.push(`Recurring, year one: ${formatMoney(h.recurringWindow)}`);
   out.push(`Net total, year one: ${formatMoney(h.windowTotal)}`);
   out.push(`Net total, whole volume plan: ${formatMoney(h.planTotal)}`);
+  if (r.exposure) {
+    const e = r.exposure;
+    const wk = e.weeksLate.p10 === e.weeksLate.p90 ? `${e.weeksLate.p50}` : `${e.weeksLate.p50} [${e.weeksLate.p10} to ${e.weeksLate.p90}]`;
+    out.push('');
+    out.push('Schedule exposure (not in totals)');
+    out.push(`  Weeks late against ${e.stated}: ${wk}`);
+    out.push(`  Cost of a week of delay: ${formatMoney({ ...e.cost, ...e.perWeekUsd, mean: 0, point: 0 })}`);
+    out.push(`  Exposure if the line holds for every late week: ${formatMoney(e.cost)}`);
+  }
+  const fin = r.finance;
+  if (fin) {
+    const pctOf = (x: number) => `${(100 * x).toLocaleString('en-US', { maximumFractionDigits: 2 })}%`;
+    const range = (m: Money, f: (x: number) => string) => (m.p10 === m.p90 ? f(m.p50) : `${f(m.p50)} [${f(m.p10)} to ${f(m.p90)}]`);
+    const days = (x: number) => `${x.toLocaleString('en-US', { maximumFractionDigits: 2 })} days`;
+    const x = fin.withExposure;
+    out.push('');
+    out.push(`Cost in ${fin.period.label}, ${fin.program}: ${formatMoney(fin.periodCost)}${x ? `; including schedule exposure: ${formatMoney(x.periodCost)}` : ''}`);
+    if (fin.budget.share) {
+      out.push(`Share of the remaining ${fin.program} budget: ${range(fin.budget.share, pctOf)} of ${formatUsd(fin.budget.remainingUsd)} (budget ${formatUsd(fin.budget.budgetUsd)}, spent ${formatUsd(fin.budget.spentToDateUsd)} by ${fin.asOf}); chance it exceeds the remainder: ${pctOf(fin.budget.probabilityOver)}`);
+      if (x?.budgetShare) out.push(`  including schedule exposure: ${range(x.budgetShare, pctOf)}; chance it exceeds the remainder: ${pctOf(x.probabilityOver)}`);
+    } else {
+      out.push(`The ${fin.program} budget for ${fin.period.label} is spent (${formatUsd(fin.budget.spentToDateUsd)} of ${formatUsd(fin.budget.budgetUsd)}); chance the change costs more than what is left: ${pctOf(fin.budget.probabilityOver)}`);
+    }
+    out.push(`Runway used: ${range(fin.runway.daysUsed, days)} of ${fin.runway.runwayDaysNow} (cash ${formatUsd(fin.runway.cashOnHandUsd)}, burn ${formatUsd(fin.runway.monthlyBurnUsd)} a month)`);
+    if (x) out.push(`  including schedule exposure: ${range(x.daysUsed, days)}`);
+  }
   if (r.blocks.production.some((x) => x.needsEstimate) || COST_BLOCKS.some((b) => r.blocks[b].some((x) => x.needsEstimate))) {
     out.push('* left blank on the cost page; counted as 0 until estimated');
   }

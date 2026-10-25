@@ -1,6 +1,7 @@
 # Level 1 impact statement (#42) and the PLM ingest source (#40)
 
-When an ECR's current change-request revision has a finished `s2_cost` check run and no Level 1
+When an ECR's current change-request revision has a finished `s2_cost` check run, its timeline and supply
+checks (`s3_timeline`, `s4_supply`) have settled or been waited for (see below), and it has no Level 1
 statement, one Claude session reads Norn's impact numbers and posts a Level 1 statement. A publisher
 then writes that statement onto the ECR in Bowman's PLM. Three processes, none of which writes to
 ERPNext:
@@ -48,6 +49,41 @@ of the main checkout, which a worktree does not have). Run ONE dispatcher per da
   publisher takes it only while the ECR is still at the `prRevision` the module recorded for it.
 - Sessions are keyed by ECR and revision (the job id names both), so another ECR's session never
   blocks this one.
+- Waiting for s3 and s4 (#120, `siblings.ts`). The statement carries the cut-in date and the supplier
+  findings, so the dispatcher starts the session once s3 and s4 have settled (done, failed or blocked), not
+  at s2 alone. Measured on Bowman's data (norn-seed-1, 10,000 draws, one process): s2 takes 0.5 to 1.0 s,
+  s3 0.06 to 0.13 s and s4 0.10 to 0.47 s, and the module queues all three at once once s1 is done, so
+  the wait is normally a second or two. The wait is bounded: `SIBLING_WAIT_MS` (30 s) after s2 finished.
+  Once the cutoff has strictly passed the session starts whatever their state (a finish exactly at the
+  cutoff still counts, so the dispatcher does not go ahead at the cutoff itself: see `siblings.ts`), and the
+  statement says that check is unavailable (failed, blocked, or not finished in time), never holds Level 1 back, and is never the
+  reason for a Send back. The cutoff is a constant, not a setting: the dispatcher and the publisher both
+  read it, because it decides which runs a statement counts as having had. The dispatcher goes ahead only
+  `SIBLING_CACHE_GRACE_US` (2 s) past the cutoff, so its mirror of the database can catch up with a sibling
+  that finished just before it. A mirror lagging by more than 2 s is a known, accepted risk: the statement
+  would then call a check unavailable that the publisher reads as ready.
+- Which s3 and s4 run a statement rests on. s2, s3 and s4 all read the same s1 run, so a run of s3 or s4
+  belongs to the statement's snapshot when it names the same `upstream.s1_bom_delta` hash and the same
+  change-request revision as the statement's own s2 run (`impact_statement.checkRunId`). Among those, the
+  newest that had settled by the cutoff (a stale run counts: it finished on those inputs and was made
+  stale later). A later run, such as s4 re-run because another ECR was filed, is never read. The
+  dispatcher and the publisher call the same `siblingsForRun` (`source.ts`).
+- Times are compared at full precision: `RunRow` carries SpacetimeDB timestamps as bigint microseconds, never
+  milliseconds, so a run created a few hundred microseconds after s2 is not mistaken for one of its siblings.
+- The agent's words against the rule (#123, `prose.ts`, `guard.ts`). The PLM text lists every derived
+  blocker and condition itself, whatever the agent wrote. The MCP server (`mcp/src/main.ts`) runs `guard.ts` on
+  every post: a statement that says the checks are clean, or that there are no issues, while the rule has a
+  condition or a check has a finding, is refused with the reason, and the agent posts again. So is one with a number
+  that is not a computation (Level 1's numbers are exactly the job's), or a number in its prose that is none of: part
+  of an id or a date (ECR-0417, BW-5120-210, S/N 14-18, 2027-01-22, January 2027), at most 100, or a number Norn
+  produced for the ECR (results and the job's facts, `facts.ts`) at the precision shown, k or million applied. That
+  is an allowlist: detecting money ("$", "USD", "kUSD", a label) was bypassed every round, so whatever currency sits
+  beside a number does not matter. Text is NFKC-normalised first ("＄" is "$"). It reads every field the
+  agent wrote that the PLM page or Norn's page shows: headline, change class, route, the labels and units of
+  numbers that are not computations, drivers, assumption notes and claims. "The checks are not clean" passes, and
+  so does "the cost check is clean" when the cost check found nothing. The guard reads the run id from the
+  session's credential, `norn:check_run:N` or `norn:check_run:N:revision:M` (#128). The agent's prose is never
+  rewritten.
 - Events also go to a JSONL file (`teeSink`) as a fallback if the database is unreachable.
 
 ## The agent (`prompt.ts`)
@@ -55,7 +91,16 @@ of the main checkout, which a worktree does not have). Run ONE dispatcher per da
 It calls `get_ecr`, `get_impact` and `list_assumptions`, then `post_impact_statement` at level 1:
 the unit cost per program, the one-time cost and the 12-month total, each p10/p50/p90 copied from
 `get_impact`; the top drivers; flagged assumptions and blank lines that need an estimate; and a
-recommendation marked judgment. ICD 203 wording and Bowman's posting standards (materiality, evidence
+recommendation marked judgment. Since #120 it also posts the timeline and supply findings
+(`timeline-supply.ts`) as at most one claim starting "Timeline: " and one "Supply: ", built from sentences the
+job prompt supplies with likelihood in the ICD 203 words (`likelihoodWord`, same scale as the system prompt).
+It posts none of their numbers: the publisher shows the cut-in date and serial, the weeks late and the supplier
+findings itself, from the s3 and s4 runs bound to the statement (below), because the module would check an
+agent-posted number against the newest finished run, which a later re-run can change. What clears Bowman's
+bars decides what is raised: a cut-in or slot slip over 14 days, a bundle saving over the $10,000 one-time bar,
+a part with one source; the cut-in date and serial are always given. A peer shift under the bar reads "below
+the reporting threshold", not "no impact". A check that is not available gets one judgment claim saying so
+and no number. ICD 203 wording and Bowman's posting standards (materiality, evidence
 classes, words to avoid) are in the system prompt. The standards are constants copied from
 `bowman/norn-config/bowman.config.ts` on 2026-10-24 (`norn/config` was not on this branch); read
 them from the loaded config when it is.
@@ -80,6 +125,22 @@ recommendation is a rule, not a mood. `deriveRecommendation` reads the cost chec
 2. **Approve with conditions**: it stands with stated gaps. Every blank or unestimated line, undecided stock
    disposition, price change with no quote, or other warn flag. The conditions name exactly those.
 3. **Approve**: no blocker, no gap. Info flags are neither.
+The timeline and supply checks (#120) add to rule 2 only, never to rule 1. A check that failed, is blocked,
+had not finished at the cutoff or has mock numbers is one condition ("The supply check failed, so it is not
+assessed"): the cost assessment stands, and sending the ECR back would ask the engineer to fix Norn. Their
+warn flags that say the check could not assess something are gaps with short fixed wording
+(`stock_beyond_plan`, `cut_in_beyond_plan`, `beyond_published_slots`, `unreadable_peer`, `no_price`, a raw-material
+share that is a default, an assumption not applied, and since #147 `implementation_unestimated`: "Qualification
+and release not assessed" or "Retrofit work and downtime not assessed"). Their warn flags that are results are
+findings, shown in the statement, with two exceptions that are conditions: a missed need date (`likely_late` from
+the timeline check, when the P90 slip is over 14 days: "CCB to accept slip to <date> (S/N n) ... or expedite"), and
+a slot or capacity conflict with a named open ECR ("Resolve the supplier slot conflict with ECR-xxxx"). A single
+source stays a finding. Neither check ever changes rule 1. Both checks are read as of the statement's own snapshot
+(above). The supply check runs other open ECRs' schedules alongside this one, so its flags include theirs; a flag
+whose ref names another ECR is that ECR's, and the rule leaves it out (the leak itself is #151). Since #147 the
+cost check also copies the timeline's warn flags under `implementation-scenario:<ECR>`; with the timeline check
+in hand the rule reads them from it, so a copy is not a second condition. The cost check's own
+`implementation_scenario` note is a gap only when no alternative scenario could be costed.
 Never Reject (a human call). The system prompt states the rule, the job prompt tells the agent what it gives
 for this ECR (the agent states the rule that fired in its judgment claim), and the publisher applies it again:
 when the agent's recommendation differs or is missing, the PLM gets the rule's and the statement carries a note
@@ -98,7 +159,10 @@ publisher still sweeping wrote the statement back after the clear.
 
 Writes the seven `impact_*` fields with the connector's `writeImpact()` and nothing else (a comment
 only if `NORN_PUBLISH_COMMENT=1`). `impact_statement` is self-contained HTML (inline styles, a table
-of headline numbers, drivers, assumptions, evidence tags) that reads without opening Norn. Its last
+of headline numbers, a "Timeline and supply" section, drivers, assumptions, evidence tags) that reads
+without opening Norn. The section holds the s3/s4 numbers (dates as ISO dates, weeks, serials, counts), the
+agent's "Timeline:" and "Supply:" sentences, and a line for each check that is not available, written from
+the run's state whatever the agent said. A statement with none of these (a Level 1 from before #120) has no section. Its last
 line carries `Ref <statement id>.<digest>`.
 
 Idempotent: before every write it reads the ECR's fields from the PLM. If the ref is there and the
@@ -161,5 +225,6 @@ also recovers decisions the first attempt missed. `npm run check:decision` (scra
 
 `npm run test:level1 -w @norn/workers` (offline): dispatch rules and idempotency, the prompt,
 statement-to-PLM formatting, publisher idempotency and the lease race, statement selection and
-provenance. The module side (the recorded check run, the stale-run refusal, the lease) is in
+provenance, and (`timeline-supply.test.ts`) which s3/s4 runs a statement rests on, the bounded wait, the
+rule's treatment of their flags on Bowman's real rows (ECR-0417, -0421, -0423), the job prompt and the PLM section. The module side (the recorded check run, the stale-run refusal, the lease) is in
 `npm run check:module`, against a scratch database.

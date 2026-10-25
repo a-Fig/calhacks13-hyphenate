@@ -9,14 +9,34 @@ import { z } from 'zod';
 import { registerErpTools } from './erp.ts';
 import { companyConfigOf, explainRefusal, fastTrackField, outcomeOf, prepareRequest, recordOf, statementClassOf } from './fasttrack.ts';
 import type { ActorHandle, Norn } from './norn.ts';
+import { readsOnlyOwnEcrs, toolsForRole } from './roles.ts';
 import type { Claims } from './token.ts';
 import { affectedParts, assumptionView, bareResultKey, currentResult, currentResultKeys, ecrSummary, ecrView, effectiveAssumptions, historyOf, impactOf, partView, provenanceIndex } from './views.ts';
+
+/**
+ * A check on a statement's own words before it is saved (post_impact_statement). It returns why the statement may not be
+ * posted, which goes back to the agent like any other refusal of the tool, or undefined. The server knows nothing of the
+ * rules behind it: whoever starts the server supplies it (main.ts).
+ */
+/** Every piece of the statement the agent wrote that a page displays, not only the prose fields (#123). */
+export interface StatementProse {
+  headline: string;
+  changeClass?: string;
+  route?: string;
+  numbers?: { key?: string; label?: string; unit?: string; evidence?: string; p10?: number; p50?: number; p90?: number }[];
+  drivers: { text: string }[];
+  assumptions?: { key?: string; note?: string }[];
+  claims: { text: string }[];
+}
+
+export type StatementGuard = (pr: PullRequest, spawnedBy: string, statement: StatementProse) => string | undefined;
 
 export interface ToolContext {
   norn: Norn;
   claims: Claims;
   actor: ActorHandle;
   log: (message: string) => void;
+  statementGuard?: StatementGuard;
 }
 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean };
@@ -31,8 +51,23 @@ const ECR = z.string().min(1).describe('The ECR number as list_ecrs shows it, e.
 
 class ToolFailure extends Error {}
 
+/**
+ * The ECRs this credential may read, lowercased, or null when it may read any (every role but the
+ * ones in roles.ts, whose `ecrs` limit writes only). A restricted role's `ecrs` are matched exactly,
+ * so a '*' in them grants nothing.
+ */
+function readScope(ctx: ToolContext): Set<string> | null {
+  return readsOnlyOwnEcrs(ctx.claims.role) ? new Set(ctx.claims.ecrs.map(e => e.toLowerCase())) : null;
+}
+
 function ecrOf(ctx: ToolContext, ref: string): PullRequest {
   const { pr, known } = ctx.norn.findEcr(ref);
+  const scope = readScope(ctx);
+  if (scope) {
+    // Same words whether the ECR does not exist or is someone else's, and no list of the other ECRs.
+    if (!pr || !scope.has(pr.plmEcrNumber.toLowerCase())) throw new ToolFailure(`This credential can read only ${ctx.claims.ecrs.join(', ') || 'no ECR'}. It cannot read '${ref.slice(0, 60)}'.`);
+    return pr;
+  }
   if (!pr) throw new ToolFailure(`No single ECR matches '${ref}'. ECRs: ${known.join(', ') || 'none'}.`);
   return pr;
 }
@@ -90,8 +125,22 @@ export const INSTRUCTIONS = [
   'You act under your own name for the person named in your credential, and only on the ECRs your job names. A refusal is final; report it.',
 ].join(' ');
 
+/** A view of the server that registers only the named tools; the rest are never offered and are refused as unknown. */
+function onlyTools(server: McpServer, allowed: ReadonlySet<string>): McpServer {
+  return new Proxy(server, {
+    get(target, prop) {
+      if (prop === 'registerTool') return (name: string, ...rest: unknown[]) => (allowed.has(name) ? (target.registerTool as (...a: unknown[]) => unknown).call(target, name, ...rest) : undefined);
+      const v = Reflect.get(target, prop, target);
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+  });
+}
+
 export function registerTools(server: McpServer, ctx: ToolContext): void {
   const { norn } = ctx;
+  // A restricted role (roles.ts) is offered only its own tools. Every other role gets all of them, as before.
+  const allowed = toolsForRole(ctx.claims.role);
+  if (allowed) server = onlyTools(server, allowed);
 
   // ---- reads ----------------------------------------------------------------------------------
 
@@ -143,6 +192,15 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     tool(ctx, 'get_part', async ({ part }: { part: string }) => {
       const want = part.trim().toLowerCase();
       const p = [...norn.db.part.iter()].find(x => x.partNumber.toLowerCase() === want);
+      const scope = readScope(ctx);
+      if (scope) {
+        // Only a part on the change request or BOM delta of an ECR this credential names; the same words
+        // for a part that does not exist, no list of other parts, and no other ECR's number in the answer.
+        const mine = [...norn.db.pullRequest.iter()].filter(pr => scope.has(pr.plmEcrNumber.toLowerCase()));
+        const on = p ? mine.filter(pr => affectedParts(norn, pr).some(a => a.partNumber === p.partNumber)) : [];
+        if (!p || on.length === 0) return fail(`This credential can read only parts on the change request or BOM delta of ${ctx.claims.ecrs.join(', ') || 'no ECR'}. '${part.slice(0, 60)}' is not one of them.`);
+        return ok({ ...partView(p), namedInEcrs: on.map(pr => pr.plmEcrNumber) });
+      }
       if (!p) return fail(`No part '${part}' in Norn. Part numbers: ${[...norn.db.part.iter()].map(x => x.partNumber).sort().join(', ') || 'none'}.`);
       const ecrs = [...norn.db.pullRequest.iter()].filter(pr => affectedParts(norn, pr).some(a => a.partNumber === p.partNumber)).map(pr => pr.plmEcrNumber);
       return ok({ ...partView(p), namedInEcrs: ecrs });
@@ -267,6 +325,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     tool(ctx, 'post_impact_statement', async (a: any) => {
       const pr = ecrOf(ctx, a.ecr);
+      const refused = ctx.statementGuard?.(pr, ctx.claims.spawnedBy, { headline: a.headline, changeClass: a.changeClass, route: a.route, numbers: a.numbers, drivers: a.drivers, assumptions: a.assumptions, claims: a.claims });
+      if (refused) throw new ToolFailure(refused);
       const numbers = (a.numbers as any[]).map(n => {
         if (n.evidence === 'computation') {
           if (!n.resultKey) throw new ToolFailure(`Number '${n.key}' is a computation, so it needs resultKey (a key from get_impact).`);

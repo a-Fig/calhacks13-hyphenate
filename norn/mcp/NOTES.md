@@ -71,7 +71,15 @@ const spec: JobSpec = {
 - The token is minted for that job (default 30 minutes, at most 6 hours) from the identity you pass, so
   build the runner's `identity` and the token from the same object. `ecrs` are full PLM numbers.
 - The runner's `allowedTools` is the second lock: the server offers all ten tools, and the runner
-  denies the ones a role does not list.
+  denies the ones a role does not list. The exception is a restricted role (below), whose token the
+  server itself narrows.
+- **Restricted roles** (`src/roles.ts`). `ask-norn` (Ask Norn, a reader's question about one ECR) gets
+  `get_ecr`, `get_impact`, `list_assumptions`, `get_ecr_history` and `get_part`: the server registers no
+  other tool for it, so no write, comment or proposed assumption and no `list_ecrs`. For this role the
+  token's `ecrs` limit reads too: the four ECR tools refuse any other ECR, `get_part` answers only for a
+  part on the change request or BOM delta of an ECR the token names (as `get_ecr`'s `affectedParts` finds
+  it), and a refusal never lists the other ECRs or parts. `"*"` in its `ecrs` grants nothing. Every other
+  role is untouched: all ten tools, reads open, `ecrs` limiting writes only.
 - **Roles decide the highest statement level a job may post** (see below): `level1-writeup` posts
   Level 1, `level2-...` Level 2, `level3-...` Level 3; any other role posts none (it can still comment
   and propose assumptions).
@@ -211,6 +219,7 @@ database can take a plain `db:publish`; this branch did not publish it.
 | Reducers outside the scoped set, baseline writes, a scope widened by its holder, a grant that has run out, an agent replacing a `given` assumption | `check:gate` | pass |
 | Review findings: approval withdrawal (#1), relabelled computation numbers in the tool and the module (#2), level caps for a level1 job, a person's agent and a role with none (#3), a refused second job leaving the principal alone and history keeping the on-behalf-of recorded at the time (#4), `fact` (#5), `rejected` rows for a forged number, a revision conflict and a closed ECR, and no such row for an unscoped caller (#6), plain-text ECR numbers in refusals (#11), the helper form of the entry (#10) | `check:gate`, one or more checks each | pass |
 | A person's agent token (`*`, external origin, on-behalf-of) | `check:gate` | pass |
+| The `ask-norn` role: offered only the five read tools; reads its own ECR; refused for any other ECR and any part not on its ECR, without naming the others; `list_ecrs` and the write tools refused and nothing written; a `level1-writeup` credential still reads every ECR and part (fake server and mirror in `test:unit`, real HTTP and client in `check:gate`) | `test:unit`, `check:gate` | pass |
 | The fast-track signal and tool on Bowman's configuration and the real checks, on a scratch database: ECR-0423 approved (not drawn), a drawn number held for the second check, ECR-0417 recommended to named roles, out of scope denied and logged, unfinished checks refused, a Class I statement on a 12,000 USD supplier charge never approved (class left out, Class II sent, and Class II sent straight to the reducer), a session that read revision A refused on revision B while the session B started is decided | `check:fasttrack` | 39 of 39 |
 | A real Haiku session through the runner with only Norn's tools, token delivered through the headers helper: reads ECR-0417 and its impact, posts one comment, tries one write to ECR-0418 | `e2e` | pass: 9.4 s, 5 turns; the agent made the refused attempt itself |
 | A second Haiku session that posts a Level 1 statement with two `computation` numbers and two assumptions | `e2e -- --statement` | pass: 11.4 s, 5 turns; every computation number equals its check result |

@@ -328,10 +328,13 @@ function mapEcrDoc(s: PlmSettings, doc: PlmDoc, eco?: { name: string; released_o
   const quotes = supplierQuotes(s, doc);
   // The ECO that released the ECR: the one passed in (a lookup by `ecr`), else the ECR's own `released_eco`.
   const ecoName = eco?.name ?? text(doc.released_eco);
+  const priority = lookup(s.priorities, doc.priority, 'priority', id);
   const change: PlmChangeRequest = clean({
     id,
     program: lookup(s.programs, doc.program, 'program', id),
     filedOn: String(doc.filed_on ?? ''),
+    // The timeline check decides an urgent change faster than a routine one: it reads the priority from the change request.
+    priority,
     itemChanges: itemChanges(s, doc, warnings),
     bomChanges: bomChanges(s, doc),
     supplierQuotes: quotes.quotes,
@@ -349,7 +352,7 @@ function mapEcrDoc(s: PlmSettings, doc: PlmDoc, eco?: { name: string; released_o
     title: String(doc.title ?? ''),
     workflowState: String(doc.workflow_state ?? ''),
     originator: String(doc.originator ?? doc.owner ?? ''),
-    priority: lookup(s.priorities, doc.priority, 'priority', id),
+    priority,
     companyClass: lookup(s.companyClasses, doc.company_class, 'company class', id),
     faaClass: lookup(s.faaClasses, doc.faa_class, 'FAA class', id),
     justificationCode: String(doc.justification_code ?? ''),
