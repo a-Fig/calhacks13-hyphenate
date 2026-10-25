@@ -3,9 +3,8 @@
 First draft of the Devpost story, written 2026-10-24 for Cal Hacks' Saturday-night draft (#46).
 Every claim is from what is merged on `main` that day, with the PR that shows it in brackets.
 Strip the brackets before pasting. Submitting needs Tyler's ask. The video and the demo script
-come later. The numbers are from the 2026-10-25 rerun on the wiped `norn` (`docs/DEMO.md`). A
-**[confirm]** marks what waits for one more rerun after the supply-binding fix: the wording of the
-PLM statements and ECR-0417's conditions.
+come later. The numbers are from the final rerun on the wiped `norn`, 2026-10-25 at `main`
+35e2039 (`docs/DEMO.md`).
 
 ## Name
 
@@ -33,7 +32,7 @@ the Change Control Board.
 Fern reads an engineering change request (ECR) from the company's PLM, and the costs, suppliers,
 stock and history from its ERP. Its checks compute the unit cost, the one-time cost, the cut-in
 date and the supply risk as ranges, and posts the impact statement on the ECR, where engineers and
-the board already work (#123) **[confirm]**.
+the board already work (#123, #187).
 
 We show it deployed at Bowman Aviation, a fictional maker of electric aircraft modelled on public
 data about Archer. Bowman builds the Vesper V4 eVTOL air taxi and is developing the Meridian M6.
@@ -49,7 +48,8 @@ lands back on the ECR in the PLM about a minute after the ECR reached Fern (#80,
 - a one-time cost of $142k to $156k, and a 12-month net of about $157k;
 - the top driver: whether to use up or scrap the old brackets, a $60.6k swing;
 - six cost lines with no estimate yet, each flagged;
-- "Approve with conditions", from a stated rule that names those gaps (#112) **[confirm]**;
+- "Approve with conditions", from a stated rule that names those gaps and the board's call on the
+  late cut-in (#112);
 - the route from Bowman's own configuration: the Change Control Board with a Technical Review
   Committee review, because the p90 cost of about $164,556 is above Bowman's $150,000 limit (#112).
 

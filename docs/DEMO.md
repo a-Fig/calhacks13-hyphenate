@@ -1,9 +1,8 @@
 # The demo: runbook
 
-How to bring up Fern's live stack for Bowman, rehearse, and walk the demo. Updated 2026-10-25 ~02:00 PT from the
-rerun on the wiped `norn` (`main` at b17bb18, with #123's Level 1 timeline and supply). The numbers below are from
-that run unless marked **[confirm]**: those wait for one more rerun after the supply-binding fix
-(`claude/l1-sibling-settle`), which changes what the PLM statements of ECR-0417, ECR-0419 and ECR-0421 say.
+How to bring up Fern's live stack for Bowman, rehearse, and walk the demo. Updated 2026-10-25 ~02:45 PT from the
+final rerun on the wiped `norn`: `main` at 35e2039, with the Fern rename (#184), the settled supply binding (#187) and
+research on. The numbers below are from that run.
 
 ## Before you start
 
@@ -42,16 +41,18 @@ writes to the ERP.
 ## The demo, in order
 
 1. **ECR-0417, the bracket (Level 1 in the PLM).** Open ECR-0417 in the PLM (Submitted). About a minute after Fern
-   takes it in (the Level 1 session took 61 s on the rerun), its Impact assessment tab fills: unit cost, one-time
+   takes it in (the Level 1 session took 53 s on the final rerun; with `--research`, the first session also waits up
+   to 10 minutes for the ECR's research result), its Impact assessment tab fills: unit cost, one-time
    cost and 12-month total as ranges, the drivers, the route ("Change Control Board, with Technical Review Committee
    review (p90 cost about 164,556 USD, above 150,000 USD)") and a recommendation from the stated rule (#112): send
    back on a blocker, approve with conditions that name the gaps, otherwise approve. The rerun's numbers: about +$415
    per Vesper ($407 to $432) and +$277 per Meridian ($271 to $288); one-time $142,085 to $155,886; 12-month net
    $150,682 to $164,556 (median $157,161); the top driver, use up or scrap the old brackets, a $60,588 swing; cut-in
    2027-02-16 at the median (p10 2027-01-13, p90 2027-04-11), S/N 15, about 13 weeks after the stated date.
-   The recommendation and its conditions **[confirm]**: on the rerun, "Approve with conditions" with six cost lines
-   unestimated, two prerequisites not assessed, the slip past the CCB date, and a "supply check had not finished"
-   line that the supply-binding fix removes.
+   The recommendation is "Approve with conditions", with nine conditions: six cost lines unestimated (counted as $0),
+   qualification and release and retrofit work not assessed, and the CCB to accept the cut-in slip to 2027-02-16
+   (S/N 15) against the need at S/N 11, or expedite. The statement has a Timeline and supply section: one qualified
+   source for BW-5120-210 (Halden Precision), 14 weeks' lead time.
    On Fern's page for it (masthead "fern.", #105): Jeff Hargrove as originator, its seven reviewer seats and
    "Needed by November 12", all read from the PLM's form since #167 (they were blank on 2026-10-24); the cost with
    its budget, runway and schedule exposure (#143; the exposure is outside every total); each number traceable.
@@ -63,9 +64,9 @@ writes to the ERP.
 3. **ECR-0419 and ECR-0421, the shared supplier.** Both need Orrin magnets, and Orrin qualifies one lot a quarter.
    On Fern's Supply tab for each (#147): ECR-0421 waits 13 weeks behind ECR-0419, which makes it miss its 2027-06-01
    effectivity (100% of draws), and qualifying both in one lot saves about $180k across the pair (median $180,198,
-   p10 to p90 $154,017 to $213,625; the bundles are $119,887 for ECR-0419 and $60,252 for ECR-0421). Since #123 the
-   PLM statements carry the timeline and supply too; their wording for these two **[confirm]** after the
-   supply-binding fix.
+   p10 to p90 $154,017 to $213,625; the bundles are $119,887 for ECR-0419 and $60,252 for ECR-0421). The PLM
+   statements say it too: ECR-0421's Supply line says that with ECR-0419 ahead of it at Orrin Magnetics its cut-in
+   moves 13 weeks, and its seventh condition is "resolve supplier slot conflict with ECR-0419".
 4. **A released ECO and its ERP change package (#129).** In the PLM: the CM analyst (Dana Okafor) runs "Start CM
    review" and "Send to CCB"; the CCB chair (Rafael Quintero) runs "Approve". The PLM releases the ECO and links it
    back within about 2.5 s. Fern records the decision with Rafael as approver, marks the ECR released, and puts
@@ -79,15 +80,18 @@ writes to the ERP.
 ## Ask Fern
 
 On any ECR page, a person can ask a question in words. Each one starts a read-only Claude session over Fern's tools,
-and the answer marks any number it could not find in what it cited. On the rerun, "What moves the 12-month net cost
-most, and by how much?" on ECR-0417 took 15.8 s. It runs as its own server on port 3918, and it must allow the
-screens' origin: `NORN_ASK_ORIGINS=http://127.0.0.1:5180,http://localhost:5180 npm run ask -w @norn/workers` (with
-`NORN_DB=norn`). Without that, the panel says Ask Fern is unavailable.
+and the answer marks any number it could not find in what it cited. `npm run demo` starts it on port 3918 and allows
+the screens' origin (#182). On the final rerun, "What moves the 12-month net cost most, and by how much?" on ECR-0417
+was answered in 12.3 s: the $60,588 swing between $96,233 and $156,821, then $7,157 and $5,946, all six numbers cited
+to the statement's drivers and verified. The first try of the same question failed with "Fern gave an answer in a form
+it cannot check"; asking again answered it.
 
 ## The rerun, as one command list
 
 Each rerun needs Tyler's yes to the republish and wipe of `norn`. From a worktree on the new `main`, in Git Bash;
-`REPO` is the main checkout. Level 1 takes about a minute per ECR, and all ten open ECRs about 8.5 minutes.
+`REPO` is the main checkout. A Level 1 session takes 50 s to 2 minutes. The nine open ECRs took 15 minutes from the
+first ingest to the last statement with `--research` (8.5 minutes without it, on b17bb18): research runs at most 4
+an hour, in ECR order, and each ECR it skips waits the full 10 minutes for it.
 
 ```
 # 0. Nothing else on `norn`: no old demo stack (check: no node process from an old worktree, ports 5180 and 3917 free)
@@ -109,12 +113,13 @@ Then, with the stack up (http://127.0.0.1:5180, the PLM at http://localhost:8082
    the PLM, the p90 in the route, the recommendation and its conditions, and the originator, reviewers and need date
    on Fern's page.
 2. **Step 2:** ECR-0423's Fern page shows "Approved on the fast track".
-3. **Step 3:** the Supply tab of ECR-0421 and ECR-0419: the shift, the miss, the pair saving. The PLM statements of
-   ECR-0417, ECR-0419 and ECR-0421 should no longer say the supply check had not finished.
-4. **#151 check:** ECR-0423's Supply tab lists no flag of another ECR's (on the rerun it showed ECR-0406's "no
-   production effectivity" and prerequisites lines).
-5. **Record:** screenshots of each step for the demo, including the three PLM statements; every remaining
-   **[confirm]** here and in `docs/DEVPOST.md`, confirmed or replaced. Step 4 is not rerun: ECR-0412 is released.
+3. **Step 3:** the Supply tab of ECR-0421 and ECR-0419: the shift, the miss, the pair saving; and the Supply line in
+   the PLM statements of ECR-0417, ECR-0419 and ECR-0421.
+4. **Peer flags (#151):** ECR-0423's Supply tab lists only its own lines (on the final rerun: its no-effectivity note
+   and "ECR-0423 shares Stratus Aerosystems with ECR-0406").
+5. **Ask Fern:** one question on ECR-0417.
+6. **Record:** screenshots of each step for the demo, including the three PLM statements. ECR-0412 is closed, so the
+   ingest no longer takes it in, and step 4 needs another spare ECR (below).
 
 ## Rehearsal
 
@@ -129,13 +134,20 @@ rerun, and a note that each live filing takes the next ECR number, for good. Not
 
 ## Known gaps (2026-10-25)
 
-- **Supply binding** (`claude/l1-sibling-settle`, in progress): a batch takes in all ten ECRs at once, each one's
-  arrival re-runs its peers' supply check, and Level 1 read the run that had not finished. On the rerun, 5 of 10
-  statements said "supply check had not finished". The fix waits for settled checks (up to 3 minutes).
-- **#151:** the supply check carries another ECR's flags into an ECR's detail. #123 keeps them out of the
-  recommendation, but on the rerun ECR-0423's Supply tab showed ECR-0406's flags. Being fixed before the demo.
+- **Research skipped ECR-0417** on the final rerun: at 4 runs an hour in ECR order, it researched ECR-0406, 0407,
+  0409 and 0410 (none recorded an assumption), and the rest were assessed without it.
+- **ECR-0410's PLM statement has no Supply line,** though its footer cites the supply run and Fern's Supply tab for
+  it says "Needs attention". The other eight have one.
+- **Ask Fern** failed to parse one answer in two tries on the final rerun (above).
+- **"norn" a judge can see on Fern's pages:** the poster of a Level 1 statement shows as the agent's identity
+  (`agent:norn/level1/l1-ECR-0417-r1-e1-a1`), and the methods line names the seed `norn-seed-1`. In the PLM, the
+  Impact assessment tab's description, the field and button that open the ECR in Fern, and the recommendation line
+  on the form still carry the old name: they come from the PLM model and its form script (`bowman/plm/model.ts`, `client-scripts/ecr.js`): changing them is a PLM migration. The
+  PLM and ERPNext users show as "Fern", and the ERPNext fields as "Fern decision", since 2026-10-25 (set live; the
+  old values are in a local backup). Comments written before that keep "Fern Integration" as their author.
 - **#147's PLM child tables** (implementation tasks, cost factors) are not applied to the live PLM; that is the PLM
   owner's migration, asked of Tyler 2026-10-25. The demo's ECRs have no implementation plan in the dataset either way,
   so their numbers do not depend on it.
-- **Live runs on `norn`:** a dry run (2026-10-24, e76f0c3) and the rerun (2026-10-25, b17bb18). On the rerun all ten
-  statements were written with no errors or refusals, and steps 1 to 4 worked, with the two gaps above.
+- **Live runs on `norn`:** a dry run (2026-10-24, e76f0c3), a rerun (2026-10-25, b17bb18) and the final rerun
+  (2026-10-25, 35e2039). On the final rerun all nine open ECRs' statements were written with no errors or refusals,
+  none says the supply check had not finished, and steps 1 to 3 worked.
