@@ -84,6 +84,12 @@ export function resolveJob(spec: JobSpec, config: RunnerConfig): ResolvedJob {
     if (/^claude[._ ]?ai/i.test(name)) fail(`mcp server name ${JSON.stringify(name)} is reserved`);
     if (!server || typeof server !== 'object') fail(`mcp server ${JSON.stringify(name)} is not a config object`);
   }
+  if (spec.toolInputGuards !== undefined) {
+    if (typeof spec.toolInputGuards !== 'object' || spec.toolInputGuards === null || Array.isArray(spec.toolInputGuards)) fail('toolInputGuards must be an object of tool name to function');
+    for (const [tool, guard] of Object.entries(spec.toolInputGuards)) {
+      if (tool.trim() === '' || typeof guard !== 'function') fail(`toolInputGuards entry ${JSON.stringify(tool)} must be a function under an exact tool name`);
+    }
+  }
   for (const [key, min] of [['maxTurns', 1], ['timeoutMs', 1000]] as const) {
     const value = spec[key];
     if (value !== undefined && (!Number.isFinite(value) || value < min)) fail(`${key} must be a number >= ${min}`);

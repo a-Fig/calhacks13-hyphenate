@@ -38,6 +38,7 @@ Folders are created as code lands.
 | State layer | `module/` | The SpacetimeDB module: the tables, the narrow write API, the action log and the policy gate |
 | Workers | `workers/` | Compute checks: BOM delta, cost, timeline, supply simulation |
 | Agent runner | `runner/` | Starts and steers Norn's agents as Claude Code sessions through the Agent SDK: extraction, classification, research, review, narration, post check. Streams every step into the action log |
+| Research agent | `research/` | Picks the assumptions worth researching, builds the cost-engineer agent's job (web research through Bright Data), checks its proposals in code (quote on the page, bounds, no leaked identifiers), and re-runs the checks with the ones that pass. Offline replay from a recording |
 | Connectors | `connectors/` | Read the PLM and ERPNext over their REST APIs and webhooks, and post Norn's results to the PLM. ERPNext is read only |
 | Web | `web/` | Norn's own screens: an ECR's impact assessment, the "why" behind any number, the backlog roll-up, the audit trail |
 | MCP server | `mcp/` | The tools every agent works through: Norn's own agents, and a person's own agent connecting with credentials to act on their behalf |
