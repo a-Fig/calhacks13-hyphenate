@@ -4,8 +4,16 @@
 // tool's text goes back to the agent, which fixes it and posts again). It never rewrites the agent's prose.
 //
 // The server (mcp/src/main.ts) passes this to `startServer`; the server itself knows nothing of the rule. It reads the
-// server's mirror of the database, for the check run that started the session (`spawnedBy`, "norn:check_run:7", or "norn:check_run:7:revision:2" once the credential carries the ECR revision).
+// server's mirror of the database, for the check run that started the session (`spawnedBy`, "norn:check_run:7", or
+// "norn:check_run:7:revision:2" as the dispatcher signs it since #128), read with the module's own `parseSessionSpawn`.
+//
+// The module's freshness refusal (`sessionRunId` in reducers.ts) comes first: a session whose signed revision is
+// behind the ECR's, or whose run is no longer done, is not checked here, so the agent is told its numbers are out of
+// date rather than asked to reword a statement it may not post at all. The module's other test (the run's inputs
+// moved under it) needs the stage hashes, so the guard leaves that to the module; such a statement can be refused for
+// its wording first, and then for being out of date.
 import type { DbConnection } from '@norn/bindings';
+import { parseSessionSpawn } from '../../../module/src/gate-logic.ts';
 import { cleanClaims, findingsByCheck, findingsOf, numbersIn, QUOTABLE_BARS, unknownAmounts, type Prose } from './prose.ts';
 import { deriveRecommendation } from './recommendation.ts';
 import { ruleInputForRun } from './source.ts';
@@ -13,7 +21,7 @@ import { ruleInputForRun } from './source.ts';
 type Db = DbConnection['db'];
 
 /** Returns why the statement may not be posted, or undefined when it may. */
-export type StatementGuard = (pr: { id: bigint; plmEcrNumber: string }, spawnedBy: string, statement: Prose) => string | undefined;
+export type StatementGuard = (pr: { id: bigint; plmEcrNumber: string; revision?: number }, spawnedBy: string, statement: Prose) => string | undefined;
 
 const jsonOr = (s: string): unknown => {
   try {
@@ -26,9 +34,12 @@ const jsonOr = (s: string): unknown => {
 export function statementGuardFor(db: Db): StatementGuard {
   return (pr, spawnedBy, statement) => {
     // Same reading of the credential as the module's: a session started by a check run. Any other poster is not checked here.
-    const started = /(?:^|:)check_run:(\d+)(?::revision:\d+)?$/.exec(spawnedBy);
+    const started = parseSessionSpawn(spawnedBy);
     if (!started) return undefined;
-    const found = ruleInputForRun(db, pr.id, BigInt(started[1]!), pr.plmEcrNumber);
+    if (started.revision !== undefined && pr.revision !== undefined && started.revision !== pr.revision) return undefined;
+    const run = db.checkRun.id.find(BigInt(started.runId));
+    if (!run || run.status !== 'done') return undefined;
+    const found = ruleInputForRun(db, pr.id, run.id, pr.plmEcrNumber);
     if (!found) return undefined;
     const derived = deriveRecommendation(found.input);
     const findings = findingsOf(found.input, derived);

@@ -962,8 +962,10 @@ test('(#128) the guard reads the run id from norn:check_run:N and from norn:chec
   const guard = statementGuardFor(healthy('ECR-0417'));
   const pr0417 = { ...pr5, plmEcrNumber: 'ECR-0417' };
   const post = (spawnedBy: string) => guard(pr0417, spawnedBy, { headline: 'Checks are clean.', drivers: [], claims: [] });
-  for (const by of ['norn:check_run:3', 'norn:check_run:3:revision:1', 'check_run:3', 'norn:check_run:3:revision:12'])
+  for (const by of ['norn:check_run:3', 'check_run:3', `norn:check_run:3:revision:${pr0417.revision}`])
     assert.match(post(by) ?? '', /^Not posted\. Your headline says "clean"/, by);
+  // a session on an older (or newer) ECR revision is left to the module's freshness refusal, which comes first
+  for (const by of [`norn:check_run:3:revision:${pr0417.revision - 1}`, `norn:check_run:3:revision:${pr0417.revision + 9}`]) assert.equal(post(by), undefined, by);
   // a session not started by a check run is not checked here, as before; neither is a malformed suffix
   for (const by of ['norn:ecr_filed:3', 'norn:check_run:3:revision:', 'norn:check_run:3:revision:x', 'norn:check_run:3:other:1']) assert.equal(post(by), undefined, by);
 });
