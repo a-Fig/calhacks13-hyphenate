@@ -4,6 +4,7 @@ import { ActionList, Flash, Label } from '@primer/react';
 import { monthLabel } from '../assessment/adapter.ts';
 import type { CostBlock, CostRow, Figure, ImpactAssessment, RiskLevel } from '../assessment/types.ts';
 import { CheckStateIcon, MockTag, SavedRun } from '../ui/Bits.tsx';
+import { ImpactIcon } from '../ui/EngineeringIcons.tsx';
 import { SCurveChart, TornadoChart } from '../ui/Charts.tsx';
 import { Legend, Mark, Num } from '../ui/Evidence.tsx';
 import { range as rangeText, staleNote } from '../ui/fmt.ts';
@@ -42,9 +43,9 @@ export function Impact({ a, check }: { a: ImpactAssessment; check?: string }) {
         <ActionList>
           {a.checks.map(c => (
             <ActionList.Item key={c.id} active={c.id === current.id} onSelect={() => navigate(`${base}/${c.id}`)}>
-              <ActionList.LeadingVisual><CheckStateIcon state={c.state} /></ActionList.LeadingVisual>
+              <ActionList.LeadingVisual><ImpactIcon check={c.id} /></ActionList.LeadingVisual>
               {c.name} <MockTag on={!!c.mock} />
-              <ActionList.Description>{c.state === 'pending' ? 'Not assessed yet' : c.state === 'queued' ? 'Queued' : c.state === 'running' ? 'Running' : c.took ?? ''}</ActionList.Description>
+              <ActionList.Description><CheckStateIcon state={c.state} size={12} /> {c.state === 'pending' ? 'Not assessed yet' : c.state === 'queued' ? 'Queued' : c.state === 'running' ? 'Running' : c.took ?? ''}</ActionList.Description>
             </ActionList.Item>
           ))}
         </ActionList>
@@ -52,7 +53,7 @@ export function Impact({ a, check }: { a: ImpactAssessment; check?: string }) {
 
       <section className="nx-check-pane">
         <header className="nx-check-head">
-          <CheckStateIcon state={current.state} size={20} />
+          <span className="nx-check-emblem"><ImpactIcon check={current.id} size={24} /></span>
           <div>
             <h2>{current.name} <MockTag on={!!current.mock} /></h2>
             <div className="nx-fg-muted">
@@ -276,7 +277,7 @@ function BomCheck({ a }: { a: ImpactAssessment }) {
           </li>
         ))}
       </ul>
-      <div className="nx-foot"><Link to={`/ecr/${a.ecr.id}/changes`}>See the diff <ArrowRightIcon size={12} /></Link></div>
+      <div className="nx-foot"><Link to={`/ecr/${a.ecr.id}/changes`}>See the changes <ArrowRightIcon size={12} /></Link></div>
     </div>
   );
 }

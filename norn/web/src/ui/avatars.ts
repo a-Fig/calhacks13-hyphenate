@@ -9,7 +9,7 @@ export type AvatarKind = 'person' | 'norn' | 'agent' | 'team';
 
 export function avatarSrc(name: string, kind: AvatarKind = 'person'): string {
   if (kind === 'norn') {
-    return svg('<rect width="64" height="64" fill="#1f2328"/><path d="M22 46V18l22 28V18" fill="none" stroke="#fff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>');
+    return '/norn-mark.svg';
   }
   if (kind === 'team') {
     return svg('<rect width="64" height="64" fill="#d1d9e0"/><g fill="none" stroke="#59636e" stroke-width="4" stroke-linecap="round"><circle cx="25" cy="25" r="7"/><circle cx="43" cy="27" r="6"/><path d="M12 47c1-8 6-12 13-12s12 4 13 12M38 36c7-1 12 3 14 11"/></g>');
