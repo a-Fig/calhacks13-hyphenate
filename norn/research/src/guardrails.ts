@@ -22,7 +22,8 @@
 import { lognormal, lognormalFromQuantiles, pert, point, quantileOf, type AssumptionOverride, type Dist } from '../../checks/src/index.ts';
 import { findLeaks, findUrlLeaks, DEFAULT_ALLOW, type Identifier } from './leak.ts';
 import { quoteInPage } from './text.ts';
-import { holdingFlags, INFORMATIONAL_FLAGS, UNIT_OF, type Flag, type PageFetcher, type Proposal, type ProposedDist, type Reason, type Status, type Target, type Verdict } from './types.ts';
+import { quotedValues, quoteStates } from './quotevalue.ts';
+import { UNIT_OF, type Flag, type PageFetcher, type Proposal, type ProposedDist, type Reason, type Status, type Target, type Verdict } from './types.ts';
 
 export const AGENT_NAME = 'norn research agent (cost engineer)';
 
@@ -40,6 +41,13 @@ export interface GuardrailConfig {
    * it, is rejected.
    */
   priceMultiple?: number;
+  /**
+   * The quote's own figure, with its unit and scale, must equal the value the agent proposes (its
+   * `value`, the p50 of quantiles, or the mode of a PERT). A quote can be on the page and say
+   * nothing about the amount: one that does not state it holds the proposal for a person. Default
+   * true; a proposal derived by arithmetic from page figures is therefore held.
+   */
+  quoteMustStateValue?: boolean;
   /** A source dated more than this many years before today is held as stale. Default 3. */
   maxSourceAgeYears?: number;
   /** Ceiling for a dollar input with nothing to compare to, such as a blank row. Default 1,000,000. */
@@ -227,6 +235,7 @@ export async function reviewProposals(raw: unknown[], targets: Target[], fetchPa
     pointSpread: config.pointSpread ?? DEFAULTS.pointSpread,
     quote: config.quote ?? DEFAULTS.quote,
     maxSourceAgeYears: config.maxSourceAgeYears ?? DEFAULTS.maxSourceAgeYears,
+    quoteMustStateValue: config.quoteMustStateValue ?? true,
   };
   const byKey = new Map(targets.map((t) => [t.key, t]));
   const seen = new Set<string>();
@@ -305,6 +314,13 @@ export async function reviewProposals(raw: unknown[], targets: Target[], fetchPa
 
     // Quote: its length and a number in it; then the page.
     const qn = p.quote.trim();
+    if (cfg.quoteMustStateValue && dist) {
+      const proposed = p.value ?? (p.dist?.kind === 'quantiles' ? p.dist.p50 : p.dist?.kind === 'pert' ? p.dist.mode : undefined);
+      if (proposed !== undefined && !quoteStates(qn, proposed, p.unit)) {
+        const stated = quotedValues(qn, p.unit).map((x) => round4(x));
+        worsen('needs_person', { code: 'quote_value', message: `quote does not state the proposed value: the quote states ${stated.length ? stated.join(', ') : 'no figure'} (in ${p.unit}); the proposal is ${round4(proposed)}` });
+      }
+    }
     let verifiedAgainst: Verdict['verifiedAgainst'];
     if (qn.length < cfg.quote.minChars || qn.length > cfg.quote.maxChars) {
       worsen('rejected', { code: 'quote_missing', message: `the quote has ${qn.length} characters; it must have ${cfg.quote.minChars} to ${cfg.quote.maxChars}` });
@@ -350,18 +366,16 @@ export async function reviewProposals(raw: unknown[], targets: Target[], fetchPa
       const p10 = quantileOf(dist, 0.1), p90 = quantileOf(dist, 0.9);
       if (p10 > 0 && p90 / p10 > 4) flags.push({ code: 'wide_range', message: `p90 is ${Math.round((p90 / p10) * 10) / 10} times p10` });
       if (stated === null) flags.push({ code: 'no_source_date', message: 'the proposal states no date for the source, so its age is unknown' });
-      const holding = holdingFlags(flags);
-      if (holding.length > 0) worsen('needs_person', { code: 'flagged', message: `not applied, flagged for ${holding.map((f) => f.code).join(', ')}` });
+      if (flags.length > 0) worsen('needs_person', { code: 'flagged', message: `not applied, flagged for ${flags.map((f) => f.code).join(', ')}` });
     }
 
     const verdict: Verdict = { index, targetId: p.targetId, status: st.status, reasons, flags, ...(dist ? { dist } : {}), ...(verifiedAgainst ? { verifiedAgainst } : {}) };
-    if (st.status === 'accepted' && dist && holdingFlags(flags).length === 0) {
-      const notes = flags.filter((f) => INFORMATIONAL_FLAGS.includes(f.code)).map((f) => ` Note: ${f.message}.`).join('');
+    if (st.status === 'accepted' && dist && flags.length === 0) {
       const date = (verifiedAgainst?.retrievedAt ?? p.retrievedAt).slice(0, 10);
       verdict.override = {
         id: target.inputId,
         source: 'agent_estimated',
-        rationale: `${p.rationale.trim()} Source: ${p.sourceUrl}${p.sourceDate ? ` (dated ${p.sourceDate})` : ''}. Quote: "${qn}". Retrieved ${date}. Proposed ${describeDist(dist)}; confidence ${p.confidence}.${notes}`,
+        rationale: `${p.rationale.trim()} Source: ${p.sourceUrl}${p.sourceDate ? ` (dated ${p.sourceDate})` : ''}. Quote: "${qn}". Retrieved ${date}. Proposed ${describeDist(dist)}; confidence ${p.confidence}.`,
         dist,
         by: AGENT_NAME,
       } satisfies AssumptionOverride;

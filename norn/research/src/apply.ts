@@ -8,7 +8,7 @@
 // supplied inputs only.
 
 import { quantileOf, type AssumptionOverride, type CostCheckResult, type Range3, type TimelineResult } from '../../checks/src/index.ts';
-import { holdingFlags, type Flag, type Reason, type Status, type Target, type Verdict } from './types.ts';
+import type { Flag, Reason, Status, Target, Verdict } from './types.ts';
 
 export interface CheckRun {
   cost: CostCheckResult;
@@ -116,8 +116,8 @@ export interface ApplyInput {
 
 export function applyAndReport(input: ApplyInput): ResearchReport {
   const byKey = new Map(input.targets.map((t) => [t.key, t]));
-  // Only an accepted proposal with no holding flag is applied (the guardrails hold a flagged one; this is the second lock).
-  const accepted = input.verdicts.filter((v) => v.status === 'accepted' && holdingFlags(v.flags).length === 0 && v.override && v.targetId);
+  // Only an accepted, unflagged proposal is applied (the guardrails hold a flagged one; this is the second lock).
+  const accepted = input.verdicts.filter((v) => v.status === 'accepted' && v.flags.length === 0 && v.override && v.targetId);
   const overrides = accepted.map((v) => v.override!);
 
   const before = input.run([]);

@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { bowman } from '../../../bowman/data/index.ts';
 import { renderReport } from '../src/report.ts';
-import { recordedFetcher } from '../src/pages.ts';
+import { recordedFetcher, type RecordedPage } from '../src/pages.ts';
 import { loadRecording } from '../src/recording.ts';
 import { finish, prepare, type Company } from '../src/run.ts';
 import { applyAndReport } from '../src/apply.ts';
@@ -15,30 +15,42 @@ const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 const REC = here('../recordings/ecr-0417.recording.json');
 const company = bowman as unknown as Company;
 
+/** A page that states a share outright, for the tests of what is applied: the recording's own pages state no share. */
+const RECOVERY_PAGE: RecordedPage = {
+  url: 'https://example.test/recovery-rate', retrievedAt: '2026-10-25', fetchedBy: 'a test', excerpt: false,
+  text: 'Typical recovery rate on sold machined aluminum scrap: 1.0% of the purchase price. Updated 2026-10-01.',
+};
+
 async function replay(agentOutput?: (rec: Awaited<ReturnType<typeof loadRecording>>) => AgentOutput) {
   const rec = await loadRecording(REC);
   const prep = prepare(company, { ecrId: rec.ecr, seed: rec.seed, n: rec.n, ...(rec.context ? { context: rec.context } : {}) });
-  const out = await finish(prep, { mode: 'RECORDED', provenance: [rec.label], agentOutput: agentOutput ? agentOutput(rec) : rec.agentOutput, fetcher: recordedFetcher(rec.pages), guardrails: { today: rec.recordedOn } });
+  const out = await finish(prep, { mode: 'RECORDED', provenance: [rec.label], agentOutput: agentOutput ? agentOutput(rec) : rec.agentOutput, fetcher: recordedFetcher([...rec.pages, RECOVERY_PAGE]), guardrails: { today: rec.recordedOn } });
   return { rec, prep, ...out };
 }
 
-/** The recording's first proposal with a share close to the default's 1.8 percent, which no check flags. */
+/** The recording's first proposal with a share close to the default's 1.8 percent, quoting a page that states it (1.0%): nothing holds it. */
 const modestFirst = (rec: Awaited<ReturnType<typeof loadRecording>>): AgentOutput => ({
-  proposals: [{ ...(rec.agentOutput.proposals[0] as object), dist: { kind: 'pert', min: 0.006, mode: 0.01, max: 0.02 } }],
+  proposals: [{
+    ...(rec.agentOutput.proposals[0] as object),
+    sourceUrl: RECOVERY_PAGE.url,
+    quote: 'recovery rate on sold machined aluminum scrap: 1.0% of the purchase price',
+    sourceDate: '2026-10-01',
+    dist: { kind: 'pert', min: 0.006, mode: 0.01, max: 0.02 },
+  }],
   unresolved: [],
 });
 
 describe('replay of the ECR-0417 recording', () => {
-  it('holds the real scrap-price proposal for a person (it is flagged), holds the low-confidence one, and rejects the two planted ones for the right reasons', async () => {
+  it('holds the real scrap-price proposal for a person (its quote does not state the share), holds the low-confidence one, and rejects the two planted ones for the right reasons', async () => {
     const { verdicts } = await replay();
     assert.deepEqual(verdicts.map((v) => v.status), ['needs_person', 'needs_person', 'rejected', 'rejected']);
-    assert.deepEqual(verdicts[0]!.flags.map((f) => f.code), ['disagrees_with_current']);
-    assert.deepEqual(verdicts[0]!.reasons.map((r) => r.code), ['flagged']);
+    assert.deepEqual(verdicts[0]!.reasons.map((r) => r.code), ['quote_value']);
+    assert.match(verdicts[0]!.reasons[0]!.message, /^quote does not state the proposed value/);
     assert.equal(verdicts[0]!.override, undefined);
     assert.equal(verdicts[0]!.verifiedAgainst?.url, 'https://rockawayrecycling.com/metal/al-machine-cuts/');
-    assert.deepEqual(verdicts[1]!.reasons.map((r) => r.code), ['low_confidence']);
+    assert.deepEqual(verdicts[1]!.reasons.map((r) => r.code), ['quote_value', 'low_confidence']);
     assert.deepEqual(verdicts[2]!.reasons.map((r) => r.code), ['quote_not_found']);
-    assert.deepEqual(verdicts[3]!.reasons.map((r) => r.code), ['leak', 'leak']);
+    assert.deepEqual(verdicts[3]!.reasons.map((r) => r.code), ['leak', 'leak', 'quote_value']);
   });
 
   it('applies nothing the guardrails hold: no assumption, no headline moves', async () => {
@@ -59,21 +71,6 @@ describe('replay of the ECR-0417 recording', () => {
     }
     assert.equal(report.unchangedHeadlines, 3);
     assert.deepEqual(report.notApplied, []);
-  });
-
-  it('applies a verified, medium-confidence blank-row estimate, and the report still shows the blank was filled', async () => {
-    const { report, verdicts } = await replay((rec) => ({
-      proposals: [{ ...(rec.agentOutput.proposals[1] as object), confidence: 'medium', dist: { kind: 'quantiles', p10: 3500, p50: 4500, p90: 6500 } }],
-      unresolved: [],
-    }));
-    assert.equal(verdicts[0]!.status, 'accepted');
-    assert.deepEqual(verdicts[0]!.flags.map((f) => f.code), ['replaces_blank_row']);
-    assert.match(verdicts[0]!.override!.rationale, /Note: this fills a cost-page row that was blank/);
-    const one = report.changes.find((c) => c.key === 'oneTimeTotal')!;
-    assert.ok(one.after.p50 > one.before.p50 + 3000, 'a blank counted as $0 now carries a cost');
-    assert.deepEqual(one.movedBy.map((m) => m.targetKey), ['T2']);
-    const text = renderReport(report);
-    assert.match(text, /note for a person, not held \(replaces_blank_row\)/);
   });
 
   it('is deterministic: two replays give identical reports', async () => {
@@ -103,7 +100,7 @@ describe('replay of the ECR-0417 recording', () => {
     const { prep, rec } = await replay();
     const bad = structuredClone(prep.targets);
     bad[0]!.inputId = 'recovery:NO-SUCH-ITEM';
-    const verdicts = await reviewProposals(modestFirst(rec).proposals, bad, recordedFetcher(rec.pages), { today: rec.recordedOn, identifiers: prep.identifiers });
+    const verdicts = await reviewProposals(modestFirst(rec).proposals, bad, recordedFetcher([...rec.pages, RECOVERY_PAGE]), { today: rec.recordedOn, identifiers: prep.identifiers });
     assert.equal(verdicts[0]!.status, 'accepted');
     const r = applyAndReport({ mode: 'RECORDED', ecr: 'ECR-0417', seed: rec.seed, provenance: [], targets: bad, verdicts, run: prep.run });
     assert.equal(r.notApplied.length, 1);
@@ -117,6 +114,22 @@ describe('replay of the ECR-0417 recording', () => {
     flagged[0]!.flags = [{ code: 'wide_range', message: 'p90 is 9 times p10' }];
     const r = applyAndReport({ mode: 'RECORDED', ecr: 'ECR-0417', seed: rec.seed, provenance: [], targets: prep.targets, verdicts: flagged, run: prep.run });
     assert.deepEqual(r.changes, []);
+  });
+});
+
+describe('a fabricated cost for a blank row (review round 2)', () => {
+  it('is held with no override, and moves nothing: $400,000 for T2, high confidence, quoting a scrap price', async () => {
+    const { report, verdicts, prep } = await replay((rec) => ({
+      proposals: [{ ...(rec.agentOutput.proposals[0] as object), targetId: 'T2', unit: 'usd', dist: undefined, value: 400_000, confidence: 'high' }],
+      unresolved: [],
+    }));
+    assert.equal(prep.targets[1]!.key, 'T2');
+    assert.equal(verdicts[0]!.status, 'needs_person');
+    assert.equal(verdicts[0]!.override, undefined);
+    assert.deepEqual(verdicts[0]!.reasons.map((r) => r.code), ['quote_value']);
+    assert.match(verdicts[0]!.reasons[0]!.message, /quote does not state the proposed value/);
+    assert.deepEqual(report.changes, []);
+    assert.equal(report.unchangedHeadlines, 6);
   });
 });
 

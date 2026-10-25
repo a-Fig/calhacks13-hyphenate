@@ -32,7 +32,7 @@ export const SYSTEM_PROMPT = `You are a cost engineer at an aircraft maker, doin
 
 Method
 1. For each question, search for a primary or authoritative source first (a supplier's or recycler's published price list, a standards body, a government statistic, a trade survey), then a reputable secondary one. Use search_engine to find pages and scrape_as_markdown to read one in full. Read the page before you quote it.
-2. Take the number from the page. Copy the sentence or table row that states it, exactly, as the quote, starting and ending on whole words and whole numbers (keep a number's currency sign, decimal part, thousands separators and any %, k or million with it; a quote that begins or ends inside a number is rejected). If you need to combine page figures with arithmetic (a price per pound times a weight), say so in the rationale and show the arithmetic; the quote must still be the page's own words.
+2. Take the number from the page. Copy the sentence or table row that states it, exactly, as the quote, starting and ending on whole words and whole numbers (keep a number's currency sign, decimal part, thousands separators and any %, k or million with it; a quote that begins or ends inside a number is rejected). The quote must state the number you propose as value (or as p50, or the mode of a pert), with its unit: "$149 per hour" supports 149, "5%" supports 0.05, "12 weeks" supports 12. If you must combine page figures with arithmetic (a price per pound times a weight), say so in the rationale and show the arithmetic, quote the page's own words, and expect the proposal to be held for a person, because its quote does not state the value.
 3. Give a range when the sources disagree or the figure varies by region, grade or date. Give a single value when the page does.
 4. Set confidence honestly. high: a current figure for exactly this quantity. medium: a close proxy or an old figure. low: you are extrapolating or the source is weak. A proposal rated low is shown to a person instead of being used.
 5. If you cannot find evidence for a question, list it under unresolved with the reason. Never fill a gap from memory; an unresolved question is a good answer.
@@ -84,12 +84,35 @@ export interface ToolCallRecord {
   kinds: Leak['kind'][];
 }
 
-/** Every string anywhere in a tool's arguments. */
-function stringsIn(x: unknown, out: string[] = [], depth = 0): string[] {
-  if (typeof x === 'string') out.push(x);
-  else if (depth < 6 && Array.isArray(x)) for (const v of x) stringsIn(v, out, depth + 1);
-  else if (depth < 6 && typeof x === 'object' && x !== null) for (const v of Object.values(x)) stringsIn(v, out, depth + 1);
-  return out;
+const MAX_DEPTH = 6;
+const MAX_STRINGS = 500;
+
+/**
+ * Every string anywhere in a tool's arguments, object keys included. `tooBig` is set when the
+ * arguments nest deeper than MAX_DEPTH or hold more than MAX_STRINGS strings: they are not walked
+ * further, and the guards refuse the call rather than send what was not checked.
+ */
+function stringsIn(x: unknown): { strings: string[]; tooBig: boolean } {
+  const strings: string[] = [];
+  let tooBig = false;
+  const walk = (v: unknown, depth: number): void => {
+    if (typeof v === 'string') {
+      if (strings.length >= MAX_STRINGS) tooBig = true;
+      else strings.push(v);
+    } else if (typeof v === 'object' && v !== null) {
+      if (depth >= MAX_DEPTH) {
+        tooBig = true;
+        return;
+      }
+      if (Array.isArray(v)) for (const e of v) walk(e, depth + 1);
+      else for (const [k, e] of Object.entries(v)) {
+        walk(k, depth + 1);
+        walk(e, depth + 1);
+      }
+    }
+  };
+  walk(x, 0);
+  return { strings, tooBig };
 }
 
 /**
@@ -118,15 +141,18 @@ export function researchToolGuards(
   };
   return {
     [SEARCH_TOOL]: (input) => {
-      const strings = stringsIn(input);
+      const { strings, tooBig } = stringsIn(input);
       const query = (input as { query?: unknown } | null)?.query;
       if (typeof query !== 'string' || query.trim() === '') return verdict(SEARCH_TOOL, [], 'query', 'the call has no query');
+      if (tooBig) return verdict(SEARCH_TOOL, [], 'query', 'the arguments are nested too deeply, or hold too many strings, to check');
       return verdict(SEARCH_TOOL, strings.flatMap((t) => findLeaks(t, identifiers, allow)), 'search');
     },
     [SCRAPE_TOOL]: (input) => {
       const url = (input as { url?: unknown } | null)?.url;
       if (typeof url !== 'string' || url.trim() === '') return verdict(SCRAPE_TOOL, [], 'url', 'the call has no url');
-      const others = stringsIn(input).filter((t) => t !== url);
+      const { strings, tooBig } = stringsIn(input);
+      if (tooBig) return verdict(SCRAPE_TOOL, [], 'url', 'the arguments are nested too deeply, or hold too many strings, to check');
+      const others = strings.filter((t) => t !== url);
       const leaks = [...findUrlLeaks(url, identifiers, allow), ...others.flatMap((t) => findLeaks(t, identifiers, allow))];
       return verdict(SCRAPE_TOOL, leaks, 'URL');
     },

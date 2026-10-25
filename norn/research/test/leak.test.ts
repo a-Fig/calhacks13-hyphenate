@@ -61,6 +61,12 @@ describe('leak check on Bowman\'s dataset', () => {
     ]) assert.ok(findUrlLeaks(u, ids).length > 0, u);
     for (const u of ['https://example.test/scrap-prices', 'https://rockawayrecycling.com/metal/al-machine-cuts/', 'https://example.test/item?id=15120210&page=2']) assert.deepEqual(findUrlLeaks(u, ids), [], u);
   });
+  it('decodes percent-escapes (up to 3 passes) and + as a space before it looks (review round 2)', () => {
+    for (const q of ['%48%61%6C%64%65%6E', 'https://example.test/%48%61%6C%64%65%6E', '%2548%2561%256C%2564%2565%256E', 'Jeff+Hargrove', 'Jeff%20Hargrove', 'Bow%E2%80%8Bman', '%35%31%32%30%32%31%30']) {
+      assert.ok(hits(q).length > 0, q);
+    }
+    for (const q of ['aluminum+scrap+price', '5%25 recovery', '100% of cost', 'fifty%20percent', '%E0%A4%A']) assert.deepEqual(hits(q), [], q);
+  });
   it('matches whole words only', () => {
     assert.ok(hits('halden bracket').length > 0);
     assert.deepEqual(hits('shaldenx bracket'), []);

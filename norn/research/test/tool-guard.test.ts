@@ -77,6 +77,45 @@ describe('search calls are checked before they are sent', () => {
   });
 });
 
+describe('encoded and nested arguments (review round 2)', () => {
+  it('refuses a search whose text carries a percent-encoded identifier: "%48%61%6C%64%65%6E" is Halden', async () => {
+    const s = session();
+    for (const query of [
+      'https://example.test/%48%61%6C%64%65%6E',
+      '%48%61%6C%64%65%6E',
+      '%2548%2561%256C%2564%2565%256E', // encoded twice
+      'Jeff+Hargrove price',
+      'Jeff%20Hargrove',
+      'Bow%E2%80%8Bman Aviation',
+      'q=BW%2D5120%2D210',
+      '%35%31%32%30%32%31%30',
+    ]) assert.equal(await s.call(SEARCH_TOOL, { query }), 'denied', query);
+    assert.deepEqual(s.sent, []);
+    assert.equal(await s.call(SEARCH_TOOL, { query: 'aluminum scrap 5%25 recovery price 100%' }), 'sent');
+    assert.equal(await s.call(SEARCH_TOOL, { query: 'aluminum+scrap+price+per+pound' }), 'sent');
+  });
+  it('checks strings nested in the arguments, and object keys', async () => {
+    const s = session();
+    const q = 'aluminum scrap price';
+    assert.equal(await s.call(SEARCH_TOOL, { query: q, filters: { a: ['x', { b: 'Halden' }] } }), 'denied');
+    assert.equal(await s.call(SEARCH_TOOL, { query: q, Halden: true }), 'denied');
+    assert.equal(await s.call(SEARCH_TOOL, { query: q, filters: { region: 'west' } }), 'sent');
+  });
+  it('refuses arguments nested deeper than it checks, however clean they look, and cyclic ones', async () => {
+    const s = session();
+    const deep = (n: number, leaf: unknown): unknown => (n === 0 ? leaf : { next: deep(n - 1, leaf) });
+    assert.equal(await s.call(SEARCH_TOOL, { query: 'aluminum scrap price', extra: deep(8, 'Halden') }), 'denied');
+    assert.equal(await s.call(SEARCH_TOOL, { query: 'aluminum scrap price', extra: deep(8, 'clean') }), 'denied');
+    assert.equal(await s.call(SCRAPE_TOOL, { url: 'https://example.test/p', extra: deep(8, 'clean') }), 'denied');
+    const cyc: Record<string, unknown> = { query: 'aluminum scrap price' };
+    cyc.self = cyc;
+    assert.equal(await s.call(SEARCH_TOOL, cyc), 'denied');
+    assert.equal(await s.call(SEARCH_TOOL, { query: 'aluminum scrap price', extra: Array.from({ length: 600 }, () => 'x') }), 'denied');
+    assert.match(s.denials.at(-1)!, /nested too deeply, or hold too many strings/);
+    assert.deepEqual(s.sent, []);
+  });
+});
+
 describe('page fetches are checked before they are sent', () => {
   it('refuses a URL with an identifier in its path or query', async () => {
     const s = session();
