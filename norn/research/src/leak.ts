@@ -129,8 +129,7 @@ function compactHit(hay: ReturnType<typeof compactWithEdges>, needle: string): b
   return false;
 }
 
-/** Every identifier found in `text`. Empty: clean. */
-export function findLeaks(text: string, ids: Identifier[], allow: readonly string[] = DEFAULT_ALLOW): Leak[] {
+function scanLeaks(text: string, ids: Identifier[], allow: readonly string[]): Leak[] {
   const hay = wordForm(text);
   const compactHay = compactWithEdges(text);
   const allowed = new Set(allow.map((w) => wordForm(w)));
@@ -150,7 +149,20 @@ export function findLeaks(text: string, ids: Identifier[], allow: readonly strin
   return leaks;
 }
 
-/** Percent-decodes as far as it goes (a few rounds, in case of double encoding); a malformed escape is left as written. */
+/**
+ * Every identifier found in `text`, as written and after decoding: percent-escapes are decoded
+ * (repeatedly, at most 3 passes, so a double-encoded name is read too), with and without `+` read
+ * as a space (a form-encoded query), and every form is folded as described at the top of this
+ * file. Empty: clean. "%48%61%6C%64%65%6E" is Halden.
+ */
+export function findLeaks(text: string, ids: Identifier[], allow: readonly string[] = DEFAULT_ALLOW): Leak[] {
+  const forms = new Set<string>([text, decodeAll(text), decodeAll(text.replace(/[+]/g, ' '))]);
+  const out: Leak[] = [];
+  for (const f of forms) for (const l of scanLeaks(f, ids, allow)) if (!out.some((o) => o.identifier === l.identifier)) out.push({ ...l, query: text });
+  return out;
+}
+
+/** Percent-decodes as far as it goes (at most 3 passes, in case of double encoding); a malformed escape is left as written. */
 function decodeAll(s: string): string {
   let cur = s;
   for (let i = 0; i < 3; i++) {
@@ -172,7 +184,7 @@ function decodeAll(s: string): string {
  * as a search query.
  */
 export function findUrlLeaks(rawUrl: string, ids: Identifier[], allow: readonly string[] = DEFAULT_ALLOW): Leak[] {
-  const forms = new Set<string>([rawUrl, decodeAll(rawUrl)]);
+  const forms = new Set<string>([rawUrl, decodeAll(rawUrl), decodeAll(rawUrl.replace(/[+]/g, ' '))]);
   try {
     const u = new URL(rawUrl);
     forms.add(decodeAll(`${u.username} ${u.password} ${domainToUnicode(u.hostname)} ${u.pathname} ${u.search} ${u.hash}`));

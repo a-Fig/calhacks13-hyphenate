@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { parseSourceDate, reviewProposals, validateProposal } from '../src/guardrails.ts';
 import { quoteInPage } from '../src/text.ts';
 import type { PageFetcher } from '../src/types.ts';
-import { config, fetcher, good, pages, targets, URL_A } from './helpers.ts';
+import { config, fetcher, good, pages, strict, targets, URL_A } from './helpers.ts';
 
 const one = async (raw: unknown, cfg = config, fx = fetcher) => (await reviewProposals([raw], targets, fx, cfg))[0]!;
 const codes = (v: { reasons: { code: string }[] }) => v.reasons.map((r) => r.code);
@@ -396,25 +396,11 @@ describe('flags hold a proposal for a person (review finding 7)', () => {
     assert.deepEqual(v.flags, []);
     assert.equal(v.status, 'accepted');
   });
-  it('shows a filled blank row without holding it: accepted, with the flag kept in the verdict and the rationale', async () => {
-    const v = await one(good({ targetId: 'T2', unit: 'usd', dist: { kind: 'quantiles', p10: 3000, p50: 4000, p90: 5500 }, quote: RATE }));
-    assert.equal(v.status, 'accepted');
-    assert.deepEqual(v.reasons, []);
-    assert.deepEqual(v.flags.map((f) => f.code), ['replaces_blank_row']);
-    assert.equal(v.override?.id, 'cost:E:retrofit:x');
-    assert.match(v.override!.rationale, /Note: this fills a cost-page row that was blank \(counted as \$0\)/);
-  });
-  it('still holds a filled blank row that also disagrees with the company\'s history, or states no date', async () => {
+  it('holds a filled blank row, and a disagreement with the company\'s history', async () => {
     const v = await one(good({ targetId: 'T2', unit: 'usd', dist: undefined, value: 4000, quote: RATE }), { ...config, history: { T2: [{ label: 'the last retrofit re-inspection', value: 500 }] } });
     assert.deepEqual(v.flags.map((f) => f.code).sort(), ['disagrees_with_history', 'replaces_blank_row']);
     assert.equal(v.status, 'needs_person');
-    assert.deepEqual(codes(v), ['flagged']);
-    assert.match(v.reasons[0]!.message, /disagrees_with_history/);
-    assert.ok(!/replaces_blank_row/.test(v.reasons[0]!.message));
     assert.equal(v.override, undefined);
-    const undated = await one(good({ targetId: 'T2', unit: 'usd', dist: undefined, value: 4000, quote: RATE, sourceDate: undefined }));
-    assert.equal(undated.status, 'needs_person');
-    assert.deepEqual(undated.flags.map((f) => f.code).sort(), ['no_source_date', 'replaces_blank_row']);
   });
 });
 
@@ -431,5 +417,76 @@ describe('strictest outcome wins', () => {
     const b = await reviewProposals(raw, targets, fetcher, config);
     assert.deepEqual(JSON.stringify(a), JSON.stringify(b));
     void pages;
+  });
+});
+
+describe('the quote must state the proposed value (review round 2)', () => {
+  const U = 'https://example.test/figure';
+  const stating = (page: string) => serving(U, page);
+  const run = (over: Parameters<typeof good>[0], page: string, cfg = strict) => one(good({ sourceUrl: U, ...over }), cfg, stating(page));
+
+  it('holds Sol\'s repro: $400,000 for the blank T2, high confidence, quoting "CURRENT PRICE $0.75/lb"; no override', async () => {
+    const v = await one(good({ targetId: 'T2', unit: 'usd', dist: undefined, value: 400_000, confidence: 'high', quote: 'CURRENT PRICE $0.75/lb' }), strict);
+    assert.equal(v.status, 'needs_person');
+    assert.equal(v.override, undefined);
+    assert.deepEqual(codes(v), ['quote_value']);
+    assert.match(v.reasons[0]!.message, /^quote does not state the proposed value: the quote states 0\.75 \(in usd\); the proposal is 400000/);
+    // The default configuration is the strict one.
+    const bare = await one(good({ targetId: 'T2', unit: 'usd', dist: undefined, value: 400_000, confidence: 'high', quote: 'CURRENT PRICE $0.75/lb' }), { today: '2026-10-25', identifiers: config.identifiers });
+    assert.equal(bare.status, 'needs_person');
+    assert.equal(bare.override, undefined);
+  });
+
+  it('holds a proposal derived by arithmetic from a figure on the page', async () => {
+    const v = await one(good(), strict); // 1.5% proposed, the quote is a price per pound
+    assert.equal(v.status, 'needs_person');
+    assert.deepEqual(codes(v), ['quote_value']);
+  });
+
+  it('accepts when the quote states the value with its unit: dollars, a share, weeks', async () => {
+    const usd = await run({ targetId: 'T3', unit: 'usd', dist: undefined, value: 1100, quote: 'Standard tooling price: $1,100 per set' }, 'Standard tooling price: $1,100 per set, delivered.');
+    assert.equal(usd.status, 'accepted');
+    assert.ok(usd.override);
+    const share = await run({ dist: { kind: 'pert', min: 0.008, mode: 0.015, max: 0.03 }, quote: 'Recovery on sold scrap is 1.5% of the price' }, 'Recovery on sold scrap is 1.5% of the price paid.');
+    assert.equal(share.status, 'accepted');
+    const weeks = await run({ targetId: 'T4', unit: 'weeks', dist: { kind: 'quantiles', p10: 10, p50: 12, p90: 16 }, quote: 'Typical lead time is 12 weeks for this part' }, 'Typical lead time is 12 weeks for this part type.');
+    assert.equal(weeks.status, 'accepted');
+  });
+
+  it('reads scale and unit: million, thousand, k, cents, percent, days and months', async () => {
+    const usd = (value: number, quote: string) => run({ targetId: 'T2', unit: 'usd', dist: undefined, value, quote: `Quoted: ${quote} for the work` }, `Quoted: ${quote} for the work`);
+    for (const [value, quote] of [[4_500_000, '$4.5 million'], [4500, '$4.5 thousand'], [4500, '$4.5k'], [4500, '4,500 USD'], [4500, '4500 dollars'], [0.75, '75 cents']] as const) {
+      assert.ok(!codes(await usd(value, quote)).includes('quote_value'), quote);
+    }
+    // The wrong scale or unit does not state the value.
+    for (const [value, quote] of [[4500, '$4.5 million'], [4_500_000, '$4.5 thousand'], [4500, '4500 widgets'], [45, '$4.5 million']] as const) {
+      assert.ok(codes(await usd(value, quote)).includes('quote_value'), quote);
+    }
+    const share = (value: number, quote: string) => run({ dist: undefined, value, quote: `Observed: ${quote} on average` }, `Observed: ${quote} on average`);
+    assert.ok(!codes(await share(0.036, '3.6%')).includes('quote_value'));
+    assert.ok(!codes(await share(0.036, '3.6 percent')).includes('quote_value'));
+    assert.ok(codes(await share(0.036, '36%')).includes('quote_value'));
+    assert.ok(codes(await share(3.6, '3.6%')).includes('quote_value'));
+    const wk = (value: number, quote: string) => run({ targetId: 'T4', unit: 'weeks', dist: undefined, value, quote: `Observed: ${quote} on average` }, `Observed: ${quote} on average`);
+    assert.ok(!codes(await wk(3, '21 days')).includes('quote_value'));
+    assert.ok(!codes(await wk(13, '3 months')).includes('quote_value'));
+    assert.ok(codes(await wk(12, '12 days')).includes('quote_value'));
+    assert.ok(codes(await wk(12, 'lot 12')).includes('quote_value'));
+  });
+
+  it('uses the p50 of quantiles and the mode of a PERT as the proposed value', async () => {
+    const q = 'Standard tooling price: $1,100 per set';
+    const page = `${q}, delivered.`;
+    assert.equal((await run({ targetId: 'T3', unit: 'usd', dist: { kind: 'quantiles', p10: 1000, p50: 1100, p90: 1200 }, quote: q }, page)).status, 'accepted');
+    assert.deepEqual(codes(await run({ targetId: 'T3', unit: 'usd', dist: { kind: 'quantiles', p10: 1000, p50: 1150, p90: 1200 }, quote: q }, page)), ['quote_value']);
+  });
+
+  it('still holds a blank-row fill whose quote does state the value (replaces_blank_row holds)', async () => {
+    const q = 'Labor rate in the West: $149 per hour';
+    const v = await run({ targetId: 'T2', unit: 'usd', dist: undefined, value: 149, quote: q }, `${q}, typical.`);
+    assert.equal(v.status, 'needs_person');
+    assert.deepEqual(v.flags.map((f) => f.code), ['replaces_blank_row']);
+    assert.deepEqual(codes(v), ['flagged']);
+    assert.equal(v.override, undefined);
   });
 });

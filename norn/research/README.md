@@ -34,7 +34,7 @@ node src/cli.ts --live ECR-0417 --save-recording recordings/live-0417.json
    company identifiers by the runner before it is sent (see "Before a call is sent").
 3. **Guardrails** (`src/guardrails.ts`, `src/leak.ts`, `src/text.ts`). Pure code. Each proposal is
    `accepted`, `needs_person` or `rejected`, with every reason. Only `accepted` is applied.
-4. **Apply and report** (`src/apply.ts`, `src/report.ts`). Accepted proposals, which have no holding flag,
+4. **Apply and report** (`src/apply.ts`, `src/report.ts`). Accepted proposals, which have no flag,
    become `AssumptionOverride { source: 'agent_estimated', by: 'norn research agent (cost engineer)' }`
    with the URL, quote and date in the rationale. The checks run again on the same seed, and the
    report gives each changed headline before and after (p10/p50/p90), which assumption moved it
@@ -52,12 +52,12 @@ node src/cli.ts --live ECR-0417 --save-recording recordings/live-0417.json
 | Page could not be fetched to verify | needs_person |
 | Out of bounds: a share outside 0 to 1; a lead time outside 0 to 104 weeks; a cost not above 0; a cost whose median is more than 10 times from its current value either way (configurable), or above $1,000,000 when it has no current value | needs_person |
 | The agent rates its own confidence low | needs_person |
+| The quote does not state the proposed value: none of the figures in the quote, with their unit and scale, equals the proposal's `value` (or the p50 of its quantiles, or the mode of its PERT) | needs_person ("quote does not state the proposed value") |
 | Stale source: the proposal states a source date more than 3 years before today (configurable) | needs_person |
-| A holding flag: p50 more than 3 times (share) or 2 times (dollars, weeks) from the current p50 or from a reference value from the company's history; p90 over 4 times p10; **no source date stated** | needs_person (held, not applied; the flags are listed) |
-| Fills a blank cost-page row (`replaces_blank_row`): informational | accepted; the flag stays in the verdict and the report, and the rationale carries "Note: this fills a cost-page row that was blank (counted as $0)..." |
+| Any flag: p50 more than 3 times (share) or 2 times (dollars, weeks) from the current p50 or from a reference value from the company's history; **fills a blank cost-page row**; p90 over 4 times p10; **no source date stated** | needs_person (held, not applied; the flags are listed) |
 
 The strictest outcome wins and every reason is kept. Only a proposal with no reason to hold it and
-no holding flag is `accepted`, and only an accepted one becomes an assumption. A single `value` becomes a
+no flag is `accepted`, and only an accepted one becomes an assumption. A single `value` becomes a
 distribution (share: PERT(v/2, v, 2v), capped at 1; dollars and weeks: lognormal with spread 0.25,
 the checks' `agent_estimated` spread). One proposal that fails in any way, including an exception
 while it is being read, is rejected with a reason and the review goes on with the next.
@@ -67,6 +67,20 @@ while it is being read, is rejected with a reason and the review goes on with th
 guardrails do not read it from the page; they use what the agent states. A proposal that states
 none is flagged, which holds it. A recorded or live page that states a date therefore needs the
 agent to copy that date.
+
+**The quote must state the value.** A quote can be on the page and say nothing about the amount: a
+recycler's "$0.75/lb" under a $400,000 estimate. So the figures in the quote are read with their unit
+and scale (`src/quotevalue.ts`): dollars need a currency sign or "USD"/"dollars" and take k, thousand,
+million, billion and cents; a share takes % or "percent", or a plain decimal from 0 to 1; weeks take
+weeks, days, months or years. One of them must equal the proposed value (the `value`, the p50 of
+quantiles, or the mode of a PERT) or the proposal is held for a person. A value the agent works out
+itself, such as a price per pound times a part weight, is therefore always held. The review
+(`quoteMustStateValue`, default on; only the tests of the other checks turn it off) keeps the
+reason in the report.
+
+A blank cost-page row that is filled is held too (`replaces_blank_row`), because the quote checks
+only that a figure is on the page, not that a number of that size belongs in that row. Approval of
+held proposals is follow-up work.
 
 **Quote and numbers.** The quote must be found in the page text, and where it starts or ends with a
 number that number must be a whole token of the page. A quote may not start after a digit, letter,
@@ -108,10 +122,16 @@ and the call is made only if the guard allows it. A guard that throws or answers
 
 `researchToolGuards` (`src/job.ts`) supplies the guards for the two Bright Data tools:
 
-- `mcp__brightdata__search_engine`: every string in the arguments goes through the leak check, and a
-  call with no `query` is refused;
-- `mcp__brightdata__scrape_as_markdown`: the URL (host, path, query, fragment, as written and
-  percent-decoded) goes through the leak check, and a call with no URL is refused.
+- `mcp__brightdata__search_engine`: every string in the arguments, object keys included, goes through
+  the leak check, and a call with no `query` is refused;
+- `mcp__brightdata__scrape_as_markdown`: the URL (host, path, query, fragment) and every other string
+  go through the leak check, and a call with no URL is refused.
+
+Every string is checked as written and after decoding: percent-escapes decoded until stable (at most
+3 passes, so `%48%61%6C%64%65%6E` and a double-encoded name are read as Halden), `+` read as a space,
+and then the folding described under "Leak check". Arguments nested deeper than 6 levels, or holding
+more than 500 strings (a cyclic object too), are refused outright, since what is not walked is not
+checked.
 
 A refused call is never sent to Bright Data. The reason sent back to the agent names the kind of
 identifier (supplier, item...), not the text. A source URL in a proposal is checked the same way
@@ -151,11 +171,11 @@ and `npm view @brightdata/mcp` (version 4.1.0, modified 2026-10-20):
 - the `sourceDate` of proposals 1 and 2 is the date the recorded page states (the recycler's "Last
   Updated: 10/25/2026" and the trade article's "December 2, 2025");
 - **nothing in the recording is applied, so no headline number moves in the replay.** Proposal 1, the
-  real scrap price, is verified but flagged (its median is more than 3 times from the default's), so
-  it is held for a person; proposal 2 (a blank row) is held because the agent rated itself low, not
-  because it fills a blank, which would not hold it; 3 and 4 are
-  rejected. Applying a proposal with no holding flag is tested in `test/replay.test.ts` with a variant of
-  proposal 1.
+  real scrap price, is verified on the page, but its quote is a price per pound and the proposal is a
+  share the agent worked out, so the quote does not state the value and it is held for a person
+  (it would also be flagged for being more than 3 times from the default's); proposal 2 is held for
+  the same reason and because the agent rated itself low; 3 and 4 are rejected. Applying a proposal
+  is tested in `test/replay.test.ts` with a variant of proposal 1 that quotes a page stating its share.
 
 Cal Hacks disqualifies a Bright Data entry that uses "mocked or hardcoded data in the demo"
 (`sources/calhacks/hacker-guide.md`). The replay is for testing and for showing the guardrails; the
@@ -186,8 +206,8 @@ recording.
 - `norn/web`: the report on the impact page (held and rejected proposals, flags, before and after),
   with the quote and URL one click from the number.
 - Policy: a person's approve action for held proposals (`needs_person`, which now includes every
-  flagged one except a filled blank row) is follow-up work. Nothing implements it yet: a held proposal is listed in the report
-  and is not applied. Bowman's autonomy limits would decide whether an accepted one applies
+  flagged one) is follow-up work. Nothing implements it yet: a held proposal is listed in the report
+  and is not applied. Bowman's autonomy limits would decide whether an accepted, unflagged one applies
   without a person.
 - Runner config: a role model for `researcher`, the token as an environment variable on the home
   server, and a log sink into the action log.

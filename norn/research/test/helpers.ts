@@ -42,7 +42,12 @@ export const ids = collectIdentifiers({
   ecrs: [{ id: 'ECR-0999', supplierQuotes: [{ id: 'Q-ZRN-26-1187' }] }],
 });
 
-export const config: GuardrailConfig = { today: '2026-10-25', identifiers: ids };
+/**
+ * The config most tests use. It switches off "the quote must state the proposed value" so a test
+ * of one check can use one quote for many values; `strict` is the real default and has its own tests.
+ */
+export const config: GuardrailConfig = { today: '2026-10-25', identifiers: ids, quoteMustStateValue: false };
+export const strict: GuardrailConfig = { today: '2026-10-25', identifiers: ids };
 
 /** A proposal that passes every check against PAGE_A, to be altered by a test: dated, close to the current value, medium confidence. */
 export const good = (over: Partial<Proposal> = {}): Proposal => ({
