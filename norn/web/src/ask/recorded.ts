@@ -23,14 +23,14 @@ export function recordedToolResults(saved: Row[] = rows as Row[]): ToolResultTex
 
 export const RECORDED_AGENT_ANSWER: AgentAnswer = {
   answer:
-    'The cancellation charge is 10% of the part price. The supplier quoted 18.64 per unit for the 60 on order (supplier quote Q-HAL-26-1187 line 6). It is part of the $60,439 inventory disposition line for BW-5120-210, which covers scrapping 324 and cancelling 60.',
+    'The cancellation charge is 10% [c1] of the part price. The supplier quoted 18.64 [c1] per unit for the 60 [c1] on order (supplier quote Q-HAL-26-1187 line 6 [c1]). It is part of the $60,439 [c2] inventory disposition line for BW-5120-210, which covers scrapping 324 [c2] and cancelling 60 [c2].',
   citations: [
-    { label: 'Cancellation charge', refId: 'cancel:BW-5120-210', value: '10%' },
-    { label: 'Inventory disposition', refId: 'line:inventory:BW-5120-210', value: '$60,439' },
+    { id: 'c1', refId: 'cancel:BW-5120-210', value: '10%' },
+    { id: 'c2', refId: 'line:inventory:BW-5120-210', value: '$60,439' },
   ],
 };
 
 export function recordedAnswer(agent: AgentAnswer = RECORDED_AGENT_ANSWER, saved?: Row[]): AskAnswer {
   const g = guardAnswer(agent, recordedToolResults(saved));
-  return { ok: true, answer: agent.answer, segments: g.segments, citations: g.citations, unverifiedNumbers: g.unverifiedNumbers, mock: g.mock, recorded: true, model: 'recorded', durationMs: 0 };
+  return { ok: true, answer: g.text, segments: g.segments, citations: g.citations, unverifiedNumbers: g.unverifiedNumbers, mock: g.mock, recorded: true, model: 'recorded', durationMs: 0 };
 }

@@ -138,13 +138,15 @@ function ExchangeView({ a, x }: { a: ImpactAssessment; x: Exchange }) {
 }
 
 function ResponseView({ a, r }: { a: ImpactAssessment; r: AskResponse }) {
-  if (!r.ok) return <Flash variant={r.kind === 'unavailable' ? 'warning' : 'danger'}>{r.message}</Flash>;
+  if (!r.ok) return <Flash variant={r.kind === 'unavailable' || r.kind === 'busy' || r.kind === 'limited' ? 'warning' : 'danger'}>{r.message}</Flash>;
   return <AnswerView a={a} r={r} />;
 }
 
 function AnswerView({ a, r }: { a: ImpactAssessment; r: AskAnswer }) {
   const why = useWhy();
   const bad = r.unverifiedNumbers.length;
+  // A number's citation markers became chips: the number carries the chip's place in the list as a small reference.
+  const place = (id: string) => r.citations.findIndex(c => c.id === id) + 1;
   return (
     <>
       {r.recorded && (
@@ -153,9 +155,15 @@ function AnswerView({ a, r }: { a: ImpactAssessment; r: AskAnswer }) {
         </p>
       )}
       <p className="nx-ask-answer">
-        {r.segments.map((s, i) =>
-          s.unverified ? <mark key={i} className="nx-ask-unverified" title="Not found in Norn's data">{s.text}</mark> : <span key={i}>{s.text}</span>
-        )}
+        {r.segments.map((s, i) => {
+          const refs = (s.cites ?? []).map(place).filter(n => n > 0);
+          const sup = refs.length > 0 && <sup className="nx-ask-ref" title={`Source ${refs.join(', ')} below`}>{refs.join(',')}</sup>;
+          return s.unverified ? (
+            <span key={i}><mark className="nx-ask-unverified" title="Not found in Norn's data">{s.text}</mark>{sup}</span>
+          ) : (
+            <span key={i}>{s.text}{sup}</span>
+          );
+        })}
       </p>
       {bad > 0 && (
         <Flash variant="danger" className="nx-ask-flash">
@@ -164,17 +172,18 @@ function AnswerView({ a, r }: { a: ImpactAssessment; r: AskAnswer }) {
       )}
       {r.citations.length > 0 && (
         <div className="nx-ask-cites" aria-label="Sources">
-          {r.citations.map((c, i) => <Chip key={`${c.refId}-${i}`} c={c} traceId={c.verified ? resolveTraceId(c.refId, a.traces) : null} open={why.open} />)}
+          {r.citations.map((c, i) => <Chip key={`${c.refId}-${i}`} n={i + 1} c={c} traceId={c.verified ? resolveTraceId(c.refId, a.traces) : null} open={why.open} />)}
         </div>
       )}
     </>
   );
 }
 
-function Chip({ c, traceId, open }: { c: AskCitation; traceId: string | null; open: (id: string) => void }) {
+function Chip({ n, c, traceId, open }: { n: number; c: AskCitation; traceId: string | null; open: (id: string) => void }) {
   const body = (
     <>
       {c.verified ? <LinkIcon size={12} /> : <AlertIcon size={12} />}
+      <span className="nx-ask-chip-n">{n}</span>
       <span>{c.label}</span>
       {c.value && <b>{c.value}</b>}
     </>

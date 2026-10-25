@@ -12,6 +12,27 @@ export function askBaseUrl(): string {
 }
 
 const SERVER_DOWN: AskRefusal = { ok: false, kind: 'unavailable', message: 'Ask Norn is unavailable: its server is not running here.' };
+const UNREADABLE: AskRefusal = { ok: false, kind: 'unavailable', message: 'Ask Norn is unavailable: its server sent a reply the page cannot read.' };
+
+const isObject = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
+const isStrings = (x: unknown): x is string[] => Array.isArray(x) && x.every(s => typeof s === 'string');
+const KINDS = new Set(['unavailable', 'busy', 'limited', 'failed', 'bad_request']);
+
+/**
+ * The server's reply if it has the shape the page needs, else null. The page reads the answer's lists and
+ * text straight away, so a reply that says ok but lacks them must not get that far.
+ */
+export function readAskResponse(body: unknown): AskResponse | null {
+  if (!isObject(body)) return null;
+  if (body.ok === false) return typeof body.kind === 'string' && KINDS.has(body.kind) && typeof body.message === 'string' ? (body as unknown as AskRefusal) : null;
+  if (body.ok !== true) return null;
+  const segmentsOk = Array.isArray(body.segments) && body.segments.every(s => isObject(s) && typeof s.text === 'string' && (s.unverified === undefined || typeof s.unverified === 'boolean') && (s.cites === undefined || isStrings(s.cites)));
+  const citationsOk =
+    Array.isArray(body.citations) &&
+    body.citations.every(c => isObject(c) && typeof c.id === 'string' && typeof c.label === 'string' && typeof c.refId === 'string' && typeof c.value === 'string' && (c.verified === undefined || typeof c.verified === 'boolean'));
+  if (typeof body.answer !== 'string' || !segmentsOk || !citationsOk || !isStrings(body.unverifiedNumbers) || typeof body.mock !== 'boolean') return null;
+  return body as unknown as AskAnswer;
+}
 
 export async function askStatus(f: typeof fetch = fetch, base = askBaseUrl()): Promise<AskStatus> {
   try {
@@ -33,9 +54,7 @@ export async function askNorn(ecr: string, question: string, f: typeof fetch = f
       body: JSON.stringify({ ecr, question }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    const body = (await r.json()) as AskResponse;
-    if (body && typeof body === 'object' && 'ok' in body) return body;
-    return { ok: false, kind: 'failed', message: 'Ask Norn sent a reply the page cannot read.' };
+    return readAskResponse(await r.json()) ?? UNREADABLE;
   } catch (e) {
     if (e instanceof DOMException && e.name === 'TimeoutError') return { ok: false, kind: 'failed', message: 'Norn took too long to answer. Try a narrower question.' };
     return SERVER_DOWN;

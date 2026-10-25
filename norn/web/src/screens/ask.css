@@ -26,3 +26,5 @@ button.nx-ask-chip:focus-visible { outline: 2px solid var(--fgColor-accent); out
 .nx-ask-flash { margin-top: 12px; display: block; }
 .nx-ask-busy { display: flex; align-items: center; gap: 8px; color: var(--fgColor-muted); font-size: 14px; }
 .nx-ask-recorded { margin-left: 4px; }
+.nx-ask-ref { margin-left: 1px; font-size: 10px; font-weight: 600; color: var(--fgColor-accent); font-variant-numeric: tabular-nums; }
+.nx-ask-chip-n { font-size: 10px; font-weight: 600; color: var(--fgColor-muted); font-variant-numeric: tabular-nums; }
