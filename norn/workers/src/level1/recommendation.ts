@@ -30,6 +30,8 @@ export interface RuleDetail {
   flags?: { kind: string; severity: string; message: string; ref?: string }[];
   inputs?: { id: string; label?: string; source?: string; needsEstimate?: boolean }[];
   bomDelta?: { ok: boolean; conflicts: number };
+  /** The cost check's implementation scenario (#147): `alternative` is null when the implementation could not be placed in the volume plan, so no alternative was costed. */
+  implementationScenario?: { alternative?: unknown };
 }
 
 /** One cost-page line as the cost check stored it (the `line:cost:...` rows). */
@@ -95,6 +97,9 @@ const isRange = (x: unknown): boolean => {
   return typeof r === 'object' && r !== null && [r.p10, r.p50, r.p90].every(v => typeof v === 'number' && Number.isFinite(v));
 };
 const BLOCKING_KINDS = new Set(['conflict', 'not_converged']);
+/** The cost check's own flags about its implementation scenario (#147); every other flag with that ref is a timeline flag it copied. */
+const SCENARIO_REF = 'implementation-scenario:';
+const COST_OWN_SCENARIO_KINDS = new Set(['implementation_scenario', 'not_converged']);
 const short = (s: string, n = 200) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /**
@@ -129,6 +134,13 @@ function siblingGap(f: { kind: string; message: string; ref?: string }): string 
       return `Another open ECR${at} could not be read, so supplier conflicts with it are not checked`;
     case 'no_price':
       return `${f.ref ?? 'A part'}: no quote or item master price, so its spend is left out`;
+    // The ref is the ECR's own plan (or its retrofit part) or one task of it; only a task's message says which, so only that is kept.
+    case 'implementation_unestimated':
+      return f.ref?.endsWith(':retrofit')
+        ? 'Retrofit work and downtime not assessed'
+        : /^implementation:[^:]+$/.test(f.ref ?? '')
+          ? 'Qualification and release not assessed'
+          : short(f.message);
     default:
       return short(f.message);
   }
@@ -153,7 +165,7 @@ function siblingConditions(name: string, c: SiblingCheck | undefined): string[] 
     const tail = c.cutIn?.dateP90;
     const bar = `${MATERIALITY.cutInSlipDays} days`;
     const how = median && tail ? ` to ${median} at the median, ${tail} at P90 (tail past ${bar}),` : median ? ` to ${median} at the median, with the P90 tail crossing ${bar},` : `, whose P90 tail crosses ${bar},`;
-    add(`CCB to accept the cut-in slip${how} against the stated need${c.cutIn?.stated ? ` (${c.cutIn.stated})` : ''}, or expedite`);
+    add(`CCB to accept slip${how} against the need${c.cutIn?.stated ? ` (${c.cutIn.stated})` : ''}, or expedite`);
   }
   // An unresolved conflict with another open ECR over a supplier's slot or capacity. Capacity counts only when it
   // is the interaction with a named peer that exceeds it.
@@ -183,7 +195,7 @@ export function deriveRecommendation(input: RuleInput): Derived {
   for (const i of input.detail?.inputs ?? []) {
     if (!i.needsEstimate) continue;
     named.add(i.id);
-    conditions.push(`"${i.label ?? i.id}" is blank or unestimated and counts as $0`);
+    conditions.push(`"${i.label ?? i.id}": unestimated, $0`);
   }
   // A line that says it rests on an engineer's estimate or a quote but states no amount counts as $0 and the
   // check does not flag it, so look at the line itself rather than at the flags.
@@ -195,6 +207,15 @@ export function deriveRecommendation(input: RuleInput): Derived {
   for (const f of flags) {
     if (BLOCKING_KINDS.has(f.kind) || (f.severity !== 'warn' && !GAP_KINDS.has(f.kind))) continue;
     if (f.kind === 'needs_estimate' && f.ref && named.has(f.ref)) continue;
+    // The cost check copies the timeline's warn flags into its own, under the ref `implementation-scenario:<ECR>` (#147). With the
+    // timeline check in hand the rule reads them from it, where the 14-day bar and the wording apply: a copy is not a second condition.
+    if (input.timeline && f.ref?.startsWith(SCENARIO_REF) && !COST_OWN_SCENARIO_KINDS.has(f.kind)) continue;
+    if (f.kind === 'implementation_scenario') {
+      // Costed at the median readiness serial: the primary numbers' basis, not a gap. Not placeable: the feasible cost is unknown.
+      if (input.detail?.implementationScenario?.alternative) continue;
+      conditions.push(f.message.startsWith('Implementation cannot be placed') ? 'Implementation cannot be placed in the volume plan, so its feasible cost is unknown' : short(f.message));
+      continue;
+    }
     conditions.push(short(f.message));
   }
   // The timeline and supply checks: a check that is not available, or could not assess something, is a stated gap

@@ -65,20 +65,34 @@ const row = (v: SiblingView, key: string) => v.rows.find(r => r.key === key);
 const rowsWith = (v: SiblingView, prefix: string) => v.rows.filter(r => r.key.startsWith(prefix));
 const detailOf = (v: SiblingView): Record<string, any> => jsonOr(row(v, 'detail')?.detailJson ?? '{}');
 
-/** The check's flags, as the rule reads them. */
-export function flagsOf(v: SiblingView): NonNullable<SiblingCheck['flags']> {
+/**
+ * Whether a flag is about another ECR. The supply check runs the peers' schedules through the same book as this ECR's,
+ * so its flags include theirs ("implementation_unestimated" at "implementation:ECR-0406" in ECR-0423's supply check):
+ * those are the peer's gaps, not this ECR's. A flag whose ref names ECR ids and not this one is a peer's.
+ * `unreadable_peer` is the exception: its ref is the peer that could not be read, and that is a gap of this ECR's check.
+ */
+const ECR_IDS = /\bECR-\d+\b/g;
+const aboutAnotherEcr = (f: { kind: string; ref?: unknown }, ecr: string): boolean => {
+  if (f.kind === 'unreadable_peer' || typeof f.ref !== 'string') return false;
+  const named = f.ref.match(ECR_IDS);
+  return !!named && !named.includes(ecr);
+};
+
+/** The check's flags, as the rule reads them: with `ecr`, only those about that ECR. */
+export function flagsOf(v: SiblingView, ecr?: string): NonNullable<SiblingCheck['flags']> {
   const f = detailOf(v).flags;
-  return Array.isArray(f) ? f.filter(x => x && typeof x.kind === 'string' && typeof x.severity === 'string' && typeof x.message === 'string') : [];
+  const all: NonNullable<SiblingCheck['flags']> = Array.isArray(f) ? f.filter(x => x && typeof x.kind === 'string' && typeof x.severity === 'string' && typeof x.message === 'string') : [];
+  return ecr === undefined ? all : all.filter(x => !aboutAnotherEcr(x, ecr));
 }
 
 /**
  * The rule's view of a check: its state and flags, and what the conditions quote, all from the bound rows. The
  * timeline gives the median cut-in date and serial, the stated need and how late at P90; the supply check gives the
- * other open ECRs it shares a supplier with.
+ * other open ECRs it shares a supplier with. `ecr` is the statement's ECR: flags that name another ECR are left out.
  */
-export function ruleCheckOf(v: SiblingView): SiblingCheck {
+export function ruleCheckOf(v: SiblingView, ecr?: string): SiblingCheck {
   if (v.state !== 'ready') return { state: v.state };
-  const out: SiblingCheck = { state: 'ready', flags: flagsOf(v) };
+  const out: SiblingCheck = { state: 'ready', flags: flagsOf(v, ecr) };
   const d = detailOf(v);
   const dates = jsonOr(row(v, 'cut_in_date')?.detailJson ?? '{}').date;
   const date = dates?.p50;

@@ -8,13 +8,13 @@ import { statementToPlmFields, type StatementDoc } from './format.ts';
 import { statementGuardFor } from './guard.ts';
 import { findingsOf } from './prose.ts';
 import { decide, type DecideOptions, type EcrFacts } from './plan.ts';
-import { CLAIM_MAX, SUPPLY_CLAIM, TIMELINE_CLAIM, jobPrompt, usd } from './prompt.ts';
+import { CLAIM_FIT, SUPPLY_CLAIM, TIMELINE_CLAIM, jobPrompt, usd } from './prompt.ts';
 import { gather } from './publisher.ts';
 import { deriveRecommendation, ruleInputOf, type RunRow } from './recommendation.ts';
 import { storedRows, storedSupplyRows, storedTimelineRows } from './routing-fixture.ts';
 import { SIBLING_CACHE_GRACE_US, SIBLING_WAIT_MS, siblingCutoffUs, siblingOf, waitingForSiblings } from './siblings.ts';
-import { ruleInputForRun, siblingsForRun } from './source.ts';
-import { headlineNumbers, isTimelineSupplyKey, likelihoodWord, ruleCheckOf, supplierName, tableNumbers, timelineSupplyFacts, type SiblingView, type StoredRow } from './timeline-supply.ts';
+import { ruleInputForRun, ruleSiblingsOf, siblingsForRun } from './source.ts';
+import { flagsOf, headlineNumbers, isTimelineSupplyKey, likelihoodWord, ruleCheckOf, supplierName, tableNumbers, timelineSupplyFacts, type SiblingView, type StoredRow } from './timeline-supply.ts';
 
 // ---- runs ---------------------------------------------------------------------------------------------
 
@@ -221,10 +221,10 @@ test('decide: Level 1 waits for s3 and s4 until the cutoff, then starts whatever
 const view = (rows: StoredRow[], state: SiblingView['state'] = 'ready'): SiblingView => ({ state, runId: 1, rows: state === 'ready' ? rows : [] });
 const rowsOf = (xs: { key: string; label: string; unit: string; p10: number; p50: number; p90: number; detailJson: string }[]): StoredRow[] => xs;
 const real = (ecr: string) => ({ timeline: view(rowsOf(storedTimelineRows(ecr))), supply: view(rowsOf(storedSupplyRows(ecr))) });
-const rule = (ecr: string, t: SiblingView, s: SiblingView) => deriveRecommendation(ruleInputOf(storedRows(ecr), [], { timeline: ruleCheckOf(t), supply: ruleCheckOf(s) }));
+const rule = (ecr: string, t: SiblingView, s: SiblingView) => deriveRecommendation(ruleInputOf(storedRows(ecr), [], ruleSiblingsOf({ timeline: t, supply: s }, ecr)));
 const flagOnly = (flags: object[]): SiblingView => view([{ key: 'detail', label: 'd', unit: 'json', p10: 0, p50: 0, p90: 0, detailJson: JSON.stringify({ flags }) }]);
 
-test("ECR-0417 keeps its outcome, Approve with conditions under rule 2, and its three blank cost lines first; the missed need date is a fourth condition and the single source is not", () => {
+test("ECR-0417 keeps its outcome, Approve with conditions under rule 2, and its three blank cost lines first; the two unassessed-implementation gaps and the missed need date follow, and the single source is not a condition", () => {
   const a = real('ECR-0417');
   const flags = [...(JSON.parse(a.timeline.rows.find(r => r.key === 'detail')!.detailJson).flags as { kind: string }[]), ...(JSON.parse(a.supply.rows.find(r => r.key === 'detail')!.detailJson).flags as { kind: string }[])].map(f => f.kind);
   assert.ok(flags.includes('likely_late') && flags.includes('single_source'), `the real checks do warn about it: ${flags}`);
@@ -235,10 +235,11 @@ test("ECR-0417 keeps its outcome, Approve with conditions under rule 2, and its 
   const base = deriveRecommendation(ruleInputOf(storedRows('ECR-0417'), [])).conditions;
   assert.equal(base.length, 3);
   assert.deepEqual(d.conditions.slice(0, 3), base, 'the same three blank lines, in the same order');
-  assert.deepEqual(d.conditions.slice(3), ['CCB to accept the cut-in slip to 2027-02-16 (S/N 15) at the median, 2027-04-11 at P90 (tail past 14 days), against the stated need (S/N 11 and subsequent), or expedite']);
-  // the recommendation claim as the agent writes it still fits the module's 600-character cap
+  assert.deepEqual(d.conditions.slice(3), ['Qualification and release not assessed', 'Retrofit work and downtime not assessed', 'CCB to accept slip to 2027-02-16 (S/N 15) at the median, 2027-04-11 at P90 (tail past 14 days), against the need (S/N 11 and subsequent), or expedite']);
+  // the recommendation claim as the agent writes it, with all six conditions, still fits the 520 characters past which the job asks for shortened ones
   const claim = `Recommendation: ${d.recommendation}. Rule ${d.rule}: ${d.conditions.map((c, i) => `(${i + 1}) ${c}`).join('; ')}.`;
-  assert.ok(claim.length <= CLAIM_MAX, `${claim.length} characters`);
+  assert.equal(d.conditions.length, 6);
+  assert.ok(claim.length <= CLAIM_FIT, `${claim.length} characters`);
   assert.ok(!jobPrompt({ ...factsFor0417(), recommendation: d }).includes('would not fit one claim'), 'so the job does not ask for shortened conditions');
   const b = real('ECR-0423');
   const e = rule('ECR-0423', b.timeline, b.supply);
@@ -254,7 +255,7 @@ test('a missed need date is a condition only past the 14-day bar; a single sourc
   const t = (weeks: number) => deriveRecommendation(ruleInputOf(storedRows('ECR-0423'), [], { timeline: slip(weeks) }));
   assert.equal(t(1.5).recommendation, 'Approve', 'under two weeks at P90: below the bar, nothing to accept');
   assert.equal(t(3).recommendation, 'Approve with conditions');
-  assert.match(t(3).conditions[0]!, /^CCB to accept the cut-in slip, whose P90 tail crosses 14 days, against the stated need, or expedite$/, 'no date known: the generic words');
+  assert.match(t(3).conditions[0]!, /^CCB to accept slip, whose P90 tail crosses 14 days, against the need, or expedite$/, 'no date known: the generic words');
   // single source alone, on both checks
   const single = flagOnly([{ kind: 'single_source', severity: 'warn', ref: 'BW-1', message: 'one source' }]);
   assert.deepEqual(rule('ECR-0423', single, single).conditions, []);
@@ -282,29 +283,31 @@ test('(e) the late-slip condition quotes the P90 date next to the median and say
       ],
     });
   const c = deriveRecommendation(ruleInputOf(storedRows('ECR-0423'), [], { timeline: timelineWith('2027-02-16', '2027-03-09', 1, 4) })).conditions[0]!;
-  assert.equal(c, 'CCB to accept the cut-in slip to 2027-02-16 (S/N 12) at the median, 2027-03-09 at P90 (tail past 14 days), against the stated need (need date 2027-02-09), or expedite');
+  assert.equal(c, 'CCB to accept slip to 2027-02-16 (S/N 12) at the median, 2027-03-09 at P90 (tail past 14 days), against the need (need date 2027-02-09), or expedite');
   assert.ok(!/[—–]/.test(c), 'no dashes');
   // on the real rows the P90 date is the stored one
   const real0417 = real('ECR-0417');
   const p90 = (JSON.parse(real0417.timeline.rows.find(r => r.key === 'cut_in_date')!.detailJson) as { date: { p90: string } }).date.p90;
   const d = rule('ECR-0417', real0417.timeline, real0417.supply);
-  assert.ok(d.conditions[3]!.includes(`, ${p90} at P90 (tail past 14 days)`), d.conditions[3]);
+  const slip = d.conditions.find(c => c.startsWith('CCB to accept slip'))!;
+  assert.ok(slip.includes(`, ${p90} at P90 (tail past 14 days)`), slip);
   // without a P90 date or without any date the text still says which tail is meant
   const noTail = { ...timelineWith('2027-02-16', '2027-03-09', 1, 4), cutIn: { date: '2027-02-16', serial: 12, stated: 'need date 2027-02-09', lateWeeksP90: 4 } };
-  assert.equal(deriveRecommendation(ruleInputOf(storedRows('ECR-0423'), [], { timeline: noTail })).conditions[0], 'CCB to accept the cut-in slip to 2027-02-16 (S/N 12) at the median, with the P90 tail crossing 14 days, against the stated need (need date 2027-02-09), or expedite');
+  assert.equal(deriveRecommendation(ruleInputOf(storedRows('ECR-0423'), [], { timeline: noTail })).conditions[0], 'CCB to accept slip to 2027-02-16 (S/N 12) at the median, with the P90 tail crossing 14 days, against the need (need date 2027-02-09), or expedite');
 });
 
-test('ECR-0421 on the real rows: the slip, the slot conflict with ECR-0419 and the raw-material gap are its added conditions, after its cost ones', () => {
+test('ECR-0421 on the real rows: its own unassessed plan, the slip, the slot conflict with ECR-0419 and the raw-material gap are its added conditions, after its cost ones; the gaps of ECR-0419 are not', () => {
   const r = real('ECR-0421');
   const base = deriveRecommendation(ruleInputOf(storedRows('ECR-0421'), []));
   const d = rule('ECR-0421', r.timeline, r.supply);
   assert.equal(d.recommendation, 'Approve with conditions');
   assert.deepEqual(d.conditions.slice(0, base.conditions.length), base.conditions);
   const added = d.conditions.slice(base.conditions.length);
-  assert.equal(added.length, 3);
-  assert.equal(added[0], 'CCB to accept the cut-in slip to 2027-10-28 (S/N 2) at the median, 2027-12-08 at P90 (tail past 14 days), against the stated need (from 2027-06-01), or expedite');
-  assert.match(added[1]!, /^The raw-material share of a part's price is a default/);
-  assert.equal(added[2], 'Resolve the supplier slot conflict with ECR-0419');
+  assert.equal(added.length, 4);
+  assert.equal(added[0], 'Qualification and release not assessed', "ECR-0421's own plan; ECR-0419's implementation gaps in its supply check are not its own");
+  assert.equal(added[1], 'CCB to accept slip to 2027-10-28 (S/N 2) at the median, 2027-12-08 at P90 (tail past 14 days), against the need (from 2027-06-01), or expedite');
+  assert.match(added[2]!, /^The raw-material share of a part's price is a default/);
+  assert.equal(added[3], 'Resolve the supplier slot conflict with ECR-0419');
 });
 
 test('the recommendation claim must fit 600 characters: when the conditions written out would not, the job asks for each in a few words, keeping all of them', () => {
@@ -317,7 +320,7 @@ test('the recommendation claim must fit 600 characters: when the conditions writ
 
 test('flags that say the check could not assess something are gaps, named briefly: Approve with conditions, never Send back', () => {
   const gaps = flagOnly([
-    { kind: 'stock_beyond_plan', severity: 'warn', ref: 'stock:ECR-0417', message: 'a very long message the rule does not repeat' },
+    { kind: 'stock_beyond_plan', severity: 'warn', ref: 'stock:ECR-0423', message: 'a very long message the rule does not repeat' },
     { kind: 'unreadable_peer', severity: 'warn', ref: 'ECR-0999', message: 'x' },
     { kind: 'no_price', severity: 'warn', ref: 'BW-1', message: 'x' },
     { kind: 'beyond_published_slots', severity: 'warn', ref: 'BW-2', message: 'x' },
@@ -331,7 +334,7 @@ test('flags that say the check could not assess something are gaps, named briefl
   assert.equal(d.rule, 2);
   assert.deepEqual(d.blockers, []);
   assert.equal(d.conditions.length, 6);
-  assert.ok(d.conditions[0]!.startsWith('No cut-in date can be placed (stock:ECR-0417)'));
+  assert.ok(d.conditions[0]!.startsWith('No cut-in date can be placed (stock:ECR-0423)'));
   assert.ok(d.conditions.some(c => c.includes('ECR-0999') && c.includes('could not be read')));
   assert.ok(d.conditions.some(c => c.includes('BW-1') && c.includes('no quote or item master price')));
   assert.ok(d.conditions.some(c => c === 'Assumption a:1 was not applied: it has no distribution.'));
@@ -500,7 +503,7 @@ test('factsOf: the dispatcher waits while s4 is running and starts once it has f
   assert.equal(settled.siblings?.pending, false);
 });
 
-test('jobFactsOf: the agent posts the cost numbers only, none of the timeline and supply ones; it gets their sentences, and ECR-0417 has four conditions', () => {
+test('jobFactsOf: the agent posts the cost numbers only, none of the timeline and supply ones; it gets their sentences, and ECR-0417 has six conditions', () => {
   const facts = jobFactsOf(healthy(), pr5, 1, 3);
   assert.deepEqual(
     facts.numbers.map(x => x.resultKey),
@@ -510,14 +513,14 @@ test('jobFactsOf: the agent posts the cost numbers only, none of the timeline an
   assert.ok(facts.numbers.length <= 12);
   assert.equal(facts.recommendation?.recommendation, 'Approve with conditions');
   assert.equal(facts.recommendation?.rule, 2);
-  assert.equal(facts.recommendation?.conditions.length, 4);
+  assert.equal(facts.recommendation?.conditions.length, 6);
   assert.equal(facts.timelineSupply?.timeline.length, 2);
   const p = jobPrompt(facts);
   assert.ok(!['cut_in_date', 'late_weeks', 'single_source_items', 'cut_in_serial'].some(k => p.includes(`resultKey "${k}"`)));
   assert.ok(p.includes(`One claim starting "${TIMELINE_CLAIM}" (evidence "computation")`) && p.includes(`One claim starting "${SUPPLY_CLAIM}" (evidence "computation")`));
   assert.ok(p.includes('The change can first reach the line on 2027-02-16') && p.includes('likelihood it is late: almost certain (95-99%)'));
   assert.ok(p.includes('and the median date it reaches the line'));
-  assert.ok(p.includes('CCB to accept the cut-in slip to 2027-02-16 (S/N 15)'));
+  assert.ok(p.includes('CCB to accept slip to 2027-02-16 (S/N 15)'));
   assert.ok(!/branch|merge|pull request/i.test(p.replace(/Never use:[^\n]*/, '')), 'business words only');
 });
 
@@ -536,8 +539,8 @@ test('a failed s4 does not stop Level 1: the agent is told the supply check is n
   const facts = jobFactsOf(c, pr5, 1, 3);
   assert.deepEqual(facts.timelineSupply?.unavailable, [{ check: 'supply', why: 'it failed' }]);
   assert.equal(facts.recommendation?.recommendation, 'Approve with conditions');
-  assert.equal(facts.recommendation?.conditions.length, 5, 'three cost lines, the slip, the missing check');
-  assert.equal(facts.recommendation?.conditions[4], 'The supply check failed, so it is not assessed');
+  assert.equal(facts.recommendation?.conditions.length, 7, 'three cost lines, the two unassessed-implementation gaps and the slip from the timeline, the missing check');
+  assert.equal(facts.recommendation?.conditions[6], 'The supply check failed, so it is not assessed');
   const p = jobPrompt(facts);
   assert.ok(p.includes('saying the supply check is not available because it failed'));
   assert.ok(p.includes('The change can first reach the line on 2027-02-16'), 'the timeline is still there');
@@ -662,7 +665,7 @@ const provFor = (ecr: string, t = real(ecr), over = {}) => ({
   timelineSupplyNumbers: tableNumbers(t.timeline, t.supply),
   formulas: {},
   mock: false,
-  ruleInput: ruleInputOf(storedRows(ecr), [], { timeline: ruleCheckOf(t.timeline), supply: ruleCheckOf(t.supply) }),
+  ruleInput: ruleInputOf(storedRows(ecr), [], ruleSiblingsOf(t, ecr)),
   ...over,
 });
 
@@ -734,7 +737,7 @@ test('(f) ECR-0421: the PLM text lists every derived condition by code, whatever
   const said = statementFor('ECR-0421', { headline: 'Checks are clean. The change costs $999,999 a year.', claims: [{ text: 'Recommendation: Approve with conditions. Rule 2: some cost lines are blank.', evidence: 'judgment' }] });
   const html = statementToPlmFields(said, ecr421, prov, o).fields.impact_statement as string;
   for (const c of derived.conditions) assert.ok(html.includes(escHtml(c)), `condition shown: ${c}`);
-  assert.ok(html.includes('Resolve the supplier slot conflict with ECR-0419') && html.includes('CCB to accept the cut-in slip'));
+  assert.ok(html.includes('Resolve the supplier slot conflict with ECR-0419') && html.includes('CCB to accept slip'));
   assert.ok(html.includes('Checks are clean.'), "the agent's prose is not rewritten");
   assert.ok(html.includes("Wording elsewhere in this statement that says there are none is the agent's, and the checks stand."), 'and the page says the checks stand');
   assert.ok(!/[\u2014\u2013]/.test(html.slice(html.indexOf('Conditions for the CCB'), html.indexOf('Headline numbers'))), 'no dashes in the rule-written part');
@@ -752,7 +755,8 @@ test('(f) the post tool refuses clean wording and an invented figure while the r
   const guard = statementGuardFor(db);
   const by = 'norn:check_run:3';
   const claim = (text: string) => ({ text, evidence: 'judgment' });
-  const post = (headline: string, claims: { text: string }[] = [claim('Recommendation: Approve with conditions. Rule 2: the conditions are listed.')], spawnedBy = by) => guard(pr5, spawnedBy, { headline, drivers: [], claims });
+  const pr0421 = { ...pr5, plmEcrNumber: 'ECR-0421' };
+  const post = (headline: string, claims: { text: string }[] = [claim('Recommendation: Approve with conditions. Rule 2: the conditions are listed.')], spawnedBy = by) => guard(pr0421, spawnedBy, { headline, drivers: [], claims });
   const net = storedRows('ECR-0421').find(r => r.key === 'net_total_year_one')!;
   const good = `The change costs ${usd(net.p10)} to ${usd(net.p90)} over 12 months.`;
   assert.equal(post(good), undefined, 'figures as get_impact shows them are fine');
@@ -761,20 +765,205 @@ test('(f) the post tool refuses clean wording and an invented figure while the r
   assert.equal(post(good, [claim('Recommendation: Approve with conditions. Rule 2. There is no conflict with other ECRs on the cut-in.')]), undefined, 'a specific negative is not "no issues"');
   // the clean wording is refused, with what was found, in words the agent can act on
   const clean = post('Checks are clean.')!;
-  assert.match(clean, /^Not posted\. Your headline says "clean", but Norn's checks found \d+ items for ECR-0417: \(1\) /);
-  assert.ok(clean.includes('Resolve the supplier slot conflict with ECR-0419') && clean.includes('CCB to accept the cut-in slip'), 'it names the derived conditions');
+  assert.match(clean, /^Not posted\. Your headline says "clean", but Norn's checks found \d+ items for ECR-0421: \(1\) /);
+  assert.ok(clean.includes('Resolve the supplier slot conflict with ECR-0419') && clean.includes('CCB to accept slip'), 'it names the derived conditions');
   assert.ok(clean.endsWith('post again.'));
   assert.ok(/no issues/.test(post(good, [claim('Recommendation: Approve with conditions. There are no issues.')])!));
   assert.ok(/nothing to flag/i.test(post(good, [claim('Recommendation: Approve with conditions. Nothing to flag here.')])!));
   // the invented figure
   const invented = post('The change costs $999,999 a year.')!;
-  assert.match(invented, /^Not posted\. The \$999,999 in your headline is not in any check result of ECR-0417\. /);
+  assert.match(invented, /^Not posted\. The \$999,999 in your headline is not in any check result of ECR-0421\. /);
   assert.ok(invented.endsWith('post again.'));
   assert.match(post('Clean. And $999,999.')!, /headline says "Clean".*\$999,999/);
   // sessions that no check run started are not checked here
   assert.equal(post('Checks are clean. $999,999.', undefined, 'Norn'), undefined);
   // and when the rule finds nothing, "clean" is true
   const calm = statementGuardFor(healthy('ECR-0423'));
-  const calmFindings = findingsOf(ruleInputForRun(healthy('ECR-0423'), 5n, 3n)!.input, deriveRecommendation(ruleInputForRun(healthy('ECR-0423'), 5n, 3n)!.input));
-  assert.equal(calm(pr5, by, { headline: 'Checks are clean.', drivers: [], claims: [] }) === undefined, calmFindings.length === 0);
+  const calmInput = ruleInputForRun(healthy('ECR-0423'), 5n, 3n, 'ECR-0423')!.input;
+  const calmFindings = findingsOf(calmInput, deriveRecommendation(calmInput));
+  assert.equal(calmFindings.length, 0, "ECR-0423's own checks found nothing; ECR-0406's flags in its supply check are not its findings");
+  assert.equal(calm({ ...pr5, plmEcrNumber: 'ECR-0423' }, by, { headline: 'Checks are clean.', drivers: [], claims: [] }), undefined);
+});
+
+// ---- the #147 merge: peers' flags, the cost check's copies of the timeline's, and its scenario flag ---------------
+
+const peerGap = { kind: 'implementation_unestimated', severity: 'warn', ref: 'implementation:ECR-0406', message: 'Qualification, release or retrofit prerequisites have not all been assessed.' };
+
+test('ECR-0423 stays a plain Approve with no condition when its supply check carries a peer ECR-0406 implementation_unestimated warn, on every path that builds the rule input', () => {
+  // the real fixture carries it: the supply check runs ECR-0406 through the same book
+  const s4flags = (JSON.parse(real('ECR-0423').supply.rows.find(r => r.key === 'detail')!.detailJson).flags as { kind: string; severity: string; ref: string }[]).filter(f => f.kind === 'implementation_unestimated');
+  assert.deepEqual(s4flags.map(f => `${f.severity}:${f.ref}`), ['warn:implementation:ECR-0406']);
+  // and a synthetic one, pinned explicitly
+  const supply = flagOnly([peerGap, { kind: 'no_stated_effectivity', severity: 'info', ref: 'stated:ECR-0406', message: 'x' }]);
+  const d = rule('ECR-0423', real('ECR-0423').timeline, supply);
+  assert.equal(d.recommendation, 'Approve');
+  assert.deepEqual(d.conditions, []);
+  // the same flag in ECR-0406's own check is a condition of 0406
+  assert.deepEqual(ruleCheckOf(supply, 'ECR-0406').flags?.map(f => f.ref), ['implementation:ECR-0406', 'stated:ECR-0406']);
+  // every caller: the dispatcher's facts, the guard's input and the publisher's gather
+  const facts = jobFactsOf(healthy('ECR-0423'), { ...pr5, plmEcrNumber: 'ECR-0423' }, 1, 3);
+  assert.equal(facts.recommendation?.recommendation, 'Approve');
+  assert.deepEqual(facts.recommendation?.conditions, []);
+  const guardInput = ruleInputForRun(healthy('ECR-0423'), 5n, 3n, 'ECR-0423')!.input;
+  assert.equal(deriveRecommendation(guardInput).recommendation, 'Approve');
+  const c = healthy('ECR-0423');
+  const stmt = statementFor('ECR-0423');
+  c.impactStatement = { prId: { filter: () => [{ id: 12n, level: 1, prRevision: 3, checkRunId: 3n, createdAt: { toDate: () => new Date(T0 + 120_000) }, changeClass: 'Class I', route: 'r', headline: 'h', author: null, numbers: stmt.numbers, drivers: [], assumptions: [], claims: stmt.claims }] } };
+  const g = gather(c, { ...pr5, plmEcrNumber: 'ECR-0423' })!;
+  assert.equal(deriveRecommendation(g.prov.ruleInput!).recommendation, 'Approve');
+  assert.deepEqual(deriveRecommendation(g.prov.ruleInput!).conditions, []);
+});
+
+test('flagsOf with an ECR keeps its own flags, flags that name no ECR, and an unreadable peer (a gap of this check), and drops the other ECRs', () => {
+  const v = flagOnly([
+    { kind: 'implementation_unestimated', severity: 'warn', ref: 'implementation:ECR-0423', message: 'own' },
+    { kind: 'implementation_unestimated', severity: 'warn', ref: 'implementation:ECR-0406:retrofit', message: 'peer retrofit' },
+    { kind: 'implementation_unestimated', severity: 'warn', ref: 'implementation:ECR-0042:task-1', message: 'peer task' },
+    { kind: 'no_price', severity: 'warn', ref: 'BW-1', message: 'part' },
+    { kind: 'slot_contention', severity: 'warn', message: 'no ref' },
+    { kind: 'unreadable_peer', severity: 'warn', ref: 'ECR-0999', message: 'peer unreadable' },
+  ]);
+  assert.deepEqual(flagsOf(v, 'ECR-0423').map(f => f.message), ['own', 'part', 'no ref', 'peer unreadable']);
+  assert.equal(flagsOf(v).length, 6, 'without an ECR nothing is dropped (older callers)');
+  // ECR-04230 is not ECR-0423
+  assert.equal(flagsOf(flagOnly([{ kind: 'x', severity: 'warn', ref: 'implementation:ECR-04230', message: 'm' }]), 'ECR-0423').length, 0);
+});
+
+test("an unestimated implementation of the statement's own ECR is a condition, in short fixed wording, once however many checks carry it", () => {
+  const own = [
+    { kind: 'implementation_unestimated', severity: 'warn', ref: 'implementation:ECR-0423', message: 'Qualification, release or retrofit prerequisites have not all been assessed. Dates show material readiness only; implementation may be later.' },
+    { kind: 'implementation_unestimated', severity: 'warn', ref: 'implementation:ECR-0423:retrofit', message: 'Retrofit execution, installation/retest and aircraft downtime have not been assessed.' },
+    { kind: 'implementation_unestimated', severity: 'warn', ref: 'implementation:ECR-0423:inspect', message: 'Inspect brackets: no owner is assigned.' },
+  ];
+  const d = rule('ECR-0423', flagOnly(own), flagOnly(own));
+  assert.equal(d.recommendation, 'Approve with conditions');
+  assert.deepEqual(d.conditions, ['Qualification and release not assessed', 'Retrofit work and downtime not assessed', 'Inspect brackets: no owner is assigned.']);
+});
+
+/** The ECR's cost rows with these flags added to the s2 detail, and the extra detail fields. */
+const costRowsWith = (ecr: string, flags: object[], extra: object = {}) =>
+  storedRows(ecr).map(r => {
+    if (r.key !== 'detail') return r;
+    const d = JSON.parse(r.detailJson);
+    return { ...r, detailJson: JSON.stringify({ ...d, flags: [...(d.flags ?? []), ...flags], ...extra }) };
+  });
+const copy = (kind: string) => ({ kind, severity: 'warn', ref: 'implementation-scenario:ECR-0423', message: `${kind} copied from the timeline` });
+const emptyCheck = view([{ key: 'detail', label: 'd', unit: 'json', p10: 0, p50: 0, p90: 0, detailJson: '{}' }]);
+
+test("the cost check's copies of the timeline's warns (ref implementation-scenario:<ECR>) are not a second condition when the timeline is in hand; without it they are conditions as before", () => {
+  const copies = [copy('likely_late'), copy('implementation_unestimated'), copy('beyond_published_slots'), copy('cut_in_beyond_plan')];
+  const rows = costRowsWith('ECR-0423', copies);
+  const sib = (timeline: SiblingView) => ruleSiblingsOf({ timeline, supply: emptyCheck }, 'ECR-0423');
+  // with the timeline and supply checks (nothing to say): the copies add nothing
+  const quiet = deriveRecommendation(ruleInputOf(rows, [], sib(emptyCheck)));
+  assert.deepEqual(quiet.conditions, []);
+  assert.equal(quiet.recommendation, 'Approve');
+  // the same fact from the timeline check is one condition, not two
+  const own = flagOnly([{ kind: 'implementation_unestimated', severity: 'warn', ref: 'implementation:ECR-0423', message: 'long message' }]);
+  assert.deepEqual(deriveRecommendation(ruleInputOf(rows, [], sib(own))).conditions, ['Qualification and release not assessed']);
+  // a likely_late copy does not skip the 14-day bar: a P90 slip of 1.5 weeks gives no condition from the timeline, so none at all
+  const lateFlag = { kind: 'likely_late', severity: 'warn', ref: 'stated:ECR-0423', message: 'late' };
+  const small: SiblingView = { state: 'ready', runId: 1, rows: [{ key: 'late_weeks', label: 'l', unit: 'weeks', p10: 0.5, p50: 1, p90: 1.5, detailJson: '{}' }, ...flagOnly([lateFlag]).rows] };
+  assert.equal(deriveRecommendation(ruleInputOf(rows, [], sib(small))).recommendation, 'Approve');
+  // a pending timeline check: its absence is the one condition; the copies do not repeat the facts
+  assert.deepEqual(deriveRecommendation(ruleInputOf(rows, [], sib(view([], 'pending')))).conditions, ['The timeline check had not finished when this assessment was made, so it is not assessed']);
+  // a caller with no sibling input (an older statement) behaves as it did: every s2 warn is a condition
+  assert.deepEqual(deriveRecommendation(ruleInputOf(rows, [])).conditions, copies.map(c => c.message));
+  // a warn of the cost check's own with the same kind but another ref is not a copy
+  const own2 = deriveRecommendation(ruleInputOf(costRowsWith('ECR-0423', [{ ...lateFlag, message: 'own late' }]), [], sib(emptyCheck)));
+  assert.deepEqual(own2.conditions, ['own late']);
+});
+
+test("the cost check's implementation_scenario warn is a gap only when the alternative could not be costed; not_converged still sends it back", () => {
+  const costed = { kind: 'implementation_scenario', severity: 'warn', ref: 'implementation-scenario:ECR-0423', message: 'Primary costs assume requested S/N 11; the implementation median is S/N 15. The separately costed scenario excludes unestimated delay and support costs.' };
+  const unplaced = { kind: 'implementation_scenario', severity: 'warn', ref: 'implementation-scenario:ECR-0423', message: 'Implementation cannot be placed in the volume plan. Primary costs remain a requested-effectivity scenario; feasible implementation cost is unknown.' };
+  const sib = ruleSiblingsOf({ timeline: emptyCheck, supply: emptyCheck }, 'ECR-0423');
+  const withAlt = { implementationScenario: { alternative: { net: {} } } };
+  const a = deriveRecommendation(ruleInputOf(costRowsWith('ECR-0423', [costed], withAlt), [], sib));
+  assert.equal(a.recommendation, 'Approve', 'costed: information about the basis, not a gap');
+  assert.deepEqual(a.conditions, []);
+  const b = deriveRecommendation(ruleInputOf(costRowsWith('ECR-0423', [unplaced], { implementationScenario: { alternative: null } }), [], sib));
+  assert.equal(b.recommendation, 'Approve with conditions');
+  assert.deepEqual(b.conditions, ['Implementation cannot be placed in the volume plan, so its feasible cost is unknown']);
+  // the same without any timeline input (older statements): costed is still no gap
+  assert.deepEqual(deriveRecommendation(ruleInputOf(costRowsWith('ECR-0423', [costed], withAlt), [])).conditions, []);
+  // the alternative's own cost forecast not converging blocks, as on main
+  const nc = deriveRecommendation(ruleInputOf(costRowsWith('ECR-0423', [{ kind: 'not_converged', severity: 'warn', ref: 'implementation-scenario:ECR-0423', message: 'The alternative implementation-cost scenario did not converge.' }], withAlt), [], sib));
+  assert.equal(nc.recommendation, 'Send back');
+  assert.equal(nc.rule, 1);
+});
+
+// ---- #123 round 3: every displayed field, scoped and negated wording --------------------------------------------
+
+/** One statement with this text in each field the PLM page and the web page show from the agent, one at a time. */
+/** The position the added number takes in the base statement. */
+const ADDED = () => statementFor('ECR-0421').numbers.length + 1;
+const fieldsWith = (text: string): Record<string, (base: StatementDoc) => StatementDoc> => ({
+  headline: b => ({ ...b, headline: text }),
+  'change class': b => ({ ...b, changeClass: text }),
+  'approval route': b => ({ ...b, route: text }),
+  [`number ${ADDED()} label`]: b => ({ ...b, numbers: [...b.numbers, { key: 'extra', label: text, unit: 'USD', p10: 1, p50: 2, p90: 3, evidence: 'judgment', resultKey: '' }] }),
+  [`number ${ADDED()} unit`]: b => ({ ...b, numbers: [...b.numbers, { key: 'extra', label: 'Extra', unit: text, p10: 1, p50: 2, p90: 3, evidence: 'judgment', resultKey: '' }] }),
+  'driver 1': b => ({ ...b, drivers: [{ text, evidence: 'judgment' }] }),
+  'assumption 1 note': b => ({ ...b, assumptions: [{ key: 'baseline:scrap', source: 'default', note: text }] }),
+  [`claim ${statementFor('ECR-0421').claims.length + 1}`]: b => ({ ...b, claims: [...b.claims, { text, evidence: 'judgment' }] }),
+});
+/** The same statement as the tool receives it (post_impact_statement's arguments). */
+const proseOfDoc = (s: StatementDoc) => ({ headline: s.headline, changeClass: s.changeClass, route: s.route, numbers: s.numbers, drivers: s.drivers, assumptions: s.assumptions, claims: s.claims });
+
+test("(round 3) Sol's case and one per field: clean wording or an invented figure in ANY displayed field is refused by the post tool's guard, and noted on the PLM page", () => {
+  const guard = statementGuardFor(healthy('ECR-0421'));
+  const by = 'norn:check_run:3';
+  const pr0421 = { ...pr5, plmEcrNumber: 'ECR-0421' };
+  const base = statementFor('ECR-0421');
+  assert.equal(guard(pr0421, by, proseOfDoc(base)), undefined, 'the base statement is fine');
+  // Sol's exact case: an existing assumption's note
+  const sol = guard(pr0421, by, proseOfDoc({ ...base, assumptions: [{ key: 'baseline:scrap', source: 'default', note: 'Checks are clean. The change costs $999,999 a year.' }] }))!;
+  assert.match(sol, /^Not posted\. Your assumption 1 note says "clean", but Norn's checks found/);
+  assert.match(sol, /The \$999,999 in your assumption 1 note is not in any check result of ECR-0421/);
+  const prov = provFor('ECR-0421');
+  for (const [where, put] of Object.entries(fieldsWith('Checks are clean.'))) {
+    const refused = guard(pr0421, by, proseOfDoc(put(base)));
+    assert.match(refused ?? '', new RegExp(`Your ${where} says "clean"`), `guard: ${where}`);
+    const html = statementToPlmFields(put(base), ecr421, prov, o).fields.impact_statement as string;
+    assert.ok(html.includes("Wording elsewhere in this statement that says there are none is the agent's, and the checks stand."), `page note: ${where}`);
+  }
+  for (const [where, put] of Object.entries(fieldsWith('It costs $999,999 a year.')))
+    assert.match(guard(pr0421, by, proseOfDoc(put(base))) ?? '', new RegExp(`The \\$999,999 in your ${where} is not in any check result`), `figure: ${where}`);
+  for (const [where, put] of Object.entries(fieldsWith('It costs 999,999 USD a year.')))
+    assert.match(guard(pr0421, by, proseOfDoc(put(base))) ?? '', new RegExp(`The 999,999 USD in your ${where} is not in any check result`), `USD: ${where}`);
+  // the words render as written (the guard refuses before they get here; the page still notes any that did)
+  const sneaked = statementToPlmFields({ ...base, assumptions: [{ key: 'baseline:scrap', source: 'default', note: 'Checks are clean.' }] }, ecr421, prov, o).fields.impact_statement as string;
+  assert.ok(sneaked.includes('baseline:scrap: Checks are clean.'));
+  // a statement with none of it gets no note
+  assert.ok(!(statementToPlmFields(base, ecr421, prov, o).fields.impact_statement as string).includes('Wording elsewhere'));
+});
+
+test('(round 3) "the checks are not clean" is allowed, and "the cost check is clean" only when the cost check found nothing', () => {
+  // ECR-0423 with one gap in the timeline check only
+  const gap = storedTimelineRows('ECR-0423').map(r => (r.key === 'detail' ? { ...r, detailJson: JSON.stringify({ ...JSON.parse(r.detailJson), flags: [{ kind: 'implementation_unestimated', severity: 'warn', ref: 'implementation:ECR-0423', message: 'x' }] }) } : r));
+  const db = cache({ runs: [s1, s2, done(4, 's3_timeline'), done(5, 's4_supply')], results: [...withRun(storedRows('ECR-0423'), 3, 1000), ...withRun(gap, 4, 2000), ...withRun(storedSupplyRows('ECR-0423'), 5, 3000)] });
+  const guard = statementGuardFor(db);
+  const pr0423 = { ...pr5, plmEcrNumber: 'ECR-0423' };
+  const post = (headline: string) => guard(pr0423, 'norn:check_run:3', { headline, drivers: [], claims: [{ text: 'Recommendation: Approve with conditions. Rule 2: the timeline check has a gap.' }] });
+  assert.equal(post('The checks are not clean: the timeline check found a gap.'), undefined);
+  assert.equal(post("The assessment isn't clean."), undefined);
+  assert.equal(post('The cost check is clean but the timeline check found a gap.'), undefined);
+  assert.equal(post('The cost and supply checks are clean; the timeline check found a gap.'), undefined);
+  assert.match(post('The timeline check is clean.') ?? '', /Your headline says "clean"/);
+  assert.match(post('Checks are clean.') ?? '', /Your headline says "clean"/);
+  assert.match(post('There are no issues.') ?? '', /Your headline says "no issues"/);
+  // and with a finding in the cost check, the same words are refused
+  const withCost = statementGuardFor(healthy('ECR-0417'))(pr5, 'norn:check_run:3', { headline: 'The cost check is clean.', drivers: [], claims: [] });
+  assert.match(withCost ?? '', /Your headline says "clean"/, 'ECR-0417 has blank cost lines');
+});
+
+test('(#128) the guard reads the run id from norn:check_run:N and from norn:check_run:N:revision:M alike, and from nothing else', () => {
+  const guard = statementGuardFor(healthy('ECR-0417'));
+  const pr0417 = { ...pr5, plmEcrNumber: 'ECR-0417' };
+  const post = (spawnedBy: string) => guard(pr0417, spawnedBy, { headline: 'Checks are clean.', drivers: [], claims: [] });
+  for (const by of ['norn:check_run:3', 'norn:check_run:3:revision:1', 'check_run:3', 'norn:check_run:3:revision:12'])
+    assert.match(post(by) ?? '', /^Not posted\. Your headline says "clean"/, by);
+  // a session not started by a check run is not checked here, as before; neither is a malformed suffix
+  for (const by of ['norn:ecr_filed:3', 'norn:check_run:3:revision:', 'norn:check_run:3:revision:x', 'norn:check_run:3:other:1']) assert.equal(post(by), undefined, by);
 });

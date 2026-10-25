@@ -33,8 +33,8 @@ import { jobPrompt, systemPromptFor, screenDetail, type Detail, type HeadlineKey
 import { costCheckOf, routeFor, storedCompanyConfig } from './routing.ts';
 import { settingsFromEnv, type Level1Settings } from './settings.ts';
 import { SIBLING_STAGES, siblingCutoffUs, siblingOf } from './siblings.ts';
-import { crSeqOfRun, failedChecksForRun, runRowsOf, siblingsForRun, toRunRow } from './source.ts';
-import { ruleCheckOf, timelineSupplyFacts } from './timeline-supply.ts';
+import { crSeqOfRun, failedChecksForRun, ruleSiblingsOf, runRowsOf, siblingsForRun, toRunRow } from './source.ts';
+import { timelineSupplyFacts } from './timeline-supply.ts';
 
 type Db = DbConnection['db'];
 type Pr = NonNullable<ReturnType<Db['pullRequest']['id']['find']>>;
@@ -105,7 +105,7 @@ export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
   // their numbers (the module would check them against the newest finished runs, which a later re-run can change
   // under it); the publisher shows them from these runs. The agent gets sentences built from the same rows.
   const siblings = siblingsForRun(db, pr.id, run.id);
-  const recommendation = deriveRecommendation(ruleInputOf(rows, failedChecksForRun(db, pr.id, run.id), siblings ? { timeline: ruleCheckOf(siblings.timeline), supply: ruleCheckOf(siblings.supply) } : {}));
+  const recommendation = deriveRecommendation(ruleInputOf(rows, failedChecksForRun(db, pr.id, run.id), ruleSiblingsOf(siblings, pr.plmEcrNumber)));
   return {
     ecr: pr.plmEcrNumber,
     title: pr.title,

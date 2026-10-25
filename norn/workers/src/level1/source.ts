@@ -4,7 +4,7 @@
 // baseline of a statement are read from that run, never inferred from matching numbers.
 import type { DbConnection } from '@norn/bindings';
 import type { Inputs } from '../impact.ts';
-import { failedChecksOf, ruleInputOf, type RuleInput, type RunRow } from './recommendation.ts';
+import { failedChecksOf, ruleInputOf, type RuleInput, type RunRow, type SiblingCheck } from './recommendation.ts';
 import { SIBLING_STAGES, siblingOf, type SiblingStage } from './siblings.ts';
 import { ruleCheckOf, type SiblingView } from './timeline-supply.ts';
 
@@ -97,15 +97,23 @@ export function siblingsForRun(db: Db, prId: bigint, s2RunId: bigint): { timelin
 }
 
 /**
+ * The timeline and supply checks as the rule reads them for `ecr` (the statement's ECR number): a peer ECR's flags in
+ * the supply check are not this ECR's gaps. The one place the three callers (dispatcher, publisher, guard) build them.
+ */
+export function ruleSiblingsOf(siblings: { timeline: SiblingView; supply: SiblingView } | undefined, ecr: string): { timeline?: SiblingCheck; supply?: SiblingCheck } {
+  return siblings ? { timeline: ruleCheckOf(siblings.timeline, ecr), supply: ruleCheckOf(siblings.supply, ecr) } : {};
+}
+
+/**
  * What the recommendation rule reads for a statement written from this s2 run: its own results, the checks that failed
  * as of its snapshot, and the timeline and supply checks bound to it. The dispatcher and the publisher assemble the same
  * input; the post tool's guard (guard.ts) uses this to check a statement's words against it before it is saved.
  */
-export function ruleInputForRun(db: Db, prId: bigint, s2RunId: bigint): { input: RuleInput; results: { p10: number; p50: number; p90: number; detailJson: string }[] } | undefined {
+export function ruleInputForRun(db: Db, prId: bigint, s2RunId: bigint, ecr: string): { input: RuleInput; results: { p10: number; p50: number; p90: number; detailJson: string }[] } | undefined {
   const run = s2RunId === 0n ? undefined : db.checkRun.id.find(s2RunId);
   if (!run || run.stage !== 's2_cost') return undefined;
   const rows = [...db.checkResult.prId.filter(prId)].filter(r => r.checkRunId === run.id);
   const siblings = siblingsForRun(db, prId, run.id);
-  const input = ruleInputOf(rows, failedChecksForRun(db, prId, run.id), siblings ? { timeline: ruleCheckOf(siblings.timeline), supply: ruleCheckOf(siblings.supply) } : {});
+  const input = ruleInputOf(rows, failedChecksForRun(db, prId, run.id), ruleSiblingsOf(siblings, ecr));
   return { input, results: [...rows, ...(siblings ? [...siblings.timeline.rows, ...siblings.supply.rows] : [])] };
 }

@@ -179,7 +179,7 @@ test("the fast-track instruction is built only when the tool is in the job's all
     assert.ok(prompt.includes('Do not use any other tool. Do not propose'));
   }
   const on = systemPromptFor([...LEVEL1_TOOLS, 'mcp__norn__request_fast_track_approval']);
-  for (const w of ['fastTrack.candidate is true', 'request_fast_track_approval', 'exactly once', 'after you have posted the statement', 'never mark a test true without evidence', 'do not call it']) assert.ok(on.toLowerCase().includes(w.toLowerCase()), w);
+  for (const w of ['fastTrack.candidate is true', 'request_fast_track_approval', 'exactly once', 'after you have posted the statement', 'never mark a test true without evidence', 'regulatoryClass', 'what you rest it on', 'do not call it']) assert.ok(on.toLowerCase().includes(w.toLowerCase()), w);
   assert.ok(on.includes('except request_fast_track_approval'));
 });
 

@@ -17,7 +17,7 @@ import type { ImplementationScenario } from '../../../checks/src/assessment.ts';
 import type { CompanyConfig, CostCheckHeadline } from '../../../config/src/index.ts';
 import { routeFor, ROUTE_PENDING, type AssessmentRef, type EcrRef } from './routing.ts';
 import type { ImpactFields } from './plm.ts';
-import { cleanClaims, findingsOf } from './prose.ts';
+import { cleanClaims, findingsByCheck, findingsOf } from './prose.ts';
 import { deriveRecommendation, type Derived, type RuleInput, type SiblingCheck } from './recommendation.ts';
 import { isTimelineSupplyKey } from './timeline-supply.ts';
 
@@ -248,7 +248,7 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
     list("Conditions for the CCB (Norn's rule)", derived.conditions);
   }
   // The agent's words are never rewritten; where they say nothing was found although the checks found something, the page says so.
-  if (derived && cleanClaims({ headline: s.headline, drivers: s.drivers, claims: s.claims }, findingsOf(prov.ruleInput, derived)).length)
+  if (derived && cleanClaims(s, findingsOf(prov.ruleInput, derived), findingsByCheck(prov.ruleInput, derived)).length)
     out.push(`<p style="margin:0 0 8px 0;color:#555555"><i>Norn's checks found the items named under the recommendation. Wording elsewhere in this statement that says there are none is the agent's, and the checks stand.</i></p>`);
 
   // Headline numbers: the cost's. The timeline and supply checks' numbers have their own section below.

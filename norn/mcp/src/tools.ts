@@ -16,7 +16,18 @@ import { affectedParts, assumptionView, bareResultKey, currentResult, currentRes
  * posted, which goes back to the agent like any other refusal of the tool, or undefined. The server knows nothing of the
  * rules behind it: whoever starts the server supplies it (main.ts).
  */
-export type StatementGuard = (pr: PullRequest, spawnedBy: string, statement: { headline: string; drivers: { text: string }[]; claims: { text: string }[] }) => string | undefined;
+/** Every piece of the statement the agent wrote that a page displays, not only the prose fields (#123). */
+export interface StatementProse {
+  headline: string;
+  changeClass?: string;
+  route?: string;
+  numbers?: { key?: string; label?: string; unit?: string; evidence?: string }[];
+  drivers: { text: string }[];
+  assumptions?: { key?: string; note?: string }[];
+  claims: { text: string }[];
+}
+
+export type StatementGuard = (pr: PullRequest, spawnedBy: string, statement: StatementProse) => string | undefined;
 
 export interface ToolContext {
   norn: Norn;
@@ -264,7 +275,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     tool(ctx, 'post_impact_statement', async (a: any) => {
       const pr = ecrOf(ctx, a.ecr);
-      const refused = ctx.statementGuard?.(pr, ctx.claims.spawnedBy, { headline: a.headline, drivers: a.drivers, claims: a.claims });
+      const refused = ctx.statementGuard?.(pr, ctx.claims.spawnedBy, { headline: a.headline, changeClass: a.changeClass, route: a.route, numbers: a.numbers, drivers: a.drivers, assumptions: a.assumptions, claims: a.claims });
       if (refused) throw new ToolFailure(refused);
       const numbers = (a.numbers as any[]).map(n => {
         if (n.evidence === 'computation') {

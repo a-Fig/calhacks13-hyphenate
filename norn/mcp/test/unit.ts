@@ -13,7 +13,7 @@ import { readEnvValue } from '../src/env.ts';
 import { securePrivateDir, windowsAcl } from '../src/fsutil.ts';
 import { connectErrorText, maxLevelFor } from '../src/norn.ts';
 import { MAX_TTL_SECONDS, TokenError, signToken, verifyToken, type NewClaims } from '../src/token.ts';
-import { TOOL_NAMES } from '../src/tools.ts';
+import { TOOL_NAMES, registerTools } from '../src/tools.ts';
 
 const KEY = 'k'.repeat(48);
 const base: NewClaims = { kind: 'job', jobId: 'job-1', role: 'level1-writeup', actor: 'agent:norn/level1/BWM-ECR-0417', onBehalfOf: 'person:jeff', spawnedBy: 'norn', ecrs: ['BWM-ECR-0417'] };
@@ -215,4 +215,36 @@ test('the default nornMcpFor entry keeps the token out of the config: a headers 
     if (saved === undefined) delete process.env.NORN_MCP_STATE_DIR;
     else process.env.NORN_MCP_STATE_DIR = saved;
   }
+});
+
+test('post_impact_statement hands the statement guard every agent-written field the PLM and the web page show, not just the ones its schema names for prose', async () => {
+  let seen: any;
+  const handlers = new Map<string, (a: any) => Promise<{ isError?: boolean; content: { text: string }[] }>>();
+  const server = { registerTool: (name: string, _def: unknown, handler: any) => void handlers.set(name, handler) } as any;
+  const pr = { id: 5n, plmEcrNumber: 'ECR-0417', revision: 1 } as any;
+  const ctx = {
+    norn: { findEcr: () => ({ pr, known: ['ECR-0417'] }) } as any,
+    claims: { spawnedBy: 'norn:check_run:3', actor: 'agent:test', jobId: 'j' } as any,
+    actor: {} as any,
+    log: () => {},
+    statementGuard: (_pr: unknown, _spawnedBy: string, statement: unknown) => ((seen = statement), 'refused for the test'),
+  };
+  registerTools(server, ctx as any);
+  const args = {
+    ecr: 'ECR-0417', level: 1, changeClass: 'Class I', route: 'CCB', headline: 'H',
+    numbers: [{ key: 'k', evidence: 'judgment', label: 'L', unit: 'U', p10: 1, p50: 2, p90: 3 }],
+    drivers: [{ text: 'D', evidence: 'judgment' }],
+    assumptions: [{ key: 'a', note: 'N' }],
+    claims: [{ text: 'C', evidence: 'judgment' }],
+  };
+  const r = await handlers.get('post_impact_statement')!(args);
+  assert.equal(r.isError, true);
+  assert.equal(r.content[0]!.text, 'refused for the test');
+  assert.equal(seen.headline, 'H');
+  assert.equal(seen.changeClass, 'Class I');
+  assert.equal(seen.route, 'CCB');
+  assert.deepEqual(seen.numbers.map((n: { key: string; label: string; unit: string; evidence: string }) => [n.key, n.label, n.unit, n.evidence]), [['k', 'L', 'U', 'judgment']]);
+  assert.deepEqual(seen.drivers.map((d: { text: string }) => d.text), ['D']);
+  assert.deepEqual(seen.assumptions.map((a: { note: string }) => a.note), ['N']);
+  assert.deepEqual(seen.claims.map((c: { text: string }) => c.text), ['C']);
 });

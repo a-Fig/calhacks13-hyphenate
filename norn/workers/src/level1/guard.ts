@@ -4,9 +4,9 @@
 // tool's text goes back to the agent, which fixes it and posts again). It never rewrites the agent's prose.
 //
 // The server (mcp/src/main.ts) passes this to `startServer`; the server itself knows nothing of the rule. It reads the
-// server's mirror of the database, for the check run that started the session (`spawnedBy`, "norn:check_run:7").
+// server's mirror of the database, for the check run that started the session (`spawnedBy`, "norn:check_run:7", or "norn:check_run:7:revision:2" once the credential carries the ECR revision).
 import type { DbConnection } from '@norn/bindings';
-import { cleanClaims, findingsOf, numbersIn, QUOTABLE_BARS, unknownAmounts, type Prose } from './prose.ts';
+import { cleanClaims, findingsByCheck, findingsOf, numbersIn, QUOTABLE_BARS, unknownAmounts, type Prose } from './prose.ts';
 import { deriveRecommendation } from './recommendation.ts';
 import { ruleInputForRun } from './source.ts';
 
@@ -26,15 +26,15 @@ const jsonOr = (s: string): unknown => {
 export function statementGuardFor(db: Db): StatementGuard {
   return (pr, spawnedBy, statement) => {
     // Same reading of the credential as the module's: a session started by a check run. Any other poster is not checked here.
-    const started = /(?:^|:)check_run:(\d+)$/.exec(spawnedBy);
+    const started = /(?:^|:)check_run:(\d+)(?::revision:\d+)?$/.exec(spawnedBy);
     if (!started) return undefined;
-    const found = ruleInputForRun(db, pr.id, BigInt(started[1]!));
+    const found = ruleInputForRun(db, pr.id, BigInt(started[1]!), pr.plmEcrNumber);
     if (!found) return undefined;
     const derived = deriveRecommendation(found.input);
     const findings = findingsOf(found.input, derived);
     const problems: string[] = [];
 
-    const clean = cleanClaims(statement, findings);
+    const clean = cleanClaims(statement, findings, findingsByCheck(found.input, derived));
     if (clean.length)
       problems.push(
         `Your ${clean.map(c => `${c.where} says "${c.phrase}"`).join(' and your ')}, but Norn's checks found ${findings.length === 1 ? 'one item' : `${findings.length} items`} for ${pr.plmEcrNumber}: ${findings.map((f, i) => `(${i + 1}) ${f}`).join('; ')}. Do not say the checks are clean or that there are no issues, flags, gaps or conditions. Norn lists these items in the PLM itself.`

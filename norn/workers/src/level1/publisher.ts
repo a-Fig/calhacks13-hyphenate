@@ -29,12 +29,12 @@ import { randomUUID } from 'node:crypto';
 import { provenanceOf } from '../impact.ts';
 import { alreadyPublished, statementToPlmFields, type Formatted, type Provenance, type StatementDoc } from './format.ts';
 import { ruleInputOf } from './recommendation.ts';
-import { ruleCheckOf, tableNumbers } from './timeline-supply.ts';
+import { tableNumbers } from './timeline-supply.ts';
 import { plmFromConnector, plmOptionsFromEnv, type PlmApi } from './plm.ts';
 import { costCheckOf, storedCompanyConfig, type EcrRef } from './routing.ts';
 import { statementIsFor } from './plan.ts';
 import { settingsFromEnv } from './settings.ts';
-import { crSeqOfRun, failedChecksForRun, jsonOr, runInputs, siblingsForRun } from './source.ts';
+import { crSeqOfRun, failedChecksForRun, jsonOr, ruleSiblingsOf, runInputs, siblingsForRun } from './source.ts';
 
 /** How long a claim stands if its holder dies before releasing it. Longer than one PLM write. */
 const LEASE_MS = 60_000;
@@ -261,7 +261,7 @@ export function gather(db: DbConnection['db'], pr: Row<'pullRequest'>): { statem
     ecr: { number: pr.plmEcrNumber, title: pr.title, revision: crSeq },
     prov: { baseline: p.baseline, changeRequest: p.changeRequest, codeVersion: detail.codeVersion, draws: detail.draws, implementationScenario: detail.implementationScenario, s2RunId: run ? Number(run.id) : undefined, timelineRunId: siblings?.timeline.runId, supplyRunId: siblings?.supply.runId, timelineSupplyNumbers: siblings ? tableNumbers(siblings.timeline, siblings.supply) : undefined, formulas, mock: matched.some(r => r.mock), costCheck: run ? costCheckOf(results.filter(r => r.checkRunId === run.id)) : undefined,
       // The recommendation rule reads the statement's own run, so it is derived only for a statement that has one.
-      ruleInput: run ? ruleInputOf(results.filter(r => r.checkRunId === run.id), failedChecksForRun(db, pr.id, run.id), siblings ? { timeline: ruleCheckOf(siblings.timeline), supply: ruleCheckOf(siblings.supply) } : {}) : undefined },
+      ruleInput: run ? ruleInputOf(results.filter(r => r.checkRunId === run.id), failedChecksForRun(db, pr.id, run.id), ruleSiblingsOf(siblings, pr.plmEcrNumber)) : undefined },
   };
 }
 
