@@ -29,6 +29,31 @@ test('replies are read only when they hold one figure, a range, or an explicit z
   assert.equal(parseReply('Maybe 150%', 'share').ok, false);
 });
 
+test('a range keeps both ends, however it is written (review bug 2)', () => {
+  for (const text of ['$3,000 to 5,000', '3,000-5,000', '$3k–$5k', 'between 3000 and 5000', '3,000 to 5,000', "It'll be $3,000 - $5,000 for the lot.", 'Probably $3k to 5k']) {
+    const r = parseReply(text, 'usd') as { ok: boolean; low?: number; high?: number };
+    assert.equal(r.ok, true, text);
+    assert.deepEqual([r.low, r.high], [3000, 5000], text);
+  }
+  // Not ranges of money: a lone figure stays a lone figure, a range backwards or beside another figure is refused.
+  assert.equal((parseReply('Retrofit of S/N 001-010 is $4,000.', 'usd') as { value: number }).value, 4000);
+  assert.equal((parseReply('About 3 to 5 days, $4,000.', 'usd') as { value: number }).value, 4000);
+  assert.equal(parseReply('$5,000 to $3,000', 'usd').ok, false);
+  assert.equal(parseReply('3 to 5 days', 'usd').ok, false);
+});
+
+test('"no estimate yet" is not a zero; only an explicit zero is (review bug 3)', () => {
+  for (const text of ['No cost estimate yet.', 'No estimate yet', "I don't know yet", 'Unknown', 'TBD', 'tbd - waiting on the supplier', 'Not sure, no figure from quality yet', 'Nothing back from the supplier yet', 'None of the suppliers have quoted']) {
+    assert.equal(parseReply(text, 'usd').ok, false, text);
+    assert.equal(parseReply(text, 'share').ok, false, text);
+  }
+  for (const text of ['$0', 'zero', 'No cost.', 'Nothing', 'None, the retrofit test covers it.']) {
+    const r = parseReply(text, 'usd') as { ok: boolean; value: number };
+    assert.equal(r.ok, true, text);
+    assert.equal(r.value, 0, text);
+  }
+});
+
 test("ECR-0417's gaps: the blank cost lines first, then material defaults", () => {
   assert.deepEqual(gaps.map((g) => g.kind), ['blank_row', 'blank_row', 'blank_row', 'default']);
   assert.ok(gaps.every((g) => g.kind === 'blank_row' || (g.swing ?? 0) >= seat.materialityUsd));
