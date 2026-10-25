@@ -21,7 +21,7 @@ NORN_DB=norn-mcp npm run start -w @norn/mcp      # or for another database
 npm run typecheck -w @norn/mcp
 npm run test:unit -w @norn/mcp        # 27 tests: tokens, strict signatures, levels, nornMcpFor and its helper, the key and mint scripts, Windows ACLs; the fast-track signal on Bowman's configuration and checks, the tool's argument checks and messages. No database, no model
 npm run check:gate -w @norn/mcp       # 69 checks through real HTTP and MCP against the database norn-mcp. No model
-NORN_MCP_TEST_DB=norn-ftt-1 npm run check:fasttrack -w @norn/mcp   # 31 checks: the fast-track tool and signal on a scratch database, with Bowman's configuration and the real checks. No model
+NORN_MCP_TEST_DB=norn-ftt-1 npm run check:fasttrack -w @norn/mcp   # 39 checks: the fast-track tool and signal on a scratch database, with Bowman's configuration and the real checks. No model
 npm run e2e -w @norn/mcp              # one real Haiku session through the runner (uses the laptop's Claude login)
 npm run e2e -w @norn/mcp -- --statement    # and a second session that posts a Level 1 statement
 npm run probe:argv -w @norn/mcp       # two short Haiku sessions: is the token on the claude command line?
@@ -211,7 +211,7 @@ database can take a plain `db:publish`; this branch did not publish it.
 | Reducers outside the scoped set, baseline writes, a scope widened by its holder, a grant that has run out, an agent replacing a `given` assumption | `check:gate` | pass |
 | Review findings: approval withdrawal (#1), relabelled computation numbers in the tool and the module (#2), level caps for a level1 job, a person's agent and a role with none (#3), a refused second job leaving the principal alone and history keeping the on-behalf-of recorded at the time (#4), `fact` (#5), `rejected` rows for a forged number, a revision conflict and a closed ECR, and no such row for an unscoped caller (#6), plain-text ECR numbers in refusals (#11), the helper form of the entry (#10) | `check:gate`, one or more checks each | pass |
 | A person's agent token (`*`, external origin, on-behalf-of) | `check:gate` | pass |
-| The fast-track signal and tool on Bowman's configuration and the real checks, on a scratch database: ECR-0423 approved (not drawn), a drawn number held for the second check, ECR-0417 recommended to named roles, out of scope denied and logged, unfinished checks refused, a Class I statement on a 12,000 USD supplier charge never approved (class left out, Class II sent, and Class II sent straight to the reducer) | `check:fasttrack` | 31 of 31 |
+| The fast-track signal and tool on Bowman's configuration and the real checks, on a scratch database: ECR-0423 approved (not drawn), a drawn number held for the second check, ECR-0417 recommended to named roles, out of scope denied and logged, unfinished checks refused, a Class I statement on a 12,000 USD supplier charge never approved (class left out, Class II sent, and Class II sent straight to the reducer), a session that read revision A refused on revision B while the session B started is decided | `check:fasttrack` | 39 of 39 |
 | A real Haiku session through the runner with only Norn's tools, token delivered through the headers helper: reads ECR-0417 and its impact, posts one comment, tries one write to ECR-0418 | `e2e` | pass: 9.4 s, 5 turns; the agent made the refused attempt itself |
 | A second Haiku session that posts a Level 1 statement with two `computation` numbers and two assumptions | `e2e -- --statement` | pass: 11.4 s, 5 turns; every computation number equals its check result |
 | Token on the `claude` command line, `headers` vs `headersHelper` | `probe:argv` (two Haiku sessions) | on argv with `headers`, not with the helper; both connected and answered |
@@ -315,6 +315,13 @@ the module's gate (`resolveClasses` in `gate.ts`) denies the same request made s
 FAA class of its own (the PLM has the originator's, which ingest does not carry), so the agent must state
 `regulatoryClass`, and the answer labels it the agent's. The answer's `classes` and `classesNote` say where each class
 came from (`statement`, `agent`, `agent_stricter`, `none`); the stored approval records the same (`classSources`).
+A stale session decides nothing. The signed `spawnedBy` of a Level 1 session names the check run that started it
+(`norn:check_run:N`); the module's `sessionRunId` (the guard `post_impact_statement` already used, now shared) refuses
+the request unless that run is still `done` on the ECR's current inputs, and says "This session assessed revision N;
+the ECR is now at revision M". A review reproduced a credential from revision A approving revision B without it. The
+refusal is logged as `rejected`, and the reducer sees the run, so no revision argument is added: a caller that
+can lie about `spawnedBy` could lie about a revision too. A call whose `spawnedBy` names no check run (a person, or a
+test client) has no session to check, here as for statements.
 Residual: the statement is the agent's own judgment, so an agent that posts Class II over a Class I cost is not caught
 by this; the company's cost, slip and report-level limits still hold. The reducer's refusals (not in review, checks not finished, no configuration) and the scope
 refusal come back in words. Only the mirror's rows are read, so the signal assumes a `done` run is current, as `get_impact` does.

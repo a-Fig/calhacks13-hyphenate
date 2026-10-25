@@ -50,12 +50,15 @@ const ecrAs = (id: string, as: string) => ({ ...structuredClone(bowman.ecrs.find
 // No Bowman ECR is drawn for the blind second check, so one more small ECR carries a number that is.
 const drawnId = Array.from({ length: 300 }, (_, i) => `ECR-${9000 + i}`).find(id => sampleValue({ sampleSeed: loaded.config.autonomy.sampleSeed, ecrId: id, action: 'approve_fast_track_ecr' }) < 0.2)!;
 const unfinishedId = 'ECR-9500';
+// An ECR that gets a second revision while a Level 1 session that read the first is still holding its credential. Its draw for the
+// blind second check is high, so a decision on it is an approval, not a held one.
+const staleId = Array.from({ length: 300 }, (_, i) => `ECR-${9600 + i}`).find(id => sampleValue({ sampleSeed: loaded.config.autonomy.sampleSeed, ecrId: id, action: 'approve_fast_track_ecr' }) > 0.5)!;
 // ECR-0423 with a 12,000 USD one-time supplier charge added: under the company's 25,000 limit, so only the change class stands between it and an approval
 const solId = 'ECR-9503';
 const solEcr = ecrAs('ECR-0423', solId) as any;
 solEcr.supplierQuotes[0].lines.push({ description: 'Supplier expedite and requalification charge', oneTime: 12000 });
 solEcr.costPage.other.push({ label: 'Supplier expedite and requalification charge', oneTime: 12000, basis: 'supplier_quote' });
-for (const e of [ecrAs('ECR-0423', 'ECR-0423'), ecrAs('ECR-0417', 'ECR-0417'), ecrAs('ECR-0423', drawnId), solEcr]) writeFileSync(join(ecrDir, `${e.id}.json`), JSON.stringify(e));
+for (const e of [ecrAs('ECR-0423', 'ECR-0423'), ecrAs('ECR-0417', 'ECR-0417'), ecrAs('ECR-0423', drawnId), solEcr, ecrAs('ECR-0423', staleId)]) writeFileSync(join(ecrDir, `${e.id}.json`), JSON.stringify(e));
 
 const worker: ChildProcess = spawn(process.execPath, ['--import', 'tsx', 'src/worker.ts'], {
   cwd: join(nornDir, 'workers'),
@@ -87,14 +90,14 @@ try {
   await until(() => norn.db.nornConfig.key.find(COMPANY_CONFIG_KEY)?.value === bowmanText, 90_000, "the worker to store Bowman's configuration");
   const sent = new Map<string, string>();
   await ingestOnce(setup.R, stubSource(ecrDir), sent, m => console.log(`  ingest: ${m}`));
-  for (const plm of ['ECR-0423', 'ECR-0417', drawnId, solId]) await until(() => codeDone(plm), 120_000, `${plm} to have every code check done`);
+  for (const plm of ['ECR-0423', 'ECR-0417', drawnId, solId, staleId]) await until(() => codeDone(plm), 120_000, `${plm} to have every code check done`);
   // No promotion by hand: ingest_ecr opens an ECR the PLM reports in review, which is what the fast track needs.
-  check('ingest opens the PLM-reported ECRs in review', ['ECR-0423', 'ECR-0417', drawnId, solId].every(p => ecr(p).status === 'review'), ['ECR-0423', 'ECR-0417', drawnId, solId].map(p => ecr(p).status).join(', '));
+  check('ingest opens the PLM-reported ECRs in review', ['ECR-0423', 'ECR-0417', drawnId, solId, staleId].every(p => ecr(p).status === 'review'), ['ECR-0423', 'ECR-0417', drawnId, solId, staleId].map(p => ecr(p).status).join(', '));
   // ---- the MCP server and three scoped agents ------------------------------------------------------------
   const server = await startServer({ norn, signingKey: key, port: 0 });
   const entries = new Map<Client, { headers: Record<string, string> }>();
-  const agentFor = async (name: string, ecrs: string[]) => {
-    const e = nornMcpFor({ actor: `agent:norn/level1/${name}/${stamp}`, onBehalfOf: null, spawnedBy: 'norn' }, { jobId: `ftt-${name}-${stamp}`, role: 'level1-writeup', ecrs, url: server.url, signingKey: key, delivery: 'header' });
+  const agentFor = async (name: string, ecrs: string[], spawnedBy = 'norn') => {
+    const e = nornMcpFor({ actor: `agent:norn/level1/${name}/${stamp}`, onBehalfOf: null, spawnedBy }, { jobId: `ftt-${name}-${stamp}`, role: 'level1-writeup', ecrs, url: server.url, signingKey: key, delivery: 'header' });
     const c = new Client({ name: 'ftt-check', version: '0.0.0' });
     await c.connect(new StreamableHTTPClientTransport(new URL(e.url), { requestInit: { headers: e.headers } }));
     entries.set(c, e);
@@ -193,6 +196,41 @@ try {
   check('the reducer called directly with Class II over a Class I statement is denied by the gate and logged', direct.row?.outcome === 'denied' && /more permissive than its own proposal/.test(direct.row.policy), direct.row?.policy);
   check('Sol\'s ECR is still in review with no standing approval', ecr(solId).status === 'review' && ![...norn.db.approval.prId.filter(ecr(solId).id)].some(a => a.status === 'standing'));
 
+  // ---- a session that read an earlier revision cannot decide a later one -----------------------------------
+  const runsOf = (plm: string) => [...norn.db.checkRun.prId.filter(ecr(plm).id)];
+  const standingOn = (plm: string) => [...norn.db.approval.prId.filter(ecr(plm).id)].filter(a => a.status === 'standing');
+  const s2Run = (plm: string) => runsOf(plm).filter(r => r.stage === 's2_cost' && r.status === 'done').sort((x, y) => Number(y.id - x.id))[0]!;
+  const runA = s2Run(staleId);
+  const AStale = await agentFor('astale', [staleId], `norn:check_run:${runA.id}`);
+  const iStaleA = (await call(AStale, 'get_impact', { ecr: staleId })).json;
+  check('revision A: the session started by its cost run (a Level 1 credential) posts its statement and the signal says candidate', (await statement(AStale, staleId)).json?.saved === true && iStaleA.fastTrack.candidate === true, iStaleA.fastTrack.why);
+  const answersA = answersFor(iStaleA);
+  // revision B arrives: the PLM reports the ECR changed, the checks run again on it
+  const before = runsOf(staleId).reduce((m, r) => (r.id > m ? r.id : m), 0n);
+  const revisionA = ecr(staleId).revision;
+  const eB = ecrAs('ECR-0423', staleId) as any;
+  eB.description = `${eB.description ?? ''} Revision B: the supplier asks for a first-article inspection.`;
+  eB.title = `${eB.title ?? staleId} (revision B)`;
+  writeFileSync(join(ecrDir, `${staleId}.json`), JSON.stringify(eB));
+  await ingestOnce(setup.R, stubSource(ecrDir), sent, m => console.log(`  ingest: ${m}`));
+  await until(() => ecr(staleId).revision > revisionA, 20_000, `${staleId} to take revision B`);
+  await until(() => ['s1_bom_delta', 's2_cost', 's3_timeline', 's4_supply'].every(s => runsOf(staleId).some(r => r.stage === s && r.status === 'done' && r.id > before)), 120_000, `${staleId}'s checks to finish on revision B`);
+  check('revision B is in review, its first cost run is no longer standing and a new one is', ecr(staleId).status === 'review' && runsOf(staleId).find(r => r.id === runA.id)?.status === 'stale' && s2Run(staleId).id > runA.id);
+  const stmtStale = await statement(AStale, staleId);
+  check('the old session cannot post a statement on revision B (the guard that already exists)', stmtStale.isError && /Check run \d+, which started this session, is stale/i.test(stmtStale.text), stmtStale.text.slice(0, 300));
+  // current statement for revision B, by a session started by B's own cost run
+  const AFresh = await agentFor('afresh', [staleId], `norn:check_run:${s2Run(staleId).id}`);
+  const iStaleB = (await call(AFresh, 'get_impact', { ecr: staleId })).json;
+  check('revision B: a current Level 1 statement is posted by the session B started', (await statement(AFresh, staleId)).json?.saved === true && iStaleB.fastTrack.candidate === true, iStaleB.fastTrack.why);
+  const logged = () => [...norn.db.actionLog.prId.filter(ecr(staleId).id)].filter(l => l.reducer === 'request_fast_track_approval');
+  const loggedBefore = logged().length;
+  const rStale = await call(AStale, 'request_fast_track_approval', { ecr: staleId, answers: answersA, regulatoryClass: 'minor' });
+  check('the old session asking for the fast track on revision B is refused in plain words: it assessed revision 1, the ECR is at 2', rStale.isError && /This session assessed revision 1; .*is now at revision 2/.test(rStale.text) && /Ask for nothing/.test(rStale.text) && !/approved/i.test(rStale.json?.decision ?? ''), rStale.text.slice(0, 400));
+  check('...the refusal is in the action log as rejected, and nothing was approved', logged().length === loggedBefore + 1 && logged().at(-1)?.outcome === 'rejected' && ecr(staleId).status === 'review' && standingOn(staleId).length === 0, `${logged().at(-1)?.outcome}, ${ecr(staleId).status}`);
+  const rFresh = await call(AFresh, 'request_fast_track_approval', { ecr: staleId, answers: answersFor(iStaleB), regulatoryClass: 'minor' });
+  check('the session started by revision B\'s own cost run is decided by the gate (approved on its own numbers)', !rFresh.isError && rFresh.json?.decision === 'approved' && ecr(staleId).status === 'approved' && standingOn(staleId).length === 1, rFresh.text.slice(0, 300));
+  check('...and the standing approval is that session\'s, not the old one\'s', standingOn(staleId)[0]?.prRevision === ecr(staleId).revision && /\/afresh\//.test(standingOn(staleId)[0]?.approverName ?? ''), JSON.stringify({ rev: standingOn(staleId)[0]?.prRevision, by: standingOn(staleId)[0]?.approverName }));
+
   // a last ECR whose checks never run: the worker is stopped before it is filed (a new ECR makes the others' supply check run again)
   worker.kill();
   await sleep(500);
@@ -216,7 +254,7 @@ try {
   const iDr = (await call(ADraft, 'get_impact', { ecr: draftId })).json;
   check('a draft ECR is not a candidate: the fast track decides ECRs in review', iDr.fastTrack.candidate === false && /is draft/.test(iDr.fastTrack.why), iDr.fastTrack.why);
 
-  for (const c of [A423, A417, ADrawn, ASol, AUnfinished, ADraft]) await c.close();
+  for (const c of [A423, A417, ADrawn, ASol, AStale, AFresh, AUnfinished, ADraft]) await c.close();
   await server.close();
 } finally {
   worker.kill();

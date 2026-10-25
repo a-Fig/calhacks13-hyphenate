@@ -647,6 +647,39 @@ export const addComment = write(
 );
 
 // ---------------------------------------------------------------------------------------------
+// A session's freshness. A session started by a check run ('norn:check_run:7') may act on an ECR only
+// while that run still stands: the ECR's inputs have not changed since it read them. A session left
+// over from an earlier change-request revision (or baseline) is refused, even if some of its numbers
+// happen to match. spawnedBy comes from the signed credential, not from the agent. Posting a statement
+// and asking for the fast track both rest on what the session read, so both ask this. Returns the run's
+// id, or 0 when the call was not started by a check run (a person, or a session with no run to check).
+// ---------------------------------------------------------------------------------------------
+
+function sessionRunId(ctx: Ctx, pr: Pr, spawnedBy: string, noMore: string): bigint {
+  const started = /(?:^|:)check_run:(\d+)$/.exec(spawnedBy);
+  if (!started) return 0n;
+  const run = ctx.db.checkRun.id.find(BigInt(started[1]!));
+  if (!run || run.prId !== pr.id) throw new Refusal(`this session was started by check run ${started[1]}, which is not a check run of ${pr.plmEcrNumber}`);
+  // 'done' is not enough on its own: the run must also stand on the ECR's inputs now.
+  const now = stageInfos(ctx, pr)[run.stage];
+  const moved = run.status === 'done' && now !== undefined && now.hash !== run.inputHash;
+  if (run.status !== 'done' || moved) {
+    let readRevision: unknown;
+    try {
+      readRevision = JSON.parse(run.inputsJson).revision;
+    } catch {
+      readRevision = undefined;
+    }
+    const nowRevision = currentRevision(ctx, pr.id)?.seq;
+    const which = typeof readRevision === 'number' && nowRevision !== undefined && readRevision !== nowRevision ? `This session assessed revision ${readRevision}; ${pr.plmEcrNumber} is now at revision ${nowRevision}. ` : '';
+    throw new Refusal(
+      `${which}Check run ${run.id}, which started this session, is ${moved ? 'no longer on the current inputs' : run.status}: ${pr.plmEcrNumber}'s inputs changed after the session read them (a new change-request revision, baseline or assumption), so its numbers are out of date. ${noMore}; Norn starts a new session on the current numbers`
+    );
+  }
+  return run.id;
+}
+
+// ---------------------------------------------------------------------------------------------
 // The fast track (#22, #43). An agent (or a person) asks to approve an ECR on the fast track and
 // brings its answers to the configuration's tests, with the classes it proposes. The gate decides
 // from the company's rules: approve, approve with a draw for the blind second check, recommend (to
@@ -664,6 +697,8 @@ export const requestFastTrackApproval = write(
   },
   (ctx, a, call) => {
     const pr = getPr(ctx, a.prId);
+    // The answers are about what the session read: a session from an earlier revision decides nothing now.
+    sessionRunId(ctx, pr, call.spawnedBy, 'Ask for nothing');
     if (pr.status !== 'review') throw new SenderError(`ECR ${pr.id} is ${pr.status}; the fast track decides ECRs in review`);
     if (call.decision.detail === undefined)
       throw new SenderError("no company configuration is stored: the fast track is the company's rule, and there is none to apply");
@@ -755,19 +790,8 @@ export const postImpactStatement = write(
       if (!EVIDENCE.includes(e)) throw new Refusal(`${what}: evidence must be one of ${EVIDENCE.join(', ')}`);
     };
 
-    // A session started by a check run ('norn:check_run:7') may post only while that run still stands:
-    // the ECR's inputs have not changed since it read them. A session left over from an earlier
-    // change-request revision (or baseline) is refused even if some of its numbers happen to match.
-    // spawnedBy comes from the signed credential, not from the agent.
-    let checkRunId = 0n;
-    const started = /(?:^|:)check_run:(\d+)$/.exec(call.spawnedBy);
-    if (started) {
-      const run = ctx.db.checkRun.id.find(BigInt(started[1]!));
-      if (!run || run.prId !== pr.id) throw new Refusal(`this session was started by check run ${started[1]}, which is not a check run of ${pr.plmEcrNumber}`);
-      if (run.status !== 'done')
-        throw new Refusal(`check run ${run.id}, which started this session, is ${run.status}: ${pr.plmEcrNumber}'s inputs changed after the session read them (a new change-request revision, baseline or assumption), so its numbers are out of date. Post nothing; Norn starts a new session on the current numbers`);
-      checkRunId = run.id;
-    }
+    // A session started by a check run may post only while that run still stands (sessionRunId).
+    let checkRunId = sessionRunId(ctx, pr, call.spawnedBy, 'Post nothing');
 
     // The newest result per key among runs that are still current ('done'; a stale run's are not).
     const current = new Map<string, { id: bigint; checkRunId: bigint; label: string; unit: string; p10: number; p50: number; p90: number }>();
