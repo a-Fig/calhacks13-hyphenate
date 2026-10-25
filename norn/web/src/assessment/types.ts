@@ -332,6 +332,8 @@ export interface ActivityEvent {
   /** ISO timestamp. */
   at: string;
   actor: string;
+  /** The stored name, when `actor` is a readable form of it (shown as a tooltip). */
+  actorRaw?: string;
   actorKind: ActorKind;
   /** Whom the actor acted for: "Jeff's agent, for Jeff". Absent when it acted on its own account. */
   onBehalfOf?: string;
@@ -525,6 +527,8 @@ export interface StatementView {
   level: ReportLevel;
   at: string;
   author: string;
+  /** The stored name, when `author` is a readable form of it (shown as a tooltip). */
+  authorRaw?: string;
   authorKind: ActorKind;
   headline: string;
   changeClass: string;
