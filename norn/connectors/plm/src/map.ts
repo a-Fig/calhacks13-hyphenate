@@ -46,6 +46,8 @@ export interface EcrRecord {
   /** The ECO that released this request, once approved. */
   eco?: string;
   ecoReleasedOn?: string;
+  /** The login of whoever approved the request, which the PLM stamps on the ECO as its releaser. */
+  ecoReleasedBy?: string;
   /** Review functions the CM analyst routed it to, through `reviewFunctions`. */
   routedTo: string[];
   dates: {
@@ -304,7 +306,7 @@ function impactState(doc: PlmDoc): ImpactState {
  * Map one ECR document (REST or webhook) and, if it has been released, its ECO. Throws a PlmMappingError,
  * naming the ECR, for a value the settings do not map or a number column that holds something else.
  */
-export function mapEcr(s: PlmSettings, doc: PlmDoc, eco?: { name: string; released_on?: string }): ReadResult {
+export function mapEcr(s: PlmSettings, doc: PlmDoc, eco?: { name: string; released_on?: string; released_by?: string }): ReadResult {
   try {
     return mapEcrDoc(s, doc, eco);
   } catch (e) {
@@ -313,7 +315,7 @@ export function mapEcr(s: PlmSettings, doc: PlmDoc, eco?: { name: string; releas
   }
 }
 
-function mapEcrDoc(s: PlmSettings, doc: PlmDoc, eco?: { name: string; released_on?: string }): ReadResult {
+function mapEcrDoc(s: PlmSettings, doc: PlmDoc, eco?: { name: string; released_on?: string; released_by?: string }): ReadResult {
   const id = String(doc.name);
   const warnings: string[] = [];
   const quotes = supplierQuotes(s, doc);
@@ -345,6 +347,7 @@ function mapEcrDoc(s: PlmSettings, doc: PlmDoc, eco?: { name: string; released_o
     originatingNcr: text(doc.originating_ncr),
     eco: ecoName,
     ecoReleasedOn: text(eco?.released_on),
+    ecoReleasedBy: text(eco?.released_by),
     routedTo: rows(doc.routed_to).map((r) => (Object.hasOwn(names, r.review_function) ? names[r.review_function] : String(r.review_function))),
     dates: clean({ filedOn: change.filedOn, neededBy: text(doc.needed_by), decidedOn: text(doc.decided_on), created: text(doc.creation), modified: String(doc.modified ?? '') }),
     modifiedBy: text(doc.modified_by),

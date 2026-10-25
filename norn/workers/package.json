@@ -14,6 +14,7 @@
     "ingest": "tsx src/ingest.ts",
     "check:pipeline": "tsx src/checks-pipeline.ts",
     "check:package": "tsx src/checks-package.ts",
+    "check:decision": "tsx src/checks-decision.ts",
     "level1:dispatcher": "tsx src/level1/dispatcher.ts",
     "level1:publisher": "tsx src/level1/publisher.ts",
     "level1:e2e": "tsx src/level1/e2e.ts",

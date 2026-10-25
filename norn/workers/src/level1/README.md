@@ -128,6 +128,14 @@ until it is taken in, because the watcher only reports ECRs changed after the fi
 are not offered back by the watcher. `ingest.ts` hands `ingestOnce` and `itemOf` in, because it is
 the entry module and importing it back would deadlock on its top-level await.
 
+**A decision in the PLM is mirrored, never re-assessed.** An ECR in state Approved or Rejected is not taken in
+through `ingest_ecr`, and no check or Level 1 run starts for it. The ingest reports it once with
+`record_plm_decision` (approver: the ECO's `released_by`, else the ECR's `modified_by`; date: `decided_on`),
+and then, for an Approved ECR with an ECO, `record_eco_release` as before. Norn follows the decision only
+where it can: an approval on an ECR whose checks are not done, whose baseline moved, or that is closed is
+logged as "not followed" and changes nothing. A restart or a repeat sends nothing new, and `recoverEcos` also
+recovers decisions the first attempt missed. `npm run check:decision` (scratch database) covers the module side.
+
 ## Helpers
 
 - `plm-impact.ts read|clear ECR-0417`: show or empty the seven fields (put the demo record back).

@@ -366,7 +366,7 @@ const approval = table(
     id: t.u64().primaryKey().autoInc(),
     prId: t.u64().index('btree'),
     prRevision: t.u32(), // the ECR's revision when it was approved
-    kind: t.string(), // 'fast_track' | 'tier'
+    kind: t.string(), // 'fast_track' | 'tier' | 'plm' (a person's approval taken in the PLM and mirrored by Norn)
     bodyId: t.string(), // 'fast_track', or the approval body that decided; '' when there was no company configuration
     tierId: t.string(), // the tier the cost pointed to; '' without a configuration
     tierIndex: t.i32(), // its position in the configuration's tiers; -1 without one

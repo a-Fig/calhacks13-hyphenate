@@ -11,7 +11,8 @@ import { SenderError, t } from 'spacetimedb/server';
 import { ScheduleAt } from 'spacetimedb';
 import spacetimedb, { StatementAssumption, StatementClaim, StatementNumber, TestAnswer, reaperSchedule } from './schema';
 import './scope'; // registers the job-scope rule with the policy gate
-import { assertReleasable, codeStagesNotDone, endApproval, recordApproval, recordRecommendation, settleApproval, standingApproval } from './gate'; // registers the company rule, after the job-scope rule
+import { assertReleasable, codeStagesNotDone, companyConfig, endApproval, recordApproval, recordPlmApproval, recordRecommendation, settleApproval, standingApproval } from './gate';
+import { PLM_DECISIONS, personForLogin, type PlmDecision } from './plm-decision'; // registers the rule for who may report a PLM decision // registers the company rule, after the job-scope rule
 import {
   CONFIG_DEFAULTS,
   OPEN_PR,
@@ -51,6 +52,8 @@ import {
   type Actor,
   type Call,
   type Ctx,
+  type Logged,
+  type Pr,
   type PrStatus,
 } from './core';
 import { COMPANY_CONFIG_KEY, checkCompanyConfig } from './company-config';
@@ -430,6 +433,58 @@ export const editPrText = write('edit_pr_text', { prId: t.u64(), description: t.
   return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: `edited the ECR text; ${reconcile(ctx, pr.id)}` };
 });
 
+// The move itself, once the checks on it have passed: the status, the approval record that follows it, and what a
+// release or a closing does to the checks and to the other open ECRs. setPrStatus and record_plm_decision both end here.
+// `onApproved` writes the approval row (setPrStatus: the gate's; a decision taken in the PLM: that person's).
+// Returns the summary of what moved.
+function applyTransition(ctx: Ctx, call: Call, pr: Pr, to: PrStatus, onApproved: () => void = () => recordApproval(ctx, call, pr, 'tier')): string {
+  const from = pr.status as PrStatus;
+  // Finish with this ECR's own row first, so the re-check of other ECRs below never touches it.
+  ctx.db.pullRequest.id.update({ ...pr, status: to, updatedAt: ctx.timestamp });
+  // The approval record follows the status: one is made when the ECR is approved, and one that
+  // stands ends when the ECR leaves 'approved' (a release ends it below, with the version it made).
+  if (to === 'approved') onApproved();
+  else if (from === 'approved' && to !== 'merged') {
+    const standing = standingApproval(ctx, pr.id);
+    if (standing) endApproval(ctx, standing, 'withdrawn', to === 'closed' ? 'the ECR was closed' : `moved back to ${to} by ${call.actor.name}`);
+  }
+
+  if (to === 'merged' || to === 'closed') {
+    // Nothing left to compute for an ECR that is released or abandoned.
+    for (const r of [...ctx.db.checkRun.prId.filter(pr.id)]) {
+      if (r.status === 'queued' || r.status === 'running' || r.status === 'blocked') {
+        ctx.db.checkRun.id.update({
+          ...r,
+          status: 'cancelled',
+          claimedBy: undefined,
+          leaseExpiresAt: undefined,
+          finishedAt: ctx.timestamp,
+          note: `ECR ${to}`,
+        });
+        clearProgress(ctx, r.id);
+      }
+    }
+  }
+  let extra = '';
+  if (to === 'merged') {
+    // The ECO is released: the baseline moves, and every other open ECR is re-checked against
+    // it, with a log row on each ECR whose state changed.
+    const row = appendMain(ctx, { cause: 'eco', mergedPrId: pr.id, note: `ECO from ECR ${pr.id}: ${pr.title}` });
+    ctx.db.pullRequest.id.update({ ...getPr(ctx, pr.id), mergedVersion: row.version });
+    const standing = standingApproval(ctx, pr.id);
+    if (standing) endApproval(ctx, standing, 'released', `released as baseline v${row.version}`);
+    const n = reconcileAllOpen(ctx, call, `ECR ${pr.id} released as baseline v${row.version}`);
+    extra = `; baseline v${row.parent} -> v${row.version}, re-checked ${n} other open ECR(s)`;
+  } else if (from === 'closed') {
+    // Reopening: move onto today's baseline and replace whatever went out of date meanwhile.
+    extra = `; ${reconcile(ctx, pr.id)}`;
+    reconcileAllOpen(ctx, call, `ECR ${pr.id} reopened`, pr.id); // its change request is a peer again
+  } else if (to === 'closed') {
+    reconcileAllOpen(ctx, call, `ECR ${pr.id} closed`, pr.id); // no longer a peer
+  }
+  return `${from} -> ${to}${extra}`;
+}
+
 export const setPrStatus = write(
   'set_pr_status',
   { prId: t.u64(), status: t.string() },
@@ -475,52 +530,87 @@ export const setPrStatus = write(
       }
     }
 
-    // Finish with this ECR's own row first, so the re-check of other ECRs below never touches it.
-    ctx.db.pullRequest.id.update({ ...pr, status: to, updatedAt: ctx.timestamp });
-    // The approval record follows the status: one is made when the ECR is approved, and one that
-    // stands ends when the ECR leaves 'approved' (a release ends it below, with the version it made).
-    if (to === 'approved') recordApproval(ctx, call, pr, 'tier');
-    else if (from === 'approved' && to !== 'merged') {
-      const standing = standingApproval(ctx, pr.id);
-      if (standing) endApproval(ctx, standing, 'withdrawn', to === 'closed' ? 'the ECR was closed' : `moved back to ${to} by ${call.actor.name}`);
-    }
-
-    if (to === 'merged' || to === 'closed') {
-      // Nothing left to compute for an ECR that is released or abandoned.
-      for (const r of [...ctx.db.checkRun.prId.filter(pr.id)]) {
-        if (r.status === 'queued' || r.status === 'running' || r.status === 'blocked') {
-          ctx.db.checkRun.id.update({
-            ...r,
-            status: 'cancelled',
-            claimedBy: undefined,
-            leaseExpiresAt: undefined,
-            finishedAt: ctx.timestamp,
-            note: `ECR ${to}`,
-          });
-          clearProgress(ctx, r.id);
-        }
-      }
-    }
-    let extra = '';
-    if (to === 'merged') {
-      // The ECO is released: the baseline moves, and every other open ECR is re-checked against
-      // it, with a log row on each ECR whose state changed.
-      const row = appendMain(ctx, { cause: 'eco', mergedPrId: pr.id, note: `ECO from ECR ${pr.id}: ${pr.title}` });
-      ctx.db.pullRequest.id.update({ ...getPr(ctx, pr.id), mergedVersion: row.version });
-      const standing = standingApproval(ctx, pr.id);
-      if (standing) endApproval(ctx, standing, 'released', `released as baseline v${row.version}`);
-      const n = reconcileAllOpen(ctx, call, `ECR ${pr.id} released as baseline v${row.version}`);
-      extra = `; baseline v${row.parent} -> v${row.version}, re-checked ${n} other open ECR(s)`;
-    } else if (from === 'closed') {
-      // Reopening: move onto today's baseline and replace whatever went out of date meanwhile.
-      extra = `; ${reconcile(ctx, pr.id)}`;
-      reconcileAllOpen(ctx, call, `ECR ${pr.id} reopened`, pr.id); // its change request is a peer again
-    } else if (to === 'closed') {
-      reconcileAllOpen(ctx, call, `ECR ${pr.id} closed`, pr.id); // no longer a peer
-    }
-    return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: `${from} -> ${to}${extra}` };
+    return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: applyTransition(ctx, call, pr, to) };
   },
   { downgradable: a => a.status === 'approved' || a.status === 'merged' }
+);
+
+// The PLM has decided the ECR: its board approved or rejected it there, and Norn mirrors that (the PLM is the system of
+// record for the decision). Approved: the ECR goes to approved and then merged, on the module's own rules for those moves
+// (set_pr_status), with the approval row naming the person the PLM names, not the connection that reported it. Rejected:
+// closed. When Norn cannot follow (the checks have not finished on current inputs, the baseline has moved, the ECR is
+// closed or already released), it records that and why, and moves nothing: it never shows an ECR as released that it did
+// not release. The same decision again changes nothing. Who may report it is plm-decision.ts's rule.
+export const recordPlmDecision = write(
+  'record_plm_decision',
+  { plmEcrNumber: t.string(), decision: t.string(), decidedBy: t.string(), decidedOn: t.string(), source: t.string(), sourceRef: t.string() },
+  (ctx, a, call) => {
+    const plm = nonEmpty(a.plmEcrNumber, 'plmEcrNumber', 64);
+    if (!PLM_DECISIONS.includes(a.decision as PlmDecision)) throw new SenderError(`decision must be one of ${PLM_DECISIONS.join(', ')}`);
+    const decision = a.decision as PlmDecision;
+    const decidedBy = nonEmpty(a.decidedBy, 'decidedBy', 128);
+    const decidedOn = nonEmpty(a.decidedOn, 'decidedOn', 40);
+    const source = nonEmpty(a.source, 'source', 32);
+    if (a.sourceRef.length > 200) throw new SenderError('sourceRef is too long (max 200 characters)');
+    const found = ctx.db.pullRequest.plmEcrNumber.find(plm);
+    if (!found) throw new SenderError(`Norn has no ECR ${plm}`);
+    const pr = getPr(ctx, found.id);
+
+    const loaded = companyConfig(ctx);
+    const person = loaded.state === 'ok' ? personForLogin(loaded.config.people, decidedBy) : undefined;
+    const where = source === 'plm' ? 'the PLM' : `${source} (a test feed, not the PLM)`;
+    const who = person ? `${person.name} (${decidedBy})` : decidedBy;
+    const headline = `${decision} in ${where} by ${who} on ${decidedOn}, reported by ${call.actor.name}`;
+    const detail = { decision, decidedBy, decidedOn, person: person?.id ?? null, source, sourceRef: a.sourceRef, reportedBy: call.actor.name };
+    // A decision Norn cannot follow is logged once: the same reason again adds no row.
+    const noFollow = (why: string): Logged | null => {
+      const summary = `${headline}; Norn did not follow it: ${why}`;
+      const last = [...ctx.db.actionLog.prId.filter(pr.id)].filter(l => l.reducer === 'record_plm_decision' && l.summary.startsWith(`${decision} in `)).sort((x, y) => Number(x.id - y.id)).at(-1);
+      if (last?.summary === summary) return null;
+      return { prId: pr.id, entity: `plm_decision:${pr.id}`, summary, detail, outcome: 'downgraded' };
+    };
+
+    if (decision === 'rejected') {
+      if (pr.status === 'closed') return null;
+      if (pr.status === 'merged') return noFollow(`ECR ${pr.id} is already released in Norn`);
+      const standing = standingApproval(ctx, pr.id);
+      if (standing) endApproval(ctx, standing, 'withdrawn', `rejected in ${where} by ${who}`);
+      const moved = applyTransition(ctx, call, pr, 'closed');
+      return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: `${headline}; ${moved}`, detail };
+    }
+
+    if (pr.status === 'merged') return null;
+    if (pr.status === 'closed') return noFollow(`ECR ${pr.id} is closed in Norn`);
+    const notReady = codeStagesNotDone(ctx, pr);
+    if (notReady.length) return noFollow(`its checks have not finished on current inputs (${notReady.join(', ')}), so Norn cannot release it`);
+    const main = currentMain(ctx);
+    if (pr.baseVersion !== main.version) return noFollow(`it is based on baseline v${pr.baseVersion} but the baseline is at v${main.version}, so it must be re-checked first`);
+
+    // From here the move is certain. The PLM's decision stands in for the approval; an approval Norn had given is replaced.
+    const standing = standingApproval(ctx, pr.id);
+    if (standing) endApproval(ctx, standing, 'withdrawn', `replaced by the approval taken in ${where} by ${who}`);
+    const record = () =>
+      recordPlmApproval(ctx, pr, {
+        name: person?.name ?? decidedBy,
+        decisionJson: JSON.stringify({
+          reason: `approved in ${where} by ${who}`,
+          route: { bodyName: person?.title ?? 'Approver in the PLM' },
+          reasons: [{ rule: 'plm', text: `Approved in ${where} by ${who} on ${decidedOn}. Norn mirrors the PLM's decision and applies no tier of its own to it.` }],
+          ...detail,
+        }),
+      });
+    let from = pr;
+    const moves: string[] = [];
+    if (pr.status === 'draft') {
+      from = { ...pr, status: 'review' };
+      ctx.db.pullRequest.id.update({ ...from, updatedAt: ctx.timestamp });
+      moves.push('draft -> review');
+    }
+    if (from.status === 'approved') record();
+    else moves.push(applyTransition(ctx, call, from, 'approved', record));
+    moves.push(applyTransition(ctx, call, getPr(ctx, pr.id), 'merged'));
+    return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: `${headline}; ${moves.join('; ')}`, detail };
+  }
 );
 
 export const addComment = write(

@@ -18,7 +18,10 @@ export type IngestItem = {
   sourceRef: string;
   /** The change order the PLM released for the ECR, once it has (#72). */
   eco?: string;
+  /** What the PLM decided, once its board has: who decided and when, as the PLM records them (`record_plm_decision`). */
+  decision?: PlmDecisionItem;
 };
+export type PlmDecisionItem = { decision: 'approved' | 'rejected'; decidedBy: string; decidedOn: string };
 export type IngestSource = { name: string; list: () => Promise<IngestItem[]> };
 
 /** JSON with object keys sorted, so the same content always gives the same text and digest. */

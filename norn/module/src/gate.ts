@@ -190,6 +190,36 @@ export function recordApproval(ctx: Ctx, call: Call, pr: Pr, kind: 'fast_track' 
   });
 }
 
+// The approval a person gave in the PLM, which Norn mirrors (record_plm_decision). Not the gate's decision, so it has no tier
+// or body of its own (tierIndex -1, as an approval made without a configuration): the board that approved it is the PLM's.
+// The approver is the person the PLM names, not the connection that reported it; `sender` is still that connection.
+export function recordPlmApproval(ctx: Ctx, pr: Pr, a: { name: string; decisionJson: string }): void {
+  ctx.db.approval.insert({
+    id: 0n,
+    prId: pr.id,
+    prRevision: pr.revision,
+    kind: 'plm',
+    bodyId: '',
+    tierId: '',
+    tierIndex: -1,
+    costSize: -1,
+    costBasis: 'none',
+    ownDigest: ownDigest(ctx, pr),
+    decisionJson: a.decisionJson,
+    answersJson: '',
+    status: 'standing',
+    pendingRecheck: false,
+    approverKind: 'person',
+    approverName: a.name,
+    approverOrigin: 'human',
+    onBehalfOf: undefined,
+    sender: ctx.sender,
+    at: ctx.timestamp,
+    endedAt: undefined,
+    endedReason: '',
+  });
+}
+
 export function endApproval(ctx: Ctx, a: Approval, status: 'withdrawn' | 'released', reason: string): void {
   ctx.db.approval.id.update({ ...a, status, pendingRecheck: false, endedAt: ctx.timestamp, endedReason: reason });
 }

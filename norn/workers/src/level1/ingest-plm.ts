@@ -21,20 +21,21 @@ import { fileURLToPath } from 'node:url';
 import { PlmMappingError, listEcrs, readChangeRequest, watchEcrs, type EcrListing, type PlmOptions } from '../../../connectors/plm/src/index.ts';
 import { classify, withRetry, type Client } from '../connect.ts';
 // ingest.ts hands these in: it is the entry module, and importing it back from here would deadlock its top-level await.
-import type { IngestItem, ingestOnce as IngestOnce, itemOf as ItemOf } from '../ingest.ts';
+import type { IngestItem, PlmDecisionItem, ingestOnce as IngestOnce, itemOf as ItemOf } from '../ingest.ts';
 import { plmOptionsFromEnv } from './plm.ts';
 
 export const DEFAULT_STATES = ['Submitted', 'In CM Review', 'CCB Review'];
 
 /**
- * States an ECR is watched in even though it is decided: Approved is where the PLM's release automation links the ECO to the
- * ECR (`released_eco`, a moment after the approval; bowman/plm/NOTES.md), and no other Bowman state carries it. Without it the
- * poller drops the approval and the ECO link, and the ECO's package is never built. An ECR in one of these states only ever has
- * its ECO release recorded (`recordEcoOnly`): it is never reported to ingest_ecr, so it cannot bump the ECR's revision, re-run
- * its checks or start a Level 1 agent. The first listing does not take these in either (see `startupWanted`): the PLM's
- * history is full of approved ECRs Norn has no business opening.
+ * The states in which the PLM has decided an ECR, and what each decision is. The PLM is the system of record for the decision,
+ * and Norn mirrors it (`record_plm_decision`). Approved is also where the PLM's release automation links the ECO to the ECR
+ * (`released_eco`, a moment after the approval; bowman/plm/NOTES.md), so the ECO release is recorded here too
+ * (`recordEcoOnly`). An ECR in one of these states is never reported to ingest_ecr, whatever `NORN_PLM_STATES` says: it cannot
+ * bump the ECR's revision, re-run its checks or start a Level 1 agent. The first listing does not take these in either (see
+ * `startupWanted`): the PLM's history is full of decided ECRs Norn has no business opening.
  */
-export const ECO_STATES = ['Approved'];
+export const DECISIONS: Record<string, PlmDecisionItem['decision']> = { Approved: 'approved', Rejected: 'rejected' };
+export const DECIDED_STATES = Object.keys(DECISIONS);
 
 export interface PlmIngestOptions {
   /** ECR numbers to take in; empty: all. */
@@ -59,17 +60,51 @@ export function plmIngestOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): P
 
 /** Whether an ECR in this state, by this number, is Norn's to take in. */
 export const wanted = (o: PlmIngestOptions, e: Pick<EcrListing, 'name' | 'workflowState'>) =>
-  (o.states.includes(e.workflowState) || ECO_STATES.includes(e.workflowState)) && (o.only.length === 0 || o.only.includes(e.name));
+  (o.states.includes(e.workflowState) || DECIDED_STATES.includes(e.workflowState)) && (o.only.length === 0 || o.only.includes(e.name));
 
-/** The same for the first listing: only the ECRs still undecided, not every approved one in the PLM's history. */
+/** The same for the first listing: only the ECRs still undecided, not every decided one in the PLM's history. */
 export const startupWanted = (o: PlmIngestOptions, e: Pick<EcrListing, 'name' | 'workflowState'>) =>
-  wanted(o, e) && (o.states.includes(e.workflowState) || !ECO_STATES.includes(e.workflowState));
+  wanted(o, e) && !DECIDED_STATES.includes(e.workflowState);
 
 /** One ECR as the PLM has it now, as an ingest item. */
 export async function readItem(opts: PlmOptions, name: string, itemOf: typeof ItemOf): Promise<IngestItem> {
   const r = await readChangeRequest(opts, name);
+  // The approver is stamped on the ECO as its releaser once the PLM has made one; until then the ECR's last editor is the one
+  // who decided it (the release automation only touches the ECR to link the ECO, and by then the ECO names the approver).
+  const decided = DECISIONS[r.record.workflowState];
+  const decidedBy = r.record.ecoReleasedBy ?? r.record.modifiedBy;
+  const decision = decided && decidedBy ? { decision: decided, decidedBy, decidedOn: r.record.dates.decidedOn ?? r.record.dates.modified } : undefined;
   // The PLM's own title and text, as filed; the change request carries the structure the checks read.
-  return { ...itemOf(r.change as Record<string, any>, r.modified), title: r.record.title || name, description: r.record.text.description };
+  return { ...itemOf(r.change as Record<string, any>, r.modified), title: r.record.title || name, description: r.record.text.description, ...(decision ? { decision } : {}) };
+}
+
+/**
+ * The PLM has decided the ECR: tell Norn who decided what, once per decision (and again when the ECO is linked, which is the
+ * retry for a decision Norn could not follow at the time: the module logs why and moves nothing, and repeats nothing it
+ * already did). Like `recordEcoOnly`, this is deliberately not `ingestOnce`: a decided ECR gets no new revision, re-check or agent.
+ */
+export async function recordDecision(R: Pick<Client['R'], 'recordPlmDecision'>, item: IngestItem, sent: Map<string, string>, log: (m: string) => void): Promise<void> {
+  const d = item.decision;
+  if (!d) return;
+  const key = `decision:${item.plmEcrNumber}`;
+  const value = `${d.decision}:${item.eco ?? ''}`;
+  if (sent.get(key) === value) return;
+  try {
+    await withRetry(() => R.recordPlmDecision({ plmEcrNumber: item.plmEcrNumber, decision: d.decision, decidedBy: d.decidedBy, decidedOn: d.decidedOn, source: 'plm', sourceRef: item.sourceRef }), { idempotent: true, label: `record_plm_decision ${item.plmEcrNumber}` });
+    sent.set(key, value);
+    log(`${item.plmEcrNumber} ${d.decision} in the PLM by ${d.decidedBy}, reported to Norn`);
+  } catch (e) {
+    const c = classify(e);
+    if (c.name === 'SenderError') sent.set(key, value); // refused for good (an ECR Norn never opened): not retried every poll
+    log(`could not record ${item.plmEcrNumber}'s ${d.decision} decision: ${c.name}: ${c.message}`);
+    if (c.name !== 'SenderError') throw e; // transient: the watcher offers it again
+  }
+}
+
+/** A decided ECR: its decision, then the ECO it released (an ECR the PLM rejected has none). */
+export async function recordDecided(R: Pick<Client['R'], 'recordPlmDecision' | 'recordEcoRelease'>, item: IngestItem, sent: Map<string, string>, log: (m: string) => void): Promise<void> {
+  await recordDecision(R, item, sent, log);
+  await recordEcoOnly(R, item, sent, log);
 }
 
 /**
@@ -187,9 +222,9 @@ export const retryDue = (retry: RetryQueue, read: (name: string) => Promise<Inge
   takeIn(retry.due(now()), read, report, log, retry, now, lock, true);
 
 /**
- * At start-up, the decided ECRs' change orders: an ECO the PLM linked while this process was down is never delivered by the
- * watcher, which starts from the newest stamp. Each is only recorded (`recordEco`, as `recordEcoOnly`), never ingested, and an
- * ECR Norn never opened is refused by the module and skipped. One failure does not stop the others.
+ * At start-up, the decided ECRs: a decision the PLM took, or an ECO it linked, while this process was down is never delivered by
+ * the watcher, which starts from the newest stamp. Each is only recorded (`recordEco`, as `recordDecided`), never ingested, and
+ * an ECR Norn never opened is refused by the module and skipped. One failure does not stop the others.
  */
 export async function recoverEcos(names: string[], read: (name: string) => Promise<IngestItem>, recordEco: (item: IngestItem) => Promise<void>, lock: EcrLock, log: (m: string) => void): Promise<string[]> {
   const failed: string[] = [];
@@ -197,7 +232,7 @@ export async function recoverEcos(names: string[], read: (name: string) => Promi
     try {
       await lock(name, async () => {
         const item = await read(name);
-        if (item.eco) await recordEco(item);
+        if (item.eco || item.decision) await recordEco(item);
       });
     } catch (e) {
       failed.push(name);
@@ -208,7 +243,7 @@ export async function recoverEcos(names: string[], read: (name: string) => Promi
   return failed;
 }
 
-/** What the watcher does with one changed ECR: a decided one only records its ECO release, any other is reported to ingest_ecr. */
+/** What the watcher does with one changed ECR: a decided one only records its decision and ECO release, any other is reported to ingest_ecr. */
 export async function onChange(
   o: PlmIngestOptions,
   change: Pick<EcrListing, 'name' | 'workflowState'>,
@@ -217,7 +252,7 @@ export async function onChange(
   if (!wanted(o, change)) return;
   await d.lock(change.name, async () => {
     const item = await d.read(change.name);
-    if (ECO_STATES.includes(change.workflowState) && !o.states.includes(change.workflowState)) await d.recordEco(item);
+    if (DECIDED_STATES.includes(change.workflowState)) await d.recordEco(item);
     else await d.report(item);
     d.retry.done(change.name); // delivered fresh by the watcher: nothing left to retry
   });
@@ -243,7 +278,7 @@ export async function runPlmIngest(R: Client['R'], log: (m: string) => void, dep
   const retry = new RetryQueue(o.intervalMs);
   const lock = ecrLock();
   await takeIn(take.map(e => e.name), read, report, log, retry, Date.now, lock);
-  const recordEco = (item: IngestItem) => recordEcoOnly(R, item, sent, log);
+  const recordEco = (item: IngestItem) => recordDecided(R, item, sent, log);
   const decided = all.filter(e => wanted(o, e) && !startupWanted(o, e)).map(e => e.name);
   let unrecovered = await recoverEcos(decided, read, recordEco, lock, log);
   let recovering = false;

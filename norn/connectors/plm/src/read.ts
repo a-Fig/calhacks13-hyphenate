@@ -28,8 +28,8 @@ export async function readChangeRequest(opts: PlmOptions, ecrNumber: string): Pr
   const plm = new PlmClient(opts);
   const doc = await plm.get<{ data: Record<string, any> }>(`/api/resource/${enc(DOCTYPE.ecr)}/${enc(ecrNumber)}`);
   const linked = typeof doc.data.released_eco === 'string' && doc.data.released_eco !== '' ? doc.data.released_eco : undefined;
-  const ecos = await plm.list<{ name: string; released_on?: string }>(DOCTYPE.eco, {
-    fields: ['name', 'released_on'],
+  const ecos = await plm.list<{ name: string; released_on?: string; released_by?: string }>(DOCTYPE.eco, {
+    fields: ['name', 'released_on', 'released_by'],
     filters: linked ? [['name', '=', linked]] : [['ecr', '=', ecrNumber]],
     orderBy: 'creation asc',
   });
