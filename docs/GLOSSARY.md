@@ -108,14 +108,16 @@ Detail on how these fit together, and who does what, is in `CHANGE-CONTROL.md`.
 
 The audit trail (#25) is described in `research/trust-patterns-human.md`.
 
-- **Evidence class, shown as colour** (Tyler, 2026-10-24). Every number and claim is one of four
+- **Evidence class, shown by inline highlighting** (Tyler, 2026-10-24, #115). Every number and claim is one of four
   classes, so anyone can tell at a glance what it rests on:
   - **Fact:** read from a source, such as the ERP, the PLM or a quote.
   - **Assumption:** supposed, in order to frame or support the analysis.
   - **Computation:** calculated by code from other values.
   - **Judgment:** the agent's conclusion.
 
-  The colours themselves are not chosen yet.
+  The UI highlights the number or passage itself. The legend, tooltip and detail panel name
+  the class; repeated badges do not appear beside report values. Evidence class does not
+  indicate risk, confidence or whether a value has been independently verified.
 - **Verification marks** *(proposed)*. These are letters borrowed from audit tick marks, so finance
   readers recognise them. They show how a value was checked:
   - **T**, traced: followed from the source forward;

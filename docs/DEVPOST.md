@@ -64,8 +64,9 @@ approved on the fast track for ECR-0423, a small change at $622, and becomes "No
 approval" for ECR-0417, which is over the cost and schedule limits. Both decisions are stored with
 their reasons (#100).
 
-**The ERP stays the people's.** Norn reads the ERP, and its code has no ERP write path.
-Tightening the live ERPNext account's role to read-only is pending (#66). When an ECO is released,
+**The ERP stays the people's.** Norn reads the ERP, and its code has no ERP write path. Norn's
+ERPNext account is read-only too: every write is refused by ERPNext itself (verified 2026-10-25).
+When an ECO is released,
 Norn puts the ERP change package on it: the new standard cost, the BOM lines and the journal entries
 for scrap and the supplier's cancellation charge, each traced to the ECO and the assessment. The
 cost accountant enters the costs and journal entries, and the manufacturing engineer enters the BOM
@@ -126,7 +127,7 @@ shown are real database rows, and the package lines, problems and effects are ha
 - Every number on the statement traces to the change request revision and the ERP baseline it was
   computed from.
 - The agents run under limits a finance team would accept: named seats, scoped tokens,
-  code with no ERP write path, and a log the platform writes, not the agent.
+  a read-only ERP account, code with no ERP write path, and a log the platform writes, not the agent.
 - Hundreds of offline tests and live checks against scratch databases, and fresh-context review
   rounds on the changes to money, routing and permissions.
 
