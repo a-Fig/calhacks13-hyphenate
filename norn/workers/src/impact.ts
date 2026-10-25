@@ -36,6 +36,8 @@ export type Inputs = {
   assumptions?: { id: string; key: string; rev: number }[];
   /** s2: the cost measure the company's approval rule asks for, which the check computes exactly. Absent without a company configuration. */
   costMeasure?: { horizonMonths: number; savingsOffset: boolean };
+  /** The input hash of each stage this one reads (s2 reads s1_bom_delta). */
+  upstream?: Record<string, string>;
   /** s4: the other open ECRs' change requests it compared this one with. */
   peers?: { pr: string; revision: number; overlay: string; assumptions?: { id: string; key: string; rev: number }[] }[];
 };

@@ -18,7 +18,7 @@ function cache(ecrId: string, stored?: string): { db: Db; pr: Pr } {
   const pr = { id: 5n, plmEcrNumber: ecrId, title: 'Motor-controller mounting bracket' } as Pr;
   const rows = storedRows(ecrId).map((r, i) => ({ id: BigInt(i + 1), prId: 5n, checkRunId: 7n, mock: false, ...r }));
   const db = {
-    checkRun: { id: { find: (id: bigint) => (id === 7n ? { id: 7n, inputsJson } : undefined) } },
+    checkRun: { prId: { filter: () => [] }, id: { find: (id: bigint) => (id === 7n ? { id: 7n, inputsJson } : undefined) } },
     checkResult: { prId: { filter: (id: bigint) => (id === 5n ? rows : []) } },
     nornConfig: { key: { find: (k: string) => (k === 'company_config' && stored !== undefined ? { key: k, value: stored } : null) } },
   } as unknown as Db;

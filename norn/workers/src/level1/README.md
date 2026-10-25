@@ -64,6 +64,30 @@ With no stored config (or one that does not validate) `routeFor` returns nothing
 "Pending Norn's routing". The headline rows alone cannot place a change for a company whose cost measure does not
 let savings offset spend (Bowman's): the cost reads as unmeasured and the top tier, so the cost check's rows are used.
 
+### The recommendation (`recommendation.ts`)
+
+Two live runs on ECR-0417 once gave "Approve with conditions" and "Send back" on the same facts, so the
+recommendation is a rule, not a mood. `deriveRecommendation` reads the cost check's stored `detail` row
+(flags, inputs, `bomDelta`) and whether the redline read, BOM delta or cost check failed or is blocked:
+1. **Send back**: it cannot be assessed as filed. A BOM conflict with the baseline, an error flag, a forecast
+   that did not converge, a failed or blocked check, or no cost detail.
+2. **Approve with conditions**: it stands with stated gaps. Every blank or unestimated line, undecided stock
+   disposition, price change with no quote, or other warn flag. The conditions name exactly those.
+3. **Approve**: no blocker, no gap. Info flags are neither.
+Never Reject (a human call). The system prompt states the rule, the job prompt tells the agent what it gives
+for this ECR (the agent states the rule that fired in its judgment claim), and the publisher applies it again:
+when the agent's recommendation differs or is missing, the PLM gets the rule's and the statement carries a note
+saying what the agent wrote, and the publisher leaves a comment on the ECR in Norn (once per statement and
+outcome) so Norn's page and the PLM agree. Every input is bound to the statement's own run: its `detail` and
+cost lines, the s1 run its inputs name, and an extraction failure only if it had happened when the run
+finished, so a later failure does not change an existing statement. Cost lines on an estimate or quote basis
+with no amount, and `no_disposition`, are gaps although the check does not warn about them. It overrides rather than refusing the post because the publisher cannot talk to
+the agent and a refusal needs a module republish; the post stays valid and the PLM is never inconsistent. A
+statement that rests on no check run has nothing to derive from and keeps the agent's recommendation.
+The fast-track tool (`request_fast_track_approval`) is described in the system prompt but not yet in
+`allowedTools` (TODO in `dispatcher.ts`). `e2e.ts` now stops the publisher before it clears the PLM, because a
+publisher still sweeping wrote the statement back after the clear.
+
 ## The publisher (`publisher.ts`, `format.ts`, `plm.ts`)
 
 Writes the seven `impact_*` fields with the connector's `writeImpact()` and nothing else (a comment
