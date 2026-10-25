@@ -403,7 +403,7 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
   const plain = plainOf(s);
   const sum = (t: string) => plain(plainSummary(t));
   events.push({
-    id: 'filed', at: cr.filedOn ? `${cr.filedOn}T12:00:00-07:00` : iso(pr.createdAt), actor: personOf(cr.originator), actorKind: 'person', kind: 'filed',
+    id: 'filed', at: cr.filedOn ? `${cr.filedOn}T12:00:00-07:00` : iso(pr.createdAt), actor: personOf(cr.originator) || 'Bowman PLM', actorKind: personOf(cr.originator) ? 'person' : 'system', kind: 'filed',
     text: 'filed the ECR', detail: cr.originatingNcr ? `From ${cr.originatingNcr}.` : undefined,
   });
   for (const a of s.actions.filter(x => x.prId === pr.id)) {

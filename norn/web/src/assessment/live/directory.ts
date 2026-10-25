@@ -20,4 +20,4 @@ export const SEATS: Record<string, { role: string; person: string }> = {
   manufacturing_engineer: { role: 'Manufacturing', person: 'Owen Tillery' },
 };
 
-export const personOf = (emp: string | undefined) => (emp ? PEOPLE[emp] ?? emp : 'Someone');
+export const personOf = (emp: string | undefined) => (emp ? PEOPLE[emp] ?? emp : '');
