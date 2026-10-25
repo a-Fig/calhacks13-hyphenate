@@ -42,12 +42,20 @@ export interface CostRow {
   id: string;
   block: CostBlock;
   label: string;
-  /** From the row, not guessed: production cost per unit built after the cut-in. Decides the column. */
+  /**
+   * From the row, not guessed: ongoing production cost per unit built after the cut-in. It says what the row
+   * is, not which column an amount sits in: a retrofit kit is unit cost × quantity, which the source cost
+   * page calls extended, but it is not ongoing production.
+   */
   recurring: boolean;
+  /** The cost page's nonrecurring amount for this line (DD 1692 Block 50). A line can have this and a unit cost. */
+  nonrecurring?: Figure;
   /** Per-unit amount and units: per part built for a recurring row, per kit or unit otherwise. */
   unitCost?: Figure;
   quantity?: number;
-  /** The line's total over the window. */
+  /** Unit cost × quantity: the cost page's extended amount. Absent when the line has no unit cost. */
+  extended?: Figure;
+  /** The line's total over the window: nonrecurring plus extended. */
   total: Figure;
   note?: string;
   /** Left blank on the ECR and counted as $0 until someone estimates it. */
@@ -83,7 +91,7 @@ export interface Likelihood {
 export interface Headline {
   /** Cost change per unit built, per program the change reaches. */
   unitCost: { program: string; figure: Figure; note?: string }[];
-  /** Net cost of the window: one-time plus recurring. */
+  /** Net cost of the window: the rollout budget plus ongoing production. */
   year1: Figure;
   /** From the quantiles the checks give, fitted. Absent when there is no range. */
   year1Likelihood?: Likelihood;
@@ -93,7 +101,12 @@ export interface CostSection {
   rows: CostRow[];
   subtotals: BlockSubtotal[];
   net: Figure;
+  /**
+   * The rollout budget: every line except ongoing production, retrofit and support unit-extended amounts
+   * included. It is not the sum of the lines' nonrecurring column.
+   */
   oneTime: Figure;
+  /** Ongoing production cost over the window: per-unit change × units built after the cut-in. */
   recurring: Figure;
   /** The checks' year-one window: months from the cut-in, e.g. "Nov 2026 to Oct 2027". */
   window: { from: string | null; months: number; label: string };
@@ -101,6 +114,71 @@ export interface CostSection {
   needsEstimate: { label: string; rowId: string }[];
   /** How it was produced, for the footer: draws, seed, code version. */
   run: { draws: number; seed: string; codeVersion: string; correlation: number };
+  /** The requested and forecast implementation scenarios, when the checks cost both. Every figure above is the requested one. */
+  scenarios?: CostScenarios;
+}
+
+/**
+ * Every figure on the cost page assumes the effectivity the ECR requests. The checks may cost a second scenario at
+ * the forecast serial. It is conditional on that one serial, not a joint simulation of cost and date.
+ */
+export interface CostScenarios {
+  /** What the cost page assumes, in words: "Requested effectivity: S/N 11, Nov 2026". */
+  requested: string;
+  readiness?: Readiness;
+  forecast?: { placed: boolean; date?: { p10: string; p50: string; p90: string }; serial?: { p10: number; p50: number; p90: number } };
+  alternative?: {
+    label: string;
+    window: { from: string | null; months: number; label: string };
+    net: Figure;
+    recurring: Figure;
+    flags: { severity: 'info' | 'warn'; message: string }[];
+  };
+  /** Why there is no forecast scenario. */
+  unavailable?: string;
+  note?: string;
+}
+
+/**
+ * What the timeline's date stands for. `materials_only`: some qualification, release or retrofit work has not been
+ * assessed, so the date is when the parts and the assessed work allow it, a lower bound on implementation.
+ */
+export type Readiness = 'implementation' | 'materials_only';
+
+/** One step on the way to the line: the board's decision, a part arriving, a prerequisite, the old stock. */
+export interface TimelineStep {
+  id: string;
+  kind: 'decision' | 'parts' | 'stock' | 'prerequisite';
+  label: string;
+  /** Null for old stock that runs past the volume plan. */
+  date?: Figure;
+  /** Share of draws in which this step sets the cut-in. */
+  criticalShare: number;
+  supplier?: string;
+  owner?: string;
+  status?: string;
+  evidence?: string;
+  appliesTo?: string;
+  downtimeHoursPerUnit?: number;
+}
+
+/** The timeline check (S3) in full, for the Time to the line page. */
+export interface TimelineView {
+  readiness?: Readiness;
+  /** False when using up the old stock needs serials past the volume plan: no date can be placed. */
+  placed: boolean;
+  stated: { label: string; date: string | null; serial: number | null };
+  decision?: Figure;
+  weeksFromFiling?: Figure;
+  /** The first serial that can take the change. */
+  serial?: Figure;
+  /** When the assessed retrofit work completes, separate from the production cut-in. */
+  retrofit?: Figure;
+  late?: { weeks: Figure; likelihood: Likelihood };
+  steps: TimelineStep[];
+  flags: { severity: 'info' | 'warn'; message: string }[];
+  /** The numbers are from a run an input change has replaced. */
+  stale?: 'rechecking' | 'failed';
 }
 
 /** Where the change reaches the line. The checks give one fixed month; a range needs the timeline check (S3). */
@@ -116,7 +194,45 @@ export interface CutIn {
     figure: Figure;
     note: string;
     likelihood?: Likelihood;
+    /** What the date is: "Reaches the line", or "Material readiness" when unassessed prerequisites may make it later. */
+    label?: string;
   };
+  /** The timeline check in full, when a real one ran. */
+  timeline?: TimelineView;
+}
+
+export interface SupplyPart {
+  item: string;
+  name: string;
+  supplier: string | null;
+  sources: string[];
+  singleSource: boolean;
+  /** Where the lead time came from: a quote, the part record, or a default. */
+  leadFrom: string;
+  leadWeeks: Figure;
+}
+
+type Flags = { severity: 'info' | 'warn'; message: string }[];
+
+/** The supply check (S4) in full, for the Supply page. */
+export interface SupplyDetail {
+  stated: string;
+  /** False when the cut-in cannot be placed: spend and capacity are not stated. */
+  cutInPlaced: boolean;
+  miss?: { likelihood: Likelihood; weeksLate?: Figure };
+  /** The same, with the other open ECRs that share a supplier. */
+  missWithPeers?: { likelihood: Likelihood; weeksLate?: Figure };
+  parts: SupplyPart[];
+  spend?: { yearOne: Figure; singleSource: Figure };
+  capacity: { constraint: string; supplier: string; perYear: number; utilization: Figure; withPeers?: Figure }[];
+  peers: { ecr: string; sharedSuppliers: string[] }[];
+  peerCutInShift?: { weeks: Figure; later: Likelihood };
+  bundles: { constraint: string; withinWeeks: number; bundled: Likelihood; ownSaving: Figure; pairSaving: Figure }[];
+  /** Open ECRs that share no supplier with this one. */
+  unrelatedPeers: string[];
+  flags: Flags;
+  /** The numbers are from a run an input change has replaced. */
+  stale?: 'rechecking' | 'failed';
 }
 
 export interface Supply {
@@ -125,6 +241,8 @@ export interface Supply {
   evidence: Evidence;
   note: string;
   likelihood?: Likelihood;
+  /** The real supply check's numbers. Absent for a mock run. */
+  detail?: SupplyDetail;
 }
 
 export interface SCurve {
@@ -174,6 +292,10 @@ export interface RouteStep {
   when?: string;
   /** Who approved, if not a person. */
   by?: string;
+  /** What the record says or does not: "No review recorded", "Approved on Rev B; the ECR is now at Rev C". */
+  note?: string;
+  /** The revision an approval was given on. */
+  revision?: string;
 }
 
 export interface Recommendation {

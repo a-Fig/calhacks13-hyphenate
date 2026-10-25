@@ -229,13 +229,13 @@ export const ecrs: Ecr[] = [
         line('NC programming (Halden)', 'supplier_quote', { oneTime: 4200 }),
         line('Delta first-article inspection (Halden)', 'supplier_quote', { oneTime: 2600 }),
         line('Engineering and data revision: 106 h (stress 60, drawing 12, other 34)', 'engineer_estimate', { oneTime: 15370, note: '106 h at $145.' }),
-        line('Qualification: vibration re-test on the endurance rig', 'engineer_estimate', { oneTime: 18500 }),
+        line('Qualification: vibration re-test on the endurance rig', 'engineer_estimate', { oneTime: 18500, factor: 'qualification' }),
         blank('Scrap and write-off of Rev B inventory'),
       ],
       retrofit: [
         line('Rev C brackets for retrofit, S/N 001-010', 'supplier_quote', { unitCost: 221, quantity: 120 }),
-        line('Installation labor, 12 h per aircraft at $110', 'engineer_estimate', { unitCost: 1320, quantity: 10 }),
-        blank('Re-inspection and test after retrofit'),
+        line('Installation labor, 12 h per aircraft at $110', 'engineer_estimate', { unitCost: 1320, quantity: 10, factor: 'retrofit_installation' }),
+        line('Re-inspection and test after retrofit', 'not_provided', { factor: 'retrofit_test' }),
       ],
       logisticsSupport: [blank('Spares, maintenance manual task update, training', 'Maintenance manual task 24-31 changes the torque table; nothing else assessed.')],
       other: [blank('Delay cost of holding S/N 011-014 at the controller-install station', 'Planner to estimate.')],
@@ -312,7 +312,7 @@ export const ecrs: Ecr[] = [
         line('Aft propeller unit cost, 4-blade vs 2-blade (per propeller)', 'supplier_quote', { unitCost: 1440, quantity: 6, note: 'Budgetary. About $8,600 per aircraft.' }),
         line('Blade mould set and hub forging tooling', 'supplier_quote', { oneTime: 500000 }),
         line('Engineering and certification, about 4,500 h', 'engineer_estimate', { oneTime: 650000 }),
-        blank('Whirl-tower, flutter and noise testing'),
+        line('Whirl-tower, flutter and noise testing', 'not_provided', { factor: 'qualification' }),
         blank('Hover performance flight test'),
         blank('Scrap and write-off of 2-blade inventory'),
       ],
@@ -398,7 +398,7 @@ export const ecrs: Ecr[] = [
     costPage: {
       production: [
         line('Pump unit cost, Rev C vs Rev B', 'supplier_quote', { unitCost: 420, quantity: 2, note: 'Two per aircraft.' }),
-        line('Qualification and soak testing (Hollis)', 'supplier_quote', { oneTime: 36000 }),
+        line('Qualification and soak testing (Hollis)', 'supplier_quote', { oneTime: 36000, factor: 'qualification' }),
         blank('Engineering and data revision'),
       ],
       retrofit: [blank('Retrofit S/N 005-014 and S/N 004 engineering samples')], logisticsSupport: [], other: [],
@@ -445,7 +445,7 @@ export const ecrs: Ecr[] = [
       production: [
         line('Pump unit cost, Rev C vs Rev B', 'supplier_quote', { unitCost: -385, quantity: 2, note: 'Two per aircraft.' }),
         line('Injection mould (Hollis)', 'supplier_quote', { oneTime: 48000 }),
-        line('Qualification (Hollis)', 'supplier_quote', { oneTime: 22000 }),
+        line('Qualification (Hollis)', 'supplier_quote', { oneTime: 22000, factor: 'qualification' }),
         blank('Engineering and data revision'),
       ],
       retrofit: [], logisticsSupport: [], other: [],
@@ -504,7 +504,7 @@ export const ecrs: Ecr[] = [
     costPage: {
       production: [
         line('Magnet set unit cost, UH vs SH', 'supplier_quote', { unitCost: 1350, quantity: 6, note: 'Six forward motors per aircraft.' }),
-        line('Orrin qualification lot', 'supplier_quote', { oneTime: 96000 }),
+        line('Orrin qualification lot', 'supplier_quote', { oneTime: 96000, factor: 'qualification' }),
         line('Engineering and testing', 'engineer_estimate', { oneTime: 210000, note: 'About 1,450 h plus test hardware.' }),
         blank('Torque-constant recalibration and controller update'),
       ],
@@ -554,7 +554,7 @@ export const ecrs: Ecr[] = [
     costPage: {
       production: [
         line('Magnet set unit cost, UH vs SH', 'supplier_quote', { unitCost: 3500, quantity: 2, note: 'Two cruise motors per aircraft.' }),
-        line('Orrin qualification lot', 'supplier_quote', { oneTime: 142000 }),
+        line('Orrin qualification lot', 'supplier_quote', { oneTime: 142000, factor: 'qualification' }),
         blank('Engineering and testing'),
       ],
       retrofit: [], logisticsSupport: [], other: [],

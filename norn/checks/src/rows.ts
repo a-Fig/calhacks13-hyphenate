@@ -106,6 +106,7 @@ export function timelineRows(r: TimelineResult): CheckResultRow[] {
   }
   out.push(statRow('cut_in_serial', 'First serial that can take the change', 'serial', r.cutIn.serial, { placed: r.cutIn.placed }));
   out.push(statRow('decision_date', 'Board decision date', 'day', r.decision.day, { date: r.decision.date }));
+  if (r.retrofit) out.push(statRow('retrofit_completion_date', 'Assessed retrofit completion date', 'day', r.retrofit.day, { date: r.retrofit.date, readiness: r.readiness }));
   if (r.late) {
     out.push(statRow('late_weeks', `Weeks after the stated effectivity (${r.stated.label})`, 'weeks', r.late.weeks, { statedDate: r.stated.date, statedSerial: r.stated.serial }));
     out.push(probRow('p_late', 'Chance the change reaches the line after the stated effectivity', r.late.probability, { stated: r.stated, trace: r.late.weeks.trace }));
@@ -114,7 +115,7 @@ export function timelineRows(r: TimelineResult): CheckResultRow[] {
     key: 'detail', label: 'Inputs, flags and supporting results', unit: 'json', p10: 0, p50: 0, p90: 0,
     detailJson: JSON.stringify({
       codeVersion: r.codeVersion, seed: r.seed, draws: r.draws, correlation: r.correlation, filed: r.filed, stated: r.stated,
-      decision: r.decision, cutIn: r.cutIn, late: r.late, paths: r.paths, convergence: r.convergence, flags: r.flags, inputs: r.inputs,
+      readiness: r.readiness, retrofit: r.retrofit, decision: r.decision, cutIn: r.cutIn, late: r.late, paths: r.paths, convergence: r.convergence, flags: r.flags, inputs: r.inputs,
     }),
   });
   return out;

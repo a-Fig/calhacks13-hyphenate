@@ -12,6 +12,7 @@
 //   evidence "assumption", text "[default] ..." / "[agent estimate] ..." / "[needs estimate] ..."
 // A statement that does not follow them still renders; it just has no recommendation field.
 import { createHash } from 'node:crypto';
+import type { ImplementationScenario } from '../../../checks/src/assessment.ts';
 import type { CompanyConfig, CostCheckHeadline } from '../../../config/src/index.ts';
 import { routeFor, ROUTE_PENDING, type AssessmentRef, type EcrRef } from './routing.ts';
 import type { ImpactFields } from './plm.ts';
@@ -48,6 +49,7 @@ export interface StatementDoc {
 
 /** Where the numbers came from: what the s2_cost run's inputs and results name. */
 export interface Provenance {
+  implementationScenario?: ImplementationScenario;
   /** e.g. "ERPNext baseline 2c02958e, as of 2026-10-24" */
   baseline: string;
   /** e.g. "change request rev 1 from the PLM" */
@@ -214,6 +216,16 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
   }
   out.push(`</tbody></table>`);
   out.push(`<p style="margin:4px 0 0 0;color:#555555;font-size:12px">A range, not a point: in 10 out of 100 simulated outcomes the cost is below the low figure, and in 10 out of 100 it is above the high one. Savings are in parentheses.</p>`);
+  if (prov.implementationScenario) {
+    const scenario = prov.implementationScenario;
+    out.push(`<h5 style="margin:12px 0 4px 0">Implementation assumptions</h5>`);
+    out.push(`<p>Primary costs assume requested ${esc(scenario.requested.basis)} ${esc(scenario.requested.from)}. ${esc(scenario.note ?? '')}</p>`);
+    if (scenario.alternative) {
+      const a = scenario.alternative;
+      out.push(`<p><b>${esc(a.label)}</b>: ${esc(show(a.net.p10, 'USD'))} to ${esc(show(a.net.p90, 'USD'))}, median ${esc(show(a.net.p50, 'USD'))}, for ${a.window.months} months from ${esc(a.window.from ?? 'an unplaced cut-in')}.</p>`);
+    } else out.push('<p>Implementation cannot be placed in the volume plan; its cost is unknown.</p>');
+    if (scenario.forecast.readiness === 'materials_only') out.push('<p>Material readiness only: qualification, release or retrofit prerequisites remain unassessed. The alternative is conditional and excludes unestimated delay and support costs.</p>');
+  }
 
   if (s.drivers.length) {
     out.push(`<h5 style="margin:12px 0 4px 0">What moves the numbers</h5><ul style="margin:0">`);

@@ -66,7 +66,7 @@ NORN_DB=norn-gate-1 npm run check:gate                # end to end on a scratch 
    say), by id and revision. The worker reads them with the ECR's own, the ECR's own winning a key
    they share, so an assumption recorded on one ECR re-runs s4 on every other open ECR. A peer it
    cannot read is skipped and flagged, not fatal.
-6. **Code version.** `code_version` (default `checks-0.3.0`) is part of every hash. Set it to the
+6. **Code version.** `code_version` (default `checks-0.4.0`) is part of every hash. Set it to the
    checks library's `CHECKS_CODE_VERSION` when the library changes. The worker warns when the two
    disagree.
 
