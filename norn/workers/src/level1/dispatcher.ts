@@ -100,8 +100,8 @@ export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
   return { ecr: pr.plmEcrNumber, title: pr.title, revision, s2RunId, baseline: p.baseline, changeRequest: p.changeRequest, numbers, screened, routing, recommendation };
 }
 
-export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; prompt: string; settings: Level1Settings; signingKey?: string; mcpUrl?: string }): JobSpec {
-  const identity = { actor: actorFor(opts.jobId), onBehalfOf: null, spawnedBy: spawnedByFor(opts.s2RunId) };
+export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; ecrRevision: number; prompt: string; settings: Level1Settings; signingKey?: string; mcpUrl?: string }): JobSpec {
+  const identity = { actor: actorFor(opts.jobId), onBehalfOf: null, spawnedBy: spawnedByFor(opts.s2RunId, opts.ecrRevision) };
   return {
     id: opts.jobId,
     role: opts.settings.role,
@@ -157,7 +157,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     runIdOf.set(jobId, BigInt(s2RunId));
     try {
       const facts = jobFactsOf(conn.db, pr, revision, s2RunId);
-      const spec = jobSpecFor({ jobId, ecr: pr.plmEcrNumber, s2RunId, prompt: jobPrompt(facts), settings, signingKey });
+      const spec = jobSpecFor({ jobId, ecr: pr.plmEcrNumber, s2RunId, ecrRevision: pr.revision, prompt: jobPrompt(facts), settings, signingKey });
       log(`starting ${jobId} (${settings.model}) for ${pr.plmEcrNumber} revision ${revision}, attempt ${attempt}, on check run ${s2RunId}`);
       const r = await runner.run(spec);
       const stored = await writer.drain();

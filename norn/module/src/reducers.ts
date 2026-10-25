@@ -12,6 +12,7 @@ import { ScheduleAt } from 'spacetimedb';
 import spacetimedb, { StatementAssumption, StatementClaim, StatementNumber, TestAnswer, reaperSchedule } from './schema';
 import './scope'; // registers the job-scope rule with the policy gate
 import { assertReleasable, codeStagesNotDone, companyConfig, endApproval, recordApproval, recordPlmApproval, recordRecommendation, settleApproval, standingApproval } from './gate';
+import { parseSessionSpawn } from './gate-logic';
 import { PLM_DECISIONS, personForLogin, type PlmDecision } from './plm-decision'; // registers the rule for who may report a PLM decision // registers the company rule, after the job-scope rule
 import {
   CONFIG_DEFAULTS,
@@ -653,13 +654,21 @@ export const addComment = write(
 // happen to match. spawnedBy comes from the signed credential, not from the agent. Posting a statement
 // and asking for the fast track both rest on what the session read, so both ask this. Returns the run's
 // id, or 0 when the call was not started by a check run (a person, or a session with no run to check).
+// The dispatcher also signs the ECR's own revision it started the session on ('norn:check_run:32:revision:2').
+// That revision is held to the ECR's current one: an edit outside the structured change request (the PLM
+// description) bumps the ECR's revision but leaves the cost run, and the change-request revision, as they were.
 // ---------------------------------------------------------------------------------------------
 
 function sessionRunId(ctx: Ctx, pr: Pr, spawnedBy: string, noMore: string): bigint {
-  const started = /(?:^|:)check_run:(\d+)$/.exec(spawnedBy);
+  const started = parseSessionSpawn(spawnedBy);
   if (!started) return 0n;
-  const run = ctx.db.checkRun.id.find(BigInt(started[1]!));
-  if (!run || run.prId !== pr.id) throw new Refusal(`this session was started by check run ${started[1]}, which is not a check run of ${pr.plmEcrNumber}`);
+  const run = ctx.db.checkRun.id.find(BigInt(started.runId));
+  if (!run || run.prId !== pr.id) throw new Refusal(`this session was started by check run ${started.runId}, which is not a check run of ${pr.plmEcrNumber}`);
+  if (started.revision !== undefined && started.revision !== pr.revision)
+    throw new Refusal(
+      `This session assessed revision ${started.revision}; ${pr.plmEcrNumber} is now at revision ${pr.revision}. The ECR changed after the session read it (its text, change request, baseline or an assumption), so its numbers and answers are out of date. ${noMore}; Norn starts a new session on the current revision`
+    );
+  const nowRevision = currentRevision(ctx, pr.id)?.seq;
   // 'done' is not enough on its own: the run must also stand on the ECR's inputs now.
   const now = stageInfos(ctx, pr)[run.stage];
   const moved = run.status === 'done' && now !== undefined && now.hash !== run.inputHash;
@@ -670,8 +679,7 @@ function sessionRunId(ctx: Ctx, pr: Pr, spawnedBy: string, noMore: string): bigi
     } catch {
       readRevision = undefined;
     }
-    const nowRevision = currentRevision(ctx, pr.id)?.seq;
-    const which = typeof readRevision === 'number' && nowRevision !== undefined && readRevision !== nowRevision ? `This session assessed revision ${readRevision}; ${pr.plmEcrNumber} is now at revision ${nowRevision}. ` : '';
+    const which = typeof readRevision === 'number' && nowRevision !== undefined && readRevision !== nowRevision ? `This session read change-request revision ${readRevision}; ${pr.plmEcrNumber} is now at change-request revision ${nowRevision}. ` : '';
     throw new Refusal(
       `${which}Check run ${run.id}, which started this session, is ${moved ? 'no longer on the current inputs' : run.status}: ${pr.plmEcrNumber}'s inputs changed after the session read them (a new change-request revision, baseline or assumption), so its numbers are out of date. ${noMore}; Norn starts a new session on the current numbers`
     );

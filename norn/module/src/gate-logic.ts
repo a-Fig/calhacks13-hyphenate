@@ -164,6 +164,22 @@ export function readFastTrackRequest(
 }
 
 // ---------------------------------------------------------------------------------------------
+// The session a call came from
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * What a Level 1 session's signed `spawnedBy` says: the check run that started it and, when the dispatcher
+ * names it, the ECR's own revision (`pull_request.revision`) it read ("norn:check_run:32:revision:2"). A session
+ * identity without ":revision:" (an older one, or a test client) has no revision to hold the ECR to. Undefined
+ * when the call was not started by a check run.
+ */
+export function parseSessionSpawn(spawnedBy: string): { runId: string; revision?: number } | undefined {
+  const m = /(?:^|:)check_run:(\d+)(?::revision:(\d+))?$/.exec(spawnedBy);
+  if (!m) return undefined;
+  return m[2] === undefined ? { runId: m[1]! } : { runId: m[1]!, revision: Number(m[2]) };
+}
+
+// ---------------------------------------------------------------------------------------------
 // The classes a fast-track request is decided on
 // ---------------------------------------------------------------------------------------------
 

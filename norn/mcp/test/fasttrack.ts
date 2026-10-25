@@ -225,11 +225,30 @@ try {
   const logged = () => [...norn.db.actionLog.prId.filter(ecr(staleId).id)].filter(l => l.reducer === 'request_fast_track_approval');
   const loggedBefore = logged().length;
   const rStale = await call(AStale, 'request_fast_track_approval', { ecr: staleId, answers: answersA, regulatoryClass: 'minor' });
-  check('the old session asking for the fast track on revision B is refused in plain words: it assessed revision 1, the ECR is at 2', rStale.isError && /This session assessed revision 1; .*is now at revision 2/.test(rStale.text) && /Ask for nothing/.test(rStale.text) && !/approved/i.test(rStale.json?.decision ?? ''), rStale.text.slice(0, 400));
+  check('the old session asking for the fast track on revision B is refused in plain words: it read change-request revision 1, the ECR is at 2', rStale.isError && /This session read change-request revision 1; .*is now at change-request revision 2/.test(rStale.text) && /Ask for nothing/.test(rStale.text) && !/approved/i.test(rStale.json?.decision ?? ''), rStale.text.slice(0, 400));
   check('...the refusal is in the action log as rejected, and nothing was approved', logged().length === loggedBefore + 1 && logged().at(-1)?.outcome === 'rejected' && ecr(staleId).status === 'review' && standingOn(staleId).length === 0, `${logged().at(-1)?.outcome}, ${ecr(staleId).status}`);
   const rFresh = await call(AFresh, 'request_fast_track_approval', { ecr: staleId, answers: answersFor(iStaleB), regulatoryClass: 'minor' });
   check('the session started by revision B\'s own cost run is decided by the gate (approved on its own numbers)', !rFresh.isError && rFresh.json?.decision === 'approved' && ecr(staleId).status === 'approved' && standingOn(staleId).length === 1, rFresh.text.slice(0, 300));
   check('...and the standing approval is that session\'s, not the old one\'s', standingOn(staleId)[0]?.prRevision === ecr(staleId).revision && /\/afresh\//.test(standingOn(staleId)[0]?.approverName ?? ''), JSON.stringify({ rev: standingOn(staleId)[0]?.prRevision, by: standingOn(staleId)[0]?.approverName }));
+
+  // ---- an edit to the ECR's text alone: the cost run stays current, the session's ECR revision does not (Sol #128 round 4) ----
+  const revC = ecr(staleId).revision;
+  const s2C = s2Run(staleId);
+  const ASigned = await agentFor('asigned', [staleId], `norn:check_run:${s2C.id}:revision:${revC}`);
+  const iSigned = (await call(ASigned, 'get_impact', { ecr: staleId })).json;
+  // The PLM's description sits outside the structured change request (Sol reproduced this through the PLM mapper); edit it directly.
+  await setup.R.editPrText({ prId: ecr(staleId).id, description: `${ecr(staleId).description} Note from the PLM: this bracket is a flight-safety part.` });
+  await until(() => ecr(staleId).revision > revC, 20_000, `${staleId} to take the text edit`);
+  await sleep(3000); // any check the edit starts gets the chance to run
+  check('the text edit moves the ECR\'s revision but leaves its cost run current (the case the guard has to catch)', s2Run(staleId).id === s2C.id && s2C.status === 'done', `s2 ${s2Run(staleId).id} vs ${s2C.id}`);
+  const stmtSigned = await statement(ASigned, staleId);
+  check('the session that read the ECR before the text edit cannot post a statement after it, in plain words', stmtSigned.isError && /This session assessed revision \d+; .*is now at revision \d+/.test(stmtSigned.text), stmtSigned.text.slice(0, 300));
+  const ARead = await agentFor('aread', [staleId], `norn:check_run:${s2C.id}:revision:${ecr(staleId).revision}`);
+  check('a session that read the edited ECR posts its statement on the same cost run', (await statement(ARead, staleId)).json?.saved === true);
+  // With a current statement standing, the old session's fast-track request gets past the MCP's own checks to the module's guard (Sol's order).
+  const standingBefore = standingOn(staleId).filter(a => a.prRevision === ecr(staleId).revision).length;
+  const rSigned = await call(ASigned, 'request_fast_track_approval', { ecr: staleId, answers: answersFor(iSigned), regulatoryClass: 'minor' });
+  check('...but the old session cannot ask for the fast track on it: refused, and no approval stands on the new revision', rSigned.isError && /This session assessed revision \d+/.test(rSigned.text) && standingOn(staleId).filter(a => a.prRevision === ecr(staleId).revision).length === standingBefore, rSigned.text.slice(0, 300));
 
   // a last ECR whose checks never run: the worker is stopped before it is filed (a new ECR makes the others' supply check run again)
   worker.kill();

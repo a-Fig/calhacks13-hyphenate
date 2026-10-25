@@ -85,8 +85,8 @@ export function parseJobId(jobId: string): { revision: number; attempt: number }
 /** The actor name a session writes under (the runner identity and the MCP token carry the same). */
 export const actorFor = (jobId: string) => `agent:norn/level1/${jobId}`;
 
-/** What started the session: Norn, automatically, because a cost check finished. The MCP token takes no spaces in this field. */
-export const spawnedByFor = (checkRunId: number) => `norn:check_run:${checkRunId}`;
+/** What started the session: Norn, automatically, because a cost check finished, on the ECR's own revision counter (`pull_request.revision`, which a text edit bumps too). The MCP token takes no spaces in this field. */
+export const spawnedByFor = (checkRunId: number, revision: number) => `norn:check_run:${checkRunId}:revision:${revision}`;
 
 export interface EventRow {
   jobId: string;
