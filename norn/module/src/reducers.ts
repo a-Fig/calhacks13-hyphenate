@@ -12,6 +12,7 @@ import { ScheduleAt } from 'spacetimedb';
 import spacetimedb, { StatementAssumption, StatementClaim, StatementNumber, TestAnswer, reaperSchedule } from './schema';
 import './scope'; // registers the job-scope rule with the policy gate
 import { assertReleasable, codeStagesNotDone, companyConfig, endApproval, recordApproval, recordPlmApproval, recordRecommendation, settleApproval, standingApproval } from './gate';
+import { parseSessionSpawn } from './gate-logic';
 import { PLM_DECISIONS, personForLogin, type PlmDecision } from './plm-decision'; // registers the rule for who may report a PLM decision // registers the company rule, after the job-scope rule
 import {
   CONFIG_DEFAULTS,
@@ -182,8 +183,10 @@ export const setConfig = write('set_config', { key: t.string(), value: t.string(
 // 'NORN-<id>' until the PLM assigns one.
 type RevisionIn = { changeRequestJson: string; source: string; sourceRef: string };
 
-// Open an ECR, with its first change request if one came with it, in the caller's transaction.
-function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description: string }, first?: RevisionIn, call?: Call) {
+// Open an ECR, with its first change request if one came with it, in the caller's transaction. It opens as a
+// draft, unless the caller says it is already filed for review: the ingest path only reports ECRs the PLM
+// has submitted, so Norn shows the status the change control board sees (the fast track decides ECRs in review).
+function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description: string }, first?: RevisionIn, call?: Call, status: PrStatus = 'draft') {
   const title = nonEmpty(a.title, 'title', 200);
   if (a.description.length > 20000) throw new SenderError('description is too long (max 20000 characters)');
   const plm = a.plmEcrNumber.trim();
@@ -199,7 +202,7 @@ function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description:
     plmEcrNumber: plm || `pending-${ctx.newUuidV4().toString()}`,
     title,
     description: a.description,
-    status: 'draft',
+    status,
     baseVersion: base,
     revision: 1,
     inputsDigest: '',
@@ -222,7 +225,7 @@ function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description:
   return {
     prId: pr.id,
     entity: `pull_request:${pr.id}`,
-    summary: `opened ECR '${title}' (${plm || `NORN-${pr.id}`}) on baseline v${base}${first ? ', change request rev 1' : ''}; ${outcome}${deep ? `; ${deep} deep run(s) requested by config` : ''}${others ? `; ${others} other open ECR(s) checked against it` : ''}`,
+    summary: `opened ECR '${title}' (${plm || `NORN-${pr.id}`}) ${status === 'review' ? 'in review' : 'as a draft'} on baseline v${base}${first ? ', change request rev 1' : ''}; ${outcome}${deep ? `; ${deep} deep run(s) requested by config` : ''}${others ? `; ${others} other open ECR(s) checked against it` : ''}`,
   };
 }
 
@@ -277,7 +280,8 @@ export const ingestEcr = write(
     const plm = nonEmpty(a.plmEcrNumber, 'plmEcrNumber', 64);
     const rev: RevisionIn = { changeRequestJson: a.changeRequestJson, source: a.source, sourceRef: a.sourceRef };
     const existing = ctx.db.pullRequest.plmEcrNumber.find(plm);
-    if (!existing) return openPr(ctx, { plmEcrNumber: plm, title: a.title, description: a.description }, rev, call);
+    // An ECR the PLM reports has been filed there for review, so it opens in review (a draft is one a person has not submitted).
+    if (!existing) return openPr(ctx, { plmEcrNumber: plm, title: a.title, description: a.description }, rev, call, 'review');
 
     const digest = checkedChangeRequest(a.changeRequestJson, plm);
     const title = nonEmpty(a.title, 'title', 200);
@@ -644,6 +648,51 @@ export const addComment = write(
 );
 
 // ---------------------------------------------------------------------------------------------
+// A session's freshness. A session started by a check run ('norn:check_run:7') may act on an ECR only
+// while that run still stands: the ECR's inputs have not changed since it read them. A session left
+// over from an earlier change-request revision (or baseline) is refused, even if some of its numbers
+// happen to match. spawnedBy comes from the signed credential, not from the agent. Posting a statement
+// and asking for the fast track both rest on what the session read, so both ask this. Returns the run's
+// id, or 0 when the call was not started by a check run (a person, or a session with no run to check).
+// The dispatcher also signs the ECR's own revision it started the session on ('norn:check_run:32:revision:2').
+// That revision is held to the ECR's current one: an edit outside the structured change request (the PLM
+// description) bumps the ECR's revision but leaves the cost run, and the change-request revision, as they were.
+// ---------------------------------------------------------------------------------------------
+
+function sessionRunId(ctx: Ctx, pr: Pr, spawnedBy: string, noMore: string): bigint {
+  const started = parseSessionSpawn(spawnedBy);
+  // A credential that names a check run must name it in the one form the dispatcher signs; anything else is not
+  // waved through as if no run had started it.
+  if (!started) {
+    if (/check_run:/.test(spawnedBy)) throw new Refusal(`this session's credential names a check run in a form Norn does not read ('${spawnedBy.slice(0, 80)}'). ${noMore}`);
+    return 0n;
+  }
+  const run = ctx.db.checkRun.id.find(BigInt(started.runId));
+  if (!run || run.prId !== pr.id) throw new Refusal(`this session was started by check run ${started.runId}, which is not a check run of ${pr.plmEcrNumber}`);
+  if (started.revision !== undefined && started.revision !== pr.revision)
+    throw new Refusal(
+      `This session assessed revision ${started.revision}; ${pr.plmEcrNumber} is now at revision ${pr.revision}. The ECR changed after the session read it (its text, change request, baseline or an assumption), so its numbers and answers are out of date. ${noMore}; Norn starts a new session on the current revision`
+    );
+  const nowRevision = currentRevision(ctx, pr.id)?.seq;
+  // 'done' is not enough on its own: the run must also stand on the ECR's inputs now.
+  const now = stageInfos(ctx, pr)[run.stage];
+  const moved = run.status === 'done' && now !== undefined && now.hash !== run.inputHash;
+  if (run.status !== 'done' || moved) {
+    let readRevision: unknown;
+    try {
+      readRevision = JSON.parse(run.inputsJson).revision;
+    } catch {
+      readRevision = undefined;
+    }
+    const which = typeof readRevision === 'number' && nowRevision !== undefined && readRevision !== nowRevision ? `This session read change-request revision ${readRevision}; ${pr.plmEcrNumber} is now at change-request revision ${nowRevision}. ` : '';
+    throw new Refusal(
+      `${which}Check run ${run.id}, which started this session, is ${moved ? 'no longer on the current inputs' : run.status}: ${pr.plmEcrNumber}'s inputs changed after the session read them (a new change-request revision, baseline or assumption), so its numbers are out of date. ${noMore}; Norn starts a new session on the current numbers`
+    );
+  }
+  return run.id;
+}
+
+// ---------------------------------------------------------------------------------------------
 // The fast track (#22, #43). An agent (or a person) asks to approve an ECR on the fast track and
 // brings its answers to the configuration's tests, with the classes it proposes. The gate decides
 // from the company's rules: approve, approve with a draw for the blind second check, recommend (to
@@ -661,6 +710,8 @@ export const requestFastTrackApproval = write(
   },
   (ctx, a, call) => {
     const pr = getPr(ctx, a.prId);
+    // The answers are about what the session read: a session from an earlier revision decides nothing now.
+    sessionRunId(ctx, pr, call.spawnedBy, 'Ask for nothing');
     if (pr.status !== 'review') throw new SenderError(`ECR ${pr.id} is ${pr.status}; the fast track decides ECRs in review`);
     if (call.decision.detail === undefined)
       throw new SenderError("no company configuration is stored: the fast track is the company's rule, and there is none to apply");
@@ -752,19 +803,8 @@ export const postImpactStatement = write(
       if (!EVIDENCE.includes(e)) throw new Refusal(`${what}: evidence must be one of ${EVIDENCE.join(', ')}`);
     };
 
-    // A session started by a check run ('norn:check_run:7') may post only while that run still stands:
-    // the ECR's inputs have not changed since it read them. A session left over from an earlier
-    // change-request revision (or baseline) is refused even if some of its numbers happen to match.
-    // spawnedBy comes from the signed credential, not from the agent.
-    let checkRunId = 0n;
-    const started = /(?:^|:)check_run:(\d+)$/.exec(call.spawnedBy);
-    if (started) {
-      const run = ctx.db.checkRun.id.find(BigInt(started[1]!));
-      if (!run || run.prId !== pr.id) throw new Refusal(`this session was started by check run ${started[1]}, which is not a check run of ${pr.plmEcrNumber}`);
-      if (run.status !== 'done')
-        throw new Refusal(`check run ${run.id}, which started this session, is ${run.status}: ${pr.plmEcrNumber}'s inputs changed after the session read them (a new change-request revision, baseline or assumption), so its numbers are out of date. Post nothing; Norn starts a new session on the current numbers`);
-      checkRunId = run.id;
-    }
+    // A session started by a check run may post only while that run still stands (sessionRunId).
+    let checkRunId = sessionRunId(ctx, pr, call.spawnedBy, 'Post nothing');
 
     // The newest result per key among runs that are still current ('done'; a stale run's are not).
     const current = new Map<string, { id: bigint; checkRunId: bigint; label: string; unit: string; p10: number; p50: number; p90: number }>();

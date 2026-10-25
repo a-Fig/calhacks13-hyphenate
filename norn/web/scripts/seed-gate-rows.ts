@@ -134,7 +134,7 @@ try {
   const p431 = await until(() => byNumber('ECR-0431'), 5000, 'ECR-0431');
   for (const p of [p423, p417, p431]) await settledOn(p.id);
   for (const p of [p423, p417, p431]) {
-    await R.setPrStatus({ prId: p.id, status: 'review' });
+    // ingest_ecr opened them in review already.
     await statement(A, p.id);
   }
 

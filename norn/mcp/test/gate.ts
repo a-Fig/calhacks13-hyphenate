@@ -81,7 +81,7 @@ const actorA = `agent:norn/gate/${stamp}`;
 const entryA = entryFor(actorA, ['BWM-ECR-0417'], { onBehalfOf: 'person:jeff' });
 const A = await connect(entryA);
 const tools = (await A.listTools()).tools;
-check('nine tools are offered, each with a description', tools.length === 9 && tools.every(t => (t.description ?? '').length > 40), tools.map(t => t.name).join(', '));
+check('ten tools are offered, each with a description', tools.length === 10 && tools.every(t => (t.description ?? '').length > 40), tools.map(t => t.name).join(', '));
 
 const list = await call(A, 'list_ecrs', {});
 check('list_ecrs lists the three ECRs', list.json?.ecrs?.length === 3, list.json?.ecrs?.map((e: any) => `${e.ecr}:${e.impactState}`).join(' '));

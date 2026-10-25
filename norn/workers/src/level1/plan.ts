@@ -16,6 +16,8 @@ export interface JobRecord {
   jobId: string;
   revision: number;
   attempt: number;
+  /** The ECR's own revision (`pull_request.revision`) the session was started on; absent in older job ids. */
+  ecrRevision?: number;
   firstEventMs: number;
   lastEventMs: number;
   /** Set once a job_finished event exists. */
@@ -30,6 +32,12 @@ export interface EcrFacts {
   crSeq: number | null;
   /** When that revision was recorded. */
   crCreatedMs: number | null;
+  /**
+   * The ECR's own revision counter (`pull_request.revision`), which a text edit moves while the change request,
+   * and so `crSeq`, stays. A session signed for an earlier one is refused by the module, so the attempt cap counts
+   * only the sessions started on this one (and older job ids, which do not say).
+   */
+  ecrRevision?: number;
   /** s2_cost runs with status `done` (not stale, not cancelled), oldest first. */
   s2Done: { id: number; inputsRevision: number | null; mock: boolean }[];
   /**
@@ -54,9 +62,12 @@ export type Decision = { action: 'dispatch'; revision: number; attempt: number; 
 
 const OPEN = ['draft', 'review'];
 
-/** `l1-<ecr>-r<revision>-a<attempt>`: letters, digits, `.`, `_` and `-` only, and short enough for an actor name (64 characters). */
-export function jobIdFor(ecrNumber: string, revision: number, attempt: number): string {
-  const tail = `-r${revision}-a${attempt}`;
+/**
+ * `l1-<ecr>-r<revision>-e<ecrRevision>-a<attempt>` (`-e` left out when not given): letters, digits, `.`, `_` and `-`
+ * only, and short enough for an actor name (64 characters).
+ */
+export function jobIdFor(ecrNumber: string, revision: number, attempt: number, ecrRevision?: number): string {
+  const tail = `-r${revision}${ecrRevision === undefined ? '' : `-e${ecrRevision}`}-a${attempt}`;
   const slug = ecrNumber.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 46 - 3 - tail.length);
   return `l1-${slug}${tail}`;
 }
@@ -64,7 +75,7 @@ export function jobIdFor(ecrNumber: string, revision: number, attempt: number): 
 /** Whether a job id is one of this ECR's sessions (the id carries the ECR's number, made filename-safe). */
 export function jobIsFor(jobId: string, ecrNumber: string): boolean {
   const p = parseJobId(jobId);
-  return !!p && jobId === jobIdFor(ecrNumber, p.revision, p.attempt);
+  return !!p && jobId === jobIdFor(ecrNumber, p.revision, p.attempt, p.ecrRevision);
 }
 
 /**
@@ -77,16 +88,17 @@ export function statementIsFor(s: { crSeq: number | null }, rev: number): boolea
   return s.crSeq === rev;
 }
 
-export function parseJobId(jobId: string): { revision: number; attempt: number } | null {
-  const m = /^l1-.+-r(\d+)-a(\d+)$/.exec(jobId);
-  return m ? { revision: Number(m[1]), attempt: Number(m[2]) } : null;
+export function parseJobId(jobId: string): { revision: number; attempt: number; ecrRevision?: number } | null {
+  const m = /^l1-.+-r(\d+)(?:-e(\d+))?-a(\d+)$/.exec(jobId);
+  if (!m) return null;
+  return m[2] === undefined ? { revision: Number(m[1]), attempt: Number(m[3]) } : { revision: Number(m[1]), attempt: Number(m[3]), ecrRevision: Number(m[2]) };
 }
 
 /** The actor name a session writes under (the runner identity and the MCP token carry the same). */
 export const actorFor = (jobId: string) => `agent:norn/level1/${jobId}`;
 
-/** What started the session: Norn, automatically, because a cost check finished. The MCP token takes no spaces in this field. */
-export const spawnedByFor = (checkRunId: number) => `norn:check_run:${checkRunId}`;
+/** What started the session: Norn, automatically, because a cost check finished, on the ECR's own revision counter (`pull_request.revision`, which a text edit bumps too). The MCP token takes no spaces in this field. */
+export const spawnedByFor = (checkRunId: number, revision: number) => `norn:check_run:${checkRunId}:revision:${revision}`;
 
 export interface EventRow {
   jobId: string;
@@ -102,7 +114,7 @@ export function jobsFromEvents(rows: Iterable<EventRow>): JobRecord[] {
     const id = parseJobId(e.jobId);
     if (!id) continue;
     let j = jobs.get(e.jobId);
-    if (!j) jobs.set(e.jobId, (j = { jobId: e.jobId, revision: id.revision, attempt: id.attempt, firstEventMs: e.tsMs, lastEventMs: e.tsMs }));
+    if (!j) jobs.set(e.jobId, (j = { jobId: e.jobId, revision: id.revision, attempt: id.attempt, ...(id.ecrRevision === undefined ? {} : { ecrRevision: id.ecrRevision }), firstEventMs: e.tsMs, lastEventMs: e.tsMs }));
     j.firstEventMs = Math.min(j.firstEventMs, e.tsMs);
     j.lastEventMs = Math.max(j.lastEventMs, e.tsMs);
     if (e.eventType === 'job_finished') {
@@ -138,8 +150,11 @@ export function decide(e: EcrFacts, o: DecideOptions): Decision {
   const live = (j: JobRecord) => !j.finished && (o.running.has(j.jobId) || o.nowMs - j.lastEventMs < o.orphanMs);
   if (runningHere.length || mine.some(live)) return skip(`a session is running for revision ${rev}`);
 
+  // Attempt numbers keep counting up, so job ids never repeat; the cap counts the sessions that could still be
+  // accepted: those started on the ECR's current revision, and older ids that do not name one.
   const attempts = Math.max(0, ...mine.map(j => j.attempt), ...runningHere.map(x => x.p.attempt));
-  if (attempts >= o.maxAttempts) return skip(`revision ${rev} has used its ${o.maxAttempts} attempt(s) without a statement`);
+  const used = e.ecrRevision === undefined ? mine.length : mine.filter(j => j.ecrRevision === undefined || j.ecrRevision === e.ecrRevision).length;
+  if (used >= o.maxAttempts) return skip(`revision ${rev} has used its ${o.maxAttempts} attempt(s) without a statement`);
 
   // A retry waits: out of usage until the window resets, otherwise a fixed delay.
   const last = mine.at(-1);

@@ -101,7 +101,7 @@ try {
   // ---- the module's refusals before the release ---------------------------------------------------
   const early = await rejects(R.recordErpPackage({ prId: pr.id, ecoNumber: ECO, s2RunId: s2.id, erpBaseline: 'x', releaseJson: '{}', packageJson: '{}', lines: 0, entered: 0, conflicts: 0, notesJson: '{}' }));
   check('a package is refused while the ECR is not released', !!early && /released ECO/.test(early.message), early?.message);
-  await R.setPrStatus({ prId: pr.id, status: 'review' });
+  // ingest_ecr already opened the ECR in review.
   await R.setPrStatus({ prId: pr.id, status: 'approved' });
   // The PLM releases the ECO: the feed now carries its number, and ingest records it.
   writeFileSync(join(ecrDir, `${e417.id}.json`), JSON.stringify({ ...e417, eco: ECO }));

@@ -11,7 +11,7 @@
 import { POLICY_RULES, effectiveAssumptions, type ActorScope, type Ctx, type PolicyRule } from './core';
 
 // Reducers a scoped actor may call, with an ECR in `prId`.
-const SCOPED_WRITES = new Set(['add_comment', 'record_assumption', 'post_impact_statement']);
+const SCOPED_WRITES = new Set(['add_comment', 'record_assumption', 'post_impact_statement', 'request_fast_track_approval']);
 
 function ecrLabel(ctx: Ctx, prId: bigint): string {
   return ctx.db.pullRequest.id.find(prId)?.plmEcrNumber ?? `ECR ${prId}`;
@@ -52,7 +52,7 @@ export const scopeRule: PolicyRule = (ctx, actor, reducer, args) => {
 
   if (!live) return deny(`the grant from job ${s.jobId} has expired`);
   if (!SCOPED_WRITES.has(reducer))
-    return deny(`${reducer} is not open to an agent working under job ${s.jobId}; it may comment, propose assumptions and post impact statements on its ECRs`);
+    return deny(`${reducer} is not open to an agent working under job ${s.jobId}; it may comment, propose assumptions, post impact statements and ask for the fast track on its ECRs`);
 
   const prId = typeof args.prId === 'bigint' ? (args.prId as bigint) : 0n;
   if (prId === 0n) return deny(`the production baseline is not writable under job ${s.jobId}`);
