@@ -36,6 +36,7 @@ try {
       await page.evaluate(async ({ harness, fixture, check }) => (await import(harness)).render(fixture, check), { harness, fixture, check });
       await page.waitForSelector(check === 'conversation' ? '#audit-component .nx-thread' : '#audit-component .nx-checks');
       await page.waitForTimeout(250);
+      if (label === 'after' && check === 'conversation' && await page.getByText('The CCB approved this ECR', { exact: true }).count()) throw new Error('Conversation invented a board approval');
       await page.screenshot({ path: join(dir, `${label}-${check}.png`), fullPage: true });
       if (label === 'after') await page.screenshot({ path: join(dir, `flow-${check}.png`) });
     }
