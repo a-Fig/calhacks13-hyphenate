@@ -12,8 +12,6 @@
 .nx-masthead { background: #f8f7f3; border-top: 3px solid var(--norn-copper); border-bottom: 1px solid #dedfd8; }
 .nx-masthead-inner { display: flex; align-items: center; gap: 24px; min-height: 76px; }
 .nx .nx-brand { display: inline-flex; align-items: center; gap: 9px; color: var(--norn-ink); font-size: 31px; font-weight: 750; letter-spacing: -1.5px; text-decoration: none; }
-.nx-brand img { display: block; }
-.nx-brand-dot { color: var(--norn-copper); }
 .nx-workspace-nav { align-self: stretch; display: flex; margin-left: 20px; }
 .nx-workspace-nav a { display: flex; align-items: center; gap: 8px; border-bottom: 2px solid var(--norn-copper); padding: 0 4px; font-weight: 600; }
 .nx .nx-workspace-nav a:hover { text-decoration: none; background: #eef0e9; }
