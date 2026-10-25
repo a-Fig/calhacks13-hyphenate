@@ -14,5 +14,5 @@
     "erasableSyntaxOnly": true
   },
   "include": ["src", "test"],
-  "exclude": ["src/worker.ts", "test/live-outcome.test.ts"]
+  "exclude": ["src/worker.ts", "src/check-module.ts", "test/live-outcome.test.ts"]
 }

@@ -23,6 +23,8 @@ export interface AssumptionRow {
   current: boolean;
   distJson: string;
   createdBy: string;
+  rationale: string;
+  affects: string[];
 }
 
 /**
@@ -59,8 +61,12 @@ export type Mapped = { ok: true; args: RecordAssumptionArgs; targetKey: string }
  * `existing` are the ECR's assumptions. A current one on the same key that this agent wrote itself is
  * replaced (its revision is the call's expectedRev); one anyone else wrote is left alone. A target is
  * an input the check filled in itself, so this is a race and not the usual case.
+ *
+ * `crRev` is the change-request revision the proposal was researched against. It goes to the module as
+ * `expectedCrRev`, which refuses the write, in the same transaction, when the ECR has moved to another one. The
+ * worker's own freshness check cannot do that: it reads a cache, and the ECR can change between the check and the call.
  */
-export function toRecordAssumption(prId: bigint, v: Verdict, target: Target, existing: readonly AssumptionRow[], agentHex: string): Mapped {
+export function toRecordAssumption(prId: bigint, v: Verdict, target: Target, existing: readonly AssumptionRow[], agentHex: string, crRev?: number): Mapped {
   if (v.status !== 'accepted' || !v.override || !v.dist) return { ok: false, targetKey: target.key, why: 'the proposal was not accepted' };
   const cur = existing.find((a) => a.prId === prId && a.key === target.inputId && a.current);
   if (cur && !(cur.source === 'agent_estimated' && cur.createdBy === agentHex)) {
@@ -78,11 +84,60 @@ export function toRecordAssumption(prId: bigint, v: Verdict, target: Target, exi
       rationale: `${v.override.rationale}${flags}`,
       affects: affectsFor(target.inputId),
       expectedRev: cur?.rev ?? 0,
+      ...(crRev !== undefined ? { expectedCrRev: crRev } : {}),
     },
   };
 }
 
-/** The current assumption row that is exactly what the call asked for, written by this agent; undefined when there is none. */
-export function appliedRow(args: RecordAssumptionArgs, rows: readonly AssumptionRow[], agentHex: string): AssumptionRow | undefined {
-  return rows.find((r) => r.prId === args.prId && r.key === args.key && r.current && r.source === args.source && r.distJson === args.distJson && r.createdBy === agentHex);
+/** An `action_log` row as the worker's cache has it (every write reducer leaves one; `requestId` is the caller's own id for the call). */
+export interface LogRow {
+  id: bigint;
+  prId: bigint;
+  requestId: string;
+  reducer: string;
+  /** applied | denied | downgraded | rejected */
+  outcome: string;
+  /** For an applied `record_assumption`: `assumption:<id>`. */
+  entity: string;
+  summary: string;
+}
+
+export type CallResult =
+  /** The module applied this call and wrote this row. */
+  | { state: 'applied'; row: AssumptionRow }
+  /** The module wrote nothing because the assumption already had exactly this content (revision unchanged). */
+  | { state: 'unchanged'; row: AssumptionRow }
+  /** The module refused the call, or its outcome is not what was asked for. */
+  | { state: 'refused'; why: string }
+  /** No outcome for this call yet. */
+  | { state: 'pending' };
+
+/**
+ * What became of one `record_assumption` call, from that call's own outcome and nothing else.
+ *
+ * A scoped agent's refusal returns normally, so the call itself says nothing. The module logs every call under
+ * the caller's `requestId` (`applied` with the row it wrote, or `denied`/`rejected` with the reason), so that row
+ * is the answer, and the assumption it names must be the one asked for at the revision the call produced
+ * (`expectedRev + 1`). A look at the assumption table alone cannot tell a refused call from an older row that
+ * happens to match, which is how a refusal used to be counted as a success.
+ *
+ * The one call that leaves no log row is one that changes nothing (the module returns early when the stored
+ * assumption already has the same value, source, rationale and stages). With `final` set, that is recognised
+ * from the table: this agent's current row, identical in every field, still at the revision the call expected.
+ */
+export function callResult(args: RecordAssumptionArgs, requestId: string, log: readonly LogRow[], rows: readonly AssumptionRow[], agentHex: string, final = false): CallResult {
+  const mine = log.filter((l) => l.requestId === requestId && l.reducer === 'record_assumption').sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))[0];
+  if (mine) {
+    if (mine.outcome !== 'applied') return { state: 'refused', why: mine.summary };
+    const id = /^assumption:(\d+)$/.exec(mine.entity)?.[1];
+    const row = id ? rows.find((r) => r.id === BigInt(id)) : undefined;
+    if (!row) return { state: 'pending' }; // the log row can arrive before the assumption row in the cache
+    if (row.prId !== args.prId || row.key !== args.key || row.source !== args.source || row.distJson !== args.distJson || row.createdBy !== agentHex || row.rev !== args.expectedRev + 1)
+      return { state: 'refused', why: `the module logged this call as applied, but the assumption it names is ${row.key} rev ${row.rev} (${row.source}), not ${args.key} rev ${args.expectedRev + 1} with this value from this agent` };
+    return { state: 'applied', row };
+  }
+  if (!final) return { state: 'pending' };
+  const same = rows.find((r) => r.prId === args.prId && r.key === args.key && r.current && r.createdBy === agentHex && r.source === args.source && r.distJson === args.distJson && r.rev === args.expectedRev && args.expectedRev > 0 && r.rationale === args.rationale && r.affects.join() === args.affects.join());
+  if (same) return { state: 'unchanged', row: same };
+  return { state: 'refused', why: 'the module logged no outcome for this call; see the action log' };
 }

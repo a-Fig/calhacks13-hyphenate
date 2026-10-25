@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "erasableSyntaxOnly": false, "noUncheckedIndexedAccess": false },
-  "include": ["src/worker.ts", "test/live-outcome.test.ts"],
+  "include": ["src/worker.ts", "src/check-module.ts", "test/live-outcome.test.ts"],
   "exclude": []
 }

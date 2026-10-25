@@ -24,6 +24,12 @@ of the main checkout, which a worktree does not have). Run ONE dispatcher per da
 - Defaults: 12 turns, 240 s, 2 attempts per revision. Settings: `NORN_L1_MODEL` (default
   `claude-haiku-5-5`), `NORN_L1_MAX_TURNS`, `NORN_L1_TIMEOUT_MS`, `NORN_L1_MAX_ATTEMPTS`,
   `NORN_L1_RETRY_DELAY_MS`, `NORN_L1_CONCURRENCY`, `NORN_L1_POLL_MS`.
+- With the research worker (`norn/research`, `npm run demo -- --research`): `NORN_L1_WAIT_FOR_RESEARCH=1`
+  makes the first session for a revision wait for that revision's `research_result` event, at most
+  `NORN_L1_RESEARCH_WAIT_MS` (default 600000) after the cost run finished. Why: research re-runs the cost
+  check on the same change request, and a statement written before that stays on the old numbers for
+  good, since statements are keyed on the change-request revision. `NORN_L1_RESEARCH_ECRS` limits the wait
+  to the ECRs the research worker covers. Unset, the dispatcher does not wait (`researchWait` in `plan.ts`).
 - No duplicates. `plan.ts` is pure (a snapshot in, dispatch or skip out). The record of what was
   started is `agent_event`: every runner event is stored there through `record_agent_events`
   (`agent-events.ts`), and a job id names its ECR revision and attempt. So a restart starts nothing

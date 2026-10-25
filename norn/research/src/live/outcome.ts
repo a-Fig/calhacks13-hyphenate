@@ -62,6 +62,8 @@ export interface Outcome {
   failed: { targetKey: string; key: string; why: string }[];
   /** Set when the ECR moved on while the agent worked, so nothing was recorded. */
   superseded: string | null;
+  /** Set when no agent was run: there was nothing to ask. The result is stored all the same, as the record that research is over for the revision. */
+  skipped?: string;
 }
 
 export interface OutcomeInput {
@@ -119,7 +121,7 @@ export function buildOutcome(i: OutcomeInput): { outcome: Outcome; calls: { targ
   const order = new Map(i.targets.map((t, n) => [t.key, n]));
   const accepted = i.verdicts.filter((v) => v.status === 'accepted' && v.targetId && byKey.has(v.targetId)).sort((a, b) => (order.get(a.targetId!) ?? 0) - (order.get(b.targetId!) ?? 0));
   for (const v of accepted) {
-    const m = toRecordAssumption(i.prId, v, byKey.get(v.targetId!)!, i.existing, i.agentHex);
+    const m = toRecordAssumption(i.prId, v, byKey.get(v.targetId!)!, i.existing, i.agentHex, i.revision > 0 ? i.revision : undefined);
     if (m.ok) calls.push({ targetKey: m.targetKey, args: m.args });
     else notRecorded.push({ targetKey: m.targetKey, why: m.why });
   }

@@ -2,7 +2,7 @@
 //   npm run test:level1 -w @norn/workers
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { actorFor, decide, jobIdFor, jobsFromEvents, parseJobId, supersededJobs, type DecideOptions, type EcrFacts, type EventRow } from './plan.ts';
+import { actorFor, decide, jobIdFor, jobsFromEvents, parseJobId, researchRevisionOfJobId, supersededJobs, type DecideOptions, type EcrFacts, type EventRow } from './plan.ts';
 
 const T0 = Date.parse('2026-10-24T20:00:00Z');
 const opts = (over: Partial<DecideOptions> = {}): DecideOptions => ({ nowMs: T0 + 60_000, maxAttempts: 2, retryDelayMs: 60_000, orphanMs: 330_000, running: new Set(), ...over });
@@ -185,4 +185,74 @@ test("another ECR's revision-1 session does not block ECR-0417 revision 1", () =
   // but its own running session still does, and attempt numbers count from its own
   const mine = jobIdFor('ECR-0417', 1, 1);
   assert.match((decide(facts(), opts({ running: new Set([other, mine]) })) as any).reason, /running/);
+});
+
+// ---- waiting for the research worker (--research) ------------------------------------------------------------------
+
+const WAIT = 600_000;
+const FINISHED = T0 + 20_000;
+const researchOn = (over: Partial<DecideOptions> = {}) => opts({ research: { waitMs: WAIT }, ...over });
+const finished = (over: Partial<EcrFacts> = {}) => facts({ s2Done: [{ id: 7, inputsRevision: 1, mock: false, finishedMs: FINISHED }], ...over });
+
+test("research on: the first session waits for the revision's research result", () => {
+  const d = decide(finished(), researchOn({ nowMs: FINISHED + 60_000 }));
+  assert.equal(d.action, 'skip');
+  assert.match((d as any).reason, /waiting for the research on revision 1/);
+  // a result stored for a different revision is not this one's
+  assert.equal(decide(finished({ crSeq: 2, crCreatedMs: T0 + 5_000, s2Done: [{ id: 15, inputsRevision: 2, mock: false, finishedMs: FINISHED }], researched: [1] }), researchOn({ nowMs: FINISHED + 60_000 })).action, 'skip');
+});
+
+test('research on: the stored result releases it', () => {
+  assert.deepEqual(decide(finished({ researched: [1] }), researchOn({ nowMs: FINISHED + 60_000 })), { action: 'dispatch', revision: 1, attempt: 1, s2RunId: 7 });
+});
+
+test('research on: the wait ends WAIT ms after the cost run finished, whatever happened to research', () => {
+  assert.equal(decide(finished(), researchOn({ nowMs: FINISHED + WAIT - 1 })).action, 'skip');
+  assert.deepEqual(decide(finished(), researchOn({ nowMs: FINISHED + WAIT })), { action: 'dispatch', revision: 1, attempt: 1, s2RunId: 7 });
+  // the clock is the cost run's, not the change request's: a late run waits the full time from when it finished
+  const late = finished({ s2Done: [{ id: 7, inputsRevision: 1, mock: false, finishedMs: T0 + 400_000 }] });
+  assert.equal(decide(late, researchOn({ nowMs: T0 + 400_000 + WAIT - 1 })).action, 'skip');
+  assert.equal(decide(late, researchOn({ nowMs: T0 + 400_000 + WAIT })).action, 'dispatch');
+  // a run with no finish time in the cache falls back to when the change request was recorded
+  const unknown = facts({ s2Done: [{ id: 7, inputsRevision: 1, mock: false }] });
+  assert.equal(decide(unknown, researchOn({ nowMs: T0 + WAIT - 1 })).action, 'skip');
+  assert.equal(decide(unknown, researchOn({ nowMs: T0 + WAIT })).action, 'dispatch');
+});
+
+test('research off: nothing changes, whatever the facts say about research', () => {
+  assert.deepEqual(decide(finished(), opts({ nowMs: FINISHED + 1000 })), { action: 'dispatch', revision: 1, attempt: 1, s2RunId: 7 });
+  assert.deepEqual(decide(finished({ researched: [] }), opts({ nowMs: FINISHED + 1000 })), { action: 'dispatch', revision: 1, attempt: 1, s2RunId: 7 });
+});
+
+test('research on: ECRs the research worker does not cover are not held', () => {
+  const cover = { research: { waitMs: WAIT, ecrs: ['ECR-0423'] }, nowMs: FINISHED + 1000 };
+  assert.equal(decide(finished(), opts(cover)).action, 'dispatch');
+  assert.equal(decide(finished({ number: 'ECR-0423' }), opts(cover)).action, 'skip');
+  assert.equal(decide(finished(), opts({ ...cover, research: { waitMs: WAIT, ecrs: [] } })).action, 'skip', 'an empty list means all ECRs');
+});
+
+test('research on: a retry after a failed session is not held up again', () => {
+  const first = jobIdFor('ECR-0417', 1, 1, 1);
+  const jobs = jobsFromEvents([ev(first, 'job_queued', T0 + 700_000), ev(first, 'job_finished', T0 + 710_000, { status: 'failed' })]);
+  // research has stored nothing, and the wait would have restarted had the clock been the newest run's
+  const f = finished({ jobs, ecrRevision: 1, s2Done: [{ id: 9, inputsRevision: 1, mock: false, finishedMs: T0 + 705_000 }] });
+  assert.deepEqual(decide(f, researchOn({ nowMs: T0 + 800_000 })), { action: 'dispatch', revision: 1, attempt: 2, s2RunId: 9 });
+});
+
+test("research on: the session waits for the re-run on the researched numbers, and never takes the earlier statement as enough", () => {
+  // Sol's repro (#152): research recorded assumptions, which re-ran s2 and kept the change-request revision. With the
+  // wait in place no statement was written on run 7, so after the result is stored the revision still gets its session,
+  // and only once the new run is done.
+  const staled = (over: Partial<EcrFacts> = {}) => finished({ s2Done: [], researched: [1], ...over }); // run 7 is stale, run 9 not done yet
+  assert.match((decide(staled(), researchOn({ nowMs: FINISHED + 300_000 })) as any).reason, /no finished s2_cost run/);
+  const rerun = staled({ s2Done: [{ id: 9, inputsRevision: 1, mock: false, finishedMs: FINISHED + 310_000 }] });
+  assert.deepEqual(decide(rerun, researchOn({ nowMs: FINISHED + 311_000 })), { action: 'dispatch', revision: 1, attempt: 1, s2RunId: 9 });
+});
+
+test('research job ids name their change-request revision, and only for their ECR', () => {
+  assert.equal(researchRevisionOfJobId('research-ECR-0417-r3-0a1b2c3d-a2', 'ECR-0417'), 3);
+  assert.equal(researchRevisionOfJobId('research-ECR-0417-r3-0a1b2c3d-a2', 'ECR-0423'), null);
+  assert.equal(researchRevisionOfJobId('research-ECR-0417-r3-0a1b2c3d-a2', 'ECR-04'), null);
+  assert.equal(researchRevisionOfJobId(jobIdFor('ECR-0417', 3, 1, 1), 'ECR-0417'), null, "a Level 1 job id is not a research job's");
+  assert.equal(researchRevisionOfJobId('research-ECR-0417-r3-0A1B2C3D-a2', 'ECR-0417'), null);
 });

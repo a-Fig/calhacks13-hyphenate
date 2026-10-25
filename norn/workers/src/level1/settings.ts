@@ -24,6 +24,15 @@ export interface Level1Settings {
   webBaseUrl: string;
   /** Post a short comment on the ECR when a statement is written (off: comments cannot be taken back). */
   publishComment: boolean;
+  /**
+   * The research worker (norn/research, #148) runs next to this dispatcher: the first session for a revision waits
+   * for the revision's research result. Off unless NORN_L1_WAIT_FOR_RESEARCH=1 (`npm run demo -- --research` sets it).
+   */
+  waitForResearch: boolean;
+  /** How long after the cost run finished the wait ends anyway (research failed, out of budget, or not running). */
+  researchWaitMs: number;
+  /** Only these ECRs are researched (the research worker's own limit, NORN_L1_RESEARCH_ECRS); empty: all. */
+  researchEcrs: string[];
 }
 
 const num = (v: string | undefined, d: number) => {
@@ -46,5 +55,8 @@ export function settingsFromEnv(env: NodeJS.ProcessEnv = process.env): Level1Set
     tokenTtlSeconds: num(env.NORN_L1_TOKEN_TTL_S, 900),
     webBaseUrl: (env.NORN_WEB_URL || 'http://127.0.0.1:5173').replace(/\/+$/, ''),
     publishComment: env.NORN_PUBLISH_COMMENT === '1',
+    waitForResearch: env.NORN_L1_WAIT_FOR_RESEARCH === '1',
+    researchWaitMs: num(env.NORN_L1_RESEARCH_WAIT_MS, 600_000),
+    researchEcrs: (env.NORN_L1_RESEARCH_ECRS ?? '').split(',').map(s => s.trim()).filter(Boolean),
   };
 }

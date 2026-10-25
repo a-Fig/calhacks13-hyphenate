@@ -950,11 +950,22 @@ export const recordAssumption = write(
     rationale: t.string(),
     affects: t.array(t.string()),
     expectedRev: t.u32(), // the revision the editor saw; 0 when creating
+    // Optional. The change-request revision (ecr_revision.seq) the caller worked from. When given, the write is
+    // refused unless the ECR is still on that revision, checked in this transaction, so a proposal researched
+    // against revision 1 cannot land on revision 2. Absent (every caller before this existed): not checked.
+    expectedCrRev: t.option(t.u32()),
   },
   (ctx, a, call) => {
     if (a.prId !== 0n) {
       const pr = getPr(ctx, a.prId);
       if (!OPEN_PR.includes(pr.status as PrStatus)) throw new Refusal(`${pr.plmEcrNumber} is ${pr.status}; its assumptions are frozen`);
+    }
+    if (a.expectedCrRev !== undefined && a.expectedCrRev !== null) {
+      const crRev = a.prId === 0n ? undefined : currentRevision(ctx, a.prId)?.seq;
+      if (crRev !== a.expectedCrRev)
+        throw new Refusal(
+          `the ECR is on change-request revision ${crRev ?? 'none'}, not ${a.expectedCrRev}: the caller's numbers are for a change request that is no longer current; start again from the current one`
+        );
     }
     const key = nonEmpty(a.key, 'key', 80);
     parseJson(a.distJson, 'distJson');

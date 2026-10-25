@@ -10,6 +10,9 @@
 // assumptions on the public web through Bright Data and records the ones that pass its guardrails as
 // agent estimates. Off by default, because it spends Bright Data credits and a Claude session per ECR
 // revision; it needs BRIGHT_DATA_API_TOKEN in the environment or the .env. See norn/research/README.md.
+// With it, the Level 1 dispatcher is told to wait for each revision's research result before its first session
+// (NORN_L1_WAIT_FOR_RESEARCH, at most 10 minutes after the cost run finished), so the statement is written on the
+// researched numbers. Without it the dispatcher behaves as it always did.
 //
 // --ecrs limits the PLM ingest and the publisher to those ECRs (NORN_PLM_ECRS, NORN_PUBLISH_ECRS);
 // without it every open ECR in the PLM is taken in and gets a statement. --check runs the checks only.
@@ -185,7 +188,7 @@ try {
   start('worker', [tsxCli, 'src/worker.ts'], workers);
   await ready('worker', /read the baseline from ERPNext/);
   start('ingest', [tsxCli, 'src/ingest.ts'], workers);
-  start('dispatch', [tsxCli, 'src/level1/dispatcher.ts'], workers);
+  start('dispatch', [tsxCli, 'src/level1/dispatcher.ts'], workers, RESEARCH ? { NORN_L1_WAIT_FOR_RESEARCH: '1', ...(ECRS.length ? { NORN_L1_RESEARCH_ECRS: ECRS.join(',') } : {}) } : {});
   start('publish', [tsxCli, 'src/level1/publisher.ts'], workers);
   if (RESEARCH) start('research', [tsxCli, 'src/worker.ts'], join(norn, 'research'), ECRS.length ? { NORN_RESEARCH_ECRS: ECRS.join(',') } : {});
   start('web', [viteCli, '--host', '127.0.0.1', '--port', String(WEB_PORT), '--strictPort'], join(norn, 'web'), { VITE_NORN_SOURCE: 'live', VITE_NORN_DB: DB });

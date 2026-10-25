@@ -2,7 +2,7 @@
 // live ECRs and stores what passes the guardrails as `agent_estimated` assumptions.
 //
 //   npm run worker -w @norn/research                       # from norn/: watch the database NORN_DB (default norn)
-//   npm run worker -w @norn/research -- --dry-run --once   # research the ECRs that are due, print what it would write, write nothing
+//   npm run worker -w @norn/research -- --dry-run --once   # research the ECRs that are due, print what it would write, write nothing to the database
 //   npm run worker -w @norn/research -- --replay recordings/ecr-0417.recording.json   # offline; everything labelled RECORDED
 //
 // It changes nothing in the other workers. It reads the same tables they do, calls the module's existing
@@ -27,7 +27,7 @@ import { envFileCandidates, readEnvValue } from '../../mcp/src/env.ts';
 import { Runner, jsonlFileSink, teeSink } from '../../runner/src/index.ts';
 import { BaselineStore, baselineSourceFromEnv } from '../../workers/src/baseline.ts';
 import { classify, connect, subscribe, withRetry, type Client } from '../../workers/src/connect.ts';
-import { agentEventWriter, toInput } from '../../workers/src/level1/agent-events.ts';
+import { agentEventWriter, toInput, type AgentEventWriter } from '../../workers/src/level1/agent-events.ts';
 import type { ChangeRequest } from '../../checks/src/index.ts';
 import { AGENT_NAME, reviewProposals } from './guardrails.ts';
 import { AgentOutputError, buildResearchJob, DEFAULT_TOKEN_ENV, parseAgentOutput } from './job.ts';
@@ -35,7 +35,7 @@ import { collectIdentifiers, type IdentifierSource } from './leak.ts';
 import { brightDataFetcher } from './pages.ts';
 import { loadRecording } from './recording.ts';
 import type { Company } from './run.ts';
-import { appliedRow, type AssumptionRow } from './live/assumptions.ts';
+import { callResult, type AssumptionRow, type LogRow } from './live/assumptions.ts';
 import { buildOutcome, commentArgs, type Outcome } from './live/outcome.ts';
 import { decide, factsFor, RESEARCHABLE, ROLE, RESULT_EVENT, RESULT_SEQ, type Decision, type EventRow, type EcrFacts } from './live/plan.ts';
 import { renderReplay, replayPlan } from './live/replay.ts';
@@ -46,7 +46,7 @@ const USAGE = `Usage:
   npm run worker -w @norn/research -- [--dry-run] [--once] [--ecr ECR-0417]
   npm run worker -w @norn/research -- --replay <recording.json>
 
-  --dry-run   do the research and print what would be written; write no assumption, comment or result
+  --dry-run   do the research and print what would be written; write no assumption, comment, result or runner event to the database
   --once      handle the ECRs that are due now, then exit
   --ecr       only this ECR (repeatable); the same as NORN_RESEARCH_ECRS
   --replay    offline: run the worker's steps on a recording; reads and writes no database`;
@@ -136,8 +136,8 @@ await subscribe(worker.conn, [
   'SELECT * FROM assumption',
   `SELECT * FROM agent_event WHERE role = '${ROLE}' AND event_type = 'job_started'`,
   `SELECT * FROM agent_event WHERE role = '${ROLE}' AND event_type = '${RESULT_EVENT}'`,
-  "SELECT * FROM action_log WHERE reducer = 'record_assumption' AND outcome = 'denied'",
-  "SELECT * FROM action_log WHERE reducer = 'record_assumption' AND outcome = 'rejected'",
+  // Every outcome of a record_assumption call (applied, denied, rejected): the answer to each call this worker makes is its row.
+  "SELECT * FROM action_log WHERE reducer = 'record_assumption'",
 ]);
 
 // ---------------------------------------------------------------- reading the cache
@@ -158,14 +158,18 @@ function factsOf(pr: Pr): EcrFacts {
 
 const eventsOf = (): EventRow[] => [...db.agentEvent.iter()].filter((e) => e.role === ROLE).map((e) => ({ jobId: e.jobId, eventType: e.eventType, tsMs: ms(e.ts) }));
 const assumptionsOf = (prId: bigint): AssumptionRow[] =>
-  [...db.assumption.iter()].filter((a) => a.prId === prId).map((a) => ({ id: a.id, prId: a.prId, key: a.key, rev: a.rev, source: a.source, current: a.current, distJson: a.distJson, createdBy: a.createdBy.toHexString() }));
+  [...db.assumption.iter()].filter((a) => a.prId === prId).map((a) => ({ id: a.id, prId: a.prId, key: a.key, rev: a.rev, source: a.source, current: a.current, distJson: a.distJson, createdBy: a.createdBy.toHexString(), rationale: a.rationale, affects: a.affects }));
+const logRowsOf = (requestId: string): LogRow[] => [...db.actionLog.requestId.filter(requestId)].map((l) => ({ id: l.id, prId: l.prId, requestId: l.requestId, reducer: l.reducer, outcome: l.outcome, entity: l.entity, summary: l.summary }));
 
 // ---------------------------------------------------------------- the runner, the baseline cache, the grant
 
 mkdirSync(LOG_DIR, { recursive: true });
 const runIdOf = new Map<string, bigint>();
-const writer = agentEventWriter(worker.R, (id) => runIdOf.get(id) ?? 0n, log);
-const runner = new Runner({ sink: teeSink(jsonlFileSink(join(LOG_DIR, `${dbName}-events.jsonl`)), writer.sink), config: { concurrency: 1 } });
+// A dry run stores nothing in the database, the runner's events included: a stored `job_started` is what the plan counts as
+// a used attempt, so a dry run that stored one would leave a later live run refused ("2 attempt(s) made"). Its events go
+// to a JSONL file of their own, apart from the live run's.
+const writer: AgentEventWriter = DRY ? { sink: () => {}, drain: async () => true } : agentEventWriter(worker.R, (id) => runIdOf.get(id) ?? 0n, log);
+const runner = new Runner({ sink: teeSink(jsonlFileSink(join(LOG_DIR, `${dbName}${DRY ? '-dry-run' : ''}-events.jsonl`)), writer.sink), config: { concurrency: 1 } });
 // Baselines are read the way the worker reads them (cache by hash, else the ERP, read only). Nothing is recorded in Norn from here.
 const baselines = new BaselineStore(await baselineSourceFromEnv(), async () => {});
 
@@ -217,8 +221,15 @@ async function researchOne(pr: Pr, d: Extract<Decision, { action: 'research' }>)
     const identifiers = collectIdentifiers(ids);
     const targets = targetsFromDetail(d.costRun.detailJson!, cr, identifiers, settings.targets);
     if (!targets.length) {
-      finishedHere.add(d.key);
       log(`${pr.plmEcrNumber} r${d.seq}: nothing the cost check assumed on its own is left to research`);
+      if (DRY) {
+        finishedHere.add(d.key);
+        return;
+      }
+      // Store that as a result, so the Level 1 dispatcher (which waits for one) is not held for its whole timeout for nothing.
+      const { outcome } = buildOutcome({ mode: 'LIVE', key: d.key, ecr: pr.plmEcrNumber, prId: pr.id, revision: d.seq, digest: d.digest, s2RunId: d.costRun.id, jobId: d.jobId, now: new Date().toISOString(), targets: [], agentOutput: { proposals: [], unresolved: [] }, verdicts: [], existing: [], agentHex });
+      outcome.skipped = 'nothing the cost check assumed on its own is left to research';
+      await store(pr, outcome);
       return;
     }
 
@@ -247,6 +258,8 @@ async function researchOne(pr: Pr, d: Extract<Decision, { action: 'research' }>)
     const verdicts = await reviewProposals(output.proposals, targets, brightDataFetcher({ today }), { today, identifiers });
 
     // The ECR may have moved on while the agent worked: then these numbers are for a forecast that no longer exists.
+    // This look only saves the calls. What makes it safe is `expectedCrRev` on each call, which the module checks in the
+    // transaction that writes the assumption: the ECR can still move between this look and the call.
     const nowPr = db.pullRequest.id.find(pr.id);
     const now = nowPr ? factsOf(nowPr) : null;
     const superseded = !now
@@ -277,18 +290,17 @@ async function researchOne(pr: Pr, d: Extract<Decision, { action: 'research' }>)
     for (const [n, c] of calls.entries()) {
       const requestId = `${d.jobId}-w${n + 1}`;
       try {
+        // The call carries the change-request revision it was researched against; the module refuses it if the ECR has moved on.
         await agent.R.recordAssumption({ ...c.args, meta: { requestId } });
       } catch (e) {
         outcome.failed.push({ targetKey: c.targetKey, key: c.args.key, why: `record_assumption failed: ${classify(e).message}` });
         continue;
       }
-      // A scoped call that the gate refuses returns normally, so look for the assumption itself.
-      const row = await until(() => appliedRow(c.args, assumptionsOf(pr.id), agentHex), 6000);
-      if (row) outcome.recorded.push({ targetKey: c.targetKey, key: row.key, rev: row.rev, assumptionId: Number(row.id) });
-      else {
-        const why = [...db.actionLog.iter()].find((a) => a.requestId === requestId);
-        outcome.failed.push({ targetKey: c.targetKey, key: c.args.key, why: why ? why.summary : 'the assumption is not in the table after the call; see the action log' });
-      }
+      // A scoped call that the gate or the module refuses returns normally. The answer is this call's own row in the action log.
+      const look = (final: boolean) => callResult(c.args, requestId, logRowsOf(requestId), assumptionsOf(pr.id), agentHex, final);
+      const res = (await until(() => (look(false).state === 'pending' ? undefined : look(false)), 6000)) ?? look(true);
+      if (res.state === 'applied' || res.state === 'unchanged') outcome.recorded.push({ targetKey: c.targetKey, key: res.row.key, rev: res.row.rev, assumptionId: Number(res.row.id) });
+      else outcome.failed.push({ targetKey: c.targetKey, key: c.args.key, why: res.state === 'refused' ? res.why : 'no outcome for this call yet; see the action log' });
     }
     log(`${d.jobId}: recorded ${outcome.recorded.length}/${calls.length} assumption(s); held ${outcome.proposals.filter((p) => p.status === 'needs_person').length}, rejected ${outcome.proposals.filter((p) => p.status === 'rejected').length}${outcome.failed.length ? `, FAILED ${outcome.failed.length}` : ''}`);
 

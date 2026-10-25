@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { researchRevisionOfJobId } from '../../workers/src/level1/plan.ts';
 import { decide, factsFor, jobIdFor, keyOf, RESULT_EVENT, type EcrFacts, type EventRow, type PlanContext, type ResultRow, type RevisionRow, type RunRow } from '../src/live/plan.ts';
 
 const HOUR = 3_600_000;
@@ -114,5 +115,15 @@ describe('decide: what starts a research run', () => {
   it('counts only research jobs, not the other agents events', () => {
     const l1: EventRow[] = Array.from({ length: 6 }, (_, i) => started(`level1-ECR-0417-r1-a${i}`, 1000));
     assert.equal(decide(due(), l1, ctx()).action, 'research');
+  });
+});
+
+describe('the Level 1 dispatcher waits for the result this worker stores (workers/src/level1/plan.ts)', () => {
+  it('reads the change-request revision from the job ids this package makes, and only for the ECR they name', () => {
+    for (const [number, seq, attempt] of [['ECR-0417', 1, 1], ['ECR-0417', 12, 2], ['ECR-0423', 3, 1]] as const) {
+      const id = jobIdFor(number, seq, DIGEST, attempt);
+      assert.equal(researchRevisionOfJobId(id, number), seq, id);
+      assert.equal(researchRevisionOfJobId(id, number === 'ECR-0417' ? 'ECR-0423' : 'ECR-0417'), null, id);
+    }
   });
 });

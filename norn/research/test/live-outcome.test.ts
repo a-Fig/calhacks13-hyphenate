@@ -12,7 +12,7 @@ import { reviewProposals } from '../src/guardrails.ts';
 import { recordedFetcher } from '../src/pages.ts';
 import { loadRecording } from '../src/recording.ts';
 import { contextFromEcr, prepare, type Company } from '../src/run.ts';
-import { affectsFor, appliedRow, distToJson, toRecordAssumption, type AssumptionRow, type RecordAssumptionArgs } from '../src/live/assumptions.ts';
+import { affectsFor, callResult, distToJson, toRecordAssumption, type AssumptionRow, type LogRow, type RecordAssumptionArgs } from '../src/live/assumptions.ts';
 import { buildOutcome, commentArgs, commentFor, type OutcomeInput } from '../src/live/outcome.ts';
 import { renderReplay, replayPlan } from '../src/live/replay.ts';
 import { targetsFromDetail } from '../src/live/targets.ts';
@@ -57,7 +57,7 @@ describe('accepted proposals as record_assumption calls', () => {
     // Compile-time: this is the reducer's own parameter type, plus the metadata the client fills in.
     const typed: Parameters<DbConnection['reducers']['recordAssumption']>[0] = { ...call.args, meta: { requestId: 'r', spawnedBy: 'Norn' } };
     assert.ok(typed);
-    assert.deepEqual(Object.keys(call.args).sort(), ['affects', 'distJson', 'expectedRev', 'key', 'prId', 'rationale', 'source']);
+    assert.deepEqual(Object.keys(call.args).sort(), ['affects', 'distJson', 'expectedCrRev', 'expectedRev', 'key', 'prId', 'rationale', 'source']);
     assert.equal(call.args.prId, PR);
     assert.equal(call.args.key, 'recovery:BW-5120-210');
     assert.equal(call.args.source, 'agent_estimated');
@@ -104,7 +104,7 @@ describe('accepted proposals as record_assumption calls', () => {
   });
 
   it('replaces its own earlier estimate at the revision it saw, and leaves another actor assumption alone', async () => {
-    const row = (over: Partial<AssumptionRow>): AssumptionRow => ({ id: 3n, prId: PR, key: 'recovery:BW-5120-210', rev: 2, source: 'agent_estimated', current: true, distJson: '{}', createdBy: AGENT, ...over });
+    const row = (over: Partial<AssumptionRow>): AssumptionRow => ({ id: 3n, prId: PR, key: 'recovery:BW-5120-210', rev: 2, source: 'agent_estimated', current: true, distJson: '{}', createdBy: AGENT, rationale: '', affects: ['s2_cost'], ...over });
     const own = buildOutcome(await input({ existing: [row({})] }));
     assert.equal(own.calls[0]!.args.expectedRev, 2);
     const person = buildOutcome(await input({ existing: [row({ createdBy: 'cd'.repeat(32) })] }));
@@ -128,16 +128,69 @@ describe('accepted proposals as record_assumption calls', () => {
     assert.deepEqual(affectsFor('cancel:X-1'), ['s2_cost']);
   });
 
-  it('is only counted as taken when the assumption is in the table, current, from this agent, with the same value', async () => {
-    const { calls } = buildOutcome(await input());
-    const a: RecordAssumptionArgs = calls[0]!.args;
-    const row: AssumptionRow = { id: 9n, prId: a.prId, key: a.key, rev: 1, source: a.source, current: true, distJson: a.distJson, createdBy: AGENT };
-    assert.equal(appliedRow(a, [row], AGENT)?.id, 9n);
-    assert.equal(appliedRow(a, [], AGENT), undefined, 'a refused call leaves nothing');
-    assert.equal(appliedRow(a, [{ ...row, createdBy: 'cd'.repeat(32) }], AGENT), undefined);
-    assert.equal(appliedRow(a, [{ ...row, current: false }], AGENT), undefined);
-    assert.equal(appliedRow(a, [{ ...row, distJson: '{"kind":"fixed","value":1}' }], AGENT), undefined);
-    assert.equal(appliedRow(a, [{ ...row, prId: 8n }], AGENT), undefined);
+  it('carries the change-request revision it was researched against, and a replay (no database) carries none', async () => {
+    const { calls } = buildOutcome(await input({ revision: 2 }));
+    assert.equal(calls[0]!.args.expectedCrRev, 2);
+    const replay = buildOutcome(await input({ mode: 'RECORDED', revision: 0 }));
+    assert.equal('expectedCrRev' in replay.calls[0]!.args, false);
+  });
+});
+
+describe("what became of one record_assumption call (its own row in the action log)", () => {
+  const REQ = 'research-ECR-0417-r2-d1-a1-w1';
+  const callArgs = async (): Promise<RecordAssumptionArgs> => buildOutcome(await input({ revision: 2 })).calls[0]!.args;
+  const rowFor = (a: RecordAssumptionArgs, over: Partial<AssumptionRow> = {}): AssumptionRow => ({ id: 9n, prId: a.prId, key: a.key, rev: a.expectedRev + 1, source: a.source, current: true, distJson: a.distJson, createdBy: AGENT, rationale: a.rationale, affects: a.affects, ...over });
+  const logRow = (over: Partial<LogRow> = {}): LogRow => ({ id: 40n, prId: PR, requestId: REQ, reducer: 'record_assumption', outcome: 'applied', entity: 'assumption:9', summary: 'applied', ...over });
+
+  it('is applied when the call was logged as applied and its assumption is the one asked for, at the revision the call makes', async () => {
+    const a = await callArgs();
+    const r = callResult(a, REQ, [logRow()], [rowFor(a)], AGENT);
+    assert.equal(r.state, 'applied');
+    assert.equal(r.state === 'applied' && r.row.id, 9n);
+  });
+
+  it("is refused when the call was refused, even though an older row of this agent matches the value, source and author (Sol's repro)", async () => {
+    const a = await callArgs();
+    // An earlier estimate by this agent on the same key with the same value is still in the table...
+    const older = rowFor(a, { id: 5n, rev: 1, rationale: 'an earlier run', affects: ['s2_cost'] });
+    // ...and this call, at expectedRev 1, was refused (the ECR was edited, or moved to another change request).
+    const refused = { ...a, expectedRev: 1 };
+    const rejected = logRow({ outcome: 'rejected', entity: 'rejected', summary: 'record_assumption rejected: the ECR is on change-request revision 3, not 2' });
+    const r = callResult(refused, REQ, [rejected], [older], AGENT);
+    assert.equal(r.state, 'refused');
+    assert.match(r.state === 'refused' ? r.why : '', /change-request revision 3, not 2/);
+    // The gate's own refusal reads the same way.
+    assert.equal(callResult(refused, REQ, [logRow({ outcome: 'denied', summary: 'record_assumption refused: no' })], [older], AGENT).state, 'refused');
+    // And it does not wait on the table: an older matching row alone is no answer at all.
+    assert.equal(callResult(refused, REQ, [], [older], AGENT).state, 'pending');
+    assert.equal(callResult(refused, REQ, [], [older], AGENT, true).state, 'refused', 'the older row differs in revision, so even the final look does not take it for this call');
+  });
+
+  it('is not applied when the logged row is another value, key, author or revision than the call asked for', async () => {
+    const a = await callArgs();
+    for (const over of [{ distJson: '{"kind":"fixed","value":1}' }, { key: 'other' }, { createdBy: 'cd'.repeat(32) }, { rev: 5 }, { source: 'given' }, { prId: 8n }]) {
+      assert.equal(callResult(a, REQ, [logRow()], [rowFor(a, over)], AGENT).state, 'refused', Object.keys(over).join());
+    }
+  });
+
+  it("ignores another call's row, and waits when the log row has not reached the table cache yet", async () => {
+    const a = await callArgs();
+    assert.equal(callResult(a, REQ, [logRow({ requestId: 'someone-else' })], [rowFor(a)], AGENT).state, 'pending');
+    assert.equal(callResult(a, REQ, [logRow({ reducer: 'add_comment' })], [rowFor(a)], AGENT).state, 'pending');
+    assert.equal(callResult(a, REQ, [logRow()], [], AGENT).state, 'pending');
+  });
+
+  it('recognises the one call that leaves no log row, a call that changed nothing, only on the final look and only for an identical row at the expected revision', async () => {
+    const a = { ...(await callArgs()), expectedRev: 3 };
+    const same = rowFor(a, { rev: 3 });
+    assert.equal(callResult(a, REQ, [], [same], AGENT).state, 'pending');
+    const r = callResult(a, REQ, [], [same], AGENT, true);
+    assert.equal(r.state, 'unchanged');
+    assert.equal(callResult(a, REQ, [], [{ ...same, rationale: 'different' }], AGENT, true).state, 'refused');
+    assert.equal(callResult(a, REQ, [], [{ ...same, affects: ['s3_timeline'] }], AGENT, true).state, 'refused');
+    assert.equal(callResult(a, REQ, [], [{ ...same, rev: 4 }], AGENT, true).state, 'refused');
+    assert.equal(callResult(a, REQ, [], [{ ...same, current: false }], AGENT, true).state, 'refused');
+    assert.equal(callResult({ ...a, expectedRev: 0 }, REQ, [], [{ ...same, rev: 0 }], AGENT, true).state, 'refused', 'a create always writes');
   });
 });
 

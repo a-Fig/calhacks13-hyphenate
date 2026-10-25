@@ -12,7 +12,8 @@
     "typecheck": "tsc -p . && tsc -p tsconfig.worker.json",
     "replay": "node src/cli.ts --replay recordings/ecr-0417.recording.json",
     "worker": "tsx src/worker.ts",
-    "worker:replay": "tsx src/worker.ts --replay recordings/ecr-0417.recording.json"
+    "worker:replay": "tsx src/worker.ts --replay recordings/ecr-0417.recording.json",
+    "check:module": "tsx src/check-module.ts"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
