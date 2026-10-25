@@ -227,6 +227,144 @@ export function slipFromRows(rows: readonly ResultRow[]): number | undefined {
 }
 
 // ---------------------------------------------------------------------------------------------
+// The facts about an ECR, from plain values
+// ---------------------------------------------------------------------------------------------
+
+/** What the module (gate.ts) and the MCP server's mirror each read from their tables to build the gate's facts. */
+export interface FactInputs {
+  ecrId: string;
+  /** The rows of the cost check's newest finished run on the ECR's current inputs; empty when there is none. */
+  costRows: readonly ResultRow[];
+  /** The same for the timeline check. */
+  slipRows: readonly ResultRow[];
+  /** The highest impact-statement level written at the ECR's current revision; 0 for none. */
+  reportLevel: number;
+  /** The body that approved the ECR, or 'fast_track', once it has been. */
+  approvedBy?: string;
+}
+
+/**
+ * The gate's facts about an ECR (EcrFacts), built the one way for the gate and for the fast-track signal an
+ * agent reads, so the two cannot disagree. Not here, on purpose: the owner of the changed item (an agent's
+ * say-so is not evidence), and detected triggers (nothing in the module detects them yet; an agent's
+ * fast-track request lists the ones it saw, labelled as its own).
+ */
+export function factsFromRows(input: FactInputs, config: CompanyConfig, request?: FastTrackRequest): EcrFacts {
+  const cost = costFromRows(input.costRows, config);
+  const slip = slipFromRows(input.slipRows);
+  const facts: EcrFacts = { ecrId: input.ecrId };
+  if (cost) facts.cost = cost;
+  if (slip !== undefined) facts.slipP90Days = slip;
+  if (input.reportLevel >= 1 && input.reportLevel <= 3) facts.reportLevel = input.reportLevel as 1 | 2 | 3;
+  if (input.approvedBy) facts.approvedBy = input.approvedBy;
+  if (request) {
+    facts.classes = {
+      ...(request.classes.company ? { company: request.classes.company } : {}),
+      ...(request.classes.regulatory ? { regulatory: request.classes.regulatory } : {}),
+    };
+    facts.answers = Object.fromEntries(request.answers.map((a) => [a.testId, a.holds]));
+    facts.triggers = request.triggers;
+  }
+  return facts;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The fast-track signal: should an agent ask?
+// ---------------------------------------------------------------------------------------------
+
+export type FastTrackTestList = 'neverFastTrack' | 'requireAll' | 'requireOneOf';
+
+export interface FastTrackSignal {
+  /** True when the only thing between the ECR and the fast track is the agent's answers to `tests`. */
+  candidate: boolean;
+  /** One plain sentence or two: why it is, or what stands in the way. */
+  why: string;
+  /** The tests the agent answers: those the ECR's class does not settle. */
+  tests: { id: string; text: string; list: FastTrackTestList }[];
+  /** The classes (by id) that make the class-settled tests favourable; what a request proposes when the agent proposes none. */
+  propose: { companyClass?: string; regulatoryClass?: string };
+}
+
+/** The tests an agent answers, with their text and the list they belong to. */
+export function answerableTestsOf(config: CompanyConfig): FastTrackSignal['tests'] {
+  const { approval } = config;
+  const lists: [FastTrackTestList, typeof approval.neverFastTrack][] = [
+    ['neverFastTrack', approval.neverFastTrack],
+    ['requireAll', approval.fastTrack.requireAll],
+    ['requireOneOf', approval.fastTrack.requireOneOf],
+  ];
+  return lists.flatMap(([list, tests]) => tests.filter((t) => !t.whenClass).map((t) => ({ id: t.id, text: t.text, list })));
+}
+
+const FAST_TRACK = 'approve_fast_track_ecr';
+
+/**
+ * Whether an agent should ask for the fast track on an ECR. It runs the gate's own decision (decideAction on
+ * the ECR's facts) with the agent's answers set as favourably as the tests allow (a never-fast-track test does
+ * not hold, every other test holds) and with the classes that satisfy the class-settled tests, then reads the
+ * outcome: an approval, or a draw for the second check, means only the answers stand in the way. Anything the
+ * agent cannot change by answering (an inexact or over-limit cost, a slip past the limit, no PLM number to
+ * draw on, a class no choice can satisfy, an ECR not in review, checks not finished, a role that may not)
+ * makes it false, with the reason. Triggers are the agent's own report and are not guessed.
+ *
+ * `facts` are the ECR's facts without a request (factsFromRows without one). `maxReportLevel` is the highest
+ * statement level this agent may post: a report level the limits need that the agent can still write is met
+ * by writing it.
+ */
+export function fastTrackSignal(
+  config: CompanyConfig,
+  input: { facts: EcrFacts; actor: ConfigActor; status: string; checksFinished: boolean; maxReportLevel: number },
+): FastTrackSignal {
+  const tests = answerableTestsOf(config);
+  const answers = Object.fromEntries(tests.map((t) => [t.id, t.list !== 'neverFastTrack']));
+
+  // A class on each axis that lets the tests be met, if one does.
+  const companyIds = config.changeClasses.company.values.map((v) => v.id);
+  const regulatoryIds = config.changeClasses.regulatory.values.map((v) => v.id);
+  let classes: { company: string; regulatory: string } | undefined;
+  for (const company of companyIds) {
+    for (const regulatory of regulatoryIds) {
+      if (!classes && routeEcr(config, { ...input.facts, classes: { company, regulatory }, answers }).fastTrack.eligible) classes = { company, regulatory };
+    }
+  }
+  const out = (candidate: boolean, why: string): FastTrackSignal => ({
+    candidate,
+    why,
+    tests,
+    propose: classes ? { companyClass: classes.company, regulatoryClass: classes.regulatory } : {},
+  });
+
+  if (!classes) {
+    const r = routeEcr(config, { ...input.facts, answers });
+    return out(false, `No choice of company and regulatory class lets the fast track apply. ${r.fastTrack.why}`);
+  }
+  if (input.status !== 'review') return out(false, `The ECR is ${input.status}; the fast track decides ECRs in review.`);
+  if (!input.checksFinished) return out(false, "The checks have not all finished on the ECR's current inputs, so there are no numbers to decide on yet.");
+
+  // The report the limits need, if the agent can still write it.
+  const rule = config.autonomy.actions.find((a) => a.action === FAST_TRACK);
+  const needLevel = rule?.limits?.minReportLevel;
+  let postFirst: number | undefined;
+  const facts: EcrFacts = { ...input.facts, classes, answers };
+  if (needLevel !== undefined && (facts.reportLevel ?? 0) < needLevel && input.maxReportLevel >= needLevel) {
+    facts.reportLevel = needLevel as 1 | 2 | 3;
+    postFirst = needLevel;
+  }
+
+  const d = decideAction(config, { action: FAST_TRACK, actor: input.actor, facts });
+  if (d.outcome === 'approve' || d.outcome === 'approve_sampled') {
+    const held = (d.limits ?? []).map((l) => l.text).join(' ');
+    return out(true, `Only your answers to the tests stand between this ECR and the fast track. ${held}${postFirst ? ` Post your Level ${postFirst} statement first.` : ''}`.trim());
+  }
+  const failed = (d.limits ?? []).filter((l) => !l.held).map((l) => l.text);
+  if (failed.length) return out(false, `Past a fast-track limit, which your answers cannot change. ${failed.join(' ')}`);
+  const costRule = d.reasons.find((r) => r.rule === 'approval.costMeasure');
+  if (costRule) return out(false, costRule.text);
+  const last = d.reasons[d.reasons.length - 1];
+  return out(false, `${d.outcome === 'deny' ? "The company's rules do not let this agent take the fast track." : 'The fast track would be a recommendation, not an approval.'} ${last?.text ?? ''}`.trim());
+}
+
+// ---------------------------------------------------------------------------------------------
 // The decision
 // ---------------------------------------------------------------------------------------------
 

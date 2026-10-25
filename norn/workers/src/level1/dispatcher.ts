@@ -46,8 +46,11 @@ const jsonOr = <T>(s: string, d: T): T => {
   }
 };
 
-/** The tools a Level 1 session may use: read the ECR and its numbers, post one statement. Nothing else. */
-export const LEVEL1_TOOLS = nornTools('get_ecr', 'get_impact', 'list_assumptions', 'post_impact_statement');
+/**
+ * The tools a Level 1 session may use: read the ECR and its numbers, post one statement, and ask for the fast
+ * track (the system prompt only tells it to when get_impact's fastTrack.candidate is true). Nothing else.
+ */
+export const LEVEL1_TOOLS = nornTools('get_ecr', 'get_impact', 'list_assumptions', 'post_impact_statement', 'request_fast_track_approval');
 
 /** What `decide` needs to know about one ECR, from the client cache. */
 export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
@@ -109,9 +112,6 @@ export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; 
     prompt: opts.prompt,
     identity,
     mcpServers: { [NORN_MCP_SERVER_NAME]: nornMcpFor(identity, { jobId: opts.jobId, role: opts.settings.role, ecrs: [opts.ecr], ttlSeconds: opts.settings.tokenTtlSeconds, signingKey: opts.signingKey, url: opts.mcpUrl }) },
-    // TODO(fast track): when the MCP tool `request_fast_track_approval` lands on main, add it here (nornTools(...,
-    // 'request_fast_track_approval')) so the agent can call it when get_impact's fastTrack.candidate is true. The
-    // system prompt already says when to call it. Until it is allowed, a candidate ECR's session cannot call it.
     allowedTools: LEVEL1_TOOLS,
   };
 }
