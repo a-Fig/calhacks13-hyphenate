@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { ArrowRightIcon, CheckIcon, CircleIcon, ClockIcon, DotFillIcon } from '@primer/octicons-react';
+import { useMemo, type ReactNode } from 'react';
+import { AlertIcon, ArrowRightIcon, CheckIcon, CircleIcon, ClockIcon, DotFillIcon } from '@primer/octicons-react';
 import { ActionList, Flash, Label } from '@primer/react';
 import { monthLabel } from '../assessment/adapter.ts';
 import type { CostBlock, CostRow, Figure, ImpactAssessment, RiskLevel } from '../assessment/types.ts';
@@ -85,12 +85,10 @@ function CostCheck({ a }: { a: ImpactAssessment }) {
           <b>{staleNote(a.ecr.staleCost)}</b> The cost page below is the previous revision&rsquo;s.
         </Flash>
       )}
-      {need.length > 0 && (
-        <Flash variant="warning" className="nx-flash">
-          <b>{need.length} lines need an estimate.</b> The originator left them blank, so they count as $0 until someone estimates them:{' '}
-          {need.map(n => n.label).join('; ')}.
-        </Flash>
-      )}
+      <Notes notes={need.length ? [{
+        severity: 'warn',
+        message: <><b>{need.length} line{need.length > 1 ? 's' : ''} need{need.length > 1 ? '' : 's'} an estimate.</b> The originator left them blank, so they count as $0 until someone estimates them: {need.map(n => n.label).join('; ')}.</>,
+      }] : []} />
       <div className="nx-box">
         <div className="nx-box-title">
           Cost page <SavedRun source={a.source} /> <span className="nx-fg-muted">&middot; {a.cost.scenarios ? `${a.cost.scenarios.requested}; ` : ''}{a.cost.window.label}, point estimates, savings in parentheses; Total is nonrecurring plus extended</span>
@@ -303,14 +301,25 @@ function Scenarios({ a }: { a: ImpactAssessment }) {
   );
 }
 
-function Flags({ flags }: { flags: { severity: 'info' | 'warn'; message: string }[] }) {
-  if (!flags.length) return null;
+type Note = { severity: 'info' | 'warn'; message: ReactNode };
+
+/**
+ * A check's notes and caveats, folded into one line a person can open. The findings they repeat are on the page below
+ * (the parts, the other open ECRs, the cost lines marked "Needs an estimate"); the notes say what the check does not cover.
+ */
+function Notes({ notes }: { notes: Note[] }) {
+  if (!notes.length) return null;
+  const warn = notes.filter(n => n.severity === 'warn').length;
   return (
-    <>
-      {flags.map((f, i) => (
-        <Flash key={i} variant={f.severity === 'warn' ? 'warning' : 'default'} className="nx-flash">{f.message}</Flash>
-      ))}
-    </>
+    <details className="nx-notes">
+      <summary>
+        <AlertIcon size={16} className={warn ? 'nx-fg-attention' : 'nx-fg-muted'} />{' '}
+        {notes.length} note{notes.length > 1 ? 's' : ''} on what this check does not cover yet
+      </summary>
+      <ul>
+        {notes.map((n, i) => <li key={i} className={n.severity === 'warn' ? 'warn' : ''}>{n.message}</li>)}
+      </ul>
+    </details>
   );
 }
 
@@ -325,13 +334,11 @@ function TimelineCheck({ a }: { a: ImpactAssessment }) {
   return (
     <>
       {t?.stale && <Flash variant="warning" className="nx-flash"><b>{staleNote(t.stale)}</b> The timeline below is the previous revision&rsquo;s.</Flash>}
-      {t?.readiness === 'materials_only' && (
-        <Flash variant="warning" className="nx-flash">
-          <b>Material readiness, not implementation.</b> The date is when the parts and the assessed work allow the change. Qualification, release or retrofit work that is not assessed may make implementation later.
-        </Flash>
-      )}
       {t && !t.placed && <Flash variant="warning" className="nx-flash"><b>No date can be placed.</b> The old stock runs past the end of the volume plan{t.serial ? `, so the first serial the change can take is S/N ${Math.round(t.serial.p50)}` : ''}.</Flash>}
-      {t && <Flags flags={t.flags} />}
+      {t && <Notes notes={[
+        ...(t.readiness === 'materials_only' ? [{ severity: 'warn' as const, message: <><b>Material readiness, not implementation.</b> The date is when the parts and the assessed work allow the change. Qualification, release or retrofit work that is not assessed may make implementation later.</> }] : []),
+        ...t.flags,
+      ]} />}
       <div className="nx-stats">
         <Stat label={`Cut-in on ${c.program}, as ${c.source === 'given' ? 'filed' : 'assumed'}`} sub={`S/N ${c.serial}. ${c.rationale}`}>
           <Mark ev={c.source === 'given' ? 'fact' : 'assumption'} id="cutin">{monthLabel(c.month)}</Mark>
@@ -392,7 +399,7 @@ function SupplyCheck({ a }: { a: ImpactAssessment }) {
   return (
     <>
       {d?.stale && <Flash variant="warning" className="nx-flash"><b>{staleNote(d.stale)}</b> The supply page below is the previous revision&rsquo;s.</Flash>}
-      {d && <Flags flags={d.flags} />}
+      {d && <Notes notes={d.flags} />}
       <div className="nx-stats">
         <Stat label={<>Supply risk <MockTag on={a.mock.includes('supply')} /></>} sub={s.note}>
           <Mark ev={s.evidence} id={s.id}><Label variant={RISK[s.level]} size="large">{cap(s.level)}</Label></Mark>
