@@ -529,6 +529,44 @@ export interface Scenario {
   prov: Provenance;
 }
 
+// ---------------------------------------------------------------- finance
+
+/** A program's budget for the current period. The change's cost is measured against what is left of it. */
+export interface ProgramBudget {
+  program: ProgramId;
+  /** The budget period, as calendar months, both ends included. */
+  period: { label: string; from: MonthStr; to: MonthStr };
+  budgetUsd: number;
+  /** Spent from the start of the period to `asOf`. */
+  spentToDateUsd: number;
+  asOf: DateStr;
+  prov: Provenance;
+}
+
+/** What it costs per week when the change reaches the line later than the ECR states: idle crew, held aircraft, expediting. */
+export interface DelayCost {
+  program: ProgramId;
+  perWeekUsd: Range3;
+  /** What the weekly figure covers, in a sentence. */
+  basis: string;
+  prov: Provenance;
+}
+
+/** Cash and burn for the whole company. A pre-revenue maker runs on its cash, so a change is also measured in days of runway. */
+export interface CompanyCash {
+  cashOnHandUsd: number;
+  /** Average monthly cash out, all programs and overhead, with no revenue. */
+  monthlyBurnUsd: number;
+  asOf: DateStr;
+  prov: Provenance;
+}
+
+export interface Finance {
+  budgets: ProgramBudget[];
+  delayCosts: DelayCost[];
+  cash: CompanyCash;
+}
+
 // ---------------------------------------------------------------- dataset
 
 export interface Dataset {
@@ -555,4 +593,5 @@ export interface Dataset {
   ncrs: Ncr[];
   ecrs: Ecr[];
   demoScenarios: Scenario[];
+  finance: Finance;
 }

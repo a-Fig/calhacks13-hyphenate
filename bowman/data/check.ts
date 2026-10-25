@@ -555,6 +555,58 @@ ok(d.demoScenarios.filter((s) => s.kind !== 'background').length === 5, 'expecte
 ok(d.demoScenarios.filter((s) => s.kind === 'background').length === 3, 'expected three background scenarios');
 for (const sc of d.demoScenarios) for (const id of sc.ecrs) ok(ecrBy.has(id), `scenario ${sc.id} unknown ECR ${id}`);
 
+// ------------------------------------------------------------------ finance: budgets, cash, cost of delay
+
+{
+  const F = d.finance;
+  const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+  const monthIndex = (m: string) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5, 7)) - 1;
+  const isInvented = (p: Provenance | undefined) => p?.basis === 'invented' && !!p.note && p.note.length > 10;
+  ok(F.budgets.length === d.programs.length && F.delayCosts.length === d.programs.length, 'finance needs one budget and one delay cost per program');
+  for (const p of d.programs) {
+    const b = F.budgets.find((x) => x.program === p.id);
+    const dc = F.delayCosts.find((x) => x.program === p.id);
+    ok(b, `no budget for ${p.id}`);
+    ok(dc, `no delay cost for ${p.id}`);
+    if (b) {
+      ok(MONTH.test(b.period.from) && MONTH.test(b.period.to) && b.period.from <= b.period.to, `${p.id} budget period ${b.period.from} to ${b.period.to} is not a month range`);
+      const months = monthIndex(b.period.to) - monthIndex(b.period.from) + 1;
+      ok(months >= 1 && months <= 24, `${p.id} budget period is ${months} months`);
+      ok(Number.isInteger(b.budgetUsd) && b.budgetUsd > 0, `${p.id} budget must be a positive whole number of dollars`);
+      ok(b.spentToDateUsd >= 0 && b.spentToDateUsd < b.budgetUsd, `${p.id} spent to date must be in [0, budget)`);
+      ok(b.asOf <= d.company.asOf && b.asOf.slice(0, 7) >= b.period.from && b.asOf.slice(0, 7) <= b.period.to, `${p.id} budget asOf ${b.asOf} is outside its period`);
+      // Spending tracks the calendar: neither far behind nor far ahead of the share of the period gone.
+      const start = Date.UTC(Number(b.period.from.slice(0, 4)), Number(b.period.from.slice(5, 7)) - 1, 1);
+      const end = Date.UTC(Number(b.period.to.slice(0, 4)), Number(b.period.to.slice(5, 7)), 1); // first day after the period
+      const elapsed = (Date.parse(b.asOf) - start) / (end - start);
+      const spentShare = b.spentToDateUsd / b.budgetUsd;
+      ok(spentShare > 0.5 * elapsed && spentShare < 1.5 * elapsed, `${p.id} has spent ${pct(100 * spentShare)} of its budget after ${pct(100 * elapsed)} of the period`);
+      // The budget pays for the aircraft the program completes in the period at standard cost.
+      const completed = d.builtAircraft.filter((a) => a.program === p.id && a.completed.slice(0, 7) >= b.period.from && a.completed.slice(0, 7) < '2026-10').length
+        + d.volumePlan.filter((r) => r.program === p.id && r.month >= b.period.from && r.month <= b.period.to).reduce((a, r) => a + r.units, 0);
+      ok(b.budgetUsd >= completed * p.standardCostUsd, `${p.id} budget ${fmt(b.budgetUsd)} does not cover ${completed} aircraft at ${fmt(p.standardCostUsd)}`);
+      ok(isInvented(b.prov), `${p.id} budget needs invented provenance with a rationale`);
+    }
+    if (dc) {
+      const r = dc.perWeekUsd;
+      ok(r.p10 > 0 && r.p10 < r.p50 && r.p50 < r.p90, `${p.id} delay cost per week must be positive and in order`);
+      if (b) ok(r.p90 * 52 < b.budgetUsd, `${p.id} a year of p90 delay cost would exceed the whole budget`);
+      ok(dc.basis.length > 20, `${p.id} delay cost needs a basis`);
+      ok(isInvented(dc.prov), `${p.id} delay cost needs invented provenance with a rationale`);
+    }
+  }
+  const cash = F.cash;
+  ok(cash.cashOnHandUsd > 0 && cash.monthlyBurnUsd > 0, 'cash on hand and monthly burn must be positive');
+  ok(cash.asOf === d.company.asOf, 'cash is read as of the company date');
+  const runwayMonths = cash.cashOnHandUsd / cash.monthlyBurnUsd;
+  ok(runwayMonths >= 12 && runwayMonths <= 36, `runway is ${runwayMonths.toFixed(1)} months; a pre-revenue maker with a raise in hand has 12 to 36`);
+  // Burn covers the programs' budgets and the overhead on top, over the budget period's 12 months.
+  const budgetYear = F.budgets.reduce((a, b) => a + b.budgetUsd, 0);
+  ok(cash.monthlyBurnUsd * 12 > budgetYear && cash.monthlyBurnUsd * 12 < 1.4 * budgetYear, `yearly burn ${fmt(cash.monthlyBurnUsd * 12)} should exceed the program budgets ${fmt(budgetYear)} by overhead, not by more than 40%`);
+  ok(isInvented(cash.prov), 'cash needs invented provenance with a rationale');
+  ok(d.sectionProvenance.finance, 'no section provenance for finance');
+}
+
 // ------------------------------------------------------------------ no real company or product names outside provenance and analog fields
 
 {
