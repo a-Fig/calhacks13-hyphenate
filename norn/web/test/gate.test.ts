@@ -4,8 +4,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ACTION_IDS, LEVEL_IDS, TRIGGER_IDS, decideAction, loadConfigFile } from '../../config/src/index.ts';
-import { buildAssessment, type PrRow, type ResultRow, type RunRow, type Snapshot } from '../src/assessment/live/build.ts';
+import { ACTION_IDS, LEVEL_IDS, TRIGGER_IDS, canonicalJson, decideAction, loadConfigFile } from '../../config/src/index.ts';
+import { buildAssessment, plainSummary, type ActionRow, type PrRow, type ResultRow, type RunRow, type Snapshot } from '../src/assessment/live/build.ts';
 import {
   RELEASE_BLOCKED, buildGate, packageProblems, packageView, roleWords,
   type ApprovalRow, type EcoReleaseRow, type ErpPackageRow, type RecommendationRow,
@@ -178,7 +178,7 @@ test('the gate\'s own reasons, from Bowman\'s configuration, read in business wo
   const ids = [...ACTION_IDS, ...LEVEL_IDS.filter(l => l.includes('_')), ...TRIGGER_IDS];
   const leaks = (t: string) => ids.filter(i => new RegExp(`\\b${i}\\b`).test(t));
   assert.ok(raw.some(t => leaks(t).length), 'the gate does put ids in its reasons');
-  assert.deepEqual(raw.map(plainReason).filter(t => leaks(t).length), [], 'no id survives');
+  assert.deepEqual(raw.map(t => plainReason(t)).filter(t => leaks(t).length), [], 'no id survives');
   // The sentence Bowman's gate gave on the fast track.
   const sets = raw.filter(t => /^The company sets \w+ to \w+ for agents:/.test(t));
   assert.ok(sets.length > 0 && sets.every(t => plainReason(t).startsWith("For agents, the company's rule for ")));
@@ -305,4 +305,73 @@ test('the assessment carries the gate: its entries join the timeline and the pac
   const bare = buildAssessment({ ...s, approvals: undefined, recommendations: undefined }, prRow)!;
   assert.deepEqual(bare.gate!.approvals, []);
   assert.equal(bare.gate!.recommendation, undefined);
+});
+
+test('the timeline built from action-log rows with the real gate\'s reasons has no id, tier, body or configuration path left', async () => {
+  const loaded = await loadConfigFile(fileURLToPath(new URL('../../../bowman/norn-config/bowman.config.ts', import.meta.url)));
+  assert.ok(loaded.ok);
+  const config = loaded.config;
+  const text = canonicalJson(config);
+  // The log rows the module writes: policy is `allow (<outcome> (<rule>): <reasons>)`, a summary carries the same reason.
+  const decisions = [];
+  const facts = [{ ecrId: 'ECR-0423' }, { ecrId: 'ECR-0417', triggers: ['safety_part' as const] }];
+  const actors = [{ kind: 'agent' as const }, { kind: 'agent' as const, actingFor: 'EMP-02' }, { kind: 'person' as const, id: 'EMP-02' }, { kind: 'person' as const, id: 'EMP-14' }];
+  for (const action of ACTION_IDS) for (const actor of actors) for (const f of facts) decisions.push(decideAction(config, { action, actor, facts: f }));
+  const reasonOf = (d: ReturnType<typeof decideAction>) => `${d.outcome} (${d.decidedBy}): ${d.reasons.map(r => r.text).join(' ')}`;
+  const tierIds = config.approval.tiers.map(t => t.id);
+  const bodyIds = config.approval.bodies.map(b => b.id);
+  const [t1, t2] = [tierIds[0], tierIds[1]];
+  const extra = [
+    `approved -> review (the ${t1} tier it was approved at is no longer in the company configuration)`,
+    `approved -> review (the re-checked numbers move the ECR from the ${t1} tier to the ${t2} tier. Over the limit.)`,
+    `release_eco follows a decision, and '${bodyIds[1]}' is neither the fast track nor an approval body in the configuration`,
+  ];
+  const rows: ActionRow[] = [...decisions.map(reasonOf), ...extra].map((reason, i) => ({
+    id: BigInt(i + 1), at: ts(1000 + i), prId: 1n, reducer: i % 3 === 0 ? 'post_impact_statement' : i % 3 === 1 ? 'set_pr_status' : 'ingest_ecr', outcome: i % 3 === 0 ? 'denied' : 'applied',
+    entity: '', summary: `approved -> merged (${reason})`, detailJson: '{}', actorKind: 'agent', actorName: 'a', actorOrigin: 'norn', onBehalfOf: undefined, spawnedBy: 'Norn',
+    policy: `allow (${reason})`,
+  }));
+  const prRow: PrRow = { id: 1n, plmEcrNumber: 'ECR-0417', title: 't', description: 'd', status: 'review', revision: 2, createdBy: id('aa'), createdAt: ts(1), updatedAt: ts(1) };
+  const run: RunRow = { id: 1n, prId: 1n, stage: 's2_cost', status: 'done', note: '', createdAt: ts(10), finishedAt: ts(20) };
+  const results: ResultRow[] = (rows0417l3 as { key: string; label: string; unit: string; p10: number; p50: number; p90: number; detailJson: string }[])
+    .map((r, i) => ({ ...r, id: BigInt(i + 1), checkRunId: 1n, prId: 1n, mock: false }));
+  const snap: Snapshot = { prs: [prRow], revisions: [], runs: [run], results, statements: [], comments: [], actions: rows, events: [], principals: [], configs: [{ key: 'company_config', value: text }] };
+  const out = buildAssessment(snap, prRow)!;
+  const logged = out.activity.filter(e => e.id.startsWith('log:'));
+  assert.ok(logged.length === rows.length, `${logged.length} timeline entries from log rows`);
+  const everything = logged.map(e => `${e.text}\n${e.detail ?? ''}`);
+  // The raw rows do carry them, so the test is not vacuous.
+  const rawText = rows.map(r => `${r.summary}\n${r.policy}`).join('\n');
+  const snake = [...ACTION_IDS, ...LEVEL_IDS.filter(l => l.includes('_')), ...TRIGGER_IDS, ...tierIds.filter(t => t.includes('_'))];
+  const leaks = (t: string) => [
+    ...snake.filter(i => new RegExp(`\\b${i}\\b`).test(t)),
+    ...bodyIds.filter(b => new RegExp(`(?<![\\w.])${b}(?![\\w])`).test(t)),
+    ...(/\b(autonomy|approval|roles)(\.[A-Za-z]+|\[[^\]]+\])+/.exec(t) ? ['a configuration path'] : []),
+  ];
+  assert.ok(leaks(rawText).length >= 4, leaks(rawText).join(','));
+  assert.deepEqual(everything.flatMap(t => leaks(t)), [], 'no id or path survives in the timeline');
+  // The company's own names are used for its tiers and bodies.
+  assert.ok(everything.some(t => t.includes(config.approval.bodies.find(b => b.id === config.approval.tiers[0].body)!.name)));
+  assert.ok(everything.some(t => /the company's autonomy settings for /.test(t)));
+  // The log summary used by the list is translated too (no names there, but no schema ids either).
+  assert.doesNotMatch(plainSummary(rows[0].summary), /\bapprove_fast_track_ecr\b|\bautonomy\.actions\[/);
+});
+
+test('a malformed problem source does not hide the readable ones', () => {
+  const unsupported = ['BW-1 labor hours 1 -> 2: not entered by this package.'];
+  const v = packageView(pkgRow({
+    releaseJson: JSON.stringify({ unsupported }),
+    packageJson: JSON.stringify({ lines: [], problems: 42 }),
+    notesJson: JSON.stringify({ notes: [], problems: ['No account is mapped.'] }),
+    lines: 0, entered: 0,
+  }));
+  assert.equal(v.state, 'unreadable');
+  assert.ok(v.state === 'unreadable');
+  assert.deepEqual(v.problems, ['No account is mapped.', `Not in this package: ${unsupported[0]}`]);
+  // Each source on its own: the package's good list survives bad notes and a bad release.
+  const only = packageView(pkgRow({ releaseJson: '[]', packageJson: JSON.stringify({ lines: [], problems: ['A price row is in the way.'] }), notesJson: JSON.stringify({ problems: 7 }), lines: 0, entered: 0 }));
+  assert.ok(only.state === 'unreadable' && only.problems.length === 1 && only.problems[0] === 'A price row is in the way.');
+  // Nothing readable: an unreadable row with no problems to show.
+  const none = packageView(pkgRow({ releaseJson: 'x', packageJson: 'y', notesJson: 'z' }));
+  assert.ok(none.state === 'unreadable' && none.problems.length === 0);
 });

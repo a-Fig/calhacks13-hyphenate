@@ -14,7 +14,8 @@ import type {
 import { changedItems } from './changes.ts';
 import { dateTime, staleNote } from '../../ui/fmt.ts';
 import { personOf, SEATS } from './directory.ts';
-import { buildGate, type GateRows } from './gate.ts';
+import { buildGate, plainOf, type GateRows } from './gate.ts';
+import { plainReason } from './words.ts';
 
 // ---------------------------------------------------------------- the rows, as much of them as we read
 
@@ -115,10 +116,10 @@ const STATUS_RE = Object.keys(STATUS_WORD).join('|');
 
 /** A reducer's log summary, with status changes ("approved -> merged") in the business's words. */
 export function plainSummary(text: string): string {
-  return text
+  return plainReason(text
     .replace(new RegExp(`\\b(${STATUS_RE}) -> (${STATUS_RE})\\b`, 'g'), (_m, from: string, to: string) => `moved from ${STATUS_WORD[from]} to ${STATUS_WORD[to]}`)
     .replace(/\bmerged\b/g, 'released')
-    .replace(/ -> /g, ' to ');
+    .replace(/ -> /g, ' to '));
 }
 
 // The module's action names, in the words a person at Bowman would use.
@@ -398,27 +399,30 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
   const events: ActivityEvent[] = [];
   const actorKind = (a: ActionRow): ActorKind => (a.actorOrigin === 'norn' ? 'norn' : a.actorOrigin === 'external' ? 'person_agent' : 'person');
   const allowed = (p: string) => p.replace(/^allow\b/, 'Allowed');
+  // The log's policy and summary lines carry the gate's ids and configuration paths; the timeline says them in words.
+  const plain = plainOf(s);
+  const sum = (t: string) => plain(plainSummary(t));
   events.push({
     id: 'filed', at: cr.filedOn ? `${cr.filedOn}T12:00:00-07:00` : iso(pr.createdAt), actor: personOf(cr.originator), actorKind: 'person', kind: 'filed',
     text: 'filed the ECR', detail: cr.originatingNcr ? `From ${cr.originatingNcr}.` : undefined,
   });
   for (const a of s.actions.filter(x => x.prId === pr.id)) {
     const base = { id: `log:${a.id}`, at: iso(a.at), actor: a.actorName, actorKind: actorKind(a), onBehalfOf: a.onBehalfOf, spawnedBy: a.spawnedBy };
-    const why = `${allowed(a.policy)} · ${ACTION_WORD[a.reducer] ?? a.reducer.replace(/_/g, ' ')}${a.outcome !== 'applied' ? `, ${a.outcome}` : ''}`;
-    if (a.reducer === 'ingest_ecr') events.push({ ...base, kind: 'policy', text: 'opened the ECR in Norn from the feed', detail: `${plainSummary(a.summary)}. ${why}` });
+    const why = plain(`${allowed(a.policy)} · ${ACTION_WORD[a.reducer] ?? a.reducer.replace(/_/g, ' ')}${a.outcome !== 'applied' ? `, ${a.outcome}` : ''}`);
+    if (a.reducer === 'ingest_ecr') events.push({ ...base, kind: 'policy', text: 'opened the ECR in Norn from the feed', detail: `${sum(a.summary)}. ${why}` });
     else if (a.reducer === 'complete_check' && /^s[12]_/.test(a.summary)) {
       // A run an input change has since replaced is not shown: the timeline keeps the checks that stand.
       const ran = runs.find(r => `check_run:${r.id}` === a.entity);
       if (ran && !live(ran)) continue;
       const stage = /^(s\d_\w+)/.exec(a.summary)?.[1] ?? '';
-      events.push({ ...base, kind: 'ran_checks', text: `ran the ${CHECK_STAGES[stage]?.name.toLowerCase() ?? stage} check`, detail: `${plainSummary(a.summary)}. ${why}` });
-    } else if (a.reducer === 'record_assumption') events.push({ ...base, kind: 'research', text: 'recorded an assumption', detail: `${plainSummary(a.summary)}. ${why}` });
-    else if (a.reducer === 'set_pr_status') events.push({ ...base, kind: a.outcome === 'applied' && /-> approved\b/.test(a.summary) ? 'approved' : 'policy', text: plainSummary(a.summary), detail: why });
+      events.push({ ...base, kind: 'ran_checks', text: `ran the ${CHECK_STAGES[stage]?.name.toLowerCase() ?? stage} check`, detail: `${sum(a.summary)}. ${why}` });
+    } else if (a.reducer === 'record_assumption') events.push({ ...base, kind: 'research', text: 'recorded an assumption', detail: `${sum(a.summary)}. ${why}` });
+    else if (a.reducer === 'set_pr_status') events.push({ ...base, kind: a.outcome === 'applied' && /-> approved\b/.test(a.summary) ? 'approved' : 'policy', text: sum(a.summary), detail: why });
     else if (a.reducer === 'post_impact_statement') {
       const st = stmts.find(x => `impact_statement:${x.id}` === a.entity);
       if (a.outcome === 'applied' && st) events.push({ ...base, kind: 'report', text: `posted the impact statement, Level ${st.level}`, detail: `${st.headline.slice(0, 160)} ${why}`, level: st.level as 1 | 2 | 3 });
-      else if (a.outcome !== 'applied') events.push({ ...base, kind: 'changes_requested', text: `was refused: ${plainSummary(a.summary).slice(0, 120)}`, detail: why });
-    } else if (a.reducer === 'set_config' || a.reducer === 'edit_pr_text') events.push({ ...base, kind: 'policy', text: plainSummary(a.summary).slice(0, 120), detail: why });
+      else if (a.outcome !== 'applied') events.push({ ...base, kind: 'changes_requested', text: `was refused: ${sum(a.summary).slice(0, 120)}`, detail: why });
+    } else if (a.reducer === 'set_config' || a.reducer === 'edit_pr_text') events.push({ ...base, kind: 'policy', text: sum(a.summary).slice(0, 120), detail: why });
   }
   for (const c of s.comments.filter(x => x.prId === pr.id)) {
     const p = s.principals.find(x => x.identity.toHexString() === c.author.toHexString());

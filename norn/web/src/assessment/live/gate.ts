@@ -12,7 +12,7 @@
 // that is not in the shape expected is dropped quietly, except in the package, where a package the page
 // cannot read says so rather than looking empty.
 import type { ActivityEvent, ActorKind } from '../types.ts';
-import { plainReason } from './words.ts';
+import { NO_NAMES, namesOf, plainReason, type Names } from './words.ts';
 
 // ---------------------------------------------------------------- the rows, as much of them as we read
 
@@ -34,6 +34,8 @@ export interface ErpPackageRow {
 }
 export interface GateRows {
   approvals?: ApprovalRow[]; recommendations?: RecommendationRow[]; ecoReleases?: EcoReleaseRow[]; erpPackages?: ErpPackageRow[];
+  /** norn_config rows: the stored company configuration names the tiers, bodies and roles that reasons mention. */
+  configs?: { key: string; value: string }[];
 }
 export interface GatePr { id: bigint; plmEcrNumber: string; status: string; revision: number }
 
@@ -148,6 +150,15 @@ export interface GateView {
   events: ActivityEvent[];
 }
 
+/** The company's names for its tiers, bodies and roles, from the stored configuration. */
+export const namesFor = (rows: GateRows): Names => namesOf(rows.configs?.find(c => c.key === 'company_config')?.value);
+
+/** Text from the gate or the action log in business words, with the company's own names. */
+export const plainOf = (rows: GateRows) => {
+  const names = namesFor(rows);
+  return (text: string) => plainReason(text, names);
+};
+
 export const RELEASE_BLOCKED = 'Release is refused while an approval is pending a re-check';
 
 // ---------------------------------------------------------------- helpers
@@ -174,7 +185,7 @@ const actorKindOf = (k: WhoKind): ActorKind => (k === 'norn' ? 'norn' : k === 'a
 
 // ---------------------------------------------------------------- approvals and recommendations
 
-export function approvalView(a: ApprovalRow): ApprovalView {
+export function approvalView(a: ApprovalRow, names: Names = NO_NAMES): ApprovalView {
   const d = parse(a.decisionJson);
   const whoKind = whoKindOf(a.approverOrigin, a.approverKind);
   const fastTrack = a.kind === 'fast_track';
@@ -192,13 +203,13 @@ export function approvalView(a: ApprovalRow): ApprovalView {
     released: a.status === 'released',
     at: iso(a.at),
     endedAt: a.endedAt ? iso(a.endedAt) : undefined,
-    endedReason: a.endedReason ? plainReason(String(a.endedReason)) : undefined,
+    endedReason: a.endedReason ? plainReason(String(a.endedReason), names) : undefined,
     revision: a.prRevision,
-    reasons: isObj(d) && Array.isArray(d.reasons) ? d.reasons.filter((r: any) => isObj(r) && typeof r.text === 'string').map((r: any) => ({ rule: String(r.rule ?? ''), text: plainReason(r.text) })) : [],
+    reasons: isObj(d) && Array.isArray(d.reasons) ? d.reasons.filter((r: any) => isObj(r) && typeof r.text === 'string').map((r: any) => ({ rule: String(r.rule ?? ''), text: plainReason(r.text, names) })) : [],
   };
 }
 
-export function recommendationView(r: RecommendationRow): RecommendationView {
+export function recommendationView(r: RecommendationRow, names: Names = NO_NAMES): RecommendationView {
   const whoKind = whoKindOf(r.recommenderOrigin, r.recommenderKind);
   const by = whoKind === 'norn' ? 'Norn' : r.recommenderName;
   const what = r.action === 'release_eco' ? 'release' : 'approval';
@@ -208,15 +219,15 @@ export function recommendationView(r: RecommendationRow): RecommendationView {
     : `${by} recommends ${what}`;
   return {
     id: String(r.id), headline, by, whoKind, onBehalfOf: r.onBehalfOf || undefined, action: r.action, outcome: r.outcome,
-    reasons: (Array.isArray(r.reasons) ? r.reasons : []).filter(x => isObj(x) && typeof x.text === 'string').map(x => ({ rule: String(x.rule ?? ''), text: plainReason(x.text) })),
-    recipients: (Array.isArray(r.recipients) ? r.recipients : []).filter((x): x is string => typeof x === 'string').map(roleWords), at: iso(r.at), revision: r.prRevision, waitingForSecondCheck: waiting,
+    reasons: (Array.isArray(r.reasons) ? r.reasons : []).filter(x => isObj(x) && typeof x.text === 'string').map(x => ({ rule: String(x.rule ?? ''), text: plainReason(x.text, names) })),
+    recipients: (Array.isArray(r.recipients) ? r.recipients : []).filter((x): x is string => typeof x === 'string').map(x => names.roles[x] ?? roleWords(x)), at: iso(r.at), revision: r.prRevision, waitingForSecondCheck: waiting,
   };
 }
 
 const sentTo = (rec: RecommendationView) => (rec.recipients.length ? `Sent to ${rec.recipients.join(', ')}.` : 'No recipient was named.');
 
-function recommendationEvent(r: RecommendationRow, pr: GatePr): ActivityEvent {
-  const v = recommendationView(r);
+function recommendationEvent(r: RecommendationRow, pr: GatePr, names: Names): ActivityEvent {
+  const v = recommendationView(r, names);
   const old = r.prRevision < pr.revision;
   const verb = v.waitingForSecondCheck ? 'would approve this ECR, held for a second check' : r.outcome === 'escalate' ? 'escalated this ECR' : r.action === 'release_eco' ? 'recommended release' : 'recommended approval';
   return {
@@ -373,13 +384,31 @@ function builtView(row: ErpPackageRow): PackageBuilt {
 }
 
 /** The package as the card draws it; or, when the row is not readable, a state that says so and never reads as empty. */
+/**
+ * The problems that can be read when the row as a whole cannot. Each of the three places is recovered on its own, so
+ * one malformed source does not hide what the others say.
+ */
+export function recoverProblems(row: ErpPackageRow): string[] {
+  const out: string[] = [];
+  const add = (s: string) => { if (!out.includes(s)) out.push(s); };
+  const from = (json: string, f: (o: Record<string, any>) => string[]) => {
+    try {
+      const o = parse(json);
+      if (isObj(o)) f(o).forEach(add);
+    } catch { /* this source is unreadable; the others still count */ }
+  };
+  from(row.packageJson, o => stringList(o, 'problems', 'package'));
+  from(row.notesJson, o => stringList(o, 'problems', 'notes'));
+  from(row.releaseJson, o => stringList(o, 'unsupported', 'release').filter(u => !out.some(p => p.includes(u))).map(u => `Not in this package: ${u}`));
+  return out;
+}
+
 export function packageView(row: ErpPackageRow): PackageBuilt | PackageUnreadable {
   try {
     return builtView(row);
   } catch (e) {
     // Whatever problems can still be read are kept: they may be the reason a person has to act.
-    let problems: string[] = [];
-    try { problems = packageProblems(parse(row.releaseJson), parse(row.packageJson), parse(row.notesJson)); } catch { /* the reason below says it */ }
+    const problems = recoverProblems(row);
     return {
       state: 'unreadable', ecoNumber: String(row.ecoNumber),
       why: e instanceof Unreadable ? e.message : `The package row could not be read (${e instanceof Error ? e.message : String(e)})`,
@@ -429,13 +458,14 @@ export function buildGate(rows: GateRows, pr: GatePr): GateView {
 
 function buildGateOf(rows: GateRows, pr: GatePr): GateView {
   const mine = (rows.approvals ?? []).filter(a => a.prId === pr.id).sort((a, b) => Number(b.id - a.id));
-  const pairs = each(mine, a => ({ a, v: approvalView(a) }));
+  const names = namesFor(rows);
+  const pairs = each(mine, a => ({ a, v: approvalView(a, names) }));
   const approvals = pairs.map(x => x.v);
   const events: ActivityEvent[] = pairs.flatMap(x => each([x], y => approvalEvents(y.a, y.v)).flat());
 
   const recs = (rows.recommendations ?? []).filter(r => r.prId === pr.id).sort((a, b) => Number(a.id - b.id));
-  const recPairs = each(recs, r => ({ r, v: recommendationView(r) }));
-  events.push(...each(recs, r => recommendationEvent(r, pr)));
+  const recPairs = each(recs, r => ({ r, v: recommendationView(r, names) }));
+  events.push(...each(recs, r => recommendationEvent(r, pr, names)));
   // Only a row made on the current revision speaks for the ECR as it is now; and not once an approval has followed it.
   const latest = recPairs.filter(x => x.r.prRevision === pr.revision).at(-1);
   const acted = latest && approvals.some(v => v.state !== 'withdrawn' && v.at >= latest.v.at);
