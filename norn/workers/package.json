@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/worker.ts",
+    "demo": "tsx src/demo/start.ts",
     "seed": "tsx src/seed.ts",
     "typecheck": "tsc -p .",
     "check:module": "tsx src/checks.ts",

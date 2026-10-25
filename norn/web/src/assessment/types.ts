@@ -6,6 +6,8 @@
 // change class and approval route, the recommendation, the agent timeline) are narrative: mock
 // fixtures, optional here, and named in `ImpactAssessment.mock` so the screens can label each one.
 
+import type { GateView } from './live/gate.ts';
+
 /** How a number or claim is known (docs/GLOSSARY.md, "How Norn marks evidence"). */
 export type Evidence = 'fact' | 'assumption' | 'computation' | 'judgment';
 
@@ -223,6 +225,8 @@ export interface ActivityEvent {
   run?: AgentRun;
   /** Labelled "reported by agent" until Norn can fetch the source itself. */
   reportedByAgent?: boolean;
+  /** A recommendation made on an earlier revision of the ECR than the one it is on now. */
+  superseded?: boolean;
 }
 
 /** A Norn agent's session: the steps the runner reports, from agent_event rows. */
@@ -442,6 +446,8 @@ export interface ImpactAssessment {
   linked: LinkedRecord[];
   meeting: Meeting;
   erpPackage?: ErpPackage;
+  /** Live only: the company gate's approvals and recommendations, and the real ERP change package (./live/gate.ts). */
+  gate?: GateView;
   mock: MockSection[];
   traces: Record<string, Trace>;
 }

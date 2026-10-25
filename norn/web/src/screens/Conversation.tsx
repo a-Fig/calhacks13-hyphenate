@@ -1,16 +1,18 @@
 import { useState, type ReactNode } from 'react';
 import {
-  AlertFillIcon, CheckCircleFillIcon, CheckIcon, ChecklistIcon, CircleIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, CommentIcon,
-  DotFillIcon, EyeIcon, FileDiffIcon, GitMergeIcon, GraphIcon, NoteIcon, PackageIcon, SearchIcon, ShieldCheckIcon, TagIcon,
+  AlertFillIcon, CheckCircleFillIcon, CheckIcon, CircleIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, CommentIcon,
+  DotFillIcon, EyeIcon, GraphIcon, NoteIcon, SearchIcon, ShieldCheckIcon, TagIcon,
 } from '@primer/octicons-react';
 import { AvatarStack, Button, Checkbox, Label, PageLayout, ProgressBar, Spinner, Timeline } from '@primer/react';
 import type { ActivityEvent, ErpPackage, EventKind, ImpactAssessment, RiskLevel, StepState } from '../assessment/types.ts';
 import { monthLabel } from '../assessment/adapter.ts';
 import { DiffTable } from './Changes.tsx';
 import { CheckStateIcon, LevelLabel, MockTag, Person, SavedRun, StaleNote } from '../ui/Bits.tsx';
+import { BoardIcon, CaliperIcon, CostIcon, GaugeIcon, NcrIcon, ReleaseIcon } from '../ui/EngineeringIcons.tsx';
 import { Highlight, Mark, Num } from '../ui/Evidence.tsx';
 import { ago, dateTime, dayLabel, dateShort, range as rangeText, usdK } from '../ui/fmt.ts';
 import { Link } from '../router.tsx';
+import { ApprovalRows, ApproverItems, ErpPackageCard, RecommendationRow, ReleaseFoot } from './GateBox.tsx';
 import type { AgentRun, StatementView } from '../assessment/types.ts';
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
@@ -32,6 +34,7 @@ export function Conversation({ a }: { a: ImpactAssessment }) {
           </Timeline>
           <MergeBox a={a} />
           {a.erpPackage && <ErpCard pkg={a.erpPackage} mock={a.mock.includes('erp')} />}
+          {a.gate && <ErpPackageCard gate={a.gate} />}
         </div>
       </PageLayout.Content>
       <PageLayout.Pane position="end" width="small" padding="none">
@@ -90,7 +93,7 @@ function BotComment({ a }: { a: ImpactAssessment }) {
     <Timeline.Item className="nx-t-comment">
       <div className="nx-av-col"><Person name="Norn" kind="norn" size={40} /></div>
       <Timeline.Body className="nx-t-body">
-        <CommentBox name="norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? a.activity[a.activity.length - 1]?.at ?? ''} edited={a.source !== 'live'} right={a.level ? <LevelLabel level={a.level} long /> : undefined}>
+        <CommentBox name="Norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? a.activity[a.activity.length - 1]?.at ?? ''} edited={a.source !== 'live'} right={a.level ? <LevelLabel level={a.level} long /> : undefined}>
           <h3 className="nx-h3">Impact assessment <SavedRun source={a.source} /></h3>
           {a.ecr.staleCost && <p className="nx-small"><StaleNote state={a.ecr.staleCost} /></p>}
           <div className="nx-table-scroll" role="region" aria-label="Impact assessment numbers" tabIndex={0}>
@@ -203,12 +206,12 @@ function swing(lo: number, hi: number) {
 
 type BadgeSpec = { icon: ReactNode; variant?: 'success' | 'danger' | 'done' | 'attention' | 'accent' };
 const BADGE: Partial<Record<EventKind, BadgeSpec>> = {
-  ran_checks: { icon: <ChecklistIcon /> },
+  ran_checks: { icon: <GaugeIcon /> },
   label: { icon: <TagIcon /> },
   review_requested: { icon: <EyeIcon /> },
   report: { icon: <GraphIcon /> },
   approved: { icon: <CheckIcon />, variant: 'success' },
-  changes_requested: { icon: <FileDiffIcon />, variant: 'danger' },
+  changes_requested: { icon: <CaliperIcon />, variant: 'danger' },
   comment: { icon: <CommentIcon /> },
   research: { icon: <SearchIcon /> },
   policy: { icon: <ShieldCheckIcon />, variant: 'done' },
@@ -235,6 +238,7 @@ function EventItem({ e, mock }: { e: ActivityEvent; mock: boolean }) {
             {mock && <> <MockTag title="Mock: a saved timeline entry, not an event in Norn" /></>}
             {e.level && <> <LevelLabel level={e.level} /></>}
             {e.reportedByAgent && <> <Label variant="attention" size="small">Reported by agent</Label></>}
+            {e.superseded && <> <Label variant="secondary" size="small">Superseded</Label></>}
             {' '}<span className="nx-fg-muted" title={dateTime(e.at)}>{e.state === 'running' && !mock ? 'now' : ago(e.at)}</span>
           </span>
         </div>
@@ -302,16 +306,16 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
         </ul>
       </MergeRow>
 
-      {decided ? (
+      {a.gate?.approvals.length ? <ApprovalRows gate={a.gate} released={a.ecr.status === 'ECO released'} /> : decided ? (
         <MergeRow
-          icon={<GitMergeIcon size={24} className="nx-fg-done" />}
+          icon={a.ecr.status === 'ECO released' ? <ReleaseIcon size={24} className="nx-fg-done" /> : <CheckCircleFillIcon size={24} className="nx-fg-success" />}
           title={a.ecr.status === 'ECO released' ? 'ECO released' : 'Approved'}
           sub={ccb && ccb.state === 'not_required' ? 'Within Norn’s limits, no CCB needed' : 'The CCB approved this ECR'}
         />
       ) : (
         <MergeRow
           icon={<DotFillIcon size={24} className="nx-fg-attention" />}
-          title="Review required"
+          title={<>Review required <MockTag on={!!a.gate && a.mock.includes('route')} /></>}
           sub={`${ccb ? 'CCB approval needed' : 'Approval needed'} · ${done} of ${reviewers.length} approved`}
         >
           <div className="nx-merge-bar"><ProgressBar barSize="small" progress={reviewers.length ? (done / reviewers.length) * 100 : 0} aria-label="Approvals" /></div>
@@ -324,14 +328,17 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
         sub={a.statement ? a.statement.headline : a.recommendation.reasons[0]?.text}
       />
 
+      {a.gate?.recommendation && <RecommendationRow rec={a.gate.recommendation} />}
+
       {!decided && (
         <div className="nx-merge-foot">
-          <Button variant="primary" disabled leadingVisual={PackageIcon}>Release ECO</Button>
+          <Button variant="primary" disabled leadingVisual={ReleaseIcon}>Release ECO</Button>
           <span className="nx-fg-muted">
             {ccb?.when ? `Waiting for the CCB on ${ccb.when}` : 'Waiting for approvals'}
           </span>
         </div>
       )}
+      {a.gate && a.ecr.status === 'Approved' && <ReleaseFoot gate={a.gate} />}
     </section>
   );
 }
@@ -349,20 +356,20 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
   const steps = a.route.steps;
   const reviewers = steps.filter(s => s.role !== 'CCB' && s.state !== 'not_required');
   const done = reviewers.filter(s => s.state === 'approved').length;
-  const pct = reviewers.length ? (done / reviewers.length) * 100 : 100;
+  const pct = a.gate?.approvals.length ? (a.gate.approvals.some(x => x.state !== 'withdrawn') ? 100 : 0) : reviewers.length ? (done / reviewers.length) * 100 : 100;
   const people = [...new Map(events.map(x => [x.actor, x])).values()].slice(0, 8);
 
   return (
     <aside className="nx-side">
       <section>
-        <h3>Approvers <MockTag on={a.mock.includes('route')} /></h3>
+        <h3>Approvers <MockTag on={a.mock.includes('route') && !a.gate?.approvals.length} /></h3>
         <ul className="nx-side-list">
-          {steps.map((s, i) => (
+          {a.gate?.approvals.length ? <ApproverItems gate={a.gate} /> : steps.map((s, i) => (
             <li key={i}>
               {s.role === 'CCB'
-                ? <Person name="CCB" kind="team" size={20} />
+                ? <BoardIcon size={20} />
                 : <Person name={s.person ?? s.role} kind={s.person === 'Norn' ? 'norn' : 'person'} size={20} />}
-              <span className="nx-side-name">{s.role === 'CCB' ? 'bowman-aviation/ccb' : s.person}</span>
+              <span className="nx-side-name">{s.role === 'CCB' ? 'Change Control Board' : s.person}</span>
               <span className="nx-side-trail"><StepIcon state={s.state} /></span>
             </li>
           ))}
@@ -400,7 +407,7 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
           <ul className="nx-side-list nx-linked">
             {a.linked.map(l => (
               <li key={l.ref}>
-                {l.state === 'released' ? <GitMergeIcon size={16} className="nx-fg-done" /> : l.state === 'open' ? <DotFillIcon size={16} className="nx-fg-open" /> : <CheckCircleFillIcon size={16} className="nx-fg-done" />}
+                {l.kind === 'NCR' ? <NcrIcon size={16} className={l.state === 'open' ? 'nx-fg-attention' : 'nx-fg-muted'} /> : l.state === 'released' ? <ReleaseIcon size={16} className="nx-fg-done" /> : l.state === 'open' ? <DotFillIcon size={16} className="nx-fg-open" /> : <CheckCircleFillIcon size={16} className="nx-fg-done" />}
                 <span><b>{l.ref}</b> <span className="nx-fg-muted">{l.title}</span></span>
               </li>
             ))}
@@ -428,7 +435,7 @@ function ErpCard({ pkg, mock }: { pkg: ErpPackage; mock: boolean }) {
   return (
     <section className="nx-erp" aria-label="ERP change package">
       <header className="nx-erp-head">
-        <PackageIcon size={16} />
+        <CostIcon size={16} />
         <b>ERP change package</b>
         <MockTag on={mock} />
         <span className="nx-fg-muted">Lines for a person to enter in {pkg.system}</span>

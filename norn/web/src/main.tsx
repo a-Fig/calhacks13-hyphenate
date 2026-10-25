@@ -4,6 +4,7 @@ import '@primer/primitives/dist/css/primitives.css';
 import '@primer/primitives/dist/css/functional/themes/light.css';
 import { BaseStyles, ThemeProvider } from '@primer/react';
 import './norn.css';
+import './identity.css';
 import { usePath } from './router.tsx';
 import { Shell } from './screens/Shell.tsx';
 import { EcrList } from './screens/EcrList.tsx';
