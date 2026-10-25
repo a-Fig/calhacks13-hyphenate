@@ -12,6 +12,7 @@
 // that is not in the shape expected is dropped quietly, except in the package, where a package the page
 // cannot read says so rather than looking empty.
 import type { ActivityEvent, ActorKind } from '../types.ts';
+import { plainReason } from './words.ts';
 
 // ---------------------------------------------------------------- the rows, as much of them as we read
 
@@ -112,13 +113,26 @@ export interface PackageBuilt {
   /** The ERP read the statuses come from, short. */
   erpRead: string;
   system: string;
+  /** Set when the rows are hand-made, not read from the ERP; the card shows a Mock label with this text. A real package never has it. */
+  mock?: string;
 }
 export interface PackageMissing {
   state: 'missing';
   code: 'not_released' | 'no_eco_number' | 'building';
   why: string;
 }
-export type PackageView = PackageBuilt | PackageMissing;
+/** The package row is there but not in a shape the page can read. It is never shown as an empty package. */
+export interface PackageUnreadable {
+  state: 'unreadable';
+  ecoNumber: string;
+  why: string;
+  rowLines: number;
+  rowEntered: number;
+  rowConflicts: number;
+  /** Whatever problems could still be read. */
+  problems: string[];
+}
+export type PackageView = PackageBuilt | PackageMissing | PackageUnreadable;
 
 export interface GateView {
   /** Newest recommendation made on the ECR's current revision, if it has not been acted on since. */
@@ -143,7 +157,6 @@ const parse = (s: string): any => {
   try { return JSON.parse(s); } catch { return undefined; }
 };
 const isObj = (x: unknown): x is Record<string, any> => !!x && typeof x === 'object' && !Array.isArray(x);
-const strings = (x: unknown): string[] => (Array.isArray(x) ? x.filter((s): s is string => typeof s === 'string' && s.trim() !== '') : []);
 const ACRONYMS = new Set(['cm', 'ccb', 'cfo', 'plm', 'erp', 'eco', 'ecr', 'trc', 'pmc']);
 
 /** A role or body id in words: `cm_analyst` becomes "CM analyst". */
@@ -179,9 +192,9 @@ export function approvalView(a: ApprovalRow): ApprovalView {
     released: a.status === 'released',
     at: iso(a.at),
     endedAt: a.endedAt ? iso(a.endedAt) : undefined,
-    endedReason: a.endedReason || undefined,
+    endedReason: a.endedReason ? plainReason(String(a.endedReason)) : undefined,
     revision: a.prRevision,
-    reasons: isObj(d) && Array.isArray(d.reasons) ? d.reasons.filter((r: any) => isObj(r) && typeof r.text === 'string').map((r: any) => ({ rule: String(r.rule ?? ''), text: r.text })) : [],
+    reasons: isObj(d) && Array.isArray(d.reasons) ? d.reasons.filter((r: any) => isObj(r) && typeof r.text === 'string').map((r: any) => ({ rule: String(r.rule ?? ''), text: plainReason(r.text) })) : [],
   };
 }
 
@@ -195,7 +208,8 @@ export function recommendationView(r: RecommendationRow): RecommendationView {
     : `${by} recommends ${what}`;
   return {
     id: String(r.id), headline, by, whoKind, onBehalfOf: r.onBehalfOf || undefined, action: r.action, outcome: r.outcome,
-    reasons: r.reasons.map(x => ({ rule: x.rule, text: x.text })), recipients: r.recipients.map(roleWords), at: iso(r.at), revision: r.prRevision, waitingForSecondCheck: waiting,
+    reasons: (Array.isArray(r.reasons) ? r.reasons : []).filter(x => isObj(x) && typeof x.text === 'string').map(x => ({ rule: String(x.rule ?? ''), text: plainReason(x.text) })),
+    recipients: (Array.isArray(r.recipients) ? r.recipients : []).filter((x): x is string => typeof x === 'string').map(roleWords), at: iso(r.at), revision: r.prRevision, waitingForSecondCheck: waiting,
   };
 }
 
@@ -240,58 +254,91 @@ const GROUPS: { id: string; title: string; kinds: string[] }[] = [
 ];
 const STATUS_TEXT: Record<LineStatus, string> = { entered: 'Entered', to_enter: 'To enter in ERPNext', conflict: 'Conflict: entered differently from the package' };
 
-const fieldValue = (f: any): string => {
-  if (!isObj(f)) return '';
+/** The package row is not in a shape the page can read. Its reason is shown instead of a package. */
+class Unreadable extends Error {}
+const bad = (why: string): never => { throw new Unreadable(why); };
+
+/** An optional array of strings: absent is empty, anything else that is not an array of strings is unreadable. */
+function stringList(owner: any, key: string, where: string): string[] {
+  const v = owner?.[key];
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.some(x => typeof x !== 'string')) return bad(`${where}.${key} is not a list of text`);
+  return v.filter((x: string) => x.trim() !== '');
+}
+/** An optional array of records. */
+function objectList(owner: any, key: string, where: string): Record<string, any>[] {
+  const v = owner?.[key];
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.some(x => !isObj(x))) return bad(`${where}.${key} is not a list of records`);
+  return v;
+}
+const textOf = (v: unknown, what: string): string => (typeof v === 'string' ? v : bad(`${what} is not text`));
+
+const fieldValue = (f: Record<string, any>): string => {
   if (f.value === null || f.value === undefined) return f.from ? `(made by ${String(f.from)})` : '(not set)';
   if (typeof f.value === 'number') return f.money ? f.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(f.value);
   return String(f.value);
 };
 
-function lineView(l: any): PackageLineView | undefined {
-  if (!isObj(l) || typeof l.title !== 'string') return undefined;
-  const status: LineStatus = l.status === 'entered' ? 'entered' : l.status === 'conflict' ? 'conflict' : 'to_enter';
+function lineView(l: Record<string, any>, n: number): PackageLineView {
+  const where = `line ${n + 1}`;
+  const title = textOf(l.title, `${where} title`);
+  const status: LineStatus = l.status === 'entered' ? 'entered' : l.status === 'conflict' ? 'conflict' : l.status === 'to-enter' ? 'to_enter' : bad(`${where} has no known status`);
   return {
-    id: String(l.id ?? l.title), title: l.title, status, statusText: STATUS_TEXT[status], seat: typeof l.enteredBy === 'string' ? l.enteredBy : '',
+    id: String(l.id ?? title), title, status, statusText: STATUS_TEXT[status], seat: typeof l.enteredBy === 'string' ? l.enteredBy : '',
     instruction: typeof l.instruction === 'string' ? l.instruction : '', doctype: typeof l.doctype === 'string' ? l.doctype : '',
     note: typeof l.note === 'string' && l.note ? l.note : undefined,
-    fields: (Array.isArray(l.fields) ? l.fields : []).filter(isObj).map((f: any) => ({ label: String(f.label ?? f.field ?? ''), value: fieldValue(f) })),
-    tables: (Array.isArray(l.tables) ? l.tables : []).filter(isObj).map((t: any) => ({
+    fields: objectList(l, 'fields', where).map(f => ({ label: String(f.label ?? f.field ?? ''), value: fieldValue(f) })),
+    tables: objectList(l, 'tables', where).map(t => ({
       label: String(t.label ?? t.table ?? ''),
-      rows: (Array.isArray(t.rows) ? t.rows : []).map((row: any) => (Array.isArray(row) ? row.map((f: any) => `${isObj(f) ? String(f.label ?? f.field ?? '') : ''} ${fieldValue(f)}`.trim()).join(' · ') : '')).filter(Boolean),
+      rows: (Array.isArray(t.rows) ? t.rows : bad(`${where} table rows are not a list`)).map((row: unknown) =>
+        (Array.isArray(row) ? row : bad(`${where} has a table row that is not a list`)).filter(isObj).map((f: Record<string, any>) => `${String(f.label ?? f.field ?? '')} ${fieldValue(f)}`.trim()).join(' · ')).filter(Boolean),
     })),
   };
 }
 
-/** Every problem the package has, from the three places the worker puts one, each said once. */
+function parsedObject(json: string, what: string): Record<string, any> {
+  const v = parse(json);
+  return isObj(v) ? v : bad(`${what} is not a record`);
+}
+
+/**
+ * Every problem the package has, from the three places the worker puts one, each said once. Throws Unreadable when
+ * one of them is present and not a list of text.
+ */
 export function packageProblems(release: any, pkg: any, notes: any): string[] {
   const out: string[] = [];
   const add = (s: string) => { if (!out.includes(s)) out.push(s); };
-  for (const p of strings(pkg?.problems)) add(p);
-  for (const p of strings(notes?.problems)) add(p);
+  for (const p of stringList(pkg, 'problems', 'package')) add(p);
+  for (const p of stringList(notes, 'problems', 'notes')) add(p);
   // A change the assessment costs but the package cannot carry out (labour hours, a zero price) is a problem even
   // when the planner did not repeat it: the package must never read as "nothing to enter" while the assessment costs it.
-  for (const u of strings(release?.unsupported)) if (!out.some(p => p.includes(u))) add(`Not in this package: ${u}`);
+  for (const u of stringList(release, 'unsupported', 'release')) if (!out.some(p => p.includes(u))) add(`Not in this package: ${u}`);
   return out;
 }
 
-export function packageView(row: ErpPackageRow): PackageBuilt {
-  const release = parse(row.releaseJson);
-  const pkg = parse(row.packageJson);
-  const notes = parse(row.notesJson);
+/** The mock marker: the notes may carry `mock` (text or true). Real packages never do. */
+const mockOf = (notes: any): string | undefined => (notes?.mock === true ? 'Mock rows, not read from the ERP' : typeof notes?.mock === 'string' && notes.mock ? notes.mock : undefined);
+
+function builtView(row: ErpPackageRow): PackageBuilt {
+  const release = parsedObject(row.releaseJson, 'The release');
+  const pkg = parsedObject(row.packageJson, 'The package');
+  const notes = parsedObject(row.notesJson, 'The notes');
+  if (!Array.isArray(pkg.lines)) bad('The package has no list of lines');
   const problems = packageProblems(release, pkg, notes);
-  const readable = isObj(pkg) && Array.isArray(pkg.lines);
-  const lines = readable ? (pkg.lines as any[]).map(lineView).filter((l): l is PackageLineView => !!l) : [];
+  const raw = pkg.lines as unknown[];
+  const all = raw.map((l, i) => lineView(isObj(l) ? l : bad(`line ${i + 1} is not a record`), i));
   // The row's own counts are what the module checked; the lines are what the page can show. When they disagree, say so.
-  if (row.lines > lines.length) problems.push(`The package row counts ${row.lines} line${row.lines === 1 ? '' : 's'}, but ${lines.length} could be read from it. Treat the list below as incomplete.`);
+  if (row.lines !== all.length) problems.push(`The package row counts ${row.lines} line${row.lines === 1 ? '' : 's'}, but ${all.length} could be read from it. Treat the list below as incomplete.`);
   const counts = { lines: row.lines, entered: row.entered, toEnter: Math.max(0, row.lines - row.entered - row.conflicts), conflicts: row.conflicts, problems: problems.length };
-  const known = new Set<string>();
   const groups: PackageGroupView[] = [];
+  const placed = new Set<PackageLineView>();
   for (const g of GROUPS) {
-    const kept = (pkg?.lines as any[] | undefined)?.filter(l => isObj(l) && g.kinds.includes(l.kind)).map(lineView).filter((l): l is PackageLineView => !!l) ?? [];
-    kept.forEach(l => known.add(l.id));
+    const kept = all.filter((_, i) => g.kinds.includes((raw[i] as Record<string, any>).kind));
+    kept.forEach(v => placed.add(v));
     if (kept.length) groups.push({ id: g.id, title: g.title, lines: kept, entered: kept.filter(l => l.status === 'entered').length });
   }
-  const other = lines.filter(l => !known.has(l.id));
+  const other = all.filter(v => !placed.has(v));
   if (other.length) groups.push({ id: 'other', title: 'Other lines', lines: other, entered: other.filter(l => l.status === 'entered').length });
 
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -306,6 +353,7 @@ export function packageView(row: ErpPackageRow): PackageBuilt {
     health = 'conflict';
     headline = `${plural(counts.conflicts, 'line')} in conflict with what is in ERPNext. ${counts.entered} of ${plural(counts.lines, 'line')} entered.`;
   } else if (counts.lines === 0) {
+    // Only here: the package parsed, its lines are a real empty list, and it names no problem and no unsupported change.
     health = 'nothing';
     headline = 'The release changes nothing ERPNext holds, so there is nothing to enter.';
   } else if (counts.entered === counts.lines) {
@@ -315,12 +363,29 @@ export function packageView(row: ErpPackageRow): PackageBuilt {
     health = 'to_enter';
     headline = `${counts.entered} of ${plural(counts.lines, 'line')} entered, ${counts.toEnter} to enter in ERPNext.`;
   }
+  const effects = objectList(pkg, 'effects', 'package').map(e => ({ program: String(e.program ?? ''), name: String(e.name ?? ''), costDelta: Number(e.costDelta) || 0, basis: String(e.basis ?? '') }));
   return {
     state: 'built', ecoNumber: row.ecoNumber, health, headline, counts, problems,
-    warnings: strings(pkg?.warnings),
-    effects: (Array.isArray(pkg?.effects) ? pkg.effects : []).filter(isObj).map((e: any) => ({ program: String(e.program ?? ''), name: String(e.name ?? ''), costDelta: Number(e.costDelta) || 0, basis: String(e.basis ?? '') })),
-    groups, notes: strings(notes?.notes), builtAt: iso(row.builtAt), checkedAt: iso(row.updatedAt), erpRead: row.erpBaseline.slice(0, 8), system: 'ERPNext',
+    warnings: stringList(pkg, 'warnings', 'package'),
+    effects, groups, notes: stringList(notes, 'notes', 'notes'), mock: mockOf(notes),
+    builtAt: iso(row.builtAt), checkedAt: iso(row.updatedAt), erpRead: String(row.erpBaseline).slice(0, 8), system: 'ERPNext',
   };
+}
+
+/** The package as the card draws it; or, when the row is not readable, a state that says so and never reads as empty. */
+export function packageView(row: ErpPackageRow): PackageBuilt | PackageUnreadable {
+  try {
+    return builtView(row);
+  } catch (e) {
+    // Whatever problems can still be read are kept: they may be the reason a person has to act.
+    let problems: string[] = [];
+    try { problems = packageProblems(parse(row.releaseJson), parse(row.packageJson), parse(row.notesJson)); } catch { /* the reason below says it */ }
+    return {
+      state: 'unreadable', ecoNumber: String(row.ecoNumber),
+      why: e instanceof Unreadable ? e.message : `The package row could not be read (${e instanceof Error ? e.message : String(e)})`,
+      rowLines: row.lines, rowEntered: row.entered, rowConflicts: row.conflicts, problems,
+    };
+  }
 }
 
 function packageFor(rows: GateRows, pr: GatePr): PackageView {
@@ -341,17 +406,40 @@ function packageFor(rows: GateRows, pr: GatePr): PackageView {
 
 // ---------------------------------------------------------------- one ECR
 
+/** A row that cannot be read is left out; one bad row must not take the page down. */
+function each<T, U>(rows: T[], f: (r: T) => U): U[] {
+  const out: U[] = [];
+  for (const r of rows) {
+    try { out.push(f(r)); } catch { /* skipped */ }
+  }
+  return out;
+}
+
 export function buildGate(rows: GateRows, pr: GatePr): GateView {
+  try {
+    return buildGateOf(rows, pr);
+  } catch (e) {
+    // Never throws out of buildAssessment: the page keeps its other parts, and the package says what happened.
+    return {
+      approvals: [], events: [],
+      package: { state: 'unreadable', ecoNumber: '', why: `The gate's rows could not be read (${e instanceof Error ? e.message : String(e)})`, rowLines: 0, rowEntered: 0, rowConflicts: 0, problems: [] },
+    };
+  }
+}
+
+function buildGateOf(rows: GateRows, pr: GatePr): GateView {
   const mine = (rows.approvals ?? []).filter(a => a.prId === pr.id).sort((a, b) => Number(b.id - a.id));
-  const approvals = mine.map(approvalView);
-  const events: ActivityEvent[] = mine.flatMap((a, i) => approvalEvents(a, approvals[i]));
+  const pairs = each(mine, a => ({ a, v: approvalView(a) }));
+  const approvals = pairs.map(x => x.v);
+  const events: ActivityEvent[] = pairs.flatMap(x => each([x], y => approvalEvents(y.a, y.v)).flat());
 
   const recs = (rows.recommendations ?? []).filter(r => r.prId === pr.id).sort((a, b) => Number(a.id - b.id));
-  for (const r of recs) events.push(recommendationEvent(r, pr));
+  const recPairs = each(recs, r => ({ r, v: recommendationView(r) }));
+  events.push(...each(recs, r => recommendationEvent(r, pr)));
   // Only a row made on the current revision speaks for the ECR as it is now; and not once an approval has followed it.
-  const latest = recs.filter(r => r.prRevision === pr.revision).at(-1);
-  const acted = latest && mine.some(a => a.status !== 'withdrawn' && a.at.toDate() >= latest.at.toDate());
-  const recommendation = latest && !acted ? recommendationView(latest) : undefined;
+  const latest = recPairs.filter(x => x.r.prRevision === pr.revision).at(-1);
+  const acted = latest && approvals.some(v => v.state !== 'withdrawn' && v.at >= latest.v.at);
+  const recommendation = latest && !acted ? latest.v : undefined;
 
   const head = approvals[0];
   const pending = pr.status === 'approved' && approvals.some(a => a.state === 'pending_recheck');

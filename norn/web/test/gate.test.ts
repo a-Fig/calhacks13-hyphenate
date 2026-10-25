@@ -3,11 +3,14 @@
 // ERPNext connector's package (connectors/erpnext/src/package.ts).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { ACTION_IDS, LEVEL_IDS, TRIGGER_IDS, decideAction, loadConfigFile } from '../../config/src/index.ts';
 import { buildAssessment, type PrRow, type ResultRow, type RunRow, type Snapshot } from '../src/assessment/live/build.ts';
 import {
   RELEASE_BLOCKED, buildGate, packageProblems, packageView, roleWords,
   type ApprovalRow, type EcoReleaseRow, type ErpPackageRow, type RecommendationRow,
 } from '../src/assessment/live/gate.ts';
+import { ACTION_WORDS, LEVEL_WORDS, TRIGGER_WORDS, plainReason } from '../src/assessment/live/words.ts';
 import rows0417l3 from '../src/assessment/fixtures/ecr-0417.l3.json' with { type: 'json' };
 
 const ts = (n: number) => ({ microsSinceUnixEpoch: BigInt(n) * 1_000_000n, toDate: () => new Date(n * 1000) });
@@ -84,12 +87,112 @@ test('an empty package with no problems says there is nothing to enter; all ente
   assert.equal(done.health, 'entered');
 });
 
-test('a package the page cannot read is flagged incomplete, not shown as empty', () => {
+test('a package the page cannot read says so, and never reads as empty', () => {
+  const unreadable = (over: Partial<ErpPackageRow>) => {
+    const v = packageView(pkgRow({ lines: 0, entered: 0, ...over }));
+    assert.equal(v.state, 'unreadable', JSON.stringify(over));
+    assert.ok(v.state === 'unreadable' && v.why.length > 0);
+    return v.state === 'unreadable' ? v : undefined;
+  };
+  unreadable({ packageJson: '{}' });
+  unreadable({ packageJson: 'null' });
+  unreadable({ packageJson: 'not json' });
+  unreadable({ packageJson: '{"lines":{}}' });
+  unreadable({ packageJson: '{"lines":"x"}' });
   // The record the offline checks leave has no lines array, only a count.
-  const v = packageView(pkgRow({ packageJson: JSON.stringify({ check: true }), lines: 4, entered: 0 }));
-  assert.equal(v.health, 'problems');
-  assert.match(v.problems[0], /counts 4 lines, but 0 could be read/);
-  assert.equal(packageView(pkgRow({ packageJson: 'not json', lines: 0, entered: 0 })).health, 'nothing');
+  const check = unreadable({ packageJson: JSON.stringify({ check: true }), lines: 4 })!;
+  assert.match(check.why, /no list of lines/);
+  assert.equal(check.rowLines, 4);
+  unreadable({ packageJson: pkgJson({ problems: 'oops' }) });
+  unreadable({ packageJson: pkgJson({ warnings: [1] }) });
+  unreadable({ packageJson: pkgJson({ effects: {} }) });
+  unreadable({ packageJson: pkgJson({}, [{ ...line('bom', 'a', 'entered'), fields: 'x' }] as never), lines: 1 });
+  unreadable({ packageJson: pkgJson({}, [{ ...line('bom', 'a', 'maybe') }]), lines: 1 });
+  unreadable({ packageJson: pkgJson({}, [null] as never), lines: 1 });
+  unreadable({ releaseJson: 'null', packageJson: pkgJson({}, []) });
+  unreadable({ releaseJson: '{"unsupported":"labor hours"}', packageJson: pkgJson({}, []) });
+  unreadable({ notesJson: '[]', packageJson: pkgJson({}, []) });
+  // What can still be read is kept: a problem named in a package that is otherwise unreadable.
+  const kept = unreadable({ packageJson: '{"lines":{},"problems":["A price row is in the way."]}' })!;
+  assert.deepEqual(kept.problems, ['A price row is in the way.']);
+});
+
+test('"nothing to enter" only for a package that parsed, has an empty list of lines, and no problem or unsupported change', () => {
+  const good = packageView(pkgRow({ packageJson: pkgJson({}, []), lines: 0, entered: 0, notesJson: JSON.stringify({ notes: ['ECR-0417 changes nothing the ERP holds.'], problems: [] }) }));
+  assert.ok(good.state === 'built' && good.health === 'nothing' && /nothing to enter/.test(good.headline));
+  const withUnsupported = packageView(pkgRow({ releaseJson: JSON.stringify({ unsupported: ['labor hours 1 -> 2'] }), packageJson: pkgJson({}, []), lines: 0, entered: 0 }));
+  assert.ok(withUnsupported.state === 'built' && withUnsupported.health === 'problems');
+  const withProblem = packageView(pkgRow({ packageJson: pkgJson({ problems: ['No account is mapped.'] }, []), lines: 0, entered: 0 }));
+  assert.ok(withProblem.state === 'built' && withProblem.health === 'problems');
+  // The row counts lines the package does not list: incomplete, not empty.
+  const short = packageView(pkgRow({ packageJson: pkgJson({}, []), lines: 3, entered: 0 }));
+  assert.ok(short.state === 'built' && short.health === 'problems' && /counts 3 lines, but 0 could be read/.test(short.problems[0]));
+});
+
+test('a malformed package or row cannot throw out of the builders', () => {
+  const prRow: PrRow = { id: 1n, plmEcrNumber: 'ECR-0417', title: 't', description: 'd', status: 'merged', revision: 2, createdBy: id('aa'), createdAt: ts(1), updatedAt: ts(1) };
+  const run: RunRow = { id: 1n, prId: 1n, stage: 's2_cost', status: 'done', note: '', createdAt: ts(10), finishedAt: ts(20) };
+  const results: ResultRow[] = (rows0417l3 as { key: string; label: string; unit: string; p10: number; p50: number; p90: number; detailJson: string }[])
+    .map((r, i) => ({ ...r, id: BigInt(i + 1), checkRunId: 1n, prId: 1n, mock: false }));
+  const s: Snapshot = {
+    prs: [prRow], revisions: [], runs: [run], results, statements: [], comments: [], actions: [], events: [], principals: [],
+    erpPackages: [pkgRow({ packageJson: '{"lines":{}}', lines: 0, entered: 0 })],
+    approvals: [appr({ decisionJson: 'null' }), appr({ id: 2n, decisionJson: '{"reasons":"x","route":5}' }), { ...appr({ id: 3n }), at: undefined } as never],
+    recommendations: [rec({ reasons: undefined as never, recipients: null as never, at: ts(300) }), rec({ id: 2n, at: undefined as never })],
+  };
+  const out = buildAssessment(s, prRow)!;
+  assert.equal(out.gate!.package.state, 'unreadable');
+  assert.deepEqual(out.gate!.approvals.map(a => a.id), ['2', '1'], 'the row with no time is left out, the others kept');
+  assert.ok(out.gate!.recommendation, 'the readable recommendation stays');
+  assert.deepEqual(out.gate!.recommendation!.reasons, []);
+  // Whole-snapshot garbage: buildGate itself does not throw.
+  const g = buildGate({ approvals: 5 as never }, pr());
+  assert.equal(g.package.state, 'unreadable');
+  assert.deepEqual(g.approvals, []);
+});
+
+test('a package with a mock marker shows it; a real package does not', () => {
+  const m = packageView(pkgRow({ notesJson: JSON.stringify({ notes: [], problems: [], mock: 'Hand-made rows, not read from the ERP' }) }));
+  assert.ok(m.state === 'built' && m.mock === 'Hand-made rows, not read from the ERP');
+  const t = packageView(pkgRow({ notesJson: JSON.stringify({ notes: [], problems: [], mock: true }) }));
+  assert.ok(t.state === 'built' && /Mock/.test(t.mock!));
+  const real = packageView(pkgRow());
+  assert.ok(real.state === 'built' && real.mock === undefined);
+});
+
+test('the gate\'s own reasons, from Bowman\'s configuration, read in business words with no id left', async () => {
+  const loaded = await loadConfigFile(fileURLToPath(new URL('../../../bowman/norn-config/bowman.config.ts', import.meta.url)));
+  assert.ok(loaded.ok);
+  const config = loaded.config;
+  const raw: string[] = [];
+  const facts = [{ ecrId: 'ECR-0423' }, { ecrId: 'ECR-0423', triggers: ['safety_part', 'new_supplier', 'stale_data'] as const }, { ecrId: 'ECR-0417', approvedBy: 'fast_track' }];
+  const actors = [{ kind: 'agent' as const }, { kind: 'agent' as const, actingFor: 'EMP-02' }, { kind: 'person' as const, id: 'EMP-02' }, { kind: 'person' as const, id: 'EMP-01' }];
+  for (const action of ACTION_IDS) {
+    for (const actor of actors) {
+      for (const f of facts) {
+        const d = decideAction(config, { action, actor, facts: { ...f, triggers: f.triggers ? [...f.triggers] : undefined } });
+        raw.push(...d.reasons.map(r => r.text), ...(d.reroute?.reasons ?? []).map(r => r.text), ...(d.limits ?? []).map(l => l.text));
+      }
+    }
+  }
+  const ids = [...ACTION_IDS, ...LEVEL_IDS.filter(l => l.includes('_')), ...TRIGGER_IDS];
+  const leaks = (t: string) => ids.filter(i => new RegExp(`\\b${i}\\b`).test(t));
+  assert.ok(raw.some(t => leaks(t).length), 'the gate does put ids in its reasons');
+  assert.deepEqual(raw.map(plainReason).filter(t => leaks(t).length), [], 'no id survives');
+  // The sentence Bowman's gate gave on the fast track.
+  const sets = raw.filter(t => /^The company sets \w+ to \w+ for agents:/.test(t));
+  assert.ok(sets.length > 0 && sets.every(t => plainReason(t).startsWith("For agents, the company's rule for ")));
+  // The sentence the real gate gave on ECR-0423's fast track (Bowman's configuration, 2026-10-24).
+  const real = 'The company sets approve_fast_track_ecr to approve_sampled for agents: Most changes are small and CMII fast-tracks 75 to 85 percent of them. Within the limits Norn approves and a fifth get a blind second read.';
+  assert.equal(plainReason(real), "For agents, the company's rule for approving an ECR on the fast track is to approve, with a sampled second check: Most changes are small and CMII fast-tracks 75 to 85 percent of them. Within the limits Norn approves and a fifth get a blind second read.");
+  // Text with no id is untouched, and the maps cover every id in the configuration.
+  assert.equal(plainReason('The change is 622 USD against a limit of 25,000 USD.'), 'The change is 622 USD against a limit of 25,000 USD.');
+  assert.deepEqual(Object.keys(ACTION_WORDS).sort(), [...ACTION_IDS].sort());
+  assert.deepEqual(Object.keys(LEVEL_WORDS).sort(), [...LEVEL_IDS].sort());
+  assert.deepEqual(Object.keys(TRIGGER_WORDS).sort(), [...TRIGGER_IDS].sort());
+  // And it is what the views render.
+  const g = buildGate({ recommendations: [rec({ reasons: [{ rule: 'x', text: real }] })], approvals: [appr({ kind: 'fast_track', bodyId: 'fast_track', decisionJson: JSON.stringify({ reasons: [{ rule: 'x', text: real }] }) })] }, pr({ status: 'approved' }));
+  assert.ok(!/approve_fast_track_ecr|approve_sampled/.test(JSON.stringify(g)));
 });
 
 test('without a package, the page says why: not released, no change order number, or still building', () => {

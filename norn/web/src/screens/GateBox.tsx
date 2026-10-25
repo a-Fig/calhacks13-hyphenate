@@ -13,7 +13,7 @@ import {
 } from '@primer/octicons-react';
 import { Button, Flash, Label } from '@primer/react';
 import type { ApprovalView, GateView, PackageBuilt, PackageLineView, RecommendationView } from '../assessment/live/gate.ts';
-import { Person } from '../ui/Bits.tsx';
+import { MockTag, Person } from '../ui/Bits.tsx';
 import { dateTime, usd } from '../ui/fmt.ts';
 import './gate.css';
 
@@ -219,12 +219,38 @@ export function ErpPackageCard({ gate }: { gate: GateView }) {
       </section>
     );
   }
+  if (p.state === 'unreadable') {
+    return (
+      <section className="nx-erp" aria-label="ERP change package" data-package-state="unreadable">
+        <header className="nx-erp-head">
+          <PackageIcon size={16} />
+          <b>ERP change package</b>
+          <span className="nx-fg-muted">{p.ecoNumber}</span>
+        </header>
+        <Flash variant="danger" className="nx-pkg-flash nx-pkg-problems">
+          <AlertFillIcon size={16} /> <b>Norn could not read this ERP change package.</b> It is not empty: do not treat it as nothing to enter.
+          <ul>
+            <li>{p.why}</li>
+            {p.rowLines > 0 && <li>The stored row counts {p.rowLines} line{p.rowLines === 1 ? '' : 's'}, {p.rowEntered} entered and {p.rowConflicts} in conflict.</li>}
+          </ul>
+        </Flash>
+        {p.problems.length > 0 && (
+          <Flash variant="danger" className="nx-pkg-flash nx-pkg-problems" aria-label="Problems">
+            <b>{p.problems.length === 1 ? 'A problem' : `${p.problems.length} problems`} that could still be read</b>
+            <ul>{p.problems.map((x, i) => <li key={i}>{x}</li>)}</ul>
+          </Flash>
+        )}
+        <footer className="nx-pkg-foot nx-fg-muted nx-small">Ask whoever runs the worker to check the package row.</footer>
+      </section>
+    );
+  }
   const h = HEALTH[p.health];
   return (
     <section className="nx-erp" aria-label="ERP change package" data-package-health={p.health}>
       <header className="nx-erp-head">
         <PackageIcon size={16} />
         <b>ERP change package</b>
+        <MockTag on={!!p.mock} title={p.mock} />
         <span className="nx-fg-muted">{p.ecoNumber} &middot; lines for a person to enter in {p.system}. Norn does not write to it.</span>
         <span className="nx-sp" />
         <Label variant={p.counts.problems || p.counts.conflicts ? 'danger' : p.counts.entered === p.counts.lines && p.counts.lines ? 'success' : 'secondary'}>
@@ -282,7 +308,7 @@ export function ErpPackageCard({ gate }: { gate: GateView }) {
         </div>
       )}
       <footer className="nx-pkg-foot nx-fg-muted nx-small">
-        Built <span>{dateTime(p.builtAt)}</span> from the assessment. Statuses checked against ERP read {p.erpRead} <span>{dateTime(p.checkedAt)}</span>.
+        {p.mock && <><b>Mock:</b> {p.mock} </>}Built <span>{dateTime(p.builtAt)}</span> from the assessment. Statuses checked against ERP read {p.erpRead} <span>{dateTime(p.checkedAt)}</span>.
       </footer>
     </section>
   );

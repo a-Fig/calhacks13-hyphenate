@@ -183,7 +183,7 @@ try {
   const baselineHash = [...db.baselineSnapshot.iter()].find(b => b.current)!.hash;
   await A.R.recordErpPackage({
     prId: p423.id, ecoNumber: 'ECO-0423', s2RunId: s2.id, erpBaseline: baselineHash, releaseJson: JSON.stringify(release), packageJson: JSON.stringify(pkg),
-    lines: lines.length, entered: 1, conflicts: 1, notesJson: JSON.stringify({ notes: [...notes, 'The grey stock is used up first, so nothing is written off.'], problems: [] }),
+    lines: lines.length, entered: 1, conflicts: 1, notesJson: JSON.stringify({ notes: [...notes, 'The grey stock is used up first, so nothing is written off.'], problems: [], mock: 'Hand-made rows from web/scripts/seed-gate-rows.ts: the lines, their statuses, the problems and the effect were not read from ERPNext.' }),
   });
   console.log('ECR-0423: released as ECO-0423, package recorded (hand-made lines, 2 problems)');
 
