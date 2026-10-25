@@ -188,13 +188,33 @@ describe('job tool-input guards', () => {
     assert.match((await pre(hook, 'a', {})).hookSpecificOutput?.permissionDecisionReason ?? '', /the check failed: boom/);
   });
 
-  it('a job\'s guards are installed next to the WebFetch guard; a job without any gets the hooks it had before', () => {
+  it('a job without guards gets the WebFetch guard alone; a job with guards gets one hook that runs its guards first', () => {
     const ctx = { emitter: new JobEmitter('j', 'r', { actor: 'a', onBehalfOf: null, spawnedBy: 'norn' }, () => {}), jobPrompt: 'p', maxChars: 100, onFetchDenied: () => {} };
     const plain = buildJobHooks(ctx);
     assert.deepEqual(plain.PreToolUse!.map((m) => m.matcher), ['WebFetch']);
     const guarded = buildJobHooks({ ...ctx, toolInputGuards: { t: () => ({ allow: true }) } });
-    assert.equal(guarded.PreToolUse!.length, 2);
-    assert.equal(guarded.PreToolUse![0]!.matcher, 'WebFetch');
+    assert.equal(guarded.PreToolUse!.length, 1, 'one hook, because hooks that match one call may run side by side');
+    assert.equal(guarded.PreToolUse![0]!.hooks.length, 1);
+  });
+
+  it('runs the job\'s guards before the guard that resolves the host, and resolves only when they allow the call', async () => {
+    const asked: string[] = [];
+    const resolve = async (host: string) => (asked.push(host), ['93.184.216.34']);
+    const hooks = buildJobHooks({
+      emitter: new JobEmitter('j', 'r', { actor: 'a', onBehalfOf: null, spawnedBy: 'norn' }, () => {}), jobPrompt: 'p', maxChars: 100, onFetchDenied: () => {},
+      toolInputGuards: { WebFetch: (i) => (/secret/i.test(JSON.stringify(i)) ? { allow: false, reason: 'carries an identifier' } : { allow: true }) },
+      resolve,
+    });
+    const run = async (url: string) => {
+      const out = (await hooks.PreToolUse![0]!.hooks[0]!({ hook_event_name: 'PreToolUse', tool_name: 'WebFetch', tool_input: { url, prompt: 'x' } } as never, 't', { signal: new AbortController().signal })) as { hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string } };
+      return out.hookSpecificOutput;
+    };
+    const denied = await run('https://secret-name.example/p');
+    assert.equal(denied?.permissionDecision, 'deny');
+    assert.match(denied?.permissionDecisionReason ?? '', /carries an identifier/);
+    assert.deepEqual(asked, [], 'the host name was not looked up');
+    assert.equal(await run('https://ok.example/p'), undefined);
+    assert.deepEqual(asked, ['ok.example']);
   });
 
   it('runJob gives the session the guards of its spec, and a denied call is logged as a hook denial', async () => {

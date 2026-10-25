@@ -17,7 +17,7 @@ import { parseArgs } from 'node:util';
 import { bowman } from '../../../bowman/data/index.ts';
 import { renderReport } from './report.ts';
 import { AgentOutputError, buildResearchJob, DEFAULT_TOKEN_ENV, MissingTokenError, parseAgentOutput, redactJob, type ToolCallRecord } from './job.ts';
-import { brightDataFetcher, plainFetcher, recordedFetcher, webFirstFetcher, type RecordedPage } from './pages.ts';
+import { brightDataFetcher, plainFetcher, recordedFetcher, urlLeakCheck, webFirstFetcher, type RecordedPage } from './pages.ts';
 import { loadRecording, type Recording } from './recording.ts';
 import { finish, prepare, type Company } from './run.ts';
 import type { PageFetcher } from './types.ts';
@@ -97,7 +97,7 @@ async function live(ecrId: string, o: { seed: string; n: number; printJob: boole
     throw e;
   }
   // Fetch each page again, by a plain HTTPS fetch first and through Bright Data when that fails, and keep what came back for --save-recording.
-  const base = webFirstFetcher(plainFetcher({ today }), brightDataFetcher({ today }));
+  const base = webFirstFetcher(plainFetcher({ today, leakCheck: urlLeakCheck(prep.identifiers) }), brightDataFetcher({ today }));
   const seen: RecordedPage[] = [];
   const fetcher: PageFetcher = async (url) => {
     const r = await base(url);

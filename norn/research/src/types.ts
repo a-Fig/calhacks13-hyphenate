@@ -87,5 +87,5 @@ export interface Verdict {
 
 /** Fetches a page's text for quote verification. Live: Bright Data. Tests and replay: recorded pages. */
 export type PageVia = 'fetch' | 'brightdata' | 'recorded';
-export interface PageResult { ok: boolean; text?: string; retrievedAt?: string; error?: string; /** How it was read; absent in older fakes. */ via?: PageVia }
+export interface PageResult { ok: boolean; text?: string; retrievedAt?: string; error?: string; /** How it was read; absent in older fakes. */ via?: PageVia; /** Set when the address was refused before any request because it carries an identifier from the company's data. */ refused?: string }
 export type PageFetcher = (url: string) => Promise<PageResult>;

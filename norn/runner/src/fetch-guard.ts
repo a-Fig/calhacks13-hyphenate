@@ -98,9 +98,16 @@ export interface FetchVerdict {
   reason: string;
 }
 
-/** Decides whether WebFetch may fetch `rawUrl`. Fails closed. */
-export async function checkFetchUrl(rawUrl: unknown, resolve: Resolver = defaultResolver): Promise<FetchVerdict> {
-  const deny = (reason: string): FetchVerdict => ({ allowed: false, reason });
+/** An allowed fetch target: the address that was checked, which a caller that connects itself must connect to. */
+export type PublicTarget = { allowed: true; reason: string; host: string; address: string; family: 4 | 6 } | { allowed: false; reason: string };
+
+/**
+ * Decides whether `rawUrl` may be fetched and, when it may, says which address was checked, so a caller that opens the
+ * connection itself can connect to exactly that address (a name looked up a second time can answer differently:
+ * DNS rebinding). Resolves once. Fails closed.
+ */
+export async function resolvePublicTarget(rawUrl: unknown, resolve: Resolver = defaultResolver): Promise<PublicTarget> {
+  const deny = (reason: string): PublicTarget => ({ allowed: false, reason });
   if (typeof rawUrl !== 'string') return deny('WebFetch call has no url');
   let url: URL;
   try {
@@ -113,7 +120,7 @@ export async function checkFetchUrl(rawUrl: unknown, resolve: Resolver = default
   // The URL parser has already turned 2130706433, 0x7f.1 and 0177.0.0.1 into 127.0.0.1.
   const host = url.hostname.replace(/^\[|\]$/g, '');
   if (isIP(host)) {
-    return isNonPublicAddress(host) ? deny(`${host} is not a public internet address`) : { allowed: true, reason: 'public address' };
+    return isNonPublicAddress(host) ? deny(`${host} is not a public internet address`) : { allowed: true, reason: 'public address', host, address: host, family: isIP(host) === 6 ? 6 : 4 };
   }
   if (isLocalName(host)) return deny(`${host} is a local name`);
   let addresses: string[];
@@ -125,7 +132,15 @@ export async function checkFetchUrl(rawUrl: unknown, resolve: Resolver = default
   if (addresses.length === 0) return deny(`${host} resolved to no address`);
   const bad = addresses.find(isNonPublicAddress);
   if (bad) return deny(`${host} resolves to ${bad}, which is not a public internet address`);
-  return { allowed: true, reason: 'resolves to public addresses only' };
+  // Every answer is public; connect to the first.
+  const first = addresses[0]!;
+  return { allowed: true, reason: 'resolves to public addresses only', host, address: first, family: isIP(first) === 6 ? 6 : 4 };
+}
+
+/** Decides whether WebFetch may fetch `rawUrl`. Fails closed. */
+export async function checkFetchUrl(rawUrl: unknown, resolve: Resolver = defaultResolver): Promise<FetchVerdict> {
+  const t = await resolvePublicTarget(rawUrl, resolve);
+  return { allowed: t.allowed, reason: t.reason };
 }
 
 /**

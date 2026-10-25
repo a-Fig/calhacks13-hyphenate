@@ -9,7 +9,11 @@
 // the agent's report of it. Not run from this environment (no token, no route): see NOTES.md.
 // The token is read from the environment by name and is never printed.
 
+import https from 'node:https';
+import { isIP } from 'node:net';
+import { resolvePublicTarget, type Resolver } from '../../runner/src/fetch-guard.ts';
 import { DEFAULT_TOKEN_ENV } from './job.ts';
+import { findUrlLeaks, type Identifier } from './leak.ts';
 import type { PageFetcher, PageResult } from './types.ts';
 
 export interface RecordedPage {
@@ -65,17 +69,110 @@ export function brightDataFetcher(opts: BrightDataFetcherOptions): PageFetcher {
 // ---------------------------------------------------------------------------------------------
 // Web first, Bright Data as the fallback.
 
+export interface PlainResponse {
+  status: number;
+  /** Lower-case header names. */
+  headers: Record<string, string | undefined>;
+  body: string;
+}
+/** What the transport is told to do: connect to `address` (already checked) and ask `url.host` for `url.pathname + url.search`. */
+export interface PlainRequest {
+  url: URL;
+  address: string;
+  family: 4 | 6;
+  headers: Record<string, string>;
+  timeoutMs: number;
+  maxChars: number;
+}
+export type PlainTransport = (req: PlainRequest) => Promise<PlainResponse>;
+
 export interface PlainFetcherOptions {
-  fetchImpl?: typeof fetch;
   today: string;
   timeoutMs?: number;
   /** Pages larger than this are cut (the quote is a sentence; a book is not needed). Default 2,000,000 characters. */
   maxChars?: number;
-  /** The public-address check; default the runner's, the one WebFetch is held to. */
-  check?: (url: string) => Promise<{ allowed: boolean; reason: string }>;
+  /** Resolves a host name; default the system's. The one answer is what the connection is pinned to. */
+  resolve?: Resolver;
+  /** Opens the connection and reads the response. Default: node:https with the lookup pinned to the checked address. */
+  transport?: PlainTransport;
   /** Redirects followed, each checked again. Default 3. */
   maxRedirects?: number;
+  /**
+   * Said of every address before the name is looked up or anything is sent, the first one and each redirect's `Location`:
+   * the reason it carries an identifier from the company's data, or null. A refusal comes back as `refused`, which the
+   * guardrails turn into a rejection and which is never retried through Bright Data.
+   */
+  leakCheck?: (url: string) => string | null;
 }
+
+/** A `leakCheck` from the company's identifiers: the address as written and decoded (percent-escapes, `+`), host, path and query. */
+export function urlLeakCheck(identifiers: Identifier[], allowTerms?: readonly string[]): (url: string) => string | null {
+  return (url) => {
+    const leaks = findUrlLeaks(url, identifiers, allowTerms);
+    return leaks.length ? `contains an identifier from the company's data (${[...new Set(leaks.map((l) => l.kind))].join(', ')})` : null;
+  };
+}
+
+/**
+ * A `lookup` for node:https that answers with one address and nothing else. The address was checked by `resolvePublicTarget`;
+ * a second name lookup by the socket could answer differently (DNS rebinding), so the connection is pinned to the one checked.
+ * TLS still verifies the certificate against the host name, because `servername` and `Host` stay the name.
+ */
+export function pinnedLookup(address: string, family: 4 | 6) {
+  return (_host: string, optionsOrCb: unknown, maybeCb?: unknown): void => {
+    const cb = (typeof optionsOrCb === 'function' ? optionsOrCb : maybeCb) as (err: Error | null, a: string | { address: string; family: number }[], f?: number) => void;
+    const options = (typeof optionsOrCb === 'function' ? {} : optionsOrCb) as { all?: boolean };
+    if (options?.all) cb(null, [{ address, family }]);
+    else cb(null, address, family);
+  };
+}
+
+function lowerHeaders(h: Record<string, string | string[] | undefined>): Record<string, string | undefined> {
+  return Object.fromEntries(Object.entries(h).map(([k, v]) => [k.toLowerCase(), Array.isArray(v) ? v.join(', ') : v]));
+}
+
+/** The default transport: an https request to the checked address, the host name on the certificate check, a hard time limit. */
+export const httpsTransport: PlainTransport = (req) =>
+  new Promise((resolve, reject) => {
+    const host = req.url.hostname.replace(/^\[|\]$/g, '');
+    let done = false;
+    let timer: NodeJS.Timeout | undefined;
+    const finish = (f: () => void) => {
+      if (!done) {
+        done = true;
+        clearTimeout(timer);
+        f();
+      }
+    };
+    const r = https.request(
+      {
+        host,
+        port: req.url.port || 443,
+        path: `${req.url.pathname}${req.url.search}`,
+        method: 'GET',
+        headers: { ...req.headers, host: req.url.host },
+        ...(isIP(host) ? {} : { servername: host }),
+        lookup: pinnedLookup(req.address, req.family) as never,
+      },
+      (res) => {
+        res.setEncoding('utf8');
+        let body = '';
+        res.on('data', (chunk: string) => {
+          body += chunk;
+          if (body.length > req.maxChars) {
+            body = body.slice(0, req.maxChars);
+            res.destroy();
+            finish(() => resolve({ status: res.statusCode ?? 0, headers: lowerHeaders(res.headers), body }));
+          }
+        });
+        res.on('end', () => finish(() => resolve({ status: res.statusCode ?? 0, headers: lowerHeaders(res.headers), body })));
+        res.on('error', (e) => finish(() => reject(e)));
+      },
+    );
+    timer = setTimeout(() => r.destroy(new Error(`timed out after ${req.timeoutMs} ms`)), req.timeoutMs);
+    r.on('error', (e) => finish(() => reject(e)));
+    r.end();
+  });
 
 /** Text of an HTML page: scripts, styles and tags out, the common entities decoded, whitespace folded. */
 export function htmlToText(html: string): string {
@@ -111,38 +208,43 @@ export function looksBlockedOrEmpty(text: string): string | null {
 }
 
 /**
- * The first reader of a page for quote verification: a plain HTTPS GET with a timeout, only after the same public-address
- * check WebFetch is held to (each redirect again). It stands for "the page as a person with a browser would get it". Failure,
- * an HTTP error or a block, an empty page or a block page come back as not ok, with why.
+ * The first reader of a page for quote verification: a plain HTTPS GET with a timeout. Every address (the first and each
+ * redirect's `Location`) goes through the identifier check, then is resolved once and checked to be public, and the
+ * connection is pinned to the address that was checked. Failure, an HTTP error or a block, an empty page or a block page
+ * come back as not ok, with why; an address that carries an identifier comes back `refused`.
  */
 export function plainFetcher(opts: PlainFetcherOptions): PageFetcher {
-  const doFetch = opts.fetchImpl ?? fetch;
+  const transport = opts.transport ?? httpsTransport;
   const maxChars = opts.maxChars ?? 2_000_000;
   const maxRedirects = opts.maxRedirects ?? 3;
-  const check = opts.check ?? (async (u: string) => (await import('../../runner/src/fetch-guard.ts')).checkFetchUrl(u));
   return async (url: string): Promise<PageResult> => {
     try {
       let current = url;
       for (let hop = 0; hop <= maxRedirects; hop++) {
+        // Before anything is looked up or sent: the name server and the site learn what is being asked for.
+        const leak = opts.leakCheck?.(current);
+        if (leak) return { ok: false, error: `not fetched: the address ${leak}`, refused: leak };
         if (!/^https:\/\//i.test(current)) return { ok: false, error: 'only https pages are fetched directly' };
-        const verdict = await check(current);
-        if (!verdict.allowed) return { ok: false, error: `not fetched directly: ${verdict.reason}` };
-        const res = await doFetch(current, {
-          method: 'GET',
-          redirect: 'manual',
+        const target = await resolvePublicTarget(current, opts.resolve);
+        if (!target.allowed) return { ok: false, error: `not fetched directly: ${target.reason}` };
+        const res = await transport({
+          url: new URL(current),
+          address: target.address,
+          family: target.family,
           headers: { accept: 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5', 'user-agent': 'Mozilla/5.0 (compatible; NornResearch/1.0)' },
-          signal: AbortSignal.timeout(opts.timeoutMs ?? 20_000),
+          timeoutMs: opts.timeoutMs ?? 20_000,
+          maxChars,
         });
         if (res.status >= 300 && res.status < 400) {
-          const loc = res.headers.get('location');
+          const loc = res.headers.location;
           if (!loc) return { ok: false, error: `HTTP ${res.status} without a location` };
           current = new URL(loc, current).toString();
           continue;
         }
-        if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-        const type = res.headers.get('content-type') ?? '';
+        if (res.status < 200 || res.status >= 300) return { ok: false, error: `HTTP ${res.status}` };
+        const type = res.headers['content-type'] ?? '';
         if (type && !/text\/|html|xml|json/i.test(type)) return { ok: false, error: `content type ${type.slice(0, 60)} is not text` };
-        const raw = (await res.text()).slice(0, maxChars);
+        const raw = res.body.slice(0, maxChars);
         const text = /html|xml/i.test(type) || /^\s*<(!doctype|html)/i.test(raw) ? htmlToText(raw) : raw;
         const why = looksBlockedOrEmpty(text);
         return why ? { ok: false, error: why } : { ok: true, text, retrievedAt: opts.today, via: 'fetch' };
@@ -162,6 +264,7 @@ export function webFirstFetcher(first: PageFetcher, fallback: PageFetcher): Page
   return async (url: string): Promise<PageResult> => {
     const a = await first(url);
     if (a.ok && a.text !== undefined) return a;
+    if (a.refused) return a; // an address that carries an identifier is not tried again through Bright Data
     const b = await fallback(url);
     if (b.ok && b.text !== undefined) return b;
     return { ok: false, error: `plain fetch: ${a.error ?? 'no text'}; Bright Data: ${b.error ?? 'no text'}` };

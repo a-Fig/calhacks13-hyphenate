@@ -328,7 +328,9 @@ export async function reviewProposals(raw: unknown[], targets: Target[], fetchPa
       worsen('rejected', { code: 'quote_missing', message: 'the quote contains no number, so it cannot support one' });
     } else if (st.status !== 'rejected') {
       const page = await getPage(p.sourceUrl);
-      if (!page.ok || page.text === undefined) {
+      if (page.refused) {
+        worsen('rejected', { code: 'leak', message: `the source address, or a redirect from it, ${page.refused}; the page was not fetched` });
+      } else if (!page.ok || page.text === undefined) {
         worsen('needs_person', { code: 'page_unavailable', message: `the page could not be fetched to verify the quote (${page.error ?? 'no text'})` });
       } else if (!quoteInPage(qn, page.text)) {
         worsen('rejected', { code: 'quote_not_found', message: 'the quote does not appear in the page text, or it starts or ends in the middle of a number on the page' });

@@ -132,8 +132,9 @@ and the call is made only if the guard allows it. A guard that throws or answers
 - `WebFetch` and `mcp__brightdata__scrape_as_markdown`: the URL (host, path, query, fragment) and every other
   string (WebFetch's `prompt` too) go through the leak check, and a call with no URL is refused.
 
-The runner's own `WebFetch` guard (the public-address check, `../runner/src/fetch-guard.ts`) runs first on
-`WebFetch` and is unchanged; the leak guard runs after it.
+The runner's own `WebFetch` guard (the public-address check, `../runner/src/fetch-guard.ts`) is unchanged, but it
+runs after the identifier guards, in the same hook (`buildJobHooks`): it resolves the host, and a lookup tells the name
+server what is being fetched, so a host name that carries an identifier is refused without ever being looked up.
 
 Every string is checked as written and after decoding: percent-escapes decoded until stable (at most
 3 passes, so `%48%61%6C%64%65%6E` and a double-encoded name are read as Halden), `+` read as a space,
@@ -231,7 +232,11 @@ and stores what passes the guardrails. It changes nothing in the other workers.
    WebSearch and WebFetch first and Bright Data's MCP server as the fallback. The runner's events go to `agent_event` (role `researcher`),
    so the run shows on the ECR page's agent timeline.
 5. **Guardrails**, with pages fetched again, a plain HTTPS fetch first (`plainFetcher`, `src/pages.ts`: https only, a
-   20 s timeout, the runner's public-address check before the request and on every redirect, HTML turned into text)
+   20 s timeout, HTML turned into text). Before the request, and again for every redirect's `Location`, the address goes
+   through the identifier check (a leak is refused before any lookup or request, the proposal is rejected, and Bright Data
+   is not asked to follow it), then is resolved once and checked to be public, and the connection is pinned to the address
+   that was checked (`pinnedLookup`, with the host name still on the certificate check), so a name that answers differently
+   the second time (DNS rebinding) cannot reach a private address
    and Bright Data's scrape only when that fails or returns an empty or blocked page (`webFirstFetcher`). The
    verdict, the report (`read by a plain HTTPS fetch` or `read through Bright Data`) and the stored
    `research_result` (`verifiedVia`) say which one read each page. This comes after the runner's timeout, not inside

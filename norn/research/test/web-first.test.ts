@@ -7,7 +7,8 @@ import { JobEmitter } from '../../runner/src/events.ts';
 import { buildJobHooks } from '../../runner/src/hooks.ts';
 import { reviewProposals } from '../src/guardrails.ts';
 import { buildResearchJob, SCRAPE_TOOL, SEARCH_TOOL, SYSTEM_PROMPT, WEB_FETCH_TOOL, WEB_SEARCH_TOOL } from '../src/job.ts';
-import { brightDataFetcher, htmlToText, looksBlockedOrEmpty, plainFetcher, webFirstFetcher } from '../src/pages.ts';
+import type { Resolver } from '../../runner/src/fetch-guard.ts';
+import { brightDataFetcher, htmlToText, looksBlockedOrEmpty, pinnedLookup, plainFetcher, urlLeakCheck, webFirstFetcher, type PlainRequest, type PlainResponse, type PlainTransport } from '../src/pages.ts';
 import { renderReport } from '../src/report.ts';
 import { prepare, type Company } from '../src/run.ts';
 import type { PageFetcher } from '../src/types.ts';
@@ -40,7 +41,7 @@ describe('the job names the order: web first, Bright Data when that fails', () =
 });
 
 /** The job's hooks as the runner builds them (the WebFetch public-address guard first, then the leak guards), in front of a "sent" list. */
-function session() {
+function session(resolve?: Resolver) {
   const denials: string[] = [];
   const hooks = buildJobHooks({
     emitter: new JobEmitter('j', 'researcher', job.identity, () => {}),
@@ -48,6 +49,7 @@ function session() {
     maxChars: 1000,
     onFetchDenied: (_id, reason) => denials.push(reason),
     toolInputGuards: job.toolInputGuards,
+    ...(resolve ? { resolve } : {}),
   });
   const sent: { tool: string; input: unknown }[] = [];
   async function call(tool: string, input: unknown): Promise<'sent' | 'denied'> {
@@ -109,51 +111,154 @@ describe('the leak guard covers WebSearch and WebFetch before anything is sent',
   });
 });
 
+describe('the identifier guards run before any guard that looks a name up', () => {
+  const resolver = () => {
+    const asked: string[] = [];
+    const f: Resolver = async (host) => (asked.push(host), ['93.184.216.34']);
+    return Object.assign(f, { asked });
+  };
+  it('does not resolve a WebFetch host name that carries an identifier: the name server never hears it', async () => {
+    const dns = resolver();
+    const s = session(dns);
+    for (const url of ['https://Halden-Precision.example/price', 'https://bw-5120-210.example/', 'https://%48%61%6C%64%65%6E.example/', 'https://clean.example/Halden-Precision']) {
+      assert.equal(await s.call(WEB_FETCH_TOOL, { url, prompt: 'the price' }), 'denied', url);
+    }
+    assert.deepEqual(dns.asked, [], 'no lookup was made for any of them');
+    assert.deepEqual(s.sent, []);
+    assert.match(s.denials[0]!, /WebFetch refused by Norn: the URL contains an identifier/);
+  });
+  it('resolves, and so checks the address, only for a call the identifier guards allowed', async () => {
+    const dns = resolver();
+    const s = session(dns);
+    assert.equal(await s.call(WEB_FETCH_TOOL, { url: 'https://clean.example/prices', prompt: 'the scrap price per pound' }), 'sent');
+    assert.deepEqual(dns.asked, ['clean.example']);
+    const priv = session(async () => ['10.0.0.5']);
+    assert.equal(await priv.call(WEB_FETCH_TOOL, { url: 'https://clean.example/prices', prompt: 'x' }), 'denied');
+    assert.match(priv.denials[0]!, /not a public internet address/);
+  });
+  it('is one hook, run in that order, so the two cannot run side by side', async () => {
+    const hooks = buildJobHooks({ emitter: new JobEmitter('j', 'researcher', job.identity, () => {}), jobPrompt: '', maxChars: 10, onFetchDenied: () => {}, toolInputGuards: job.toolInputGuards });
+    assert.equal(hooks.PreToolUse!.length, 1);
+    assert.equal(hooks.PreToolUse![0]!.hooks.length, 1);
+  });
+});
+
 describe('the plain fetch that reads a quote\'s page', () => {
   const page = `<html><head><style>p{}</style><script>var x=1</script></head><body><h1>Scrap prices</h1><p>${'Clean aluminum machine cuts. '.repeat(10)}CURRENT PRICE $0.75/lb</p></body></html>`;
-  const okFetch = ((_u: string) => Promise.resolve(new Response(page, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }))) as unknown as typeof fetch;
-  const allow = async () => ({ allowed: true, reason: 'test' });
+  const PUBLIC = '93.184.216.34';
+  const html = { 'content-type': 'text/html; charset=utf-8' };
+  /** A resolver that answers `answers` one call at a time (the last answer repeats), and counts its calls. */
+  const resolver = (...answers: string[][]) => {
+    const asked: string[] = [];
+    const f: Resolver = async (host) => (asked.push(host), answers[Math.min(asked.length - 1, answers.length - 1)]!);
+    return Object.assign(f, { asked });
+  };
+  const transportOf = (respond: (r: PlainRequest) => PlainResponse | Promise<PlainResponse>) => {
+    const requests: PlainRequest[] = [];
+    const t: PlainTransport = async (r) => (requests.push(r), respond(r));
+    return Object.assign(t, { requests });
+  };
+  const ok: PlainResponse = { status: 200, headers: html, body: page };
 
-  it('reads an HTTPS page as text, says it was a plain fetch, and sets a timeout', async () => {
-    let signal: AbortSignal | undefined;
-    const f = plainFetcher({ today: '2026-10-25', check: allow, fetchImpl: (async (u: string, init: RequestInit) => { signal = init.signal as AbortSignal; return okFetch(u); }) as unknown as typeof fetch });
-    const r = await f('https://example.test/p');
+  it('reads an HTTPS page as text, says it was a plain fetch, and passes a time limit', async () => {
+    const t = transportOf(() => ok);
+    const r = await plainFetcher({ today: '2026-10-25', resolve: resolver([PUBLIC]), transport: t })('https://example.test/p');
     assert.equal(r.ok, true);
     assert.equal(r.via, 'fetch');
     assert.match(r.text!, /CURRENT PRICE \$0\.75\/lb/);
     assert.ok(!/<|var x/.test(r.text!), 'tags and scripts are gone');
-    assert.ok(signal instanceof AbortSignal, 'a timeout signal is passed');
+    assert.equal(t.requests[0]!.timeoutMs, 20_000);
+    assert.equal(t.requests[0]!.url.host, 'example.test', 'Host and the certificate check keep the name');
   });
-  it('checks the address first (the check WebFetch is held to) and never fetches a refused one', async () => {
-    let fetched = 0;
-    const f = plainFetcher({ today: 'd', check: async () => ({ allowed: false, reason: '10.0.0.5 is not a public internet address' }), fetchImpl: (async () => (fetched++, new Response(page))) as unknown as typeof fetch });
-    const r = await f('https://internal.example/p');
+
+  it('connects to the address that was checked, not to whatever the name answers the second time (DNS rebinding)', async () => {
+    // First answer public, second loopback: a socket that looked the name up again would have gone to 127.0.0.1.
+    const dns = resolver([PUBLIC], ['127.0.0.1']);
+    const t = transportOf(() => ok);
+    const r = await plainFetcher({ today: 'd', resolve: dns, transport: t })('https://rebind.example/p');
+    assert.equal(r.ok, true);
+    assert.deepEqual(t.requests.map((q) => q.address), [PUBLIC], 'the request is pinned to the first, validated address');
+    assert.equal(dns.asked.length, 1, 'the name is resolved once, and that answer is what is used');
+    // and when the first answer is the bad one, nothing connects at all
+    const bad = resolver(['127.0.0.1'], [PUBLIC]);
+    const t2 = transportOf(() => ok);
+    assert.equal((await plainFetcher({ today: 'd', resolve: bad, transport: t2 })('https://rebind.example/p')).ok, false);
+    assert.deepEqual(t2.requests, []);
+    // a name with one public and one private answer is refused whole
+    const mixed = resolver([PUBLIC, '10.0.0.5']);
+    const t3 = transportOf(() => ok);
+    assert.equal((await plainFetcher({ today: 'd', resolve: mixed, transport: t3 })('https://mixed.example/p')).ok, false);
+    assert.deepEqual(t3.requests, []);
+  });
+
+  it('pins the lookup of the real https connection to that one address', () => {
+    const lookup = pinnedLookup('93.184.216.34', 4);
+    const seen: unknown[] = [];
+    lookup('anything.example', {}, (...a: unknown[]) => seen.push(a));
+    lookup('anything.example', { all: true }, (...a: unknown[]) => seen.push(a));
+    lookup('anything.example', (...a: unknown[]) => seen.push(a));
+    assert.deepEqual(seen, [
+      [null, '93.184.216.34', 4],
+      [null, [{ address: '93.184.216.34', family: 4 }]],
+      [null, '93.184.216.34', 4],
+    ]);
+  });
+
+  it('refuses a private address and a plain-http page without a request', async () => {
+    const t = transportOf(() => ok);
+    const r = await plainFetcher({ today: 'd', resolve: resolver(['10.0.0.5']), transport: t })('https://internal.example/p');
     assert.equal(r.ok, false);
     assert.match(r.error!, /not a public internet address/);
-    assert.equal(fetched, 0);
-    assert.equal((await plainFetcher({ today: 'd', check: allow, fetchImpl: (async () => (fetched++, new Response(page))) as unknown as typeof fetch })('http://example.test/p')).ok, false, 'plain http is not fetched directly');
-    assert.equal(fetched, 0);
+    assert.equal((await plainFetcher({ today: 'd', resolve: resolver([PUBLIC]), transport: t })('http://example.test/p')).ok, false);
+    assert.equal((await plainFetcher({ today: 'd', transport: t })('https://127.0.0.1/p')).ok, false);
+    assert.deepEqual(t.requests, []);
   });
-  it('checks every redirect again, and refuses one that lands on a private address', async () => {
-    const seen: string[] = [];
-    const f = plainFetcher({
-      today: 'd',
-      check: async (u) => (seen.push(u), u.includes('127.0.0.1') ? { allowed: false, reason: '127.0.0.1 is not a public internet address' } : { allowed: true, reason: 'ok' }),
-      fetchImpl: (async (u: string) => (u.includes('start') ? new Response(null, { status: 302, headers: { location: 'https://127.0.0.1/secret' } }) : new Response(page, { headers: { 'content-type': 'text/html' } }))) as unknown as typeof fetch,
-    });
-    const r = await f('https://example.test/start');
+
+  it('resolves and checks every redirect again, and refuses one that lands on a private address', async () => {
+    const dns = resolver([PUBLIC], ['127.0.0.1']);
+    const t = transportOf((r) => (r.url.pathname === '/start' ? { status: 302, headers: { location: 'https://elsewhere.example/secret' }, body: '' } : ok));
+    const r = await plainFetcher({ today: 'd', resolve: dns, transport: t })('https://example.test/start');
     assert.equal(r.ok, false);
-    assert.deepEqual(seen, ['https://example.test/start', 'https://127.0.0.1/secret']);
+    assert.deepEqual(dns.asked, ['example.test', 'elsewhere.example']);
+    assert.equal(t.requests.length, 1, 'only the first hop was requested');
   });
-  it('reports an HTTP error, a thrown error, an empty page and a block page as not ok, with why', async () => {
-    const mk = (res: () => Response | Promise<Response>) => plainFetcher({ today: 'd', check: allow, fetchImpl: (async () => res()) as unknown as typeof fetch });
-    assert.match((await mk(() => new Response('', { status: 403 }))('https://x.test/')).error!, /HTTP 403/);
-    assert.match((await plainFetcher({ today: 'd', check: allow, fetchImpl: (async () => { throw new Error('network down'); }) as unknown as typeof fetch })('https://x.test/')).error!, /network down/);
-    assert.match((await mk(() => new Response('<html><body></body></html>', { headers: { 'content-type': 'text/html' } }))('https://x.test/')).error!, /empty or very short/);
+
+  it('runs the identifier check on a redirect Location before the lookup or the request, and never retries it through Bright Data', async () => {
+    // Sol's repro: a clean source that redirects to an address carrying the supplier and a part number.
+    const dns = resolver([PUBLIC]);
+    const t = transportOf((r) => (r.url.host === 'clean.example' ? { status: 301, headers: { location: 'https://prices.example/Halden-Precision/BW-5120-210' }, body: '' } : ok));
+    const leakCheck = urlLeakCheck(prep.identifiers);
+    const plain = plainFetcher({ today: 'd', resolve: dns, transport: t, leakCheck });
+    const r = await plain('https://clean.example/source');
+    assert.equal(r.ok, false);
+    assert.ok(r.refused);
+    assert.deepEqual(dns.asked, ['clean.example'], 'the leaking host was never looked up');
+    assert.deepEqual(t.requests.map((q) => q.url.host), ['clean.example'], 'and never requested');
+    for (const loc of ['https://prices.example/%48%61%6C%64%65%6E', 'https://prices.example/?q=BW%2D5120%2D210', 'https://Halden-Precision.example/price']) {
+      const t2 = transportOf((q) => (q.url.host === 'clean.example' ? { status: 302, headers: { location: loc }, body: '' } : ok));
+      const r2 = await plainFetcher({ today: 'd', resolve: resolver([PUBLIC]), transport: t2, leakCheck })('https://clean.example/source');
+      assert.ok(r2.refused, loc);
+      assert.deepEqual(t2.requests.map((q) => q.url.host), ['clean.example'], loc);
+    }
+    // through the whole page check: no fallback, and the proposal is rejected, not held or accepted
+    let brightData = 0;
+    const bd: PageFetcher = async () => (brightData++, { ok: true, text: PAGE_A, retrievedAt: '2026-10-25', via: 'brightdata' });
+    const [v] = await reviewProposals([good({ sourceUrl: 'https://clean.example/source' })], targets, webFirstFetcher(plain, bd), config);
+    assert.equal(v!.status, 'rejected');
+    assert.ok(v!.reasons.some((x) => x.code === 'leak' && /redirect/.test(x.message)));
+    assert.equal(brightData, 0, 'Bright Data was not asked to follow it');
+  });
+
+  it('reports an HTTP error, a thrown error, an empty page, a block page and a non-text page as not ok, with why', async () => {
+    const mk = (res: () => PlainResponse | Promise<PlainResponse>) => plainFetcher({ today: 'd', resolve: resolver([PUBLIC]), transport: transportOf(res) });
+    assert.match((await mk(() => ({ status: 403, headers: {}, body: '' }))('https://x.test/')).error!, /HTTP 403/);
+    assert.match((await mk(() => { throw new Error('network down'); })('https://x.test/')).error!, /network down/);
+    assert.match((await mk(() => ({ status: 200, headers: html, body: '<html><body></body></html>' }))('https://x.test/')).error!, /empty or very short/);
     const wall = `<html><body><h1>Just a moment...</h1><p>Checking your browser before accessing the site. ${'Please wait. '.repeat(30)}</p></body></html>`;
-    assert.match((await mk(() => new Response(wall, { headers: { 'content-type': 'text/html' } }))('https://x.test/')).error!, /bot check or a block page/);
-    assert.match((await mk(() => new Response('x', { headers: { 'content-type': 'application/pdf' } }))('https://x.test/')).error!, /not text/);
+    assert.match((await mk(() => ({ status: 200, headers: html, body: wall }))('https://x.test/')).error!, /bot check or a block page/);
+    assert.match((await mk(() => ({ status: 200, headers: { 'content-type': 'application/pdf' }, body: 'x' }))('https://x.test/')).error!, /not text/);
   });
+
   it('turns HTML into text a quote can be found in', () => {
     assert.equal(htmlToText('<p>Rates: $149&nbsp;per hour &amp; more</p><script>x()</script><li>a</li><li>b</li>'), ['Rates: $149 per hour & more', 'a', 'b'].join('\n'));
     assert.equal(looksBlockedOrEmpty('x'.repeat(300)), null);
@@ -187,11 +292,9 @@ describe('verification: plain fetch first, Bright Data only when that fails', ()
   });
   it('falls back through the real Bright Data fetcher with a fake network, and not before', async () => {
     const requests: string[] = [];
-    const net = (async (url: string) => {
-      requests.push(url);
-      return url.includes('brightdata') ? new Response(PAGE_A) : new Response('', { status: 403 });
-    }) as unknown as typeof fetch;
-    const f = webFirstFetcher(plainFetcher({ today: '2026-10-25', check: async () => ({ allowed: true, reason: 'ok' }), fetchImpl: net }), brightDataFetcher({ env: { BRIGHT_DATA_API_TOKEN: TOKEN }, today: '2026-10-25', fetchImpl: net }));
+    const bdNet = (async (url: string) => (requests.push(url), new Response(PAGE_A))) as unknown as typeof fetch;
+    const blocked: PlainTransport = async (r) => (requests.push(r.url.toString()), { status: 403, headers: {}, body: '' });
+    const f = webFirstFetcher(plainFetcher({ today: '2026-10-25', resolve: async () => ['93.184.216.34'], transport: blocked }), brightDataFetcher({ env: { BRIGHT_DATA_API_TOKEN: TOKEN }, today: '2026-10-25', fetchImpl: bdNet }));
     const r = await f('https://example.test/blocked');
     assert.equal(r.via, 'brightdata');
     assert.deepEqual(requests, ['https://example.test/blocked', 'https://api.brightdata.com/request']);
