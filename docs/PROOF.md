@@ -5,10 +5,10 @@ The run is seeded (`norn-seed-1`, checks code `checks-0.4.0`) and reads only fil
 
 ## Result
 
-**34 of 36 expectations pass, 1 fail, 1 name a check that does not exist yet.** The expectations come from the answer key the dataset carries for its planted scenarios (`bowman/data/scenarios.ts`) and from comments in `bowman/data/changes.ts`. The code was not changed to fit them. Failures stay in the table.
+**34 of 36 expectations pass, 1 fail, 1 not built (the checks, run as the expectation describes, do not produce what it names).** The expectations come from the answer key the dataset carries for its planted scenarios (`bowman/data/scenarios.ts`) and from comments in `bowman/data/changes.ts`. The code was not changed to fit them. Failures stay in the table.
 
 - FAIL, S2: Earliest realistic cut-in is S/N 34 (December 2027), set by certification, not tooling. Expected cut-in serial P50 of 34 or later; got S/N 26 (P10 21, P90 33); the timeline models decision and parts lead times, not certification.
-- NOT BUILT, S4: Norn raises the conflicting_open_ecr trigger on its own when a second open ECR edits the same item. Expected a check that detects it; got no such detection in norn/checks, norn/workers or norn/module (the trigger is named in the config schema only); not built.
+- NOT BUILT, S4: Norn raises the conflicting_open_ecr trigger on its own when a second open ECR edits the same item. Expected a flag or conflict of kind conflicting_open_ecr from the BOM delta, cost, timeline or supply check, run on each ECR, with the other passed as an open peer to the check that takes peers; got none; run that way, those checks emit only these flag and conflict kinds: cross_check, disposition_tbd, effectivity_default, implementation_unestimated, likely_late, needs_estimate, read_from_quote, shared_supplier, single_source.
 
 ## What is real
 
@@ -27,8 +27,8 @@ The run is seeded (`norn-seed-1`, checks code `checks-0.4.0`) and reads only fil
   By kind, sourced/total: items 18/214, stations 0/8, sourcing 28/172, suppliers 9/14, people 9/18, programs 2/2, ECOs 0/10, NCRs 1/5, ECRs 2/10, stock 0/209, POs 0/144.
 - **The planted scenarios are invented** (`bowman/data/changes.ts`). Their answer key is invented too, by the people who wrote the data. This page shows the checks agree with the key. It does not show the key matches a real aircraft maker.
 - **Ranges come from assumed distributions.** Where the dataset gives a price or lead-time range, the draws use it. Where it does not, the checks use stated defaults and flag them (`needs_estimate`). The slot rule for two ECRs on one supplier (the one filed first takes the first slot) is Norn's assumption, not a supplier's statement.
-- **The yes/no answers behind the fast-track test** (safety part, retrofit, tooling and so on) are set in the script from the dataset's scenario notes for ECR-0423 and ECR-0417. No classifier produces them yet. The cost, class, tier and decision are computed.
-- **The merged baselines for the conflict test** (S4) are built by the script from the two change requests. Norn does not build them.
+- **The inputs to the fast-track test that Norn does not produce.** The yes/no answers (safety part, retrofit, tooling and so on) are set in the script from the dataset's scenario notes for ECR-0423 and ECR-0417. No classifier produces them yet. The company class and the FAA class are also supplied, taken as given from the dataset (`companyClass` and `faaClass` on each change request): routing places them, it does not infer them. The cost, tier, fast-track eligibility and decision are computed from those inputs.
+- **The baselines with the other ECR already applied**, used for the conflict test (S4), are built by the script from the two change requests. Norn does not build them.
 
 ## Planted scenarios: expected against actual
 
@@ -65,7 +65,7 @@ PASS means the check's output meets the expectation as written. A range is shown
 |---|---|---|---|
 | Saves $1.90 per panel, $11.40 per aircraft | -$11.40 | point -$11.40; -$11.41 (P10 -$12.19, P90 -$10.95) | PASS |
 | Use up existing stock: no disposition cost | one-time total of $0 | one-time $0 | PASS |
-| Qualifies for the fast track under Bowman's limits (Class II, FAA minor, no never-fast-track test holds) | eligible: true | eligible: true; classes II/minor | PASS |
+| Qualifies for the fast track under Bowman's limits (Class II, FAA minor, no never-fast-track test holds); the two classes are supplied by the dataset | eligible: true | eligible: true; classes as supplied II/minor | PASS |
 | No CCB: the cost of convening a board would exceed the saving | tier below the Change Control Board | Technical Review Committee (size $622, measured) | PASS |
 | Norn's agent may approve it on the fast track | outcome approve or approve_sampled | approve_sampled, acts now | PASS |
 | Control: ECR-0417 (retrofit, tooling, over the limits) goes to the CCB and is refused the fast track | CCB; fast-track action denied | Change Control Board; eligible false; fast-track decision deny | PASS |
@@ -78,8 +78,8 @@ PASS means the check's output meets the expectation as written. A range is shown
 | The directions are opposed: +$420 per pump for margin, -$385 for cost, two pumps per aircraft | $840 and -$770 per aircraft | point $840.00 and -$770.00 | PASS |
 | The pump is shared with Meridian, so a decision moves both programs | vesper and meridian | ECR-0412: vesper, meridian; ECR-0415: vesper, meridian | PASS |
 | Each ECR alone applies cleanly to the baseline (a conflict between two ECRs is invisible to a single-ECR check) | no baseline conflict for either | ECR-0412: 0 conflicts; ECR-0415: 0 conflicts | PASS |
-| S1 (BOM delta) reports a conflict when either ECR is applied on a baseline that already contains the other (merged baseline built by this script) | stale_rev and stale_value in both orders | 0415 after 0412: stale_rev, stale_value; 0412 after 0415: stale_rev, stale_value | PASS |
-| Norn raises the conflicting_open_ecr trigger on its own when a second open ECR edits the same item | a check that detects it | no such detection in norn/checks, norn/workers or norn/module (the trigger is named in the config schema only); not built | NOT BUILT |
+| S1 (BOM delta) reports a conflict when either ECR is applied on a baseline that already contains the other (baseline built by this script) | stale_rev and stale_value in both orders | 0415 after 0412: stale_rev, stale_value; 0412 after 0415: stale_rev, stale_value | PASS |
+| Norn raises the conflicting_open_ecr trigger on its own when a second open ECR edits the same item | a flag or conflict of kind conflicting_open_ecr from the BOM delta, cost, timeline or supply check, run on each ECR, with the other passed as an open peer to the check that takes peers | none; run that way, those checks emit only these flag and conflict kinds: cross_check, disposition_tbd, effectivity_default, implementation_unestimated, likely_late, needs_estimate, read_from_quote, shared_supplier, single_source | NOT BUILT |
 
 ### S5: Different parts, one supplier (ECR-0419 and ECR-0421)
 
@@ -87,10 +87,10 @@ PASS means the check's output meets the expectation as written. A range is shown
 |---|---|---|---|
 | Different parts, no shared entity, but one supplier: Orrin Magnetics | each ECR names the other as a shared-supplier peer through SUP-ORRIN | ECR-0419: ECR-0421 via SUP-ORRIN; ECR-0421: ECR-0419 via SUP-ORRIN | PASS |
 | Both want the 2027-Q2 qualification slot; one slips to the 2027-Q3 slot | ECR-0421 (filed second) moves from 2027-04-01 to 2027-07-01; ECR-0419 stays | ECR-0421 2027-04-01 to 2027-07-01; ECR-0419 2027-04-01 to 2027-04-01 | PASS |
-| The slip is about 13 weeks | 13 weeks, in every draw | shift P10 13, P50 13, P90 13 weeks; probability later 1 | PASS |
+| The slip is about 13 weeks | 13 weeks at P10, P50 and P90, and later in every draw | shift P10 13, P50 13, P90 13 weeks; later in 100% of 10,000 draws | PASS |
 | The ECR filed first loses nothing | ECR-0419 cut-in shift of 0 weeks | shift 0 weeks | PASS |
 | Vesper cut-in S/N 030 (October 2027) when ECR-0419 gets the first slot | S/N 30, October 2027 | S/N 30; 2027-10-14 | PASS |
-| Ordering both within 26 weeks earns a 40% cheaper second qualification and a 6% raw-material price break | saving above $38,400 (40% of the cheaper qualification), in every draw | pair saving $180,329 (P10 $153,706, P90 $214,185); bundled in 100% of draws | PASS |
+| Ordering both within 26 weeks earns a 40% cheaper second qualification and a 6% raw-material price break | pair saving above $38,400 (40% of the cheaper qualification) at P10, P50 and P90, and bundled in every draw | pair saving $180,329 (P10 $153,706, P90 $214,185); bundled in 100% of 10,000 draws | PASS |
 | The pair saving is one number from either ECR | P10, P50, P90, mean and point identical from ECR-0419 and ECR-0421 | $180,329 and $180,329 | PASS |
 
 ### R: Reproducibility of the checks
@@ -113,15 +113,14 @@ PASS means the check's output meets the expectation as written. A range is shown
 
 ## Reproduce
 
-Needs Node 22.18 or later (the repo targets Node 24) and no network.
+Needs Node 22.18 or later (the repo targets Node 24). No network and no install step: the generator and both test suites run directly on Node, with no dependencies installed.
 
 ```
-cd norn/checks && npm ci && cd ../config && npm ci && cd ../..   # dev dependencies only (typescript, @types/node)
 node norn/checks/proof.ts                                      # rewrites docs/PROOF.md, about 40 s with the test suites
-git diff --exit-code docs/PROOF.md                              # no output: the rerun matches the committed file
+git diff --exit-code docs/PROOF.md                              # no output: the rerun wrote the same text as the page in the repository
 node bowman/data/check.ts                                       # the dataset validator on its own
-(cd norn/checks && npm test)                                    # the checks library tests on their own
-(cd norn/config && npm test)                                    # the configuration and routing tests on their own
+(cd norn/checks && node --test "test/*.test.ts")                # the checks library tests on their own
+(cd norn/config && node --test "test/*.test.ts")                # the configuration and routing tests on their own
 ```
 
 ## Limits

@@ -11,7 +11,7 @@
 // expectation is written as FAIL.
 
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -22,7 +22,7 @@ import { costForecastFromCheck, decideAction, loadConfigFile, routeEcr, formatIs
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SEED = 'norn-seed-1'; // the seed the workers use (norn/workers/src/checks-*.ts)
 const skipTests = process.argv.includes('--skip-tests');
-// A partial run (no test counts) never overwrites the committed page; it writes to the OS temp directory instead.
+// A partial run (no test counts) never overwrites the page in the repository; it writes to the OS temp directory instead.
 const OUT = skipTests ? join(tmpdir(), 'PROOF.skip-tests.md') : join(ROOT, 'docs/PROOF.md');
 
 // ---------------------------------------------------------------- bookkeeping
@@ -153,7 +153,8 @@ scenarioTitles.set('S3', keyOf('S3').title);
   expect('S3', 'Use up existing stock: no disposition cost', 'one-time total of $0', `one-time ${usd(c.headline.oneTimeTotal.p50)}`, c.headline.oneTimeTotal.p50 === 0 && c.headline.oneTimeTotal.p90 === 0);
 
   // The facts a classifier would supply do not exist yet (norn/config/test/route.test.ts says the same). The
-  // yes/no answers below are set here from the dataset's own scenario notes; every other input is computed.
+  // yes/no answers below are set here from the dataset's own scenario notes. The company and regulatory classes are
+  // taken as given from the dataset (companyClass, faaClass); routing places them, it does not infer them.
   const answers = {
     safety_part: false, interchangeability_or_interface: false, retrofit_of_delivered_units: false, supplier_process_or_tooling: false,
     no_form_fit_function_change: true, same_supplier_no_tooling: true, authorized_equivalent: true, obsolescence_replacement: false, documentation_fix: false,
@@ -166,8 +167,8 @@ scenarioTitles.set('S3', keyOf('S3').title);
     answers, slipP90Days, reportLevel: 1 as const,
   };
   const route = routeEcr(config, facts);
-  expect('S3', 'Qualifies for the fast track under Bowman\'s limits (Class II, FAA minor, no never-fast-track test holds)', 'eligible: true',
-    `eligible: ${route.fastTrack.eligible}; classes ${route.classes.company.value}/${route.classes.regulatory.value}`, route.fastTrack.eligible === true);
+  expect('S3', 'Qualifies for the fast track under Bowman\'s limits (Class II, FAA minor, no never-fast-track test holds); the two classes are supplied by the dataset', 'eligible: true',
+    `eligible: ${route.fastTrack.eligible}; classes as supplied ${route.classes.company.value}/${route.classes.regulatory.value}`, route.fastTrack.eligible === true);
   expect('S3', 'No CCB: the cost of convening a board would exceed the saving', 'tier below the Change Control Board',
     `${route.tier.bodyName} (size ${usd(route.cost.size ?? NaN)}, ${route.cost.basis})`, route.tier.bodyId !== 'ccb' && (route.cost.size ?? Infinity) < 150_000);
   const d = decideAction(config, { action: 'approve_fast_track_ecr', actor: { kind: 'agent' }, facts });
@@ -219,8 +220,8 @@ scenarioTitles.set('S4', keyOf('S4').title);
   expect('S4', 'Each ECR alone applies cleanly to the baseline (a conflict between two ECRs is invisible to a single-ECR check)', 'no baseline conflict for either',
     `ECR-0412: ${alone[0].conflicts.length} conflicts; ECR-0415: ${alone[1].conflicts.length} conflicts`, alone[0].ok && alone[1].ok);
 
-  // Library run on a baseline where one ECR is already in force: the other ECR's "from" values no longer match.
-  const merged = (applied: typeof ca) => ({
+  // Library run on a baseline where one ECR is already applied: the other ECR's "from" values no longer match.
+  const withApplied = (applied: typeof ca) => ({
     ...bowman,
     items: bowman.items.map((i) => {
       if (i.code !== applied.item) return i;
@@ -229,16 +230,28 @@ scenarioTitles.set('S4', keyOf('S4').title);
     }),
   });
   const kinds = (base: any, e: ReturnType<typeof ecr>) => (bomDelta(base, e) as any).conflicts.map((c: any) => c.kind).sort();
-  const k415 = kinds(merged(ca), b);
-  const k412 = kinds(merged(cb), a);
-  expect('S4', 'S1 (BOM delta) reports a conflict when either ECR is applied on a baseline that already contains the other (merged baseline built by this script)',
+  const k415 = kinds(withApplied(ca), b);
+  const k412 = kinds(withApplied(cb), a);
+  expect('S4', 'S1 (BOM delta) reports a conflict when either ECR is applied on a baseline that already contains the other (baseline built by this script)',
     'stale_rev and stale_value in both orders', `0415 after 0412: ${k415.join(', ') || 'none'}; 0412 after 0415: ${k412.join(', ') || 'none'}`,
     ['stale_rev', 'stale_value'].every((k) => k415.includes(k) && k412.includes(k)));
 
-  const hits = grep(['norn/checks/src', 'norn/workers/src', 'norn/module/src'], 'conflicting_open_ecr');
-  expect('S4', 'Norn raises the conflicting_open_ecr trigger on its own when a second open ECR edits the same item', 'a check that detects it',
-    hits.length === 0 ? 'no such detection in norn/checks, norn/workers or norn/module (the trigger is named in the config schema only); not built' : `found in ${hits.join(', ')}`,
-    hits.length === 0 ? 'not built' : true);
+  // Behavioural: run all four checks on each ECR with the other named as an open peer, and look for a flag or a
+  // BOM conflict of kind conflicting_open_ecr. Matching the name in source text proves nothing, so nothing here reads source.
+  const TRIGGER = 'conflicting_open_ecr';
+  const emitted = (e: ReturnType<typeof ecr>, peer: ReturnType<typeof ecr>) => {
+    const results: any[] = [
+      bomDelta(bowman, e), costCheck(bowman, e, { seed: SEED }),
+      timelineCheck(bowman, e, { seed: SEED }), supplyCheck(bowman, e, { seed: SEED, peers: [peer] }),
+    ];
+    return results.flatMap((r) => [...(r.flags ?? []), ...(r.conflicts ?? [])]).map((f: any) => String(f.kind));
+  };
+  const seen = [...emitted(a, b), ...emitted(b, a)];
+  const raised = seen.includes(TRIGGER);
+  expect('S4', 'Norn raises the conflicting_open_ecr trigger on its own when a second open ECR edits the same item',
+    'a flag or conflict of kind conflicting_open_ecr from the BOM delta, cost, timeline or supply check, run on each ECR, with the other passed as an open peer to the check that takes peers',
+    raised ? 'raised' : `none; run that way, those checks emit only these flag and conflict kinds: ${[...new Set(seen)].sort().join(', ')}`,
+    raised ? true : 'not built');
 }
 
 // ---------------------------------------------------------------- S5: the shared supplier
@@ -257,14 +270,16 @@ scenarioTitles.set('S5', keyOf('S5').title);
   expect('S5', 'Both want the 2027-Q2 qualification slot; one slips to the 2027-Q3 slot', 'ECR-0421 (filed second) moves from 2027-04-01 to 2027-07-01; ECR-0419 stays',
     `ECR-0421 ${slot.alone.p50} to ${slot.withPeers.p50}; ECR-0419 ${i19.slots[0].alone.p50} to ${i19.slots[0].withPeers.p50}`,
     slot.alone.p50 === '2027-04-01' && slot.withPeers.p50 === '2027-07-01' && i19.slots[0].withPeers.p50 === '2027-04-01');
-  expect('S5', 'The slip is about 13 weeks', '13 weeks, in every draw', `shift P10 ${i21.cutIn.shiftWeeks.p10}, P50 ${i21.cutIn.shiftWeeks.p50}, P90 ${i21.cutIn.shiftWeeks.p90} weeks; probability later ${i21.cutIn.probabilityLater}`,
-    i21.cutIn.shiftWeeks.p10 === 13 && i21.cutIn.shiftWeeks.p50 === 13 && i21.cutIn.shiftWeeks.p90 === 13);
+  // Probabilities are rounded to 4 places, so a value of exactly 1 proves "every draw" only while one miss would still show: fewer than 20,000 draws.
+  const everyDraw = (p: number) => p === 1 && s21.draws < 20_000;
+  expect('S5', 'The slip is about 13 weeks', '13 weeks at P10, P50 and P90, and later in every draw', `shift P10 ${i21.cutIn.shiftWeeks.p10}, P50 ${i21.cutIn.shiftWeeks.p50}, P90 ${i21.cutIn.shiftWeeks.p90} weeks; later in ${num(i21.cutIn.probabilityLater * 100)}% of ${num(s21.draws)} draws`,
+    i21.cutIn.shiftWeeks.p10 === 13 && i21.cutIn.shiftWeeks.p50 === 13 && i21.cutIn.shiftWeeks.p90 === 13 && everyDraw(i21.cutIn.probabilityLater));
   expect('S5', 'The ECR filed first loses nothing', 'ECR-0419 cut-in shift of 0 weeks', `shift ${i19.cutIn.shiftWeeks.p50} weeks`, i19.cutIn.shiftWeeks.p50 === 0);
   expect('S5', 'Vesper cut-in S/N 030 (October 2027) when ECR-0419 gets the first slot', 'S/N 30, October 2027', `S/N ${t19.cutIn.serial.p50}; ${t19.cutIn.date.p50}`, t19.cutIn.serial.p50 === 30 && t19.cutIn.date.p50.startsWith('2027-10'));
   const bundle = i19.bundles[0];
   const floor = key.secondQualificationDiscount * key.vesperQualificationUsd;
-  expect('S5', 'Ordering both within 26 weeks earns a 40% cheaper second qualification and a 6% raw-material price break', `saving above $${num(floor)} (40% of the cheaper qualification), in every draw`,
-    `pair saving ${range(bundle.pairSaving, usd)}; bundled in ${num(bundle.probabilityBundled * 100)}% of draws`, bundle.probabilityBundled === 1 && bundle.pairSaving.p10 > floor);
+  expect('S5', 'Ordering both within 26 weeks earns a 40% cheaper second qualification and a 6% raw-material price break', `pair saving above $${num(floor)} (40% of the cheaper qualification) at P10, P50 and P90, and bundled in every draw`,
+    `pair saving ${range(bundle.pairSaving, usd)}; bundled in ${num(bundle.probabilityBundled * 100)}% of ${num(s19.draws)} draws`, (bundle.probabilityBundled === 1 && s19.draws < 20_000) && bundle.pairSaving.p10 > floor);
   expect('S5', 'The pair saving is one number from either ECR', 'P10, P50, P90, mean and point identical from ECR-0419 and ECR-0421', `${usd(bundle.pairSaving.p50)} and ${usd(i21.bundles[0].pairSaving.p50)}`,
     (['p10', 'p50', 'p90', 'mean', 'point'] as const).every((k) => bundle.pairSaving[k] === i21.bundles[0].pairSaving[k]));
 }
@@ -282,20 +297,6 @@ scenarioTitles.set('R', 'Reproducibility of the checks');
 
 // ---------------------------------------------------------------- the document
 
-function grep(dirs: string[], needle: string): string[] {
-  const hits: string[] = [];
-  const walk = (dir: string) => {
-    for (const name of readdirSync(dir)) {
-      if (name === 'node_modules') continue;
-      const p = join(dir, name);
-      if (statSync(p).isDirectory()) walk(p);
-      else if (/\.(ts|js|mjs)$/.test(name) && readFileSync(p, 'utf8').includes(needle)) hits.push(p.slice(ROOT.length));
-    }
-  };
-  for (const d of dirs) walk(join(ROOT, d));
-  return hits;
-}
-
 const cell = (s: string) => s.replace(/\|/g, '/').replace(/\n/g, ' ');
 const count = (s: Status) => rows.filter((r) => r.status === s).length;
 const sample: any = check('ECR-0417');
@@ -311,7 +312,7 @@ out(`The run is seeded (\`${SEED}\`, checks code \`${codeVersion}\`) and reads o
 out();
 out('## Result');
 out();
-out(`**${count('PASS')} of ${rows.length} expectations pass, ${count('FAIL')} fail, ${count('NOT BUILT')} name a check that does not exist yet.** `
+out(`**${count('PASS')} of ${rows.length} expectations pass, ${count('FAIL')} fail, ${count('NOT BUILT')} not built (the checks, run as the expectation describes, do not produce what it names).** `
   + 'The expectations come from the answer key the dataset carries for its planted scenarios (`bowman/data/scenarios.ts`) and from comments in `bowman/data/changes.ts`. '
   + 'The code was not changed to fit them. Failures stay in the table.');
 out();
@@ -334,8 +335,8 @@ out(`- **Bowman Aviation is fictional**, as are its people, suppliers and histor
 out('  By kind, sourced/total: ' + provRows.map((r) => `${r.kind} ${r.sourced}/${r.total}`).join(', ') + '.');
 out('- **The planted scenarios are invented** (`bowman/data/changes.ts`). Their answer key is invented too, by the people who wrote the data. This page shows the checks agree with the key. It does not show the key matches a real aircraft maker.');
 out('- **Ranges come from assumed distributions.** Where the dataset gives a price or lead-time range, the draws use it. Where it does not, the checks use stated defaults and flag them (`needs_estimate`). The slot rule for two ECRs on one supplier (the one filed first takes the first slot) is Norn\'s assumption, not a supplier\'s statement.');
-out('- **The yes/no answers behind the fast-track test** (safety part, retrofit, tooling and so on) are set in the script from the dataset\'s scenario notes for ECR-0423 and ECR-0417. No classifier produces them yet. The cost, class, tier and decision are computed.');
-out('- **The merged baselines for the conflict test** (S4) are built by the script from the two change requests. Norn does not build them.');
+out('- **The inputs to the fast-track test that Norn does not produce.** The yes/no answers (safety part, retrofit, tooling and so on) are set in the script from the dataset\'s scenario notes for ECR-0423 and ECR-0417. No classifier produces them yet. The company class and the FAA class are also supplied, taken as given from the dataset (`companyClass` and `faaClass` on each change request): routing places them, it does not infer them. The cost, tier, fast-track eligibility and decision are computed from those inputs.');
+out('- **The baselines with the other ECR already applied**, used for the conflict test (S4), are built by the script from the two change requests. Norn does not build them.');
 out();
 out('## Planted scenarios: expected against actual');
 out();
@@ -362,15 +363,14 @@ out('| Everything else (workers, module, runner, web, PLM, ERP, live agents) | n
 out();
 out('## Reproduce');
 out();
-out('Needs Node 22.18 or later (the repo targets Node 24) and no network.');
+out('Needs Node 22.18 or later (the repo targets Node 24). No network and no install step: the generator and both test suites run directly on Node, with no dependencies installed.');
 out();
 out('```');
-out('cd norn/checks && npm ci && cd ../config && npm ci && cd ../..   # dev dependencies only (typescript, @types/node)');
 out('node norn/checks/proof.ts                                      # rewrites docs/PROOF.md, about 40 s with the test suites');
-out('git diff --exit-code docs/PROOF.md                              # no output: the rerun matches the committed file');
+out('git diff --exit-code docs/PROOF.md                              # no output: the rerun wrote the same text as the page in the repository');
 out('node bowman/data/check.ts                                       # the dataset validator on its own');
-out('(cd norn/checks && npm test)                                    # the checks library tests on their own');
-out('(cd norn/config && npm test)                                    # the configuration and routing tests on their own');
+out('(cd norn/checks && node --test "test/*.test.ts")                # the checks library tests on their own');
+out('(cd norn/config && node --test "test/*.test.ts")                # the configuration and routing tests on their own');
 out('```');
 out();
 out('## Limits');
