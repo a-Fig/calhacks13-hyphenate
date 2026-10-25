@@ -15,13 +15,16 @@ const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 function plm(first: Record<string, any>) {
-  const s = { doc: first, ecos: [] as Record<string, any>[] };
+  const s = { doc: first, ecos: [] as Record<string, any>[], failReads: 0 };
   globalThis.fetch = (async (input: any, init: any) => {
     assert.equal(init.method, 'GET');
     const path = decodeURIComponent(new URL(String(input)).pathname);
     const d = s.doc;
     if (path === '/api/resource/ECR') return new Response(JSON.stringify({ data: [{ name: d.name, title: d.title, workflow_state: d.workflow_state, modified: d.modified, modified_by: d.modified_by }] }));
-    if (path === `/api/resource/ECR/${d.name}`) return new Response(JSON.stringify({ data: d }));
+    if (path === `/api/resource/ECR/${d.name}`) {
+      if (s.failReads > 0) { s.failReads--; return new Response(JSON.stringify({ exc_type: 'ServiceUnavailable' }), { status: 503 }); }
+      return new Response(JSON.stringify({ data: d }));
+    }
     if (path === '/api/resource/ECO') return new Response(JSON.stringify({ data: s.ecos }));
     throw new Error(`unexpected fake PLM path ${path}`);
   }) as typeof fetch;
@@ -309,4 +312,28 @@ test('a transient failure reading the ECR from the watcher is queued too, and a 
   const { PlmMappingError } = await import('../../../connectors/plm/src/index.ts');
   await assert.rejects(onChange(o, { name: 'ECR-2', workflowState: 'Submitted' }, { ...base, read: async () => { throw new PlmMappingError('bad field'); } }), /bad field/);
   assert.equal(retry.has('ECR-2'), false, 'the ECR is at fault: the watcher offers it again once someone fixes it');
+});
+
+test('three HTTP 503s on an approved ECR, then recovery: the decision is delivered, and nothing is given up on', async () => {
+  const p = plm({ ...ecrDoc(), workflow_state: 'Approved', released_eco: 'ECO-0001', modified_by: 'eco-release@acme.test' });
+  p.ecos = [{ name: 'ECO-0001', released_on: '2026-10-02', released_by: 'rafael@acme.test' }];
+  p.failReads = 3;
+  const calls: string[] = [];
+  const R = { recordPlmDecision: async () => void calls.push('decision'), recordEcoRelease: async () => void calls.push('eco') } as any;
+  const sent = new Map<string, string>();
+  const retry = new RetryQueue(1);
+  const lock = ecrLock();
+  const errors: string[] = [];
+  const o = plmIngestOptionsFromEnv({});
+  const read = (name: string) => readItem(opts, name, itemOf);
+  const recordEco = (item: any) => recordDecided(R, item, sent, () => {}, async () => true);
+  const d = { read, report: async () => void calls.push('ingestEcr'), recordEco, lock, retry, now: () => 0, log: () => {} };
+  const w = new EcrWatcher(opts, (change) => onChange(o, change, d), { since: '2026-01-01 00:00:00', onError: (e) => errors.push((e as Error).message) });
+  for (let i = 0; i < 6; i++) await w.tick(); // five healthy polls follow the failures
+  let n = 0;
+  while (retry.has('ECR-0001') && n++ < 10) await retryDue(retry, read, routed({ report: d.report, recordEco }), () => {}, () => 1_000_000 + n * 100_000, lock);
+  assert.equal(errors.some((e) => e.includes('giving up')), false, errors.join(' | '));
+  assert.equal(retry.has('ECR-0001'), false);
+  assert.deepEqual(calls, ['decision', 'eco'], 'delivered once, and no ingest_ecr');
+  assert.equal(sent.get('decision:ECR-0001'), 'approved');
 });

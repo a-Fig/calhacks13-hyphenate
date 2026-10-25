@@ -12,6 +12,9 @@
 // cannot start a loop; a person's edit changes the fingerprint, so it is delivered even when Norn's write
 // landed on top of it before the next pass. The mark moves past everything either way.
 //
+// A read of the request that fails for any reason but a mapping error (the PLM or the network) does not decide anything: the
+// request is delivered without a fingerprint, and the handler, which reads it again, owns what happens next.
+//
 // Delivery is at least once: if `onChange` throws, the change is offered again on the next pass, up to
 // `maxAttempts` times, and then given up on so that it cannot hold back the ones after it. Each
 // pass also looks a few seconds behind the mark, because a change saved just before another can commit
@@ -24,7 +27,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { DOCTYPE } from './schema.ts';
 import { PlmClient } from './client.ts';
 import { listEcrs, readChangeRequest } from './read.ts';
-import { inputsHash } from './map.ts';
+import { PlmMappingError, inputsHash } from './map.ts';
 import type { EcrListing } from './read.ts';
 import type { PlmOptions } from './options.ts';
 
@@ -130,8 +133,17 @@ export class EcrWatcher {
       if (!this.#seen.has(key)) {
         let hash: string | undefined;
         try {
-          hash = inputsHash(await readChangeRequest(this.#opts, row.name));
-          if (this.#inputs.get(row.name) !== hash) {
+          try {
+            hash = inputsHash(await readChangeRequest(this.#opts, row.name));
+          } catch (e) {
+            // An ECR that cannot be mapped is its own fault: it counts as a failed delivery, below. A read that failed for
+            // any other reason (the PLM or the network) says nothing about the ECR, so it must not count toward giving up
+            // on it or let the mark move past it: with no fingerprint to compare, deliver it, and the handler, which reads
+            // it again, owns the retry.
+            if (e instanceof PlmMappingError) throw e;
+            this.#onError(e);
+          }
+          if (hash === undefined || this.#inputs.get(row.name) !== hash) {
             await this.#onChange(row);
             delivered.push(row);
           }
