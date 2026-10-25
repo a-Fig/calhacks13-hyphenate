@@ -200,7 +200,7 @@ try {
     `${small.outcome} ${pr(p423.id).status} ${appr423?.kind}/${appr423?.approverKind}/${appr423?.tierId} gate ${gs?.outcome} reasons ${gs?.reasons?.length}/${appr423 && JSON.parse(appr423.decisionJson).reasons?.length} answers ${appr423?.answersJson.slice(0, 80)}`,
   );
   check(
-    '...and "Norn recommends approval" on the large ECR, not approved, with the limit it passed and the roles who get it',
+    '...and "Fern recommends approval" on the large ECR, not approved, with the limit it passed and the roles who get it',
     large.outcome === 'downgraded' && pr(p417.id).status === 'review' && !standing(p417.id) && /recommends approval; not approved/.test(large.summary)
       && gl?.outcome === 'recommend' && gl.limits.some((l: any) => l.limit === 'maxCost' && !l.held) && slipOf(gl)?.held === false && slipOf(gl).actual > 14 && /maxCost/.test(gl.reasons.map((r: any) => r.rule).join(' ')) && gl.recipients.includes('cm_analyst'),
     `${large.outcome} ${large.summary.slice(0, 120)} slip ${slipOf(gl)?.actual} days, ${texts(gl).slice(0, 160)}`,

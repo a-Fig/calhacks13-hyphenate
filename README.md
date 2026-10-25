@@ -29,18 +29,18 @@ Prizes are $8,000, $5,000 and $3,000 for the top 3 teams, plus an expedited inte
 - Tyler Darisme ([a-Fig](https://github.com/a-Fig))
 - Ankit
 
-## Our idea: Norn
+## Our idea: Fern
 
 Every design change at an aircraft maker changes what the aircraft costs to build, when the change reaches the production line, and how exposed the supply chain is. Today a cost engineer, a buyer, a planner and a cost accountant each work that out by hand before the Change Control Board can decide, and a change can wait months for a few hours of real work.
 
-Norn does that impact assessment. It reads the engineering change request (ECR) from the company's PLM, and costs, suppliers, stock and history from its ERP. It returns unit cost, one-time cost, cut-in date and supply risk as ranges, and posts them on the ECR where engineers and the board already work. When the change order is released, the new cost lands in the ERP. Its agents approve the small changes the company allows them to, and every number traces back to its source.
+Fern does that impact assessment. It reads the engineering change request (ECR) from the company's PLM, and costs, suppliers, stock and history from its ERP. It returns unit cost, one-time cost, cut-in date and supply risk as ranges, and posts them on the ECR where engineers and the board already work. When the change order is released, the new cost lands in the ERP. Its agents approve the small changes the company allows them to, and every number traces back to its source.
 
-We demo Norn deployed at Bowman Aviation, a fictional aircraft maker built from public data, running a stand-in PLM and ERPNext. The plan is [docs/PLAN.md](docs/PLAN.md). This section describes what we are building; it becomes a description of what works as the pieces land.
+We demo Fern deployed at Bowman Aviation, a fictional aircraft maker built from public data, running a stand-in PLM and ERPNext. The plan is [docs/PLAN.md](docs/PLAN.md). This section describes what we are building; it becomes a description of what works as the pieces land.
 
 ## Repo layout
 
 - [norn/](norn/README.md) - our product
-- [bowman/](bowman/README.md) - Bowman Aviation: its data, its PLM, its ERP (ERPNext) and its configuration of Norn
+- [bowman/](bowman/README.md) - Bowman Aviation: its data, its PLM, its ERP (ERPNext) and its configuration of Fern
 - [docs/](docs/PLAN.md) - the plan, glossary, research and hackathon notes
 - [sources/](sources/README.md) - original material, verbatim
 

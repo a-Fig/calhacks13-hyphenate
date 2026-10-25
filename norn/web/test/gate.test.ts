@@ -183,8 +183,8 @@ test('the gate\'s own reasons, from Bowman\'s configuration, read in business wo
   const sets = raw.filter(t => /^The company sets \w+ to \w+ for agents:/.test(t));
   assert.ok(sets.length > 0 && sets.every(t => plainReason(t).startsWith("For agents, the company's rule for ")));
   // The sentence the real gate gave on ECR-0423's fast track (Bowman's configuration, 2026-10-24).
-  const real = 'The company sets approve_fast_track_ecr to approve_sampled for agents: Most changes are small and CMII fast-tracks 75 to 85 percent of them. Within the limits Norn approves and a fifth get a blind second read.';
-  assert.equal(plainReason(real), "For agents, the company's rule for approving an ECR on the fast track is to approve, with a sampled second check: Most changes are small and CMII fast-tracks 75 to 85 percent of them. Within the limits Norn approves and a fifth get a blind second read.");
+  const real = 'The company sets approve_fast_track_ecr to approve_sampled for agents: Most changes are small and CMII fast-tracks 75 to 85 percent of them. Within the limits Fern approves and a fifth get a blind second read.';
+  assert.equal(plainReason(real), "For agents, the company's rule for approving an ECR on the fast track is to approve, with a sampled second check: Most changes are small and CMII fast-tracks 75 to 85 percent of them. Within the limits Fern approves and a fifth get a blind second read.");
   // Text with no id is untouched, and the maps cover every id in the configuration.
   assert.equal(plainReason('The change is 622 USD against a limit of 25,000 USD.'), 'The change is 622 USD against a limit of 25,000 USD.');
   assert.deepEqual(Object.keys(ACTION_WORDS).sort(), [...ACTION_IDS].sort());
@@ -217,14 +217,14 @@ test('a recommendation for an old revision is superseded in the timeline and not
   assert.equal(g.events[0].superseded, true);
   assert.match(g.events[0].detail!, /Superseded: made on revision 1, and the ECR is now on revision 2/);
   assert.equal(g.events[0].text, 'recommended approval');
-  assert.equal(g.events[0].actor, 'Norn');
+  assert.equal(g.events[0].actor, 'Fern');
 });
 
 test('the newest recommendation on the current revision is the one in the box, with its reasons and recipients', () => {
   const rows = [rec({ id: 1n, prRevision: 1, at: ts(100) }), rec({ id: 2n, prRevision: 2, at: ts(150) }), rec({ id: 3n, prRevision: 2, at: ts(160), reasons: [{ rule: 'a', text: 'Newer reason.' }] })];
   const g = buildGate({ recommendations: rows }, pr({ revision: 2 }));
   assert.equal(g.recommendation!.id, '3');
-  assert.equal(g.recommendation!.headline, 'Norn recommends approval');
+  assert.equal(g.recommendation!.headline, 'Fern recommends approval');
   assert.deepEqual(g.recommendation!.reasons, [{ rule: 'a', text: 'Newer reason.' }]);
   assert.deepEqual(g.recommendation!.recipients, ['CM analyst', 'Cost accountant']);
   assert.deepEqual(g.events.map(e => [e.id, !!e.superseded]), [['rec:1', true], ['rec:2', false], ['rec:3', false]]);
@@ -264,7 +264,7 @@ test('approvals: who, role, state and when, newest first; withdrawn ones keep th
   const g = buildGate({ approvals: rows }, pr({ status: 'merged' }));
   assert.deepEqual(g.approvals.map(a => [a.id, a.state, a.released]), [['3', 'approved', true], ['2', 'approved', false], ['1', 'withdrawn', false]]);
   const ft = g.approvals[1];
-  assert.deepEqual([ft.who, ft.whoKind, ft.role, ft.fastTrack, ft.onBehalfOf], ['Norn', 'norn', 'Fast track', true, 'Dana Okafor']);
+  assert.deepEqual([ft.who, ft.whoKind, ft.role, ft.fastTrack, ft.onBehalfOf], ['Fern', 'norn', 'Fast track', true, 'Dana Okafor']);
   assert.equal(g.approvals[2].endedReason, "the ECR's own revision changed");
   const ev = Object.fromEntries(g.events.map(e => [e.id, e]));
   assert.equal(ev['appr:2'].text, 'approved this ECR on the fast track');

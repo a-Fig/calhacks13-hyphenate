@@ -99,7 +99,7 @@ export async function publishDetailed(d: PublishDeps, ecrNumber: string, f: Form
     try {
       await d.override.record(p);
     } catch (e) {
-      d.log(`${ecrNumber}: could not record the override in Norn: ${(e as Error).message}`);
+      d.log(`${ecrNumber}: could not record the override in Fern: ${(e as Error).message}`);
     }
   };
   if (prov.mock) return mock();
@@ -135,7 +135,7 @@ export async function publishDetailed(d: PublishDeps, ecrNumber: string, f: Form
     if (!alreadyPublished(after, target.f)) d.log(`${ecrNumber}: the PLM stored the statement but its answer differs from what was sent (it may have rewritten the text)`);
     if (d.comment) {
       const rec = target.f.recommendation ? ` Recommendation: ${target.f.recommendation}.` : '';
-      await d.plm.postComment(ecrNumber, `<p>Norn posted a Level ${target.f.fields.impact_report_level} impact statement on this ECR.${rec} See the Impact assessment tab.</p>`);
+      await d.plm.postComment(ecrNumber, `<p>Fern posted a Level ${target.f.fields.impact_report_level} impact statement on this ECR.${rec} See the Impact assessment tab.</p>`);
     }
     await record(target.f);
     return { result: 'written', f: target.f };
@@ -152,7 +152,7 @@ export const statementIdOf = (f: Formatted): number => Number(f.ref.split('.')[0
 
 export function overrideComment(statementId: number, o: NonNullable<Formatted['overridden']>): string {
   const agent = o.agent ? `"${o.agent}"` : 'none';
-  return `Norn's rule set the recommendation to ${o.derived.recommendation}; the Level 1 agent wrote ${agent} (rule ${o.derived.rule}, statement ${statementId}). ${o.derived.reasoning}`;
+  return `Fern's rule set the recommendation to ${o.derived.recommendation}; the Level 1 agent wrote ${agent} (rule ${o.derived.rule}, statement ${statementId}). ${o.derived.reasoning}`;
 }
 
 export interface OverrideDeps {
@@ -345,7 +345,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
             const override = {
               recorded: (p: Formatted) => !p.overridden || cached().includes(overrideComment(statementIdOf(p), p.overridden)),
               record: async (p: Formatted) => {
-                if (await recordOverride(overrideDeps, statementIdOf(p), p)) log(`${pr.plmEcrNumber}: recorded in Norn that the rule's recommendation replaced the agent's (statement ${statementIdOf(p)})`);
+                if (await recordOverride(overrideDeps, statementIdOf(p), p)) log(`${pr.plmEcrNumber}: recorded in Fern that the rule's recommendation replaced the agent's (statement ${statementIdOf(p)})`);
               },
             };
             const out = await publishDetailed({ plm, lease: leaseFor(pr.id), comment: settings.publishComment, override, log }, pr.plmEcrNumber, f, g.prov, latest);

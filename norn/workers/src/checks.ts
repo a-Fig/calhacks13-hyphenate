@@ -47,7 +47,7 @@ check('the action log records actor, on-behalf-of, origin, spawned-by and policy
 check('spawnedBy comes with each call, not with the connection', l2.spawnedBy === 'parent-job-9' && l1.spawnedBy === 'external:mcp', `${l1.spawnedBy} then ${l2.spawnedBy} from the same connection`);
 const cmt = [...db.comment.iter()].find(c => c.prId === E1.id)!;
 check('comments and ECRs store who wrote them as an identity, not a name', cmt.author.isEqual(C.identity) && pr(E1.id).createdBy.isEqual(A.identity), 'comment.author and pull_request.created_by are identities');
-check('a Norn-originated ECR gets a NORN-<id> key and kind ecr', pr(E1.id).plmEcrNumber === `NORN-${E1.id}` && pr(E1.id).kind === 'ecr', `${pr(E1.id).plmEcrNumber}, ${pr(E1.id).kind}`);
+check('a Fern-originated ECR gets a NORN-<id> key and kind ecr', pr(E1.id).plmEcrNumber === `NORN-${E1.id}` && pr(E1.id).kind === 'ecr', `${pr(E1.id).plmEcrNumber}, ${pr(E1.id).kind}`);
 
 // ---- defect 1: a stage's hash includes the stages it reads ---------------------------------------
 const s1a = await work(E1.id, 's1_bom_delta');
@@ -318,7 +318,7 @@ const c1b = await claimAs(A, 'p1');
 check('claim_publication: one holder at a time, even two processes of one identity; the second is refused with [held], the first may renew', c1 === null && c2?.message.includes('[held]') === true && c1b === null, `${c2?.message}`);
 check('...and the claim is a row naming the connection\'s identity and the statement', held()?.holder.isEqual(A.identity) === true && held()?.processId === 'p1' && held()?.statementId === second.id);
 const c3 = await claimAs(A2, 'p1');
-check('...another Norn agent, even using the same process id, is refused while the lease stands', c3?.message.includes('[held]') === true, c3?.message);
+check('...another Fern agent, even using the same process id, is refused while the lease stands', c3?.message.includes('[held]') === true, c3?.message);
 const cExt = await claimAs(C, 'x');
 const cPerson = await claimAs(P, 'x');
 check('...a person and an outside agent may not claim a lease at all', cExt?.message.includes('[forbidden]') === true && cPerson?.message.includes('[forbidden]') === true, `${cExt?.message} | ${cPerson?.message}`);
@@ -332,7 +332,7 @@ check('...the holder releases it, and then another can claim', await holds(() =>
 await A2.R.releasePublication({ prId: E12.id, processId: 'q1' });
 await claimAs(A, 'p1', 1000);
 await sleep(1300);
-check('a lease that is not released ends by itself: another Norn agent may claim over it', (await claimAs(A2, 'q1')) === null && (await holds(() => held()?.holder.isEqual(A2.identity))));
+check('a lease that is not released ends by itself: another Fern agent may claim over it', (await claimAs(A2, 'q1')) === null && (await holds(() => held()?.holder.isEqual(A2.identity))));
 await A2.R.releasePublication({ prId: E12.id, processId: 'q1' });
 await claimAs(A, 'p1', 1000);
 await sleep(1300);

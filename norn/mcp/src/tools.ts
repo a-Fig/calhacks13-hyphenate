@@ -83,7 +83,7 @@ function tool(ctx: ToolContext, name: string, body: (...args: any[]) => Promise<
       if (e instanceof ToolFailure) result = fail(e.message);
       else {
         ctx.log(`tool ${name} failed: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
-        result = fail('Norn hit an internal error handling this call. Nothing was reported as done. Say so in your answer.');
+        result = fail('Fern hit an internal error handling this call. Nothing was reported as done. Say so in your answer.');
       }
     }
     ctx.log(`tool ${name} actor=${ctx.claims.actor} job=${ctx.claims.jobId} ${result.isError ? 'error' : 'ok'} ${Date.now() - t0}ms`);
@@ -99,15 +99,15 @@ async function sendWrite(ctx: ToolContext, reducer: string, args: Record<string,
   const r = await ctx.norn.call(ctx.actor, ctx.claims, reducer, args);
   const failed = (message: string) => ({ failed: fail(message) });
   if (r.error) {
-    if (r.error.kind === 'rejected') return failed(explain?.(r.error.message) ?? `Norn rejected this: ${r.error.message}`);
-    if (r.error.kind === 'unknown_result') return failed('Norn did not confirm whether this was saved. Call get_ecr_history before trying again, so you do not post it twice.');
-    return failed(`Norn could not take this write right now (${r.error.kind}). Nothing was saved. Try once more; if it fails again, say so in your answer.`);
+    if (r.error.kind === 'rejected') return failed(explain?.(r.error.message) ?? `Fern rejected this: ${r.error.message}`);
+    if (r.error.kind === 'unknown_result') return failed('Fern did not confirm whether this was saved. Call get_ecr_history before trying again, so you do not post it twice.');
+    return failed(`Fern could not take this write right now (${r.error.kind}). Nothing was saved. Try once more; if it fails again, say so in your answer.`);
   }
-  if (!r.row) return failed('Norn accepted the call but has not confirmed it yet. Call get_ecr_history before trying again, so you do not post it twice.');
-  if (r.row.outcome === 'rejected') return failed(`Norn rejected this: ${r.row.summary.replace(/^\S+ rejected: /, '')}. Nothing was saved (entry ${r.row.id} in the action log).`);
+  if (!r.row) return failed('Fern accepted the call but has not confirmed it yet. Call get_ecr_history before trying again, so you do not post it twice.');
+  if (r.row.outcome === 'rejected') return failed(`Fern rejected this: ${r.row.summary.replace(/^\S+ rejected: /, '')}. Nothing was saved (entry ${r.row.id} in the action log).`);
   if (r.row.outcome === 'denied')
     return failed(
-      `Refused by Norn's policy gate: ${r.row.policy.replace(/^deny: /, '')}. The refusal is recorded in Norn's action log (entry ${r.row.id}). Do not retry or look for another way; report that you were refused.`
+      `Refused by Fern's policy gate: ${r.row.policy.replace(/^deny: /, '')}. The refusal is recorded in Fern's action log (entry ${r.row.id}). Do not retry or look for another way; report that you were refused.`
     );
   return { row: r.row };
 }
@@ -119,9 +119,9 @@ async function write(ctx: ToolContext, reducer: string, args: Record<string, unk
 }
 
 export const INSTRUCTIONS = [
-  "Norn's tools for engineering change requests (ECRs) at Bowman.",
+  "Fern's tools for engineering change requests (ECRs) at Bowman.",
   'Numbers come from checks that code ran; read them with get_impact and quote them as they are. If a result says mock, it is placeholder data and you must say so.',
-  'Label what you write by evidence class: assumption, computation (copied from a check result) or judgment (your conclusion). You cannot label your own claim a fact; facts are what Norn holds from its sources.',
+  'Label what you write by evidence class: assumption, computation (copied from a check result) or judgment (your conclusion). You cannot label your own claim a fact; facts are what Fern holds from its sources.',
   'You act under your own name for the person named in your credential, and only on the ECRs your job names. A refusal is final; report it.',
 ].join(' ');
 
@@ -185,7 +185,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   server.registerTool(
     'get_part',
     {
-      description: 'Read one part by part number: name, category and spec, and the ECRs whose text names it. Evidence class: fact (as held in Norn; the ERP connector is not wired in yet).',
+      description: 'Read one part by part number: name, category and spec, and the ECRs whose text names it. Evidence class: fact (as held in Fern; the ERP connector is not wired in yet).',
       inputSchema: { part: z.string().min(1).describe('The part number, e.g. "BWM-1042-01".') },
       annotations: { readOnlyHint: true },
     },
@@ -201,7 +201,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         if (!p || on.length === 0) return fail(`This credential can read only parts on the change request or BOM delta of ${ctx.claims.ecrs.join(', ') || 'no ECR'}. '${part.slice(0, 60)}' is not one of them.`);
         return ok({ ...partView(p), namedInEcrs: on.map(pr => pr.plmEcrNumber) });
       }
-      if (!p) return fail(`No part '${part}' in Norn. Part numbers: ${[...norn.db.part.iter()].map(x => x.partNumber).sort().join(', ') || 'none'}.`);
+      if (!p) return fail(`No part '${part}' in Fern. Part numbers: ${[...norn.db.part.iter()].map(x => x.partNumber).sort().join(', ') || 'none'}.`);
       const ecrs = [...norn.db.pullRequest.iter()].filter(pr => affectedParts(norn, pr).some(a => a.partNumber === p.partNumber)).map(pr => pr.plmEcrNumber);
       return ok({ ...partView(p), namedInEcrs: ecrs });
     })
@@ -295,10 +295,10 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     'post_impact_statement',
     {
       description:
-        'Post a structured impact statement (level 1 to 3) on an ECR: change class, proposed approval route, a headline, headline numbers with p10/p50/p90, drivers, the assumptions it rests on, and claims, each with an evidence class. A number with evidence "computation" must name the key of a result from get_impact (e.g. "unit_cost_delta") and is copied from that result, with its label and unit: do not type them. You cannot post evidence "fact". Any other number needs p10, p50 and p90. Assumption sources are filled in from Norn\'s record. Use fixed likelihood words in prose (almost no chance, very unlikely, unlikely, roughly even, likely, very likely, almost certain).',
+        'Post a structured impact statement (level 1 to 3) on an ECR: change class, proposed approval route, a headline, headline numbers with p10/p50/p90, drivers, the assumptions it rests on, and claims, each with an evidence class. A number with evidence "computation" must name the key of a result from get_impact (e.g. "unit_cost_delta") and is copied from that result, with its label and unit: do not type them. You cannot post evidence "fact". Any other number needs p10, p50 and p90. Assumption sources are filled in from Fern\'s record. Use fixed likelihood words in prose (almost no chance, very unlikely, unlikely, roughly even, likely, very likely, almost certain).',
       inputSchema: {
         ecr: ECR,
-        level: z.number().int().min(1).max(3).describe('1 = impact screen, 2 = researched, 3 = Norn\'s final verdict.'),
+        level: z.number().int().min(1).max(3).describe('1 = impact screen, 2 = researched, 3 = Fern\'s final verdict.'),
         changeClass: z.string().min(1).max(80).describe('The change class, e.g. "Class I".'),
         route: z.string().min(1).max(200).describe('The proposed approval route, e.g. "CCB".'),
         headline: z.string().min(1).max(600).describe('One or two plain sentences.'),
@@ -366,7 +366,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     'request_fast_track_approval',
     {
       description:
-        "Ask Norn to approve an ECR on the fast track, with your answers to the company's fast-track tests (get_impact fastTrack.tests; ask only when fastTrack.candidate is true). Answer every test, once, honestly, with evidence: a test you mark true without evidence is a false statement under your name. Norn's gate decides from the company's rules and the numbers, not from you: the answer says approved, held for a blind second check (not approved yet), recommended to a named role, or refused, each with the reasons. Call it once and report the outcome as it is. Classes: leave companyClass out and Norn uses the change class on your current statement for this revision (post your Level 1 statement first, stating Class I or Class II with a reason; Norn never picks a class for you, and a class more permissive than your statement's is refused). Always state regulatoryClass (the FAA class, e.g. \"minor\" or \"major\") and say in your answer what you rest it on; Norn holds no FAA class of its own. The answer reports where each class came from. Optional triggers: named conditions you saw (safety_part, new_supplier, conflicting_open_ecr, shared_supplier_exposure, linchpin_assumption_agent_estimated, sources_conflict, stale_data, checker_disagrees); any of them sends the ECR to a person. Refused if the ECR is outside your job, not in review, or its checks have not finished.",
+        "Ask Fern to approve an ECR on the fast track, with your answers to the company's fast-track tests (get_impact fastTrack.tests; ask only when fastTrack.candidate is true). Answer every test, once, honestly, with evidence: a test you mark true without evidence is a false statement under your name. Fern's gate decides from the company's rules and the numbers, not from you: the answer says approved, held for a blind second check (not approved yet), recommended to a named role, or refused, each with the reasons. Call it once and report the outcome as it is. Classes: leave companyClass out and Fern uses the change class on your current statement for this revision (post your Level 1 statement first, stating Class I or Class II with a reason; Fern never picks a class for you, and a class more permissive than your statement's is refused). Always state regulatoryClass (the FAA class, e.g. \"minor\" or \"major\") and say in your answer what you rest it on; Fern holds no FAA class of its own. The answer reports where each class came from. Optional triggers: named conditions you saw (safety_part, new_supplier, conflicting_open_ecr, shared_supplier_exposure, linchpin_assumption_agent_estimated, sources_conflict, stale_data, checker_disagrees); any of them sends the ECR to a person. Refused if the ECR is outside your job, not in review, or its checks have not finished.",
       inputSchema: {
         ecr: ECR,
         answers: z.array(Answer).min(1).max(30),
@@ -379,8 +379,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     tool(ctx, 'request_fast_track_approval', async (a: { ecr: string; answers: { testId: string; holds: boolean; evidence: string }[]; companyClass?: string; regulatoryClass?: string; triggers?: string[] }) => {
       const pr = ecrOf(ctx, a.ecr);
       const loaded = companyConfigOf(norn);
-      if (loaded.state === 'none') return fail('No company configuration is stored in Norn, so there is no fast track rule to apply. Nothing was sent.');
-      if (loaded.state === 'unreadable') return fail(`Norn cannot read the company configuration (${loaded.why}), so it takes no fast-track decision. Nothing was sent.`);
+      if (loaded.state === 'none') return fail('No company configuration is stored in Fern, so there is no fast track rule to apply. Nothing was sent.');
+      if (loaded.state === 'unreadable') return fail(`Fern cannot read the company configuration (${loaded.why}), so it takes no fast-track decision. Nothing was sent.`);
       const prepared = prepareRequest(loaded.config, a, statementClassOf(norn, pr, loaded.config));
       if (!prepared.ok) return fail(prepared.message);
       const { request } = prepared;

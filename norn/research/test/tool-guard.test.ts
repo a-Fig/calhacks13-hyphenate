@@ -51,7 +51,7 @@ describe('search calls are checked before they are sent', () => {
     }
     assert.deepEqual(s.sent, [], 'nothing reached Bright Data');
     assert.equal(s.denials.length, 6);
-    assert.match(s.denials[0]!, /search_engine refused by Norn: the search contains an identifier from the company's data \(supplier/);
+    assert.match(s.denials[0]!, /search_engine refused by Fern: the search contains an identifier from the company's data \(supplier/);
     assert.ok(!s.denials.join('\n').includes('Halden'), 'the reason names the kind of identifier, not the text');
   });
   it('checks every argument, not only the query', async () => {

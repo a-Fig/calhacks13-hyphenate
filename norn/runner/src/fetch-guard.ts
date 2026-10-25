@@ -160,7 +160,7 @@ export function webFetchGuard(
       verdict = { allowed: false, reason: `the address check failed: ${err instanceof Error ? err.message : String(err)}` };
     }
     if (verdict.allowed) return {};
-    const reason = `WebFetch refused by Norn: ${verdict.reason}`;
+    const reason = `WebFetch refused by Fern: ${verdict.reason}`;
     onDeny(toolUseId, reason);
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } };
   };

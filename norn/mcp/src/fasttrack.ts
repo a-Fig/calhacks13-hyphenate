@@ -74,8 +74,8 @@ export function checksFinished(norn: Norn, pr: PullRequest): boolean {
 
 export function signalOf(norn: Norn, pr: PullRequest, claims: Pick<Claims, 'kind' | 'role' | 'actor' | 'onBehalfOf'>): FastTrackSignal | { none: string } {
   const loaded = companyConfigOf(norn);
-  if (loaded.state === 'none') return { none: 'No company configuration is stored in Norn, so there is no fast track to ask for.' };
-  if (loaded.state === 'unreadable') return { none: `Norn cannot read the company configuration (${loaded.why}), so it takes no fast-track decision.` };
+  if (loaded.state === 'none') return { none: 'No company configuration is stored in Fern, so there is no fast track to ask for.' };
+  if (loaded.state === 'unreadable') return { none: `Fern cannot read the company configuration (${loaded.why}), so it takes no fast-track decision.` };
   return fastTrackSignal(loaded.config, {
     facts: factsOf(norn, pr, loaded.config),
     actor: actorOf(loaded.config, claims),
@@ -116,24 +116,24 @@ export function prepareRequest(
   args: FastTrackArgs,
   statementCompany: string | undefined,
 ): { ok: true; request: FastTrackRequest } | { ok: false; message: string } {
-  const sentNothing = (why: string) => ({ ok: false as const, message: `Nothing was sent to Norn: ${why}` });
+  const sentNothing = (why: string) => ({ ok: false as const, message: `Nothing was sent to Fern: ${why}` });
   const company = args.companyClass?.trim() ?? '';
   const regulatory = args.regulatoryClass?.trim() ?? '';
   const r = readFastTrackRequest(config, { answers: args.answers, companyClass: company, regulatoryClass: regulatory, triggers: args.triggers ?? [] });
   if (!r.ok) return sentNothing(`${r.why}. Answer the tests get_impact lists under fastTrack.tests, by id, once each, with evidence.`);
   if (!company && !statementCompany)
-    return sentNothing(`Norn has no change class for this revision: the ECR's current statement proposes none. State the change class and the regulatory class, with evidence: post your Level 1 statement with the change class you can support and a one-line reason, then ask again with regulatoryClass.`);
+    return sentNothing(`Fern has no change class for this revision: the ECR's current statement proposes none. State the change class and the regulatory class, with evidence: post your Level 1 statement with the change class you can support and a one-line reason, then ask again with regulatoryClass.`);
   if (!regulatory)
-    return sentNothing(`state the regulatory (FAA) class in regulatoryClass, with the evidence you rest it on in your answer. Norn holds no FAA class of its own for this ECR and will not assume one.`);
+    return sentNothing(`state the regulatory (FAA) class in regulatoryClass, with the evidence you rest it on in your answer. Fern holds no FAA class of its own for this ECR and will not assume one.`);
   const classes = resolveClasses(config, r.request.classes, statementCompany);
   if (!classes.ok) return sentNothing(`${classes.why}. Leave companyClass out to use the statement's, or post a statement that proposes the class you can support, with a one-line reason.`);
   return { ok: true, request: { ...r.request, classes: classes.classes, classSources: classes.sources } };
 }
 
 const SOURCE_TEXT: Record<ClassSource, string> = {
-  statement: "Norn's own, from the ECR's current statement",
-  agent_stricter: "yours, and no more permissive than Norn's",
-  agent: 'yours; Norn holds no class of its own for this axis to check it against',
+  statement: "Fern's own, from the ECR's current statement",
+  agent_stricter: "yours, and no more permissive than Fern's",
+  agent: 'yours; Fern holds no class of its own for this axis to check it against',
   none: 'none was given, so the stricter default applied',
 };
 
@@ -158,7 +158,7 @@ export function classReport(config: CompanyConfig, req: Pick<FastTrackRequest, '
 export function explainRefusal(message: string, ecr: string): string | undefined {
   const status = /ECR \d+ is (\w+); the fast track decides ECRs in review/.exec(message);
   if (status) return `${ecr} is ${status[1]}, not in review. The fast track decides ECRs in review only. Nothing was changed.`;
-  if (/no company configuration is stored/.test(message)) return 'No company configuration is stored in Norn, so there is no fast track rule to apply. Nothing was changed.';
+  if (/no company configuration is stored/.test(message)) return 'No company configuration is stored in Fern, so there is no fast track rule to apply. Nothing was changed.';
   const stages = /checks not finished on current inputs \(([^)]*)\)/.exec(message);
   if (stages) return `The checks on ${ecr} have not finished on its current inputs (${stages[1]}). Call get_impact to see their state, and ask again once they are current. Nothing was changed.`;
   return undefined;
@@ -217,7 +217,7 @@ export function outcomeOf(
       return {
         decision: 'held_for_second_check',
         ecrStatus: 'review',
-        summary: `${ecr} is NOT approved yet. It was drawn for the blind second check, so Norn filed your approval as a recommendation${toText} and it waits for that check.`,
+        summary: `${ecr} is NOT approved yet. It was drawn for the blind second check, so Fern filed your approval as a recommendation${toText} and it waits for that check.`,
         secondCheck: 'drawn',
         recipients: to,
         reasons,
@@ -225,19 +225,19 @@ export function outcomeOf(
         ...classOf(d),
       };
     if (r.outcome === 'escalate')
-      return { decision: 'escalated', ecrStatus: 'review', summary: `${ecr} is NOT approved. Norn handed it${toText} with your work.`, recipients: to, reasons, ...common, ...classOf(d) };
+      return { decision: 'escalated', ecrStatus: 'review', summary: `${ecr} is NOT approved. Fern handed it${toText} with your work.`, recipients: to, reasons, ...common, ...classOf(d) };
     return {
       decision: 'recommended',
       ecrStatus: 'review',
       route: ordinary ? 'ordinary' : 'fast_track',
       summary: ordinary
-        ? `${ecr} cannot take the fast track, so it is NOT approved. Norn filed your approval as a recommendation on the ordinary route${d?.route ? ` (${d.route.bodyName})` : ''}${toText}.`
-        : `${ecr} is NOT approved. It is past a fast-track limit, so Norn filed your approval as a recommendation${toText}.`,
+        ? `${ecr} cannot take the fast track, so it is NOT approved. Fern filed your approval as a recommendation on the ordinary route${d?.route ? ` (${d.route.bodyName})` : ''}${toText}.`
+        : `${ecr} is NOT approved. It is past a fast-track limit, so Fern filed your approval as a recommendation${toText}.`,
       recipients: to,
       reasons,
       ...common,
       ...classOf(d),
     };
   }
-  return { decision: 'unconfirmed', summary: `Norn accepted the call but the decision is not visible yet. Call get_ecr_history for ${ecr} before asking again.`, ...common, ...classReport(config, request) };
+  return { decision: 'unconfirmed', summary: `Fern accepted the call but the decision is not visible yet. Call get_ecr_history for ${ecr} before asking again.`, ...common, ...classReport(config, request) };
 }

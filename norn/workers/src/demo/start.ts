@@ -114,7 +114,7 @@ if (process.env.CLAUDE_CODE_OAUTH_TOKEN) fine('Claude login: CLAUDE_CODE_OAUTH_T
 else if (existsSync(join(claudeDir, '.credentials.json'))) fine(`Claude login: credentials in ${claudeDir}`);
 else bad(`no Claude login found in ${claudeDir}: run \`claude\` and /login once`);
 
-for (const [port, what] of [[WEB_PORT, 'the web screens'], [MCP_PORT, 'the MCP server'], [ASK_NORN_PORT, 'Ask Norn']] as const) {
+for (const [port, what] of [[WEB_PORT, 'the web screens'], [MCP_PORT, 'the MCP server'], [ASK_NORN_PORT, 'Ask Fern']] as const) {
   if (await reachable('127.0.0.1', port, 500)) bad(`port ${port} (${what}) is already in use: stop what holds it, or pass --web-port`);
   else fine(`port ${port} is free for ${what}`);
 }
@@ -197,7 +197,7 @@ try {
   start('web', [viteCli, '--host', '127.0.0.1', '--port', String(WEB_PORT), '--strictPort'], join(norn, 'web'), { VITE_NORN_SOURCE: 'live', VITE_NORN_DB: DB });
   start('ask', [tsxCli, 'src/ask/server.ts'], workers, { NORN_ASK_PORT: String(ASK_NORN_PORT), NORN_ASK_ORIGINS: `http://127.0.0.1:${WEB_PORT},http://localhost:${WEB_PORT}` });
   await Promise.all([ready('ask', /listening on/), ready('ingest', /watching the PLM/), ready('dispatch', /watching '/), ready('publish', /publishing Level 1/), ready('web', /ready in/), ...(RESEARCH ? [ready('research', /watching '/)] : [])]);
-  say(`Norn is up on '${DB}'. Screens: http://127.0.0.1:${WEB_PORT}, Ask Norn on port ${ASK_NORN_PORT}  (Ctrl-C stops everything)`);
+  say(`Fern is up on '${DB}'. Screens: http://127.0.0.1:${WEB_PORT}, Ask Fern on port ${ASK_NORN_PORT}  (Ctrl-C stops everything)`);
 } catch (e) {
   say(`start-up failed: ${(e as Error).message}`);
   stopAll();

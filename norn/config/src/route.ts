@@ -256,7 +256,7 @@ function placeClass(config: CompanyConfig, axis: 'company' | 'regulatory', given
     label: fallback.label,
     source: 'when_unsure',
     rule: `changeClasses.${axis}.whenUnsure`,
-    why: `${because}, so the ${a.label.toLowerCase()} is ${fallback.label}, the class the configuration uses when Norn cannot tell.`,
+    why: `${because}, so the ${a.label.toLowerCase()} is ${fallback.label}, the class the configuration uses when Fern cannot tell.`,
   };
 }
 
@@ -505,7 +505,7 @@ function notExact(route: Route): string {
       : route.cost.basis === 'lower_bound'
         ? 'The cost measure is only a lower bound, taken from the assessment\'s ranges'
         : 'The cost measure is estimated from the assessment\'s ranges';
-  return `${what}; Norn acts only on an exact measure, worked out per draw of the forecast by the checks. It recommends instead.`;
+  return `${what}; Fern acts only on an exact measure, worked out per draw of the forecast by the checks. It recommends instead.`;
 }
 
 /**

@@ -46,7 +46,7 @@ await X.R.setPrStatus({ prId: E.id, status: 'approved', meta: { requestId: `down
 const down = await until(() => logs(l => l.requestId === `down-${stamp}`)[0], 3000, 'the downgrade in the log');
 check('an outside agent\'s approval is downgraded to a recommendation: logged as downgraded, the ECR stays in review', down.outcome === 'downgraded' && down.summary.startsWith('recommends approval') && down.policy.startsWith('downgrade to recommendation') && pr(E.id).status === 'review', `${down.outcome}: ${down.summary}`);
 await A.R.setPrStatus({ prId: E.id, status: 'approved', meta: { requestId: `approve-${stamp}` } });
-check('the same approval by Norn\'s own agent goes through', await holds(() => pr(E.id).status === 'approved') && (await until(() => logs(l => l.requestId === `approve-${stamp}`)[0])).outcome === 'applied');
+check('the same approval by Fern\'s own agent goes through', await holds(() => pr(E.id).status === 'approved') && (await until(() => logs(l => l.requestId === `approve-${stamp}`)[0])).outcome === 'applied');
 
 // downgrade with no weaker form
 const E2 = await newPr(`policy close ${stamp}`);

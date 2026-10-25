@@ -106,7 +106,7 @@ test('an ECR number cannot be cited to vouch for every number', () => {
 });
 
 test('an answer with no numbers needs none', () => {
-  assert.deepEqual(guard('Norn has no record of that. Ask the cost accountant.', []).unverifiedNumbers, []);
+  assert.deepEqual(guard('Fern has no record of that. Ask the cost accountant.', []).unverifiedNumbers, []);
 });
 
 test('mock results are reported', () => {
@@ -116,7 +116,7 @@ test('mock results are reported', () => {
 });
 
 test('a tool result that is not JSON backs nothing', () => {
-  const g = guardOn([{ tool: 'x', content: 'Norn hit an internal error' }])('It is 5 [c1].', [['c1', 'k', '5']]);
+  const g = guardOn([{ tool: 'x', content: 'Fern hit an internal error' }])('It is 5 [c1].', [['c1', 'k', '5']]);
   assert.deepEqual(g.unverifiedNumbers, ['5']);
 });
 
@@ -393,7 +393,7 @@ const rerun = guardOn([
   { tool: 'mcp__norn__get_ecr', content: JSON.stringify(statements) },
 ]);
 const rerunAnswer =
-  "The biggest mover is the choice for the old BW-5120-210 bracket stock: use it up or scrap it. Norn's driver statement says this moves the 12-month net cost between $96,233 [c1] and $156,821 [c1], a swing of $60,588 [c1]. Those three figures come from the driver text. The upper end matches the point estimate of $156,821 [c2]. The overall forecast range is $150,682 [c3] to $164,556 [c4]. The vibration re-test swings the cost by $7,157 [c5], and engineering hours come next at $5,946 [c6]. The totals leave out several items that are counted as $0 until someone estimates them.";
+  "The biggest mover is the choice for the old BW-5120-210 bracket stock: use it up or scrap it. Fern's driver statement says this moves the 12-month net cost between $96,233 [c1] and $156,821 [c1], a swing of $60,588 [c1]. Those three figures come from the driver text. The upper end matches the point estimate of $156,821 [c2]. The overall forecast range is $150,682 [c3] to $164,556 [c4]. The vibration re-test swings the cost by $7,157 [c5], and engineering hours come next at $5,946 [c6]. The totals leave out several items that are counted as $0 until someone estimates them.";
 const rerunCites: Cite[] = [
   ['c1', 'driver:12.1', '$60,588'],
   ['c2', 'net_total_year_one', '$156,821'],

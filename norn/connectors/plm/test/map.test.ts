@@ -209,7 +209,7 @@ test('the ECO that released the request is carried on the change and the record'
   assert.deepEqual([record.eco, record.ecoReleasedOn], ['ECO-0319', '2026-10-30']);
 });
 
-test('what Norn has posted is read back under the PLM field names', () => {
+test('what Fern has posted is read back under the PLM field names', () => {
   const doc = ecrDoc();
   Object.assign(doc, { impact_report_level: '1', impact_recommendation: 'Approve', impact_statement: '<p>x</p>', impact_approval_route: '' });
   assert.deepEqual(mapEcr(settings, doc).record.impact, { impact_report_level: '1', impact_recommendation: 'Approve', impact_statement: '<p>x</p>' });

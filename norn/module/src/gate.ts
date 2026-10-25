@@ -111,7 +111,7 @@ export const gateRule: PolicyRule = (ctx, actor, reducer, args) => {
   const loaded = companyConfig(ctx);
   if (loaded.state === 'none') return { effect: 'allow', reason: NO_CONFIG };
   if (!action) return { effect: 'allow', reason: `${reducer} is not gated by the company's configuration` };
-  if (loaded.state === 'unreadable') return { effect: 'deny', reason: `${loaded.why}; Norn takes no ${action} decision on a configuration it cannot read` };
+  if (loaded.state === 'unreadable') return { effect: 'deny', reason: `${loaded.why}; Fern takes no ${action} decision on a configuration it cannot read` };
   const who = configActor(loaded.config, actor);
   if (!who) return { effect: 'deny', reason: `${actor.name} has not registered as a person or an agent, so the company's rules cannot be applied to it` };
   const pr = typeof args.prId === 'bigint' ? ctx.db.pullRequest.id.find(args.prId) : undefined;

@@ -16,19 +16,19 @@ export const ASK_TOOLS: NornToolName[] = [...ASK_NORN_TOOLS];
 export const ASK_ROLE = ASK_NORN_ROLE;
 
 export const ASK_SYSTEM_PROMPT = [
-  'You are Norn answering one question from a finance or engineering reader about one engineering change request (ECR). Norn has already assessed the ECR; your job is to explain that stored assessment, not to redo it.',
+  'You are Fern answering one question from a finance or engineering reader about one engineering change request (ECR). Fern has already assessed the ECR; your job is to explain that stored assessment, not to redo it.',
   '',
   'Rules:',
-  '1. Read before you answer. Use the Norn tools for this ECR: get_impact (check results, each with its trace), list_assumptions, get_ecr, get_ecr_history. To see the trace behind one number, call get_impact with that result key. The inputs behind the numbers (quotes, rates, stock, their sources and rationale) are in the result with key "detail"; read it, but cite the specific input or result id that holds each number (for example cancel:BW-5120-210, line:inventory:BW-5120-210 or one_time_total), never "detail" itself: a citation of the whole detail row is too broad to check and is not shown as verified. A driver (an entry in the "drivers" list of a statement in get_ecr, "What moves the numbers") has no id of its own: cite it as driver:<the statement id>.<its place in that list, counting from 1>, for example driver:12.2, and only for a number its own text holds.',
+  '1. Read before you answer. Use the Fern tools for this ECR: get_impact (check results, each with its trace), list_assumptions, get_ecr, get_ecr_history. To see the trace behind one number, call get_impact with that result key. The inputs behind the numbers (quotes, rates, stock, their sources and rationale) are in the result with key "detail"; read it, but cite the specific input or result id that holds each number (for example cancel:BW-5120-210, line:inventory:BW-5120-210 or one_time_total), never "detail" itself: a citation of the whole detail row is too broad to check and is not shown as verified. A driver (an entry in the "drivers" list of a statement in get_ecr, "What moves the numbers") has no id of its own: cite it as driver:<the statement id>.<its place in that list, counting from 1>, for example driver:12.2, and only for a number its own text holds.',
   "2. Answer only from what those tools return. Do not use general knowledge, other ECRs or guesses. You have no web access.",
-  '3. Every number you write must be copied from a tool result, at the precision the result shows or coarser. Write it in digits, with its unit (for example $60,439, 10%, 18.64), and put the marker of the citation that holds it right after it, before any other word: "The charge is 10% [c1] of the price." Each marker names one citation in your list (c1, c2, ...). Code checks the number against that citation\'s stored value and nothing else, so a number with no marker, or with the marker of a citation that does not hold it, is shown to the reader as not found in Norn\'s data. Use markers only after numbers. Never add, subtract, average, convert or estimate numbers: code computes, you explain. If you need a total that no result holds, say Norn does not have it.',
+  '3. Every number you write must be copied from a tool result, at the precision the result shows or coarser. Write it in digits, with its unit (for example $60,439, 10%, 18.64), and put the marker of the citation that holds it right after it, before any other word: "The charge is 10% [c1] of the price." Each marker names one citation in your list (c1, c2, ...). Code checks the number against that citation\'s stored value and nothing else, so a number with no marker, or with the marker of a citation that does not hold it, is shown to the reader as not found in Fern\'s data. Use markers only after numbers. Never add, subtract, average, convert or estimate numbers: code computes, you explain. If you need a total that no result holds, say Fern does not have it.',
   '4. If the stored data does not answer the question, say so plainly in one sentence and name who to ask (for example the cost accountant, the buyer or the cost engineer). Do not fill the gap.',
   '5. Say where each number comes from in plain words: the quote, the assumption and its source, the check, the person. Say if a result is stale or mock: true.',
   '6. Be short: two to five sentences, plain words for a finance reader, no headings.',
   '',
   'Your final message must be one JSON object and nothing else:',
   '{"answer": "<your answer, with a marker such as [c1] right after each number>", "citations": [{"id": "c1", "refId": "<the key or id of the result or input in the tool result>", "value": "<the value as the tool result shows it, e.g. $60,439 or 10%>"}]}',
-  'List each citation once, with the id its markers use (c1, c2, ...). refId must be a key or id that appears in a tool result (a check result key such as one_time_total or line:inventory:BW-5120-210, an input id such as cancel:BW-5120-210, or a driver such as driver:12.2). Norn shows its own label for what refId names, so do not write one. Use [] when the answer holds no numbers.',
+  'List each citation once, with the id its markers use (c1, c2, ...). refId must be a key or id that appears in a tool result (a check result key such as one_time_total or line:inventory:BW-5120-210, an input id such as cancel:BW-5120-210, or a driver such as driver:12.2). Fern shows its own label for what refId names, so do not write one. Use [] when the answer holds no numbers.',
 ].join('\n');
 
 export function askPrompt(ecr: string, question: string): string {
@@ -87,11 +87,11 @@ function sameEcr(asked: string, used: unknown): boolean {
 
 function refusalFor(r: JobResult): AskRefusal {
   const kind = r.error?.kind;
-  if (kind === 'auth' || kind === 'account') return { ok: false, kind: 'unavailable', message: 'Ask Norn is unavailable: the Claude login on the Norn server needs renewing.' };
-  if (kind === 'usage_limit' || kind === 'rate_limited' || kind === 'overloaded') return { ok: false, kind: 'unavailable', message: "Ask Norn is unavailable right now: the model's usage limit is reached. Try again later." };
-  if (kind === 'timeout' || r.status === 'timed_out') return { ok: false, kind: 'failed', message: 'Norn took too long to answer. Try a narrower question.' };
-  if (kind === 'max_turns') return { ok: false, kind: 'failed', message: 'Norn could not settle this from its data in time. Try a narrower question.' };
-  return { ok: false, kind: 'failed', message: 'Norn could not answer this one. Nothing was changed.' };
+  if (kind === 'auth' || kind === 'account') return { ok: false, kind: 'unavailable', message: 'Ask Fern is unavailable: the Claude login on the Fern server needs renewing.' };
+  if (kind === 'usage_limit' || kind === 'rate_limited' || kind === 'overloaded') return { ok: false, kind: 'unavailable', message: "Ask Fern is unavailable right now: the model's usage limit is reached. Try again later." };
+  if (kind === 'timeout' || r.status === 'timed_out') return { ok: false, kind: 'failed', message: 'Fern took too long to answer. Try a narrower question.' };
+  if (kind === 'max_turns') return { ok: false, kind: 'failed', message: 'Fern could not settle this from its data in time. Try a narrower question.' };
+  return { ok: false, kind: 'failed', message: 'Fern could not answer this one. Nothing was changed.' };
 }
 
 export interface AskOptions {
@@ -124,7 +124,7 @@ export async function ask(req: AskRequest, deps: AskDeps, opts: AskOptions = {})
       allowedTools: nornTools(...ASK_TOOLS),
     };
   } catch (e) {
-    return { ok: false, kind: 'unavailable', message: `Ask Norn is unavailable: ${(e as Error).message}` };
+    return { ok: false, kind: 'unavailable', message: `Ask Fern is unavailable: ${(e as Error).message}` };
   }
 
   // One limit for the whole question: time spent waiting for a free session counts as well as time spent working.
@@ -147,8 +147,8 @@ export async function ask(req: AskRequest, deps: AskDeps, opts: AskOptions = {})
     clearTimeout(timer);
     opts.signal?.removeEventListener('abort', onGone);
   }
-  if (timedOut) return { ok: false, kind: 'failed', message: 'Norn took too long to answer. Try a narrower question.' };
-  if (opts.signal?.aborted) return { ok: false, kind: 'failed', message: 'The question was withdrawn before Norn answered.' };
+  if (timedOut) return { ok: false, kind: 'failed', message: 'Fern took too long to answer. Try a narrower question.' };
+  if (opts.signal?.aborted) return { ok: false, kind: 'failed', message: 'The question was withdrawn before Fern answered.' };
   if (result.status !== 'succeeded') return refusalFor(result);
 
   // What the session read: each tool result, paired with its call so a question about another ECR is caught.
@@ -163,11 +163,11 @@ export async function ask(req: AskRequest, deps: AskDeps, opts: AskOptions = {})
       results.push({ tool: calls.get(e.toolUseId)?.tool ?? e.tool ?? '', content: e.content });
     }
   }
-  if (strayEcr) return { ok: false, kind: 'failed', message: `Ask Norn answers about ${req.ecr} only. Open the other ECR and ask there.` };
-  if (results.length === 0) return { ok: false, kind: 'failed', message: `Norn could not read the stored assessment for ${req.ecr}, so it will not answer. Nothing was made up.` };
+  if (strayEcr) return { ok: false, kind: 'failed', message: `Ask Fern answers about ${req.ecr} only. Open the other ECR and ask there.` };
+  if (results.length === 0) return { ok: false, kind: 'failed', message: `Fern could not read the stored assessment for ${req.ecr}, so it will not answer. Nothing was made up.` };
 
   const agent = parseAgentAnswer(result.result);
-  if (!agent) return { ok: false, kind: 'failed', message: 'Norn gave an answer in a form it cannot check, so it is not shown.' };
+  if (!agent) return { ok: false, kind: 'failed', message: 'Fern gave an answer in a form it cannot check, so it is not shown.' };
   const g = guardAnswer(agent, results);
   const answer: AskAnswer = {
     ok: true,

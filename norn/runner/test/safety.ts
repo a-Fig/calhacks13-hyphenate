@@ -170,8 +170,8 @@ describe('job tool-input guards', () => {
     );
     const bad = await pre(hook, 'mcp__x__search', { q: 'a secret thing' });
     assert.equal(bad.hookSpecificOutput?.permissionDecision, 'deny');
-    assert.match(bad.hookSpecificOutput?.permissionDecisionReason ?? '', /mcp__x__search refused by Norn: the query leaks/);
-    assert.deepEqual(denied, [['tu1', 'mcp__x__search refused by Norn: the query leaks']]);
+    assert.match(bad.hookSpecificOutput?.permissionDecisionReason ?? '', /mcp__x__search refused by Fern: the query leaks/);
+    assert.deepEqual(denied, [['tu1', 'mcp__x__search refused by Fern: the query leaks']]);
     assert.deepEqual(await pre(hook, 'mcp__x__search', { q: 'fine' }), {});
     assert.deepEqual(await pre(hook, 'mcp__x__other', { q: 'a secret thing' }), {});
     assert.deepEqual(await pre(hook, 'toString', { q: 'a secret thing' }), {});
@@ -283,8 +283,8 @@ describe('log completeness', () => {
   it('precedes a hook-denied result with a permission_denied event', () => {
     const t = new MessageTranslator(1000);
     t.translate(assistant([{ type: 'tool_use', id: 'w1', name: 'WebFetch', input: { url: 'http://127.0.0.1/' } }]));
-    t.noteHookDenial('w1', 'WebFetch refused by Norn: 127.0.0.1 is not a public internet address');
-    const out = t.translate(toolResult('w1', 'WebFetch refused by Norn: ...', true));
+    t.noteHookDenial('w1', 'WebFetch refused by Fern: 127.0.0.1 is not a public internet address');
+    const out = t.translate(toolResult('w1', 'WebFetch refused by Fern: ...', true));
     assert.deepEqual(out.map((b) => b.type), ['permission_denied', 'tool_result']);
     assert.ok(out[0]!.type === 'permission_denied' && out[0]!.reasonType === 'hook' && out[0]!.tool === 'WebFetch');
   });
