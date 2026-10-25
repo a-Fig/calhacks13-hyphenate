@@ -6,9 +6,10 @@ inputs. Code decides which to use and computes every number (`../ARCHITECTURE.md
 
 ```
 npm ci                # in norn/, once
-npm test              # 60 tests, no model, no network, no login (about 25 s)
+npm test              # 98 tests, no model, no network, no login (about 35 s)
 npm run typecheck
 npm run replay        # the ECR-0417 demo, offline, every line labelled RECORDED
+npm run worker        # the live worker (#148): see "Running it on live ECRs" below
 
 # live (not run from the build environment, see "Not verified")
 export BRIGHT_DATA_API_TOKEN=...                 # read by name, never printed
@@ -106,17 +107,159 @@ recording.
   formatting, but a live quote can still fail on text the two paths format differently.
 - The prompt's output contract has not been tried on a model.
 
-## Wiring it in (follow-up)
+## Running it on live ECRs (#148)
 
-- `norn/workers`: a job kind `research` that, for an ECR with a finished cost run, calls `prepare`,
-  submits `buildResearchJob` to the runner, then `finish`, and stores the accepted overrides as
-  `Assumption` rows (source `agent_estimated`) and the report as a run row. Needs the module
-  schema's assumption table and the check-run hash to include them (assumptions are inputs to the
-  run hash), so the cost check re-runs when one lands.
+`src/worker.ts` is a long-running process, like the Level 1 dispatcher. It watches the ECRs in the Norn
+database and, for each change-request revision whose cost run is current, runs the research job above
+and stores what passes the guardrails. It changes nothing in the other workers.
+
+**How a run goes**
+
+1. **Which ECR** (`src/live/plan.ts`). The ECR is `draft` or `review` (an approved ECR is left alone:
+   changing an assumption withdraws the approval), and its newest `done` `s2_cost` run names the
+   current change-request revision and digest. The module makes a run stale the moment any input
+   changes, so a `done` run is current (`../workers/README.md`, "For whatever waits on the numbers").
+   Mock runs are skipped.
+2. **Targets** (`src/live/targets.ts`). From the `detail` row of that run's stored result (its inputs,
+   drivers and inventory), through `pickTargets`. The check is not run again. An input outside the
+   check's top eight drivers has no measured swing here and ranks after the measured ones.
+3. **Identifiers for the leak check.** From the baseline the run names (the worker's own cache by hash,
+   else read from the ERP, read only; nothing is recorded in Norn from here), plus the ERP's company
+   name and the ECR's change request. Supplier display names are not in the baseline, so a supplier is
+   known by its id.
+4. **The agent job.** `buildResearchJob` with the budgets below, through `norn/runner`, with Bright
+   Data's MCP server as its only tools. The runner's events go to `agent_event` (role `researcher`),
+   so the run shows on the ECR page's agent timeline.
+5. **Guardrails**, with pages fetched again through Bright Data.
+6. **Recording** (`src/live/assumptions.ts`, `src/live/outcome.ts`). Each accepted proposal becomes one
+   `record_assumption` call, under the identity `norn research agent (cost engineer)`:
+
+   | Argument | Value |
+   |---|---|
+   | `prId` | the ECR |
+   | `key` | the check's input id, such as `recovery:<item>` |
+   | `distJson` | `{"kind":"pert",...}` or `{"kind":"lognormal","median","sigmaLow","sigmaHigh"}`, the shapes `../workers/src/impact.ts` reads |
+   | `source` | `agent_estimated` |
+   | `rationale` | the agent's reasoning, the URL, the exact quote, the retrieval date, the distribution and the confidence, and any flag |
+   | `affects` | `["s2_cost"]` (`["s3_timeline"]` for a lead time) |
+   | `expectedRev` | 0, or the revision of this agent's own earlier estimate of the key |
+
+   That identity is given a job scope first (`grant_scope`: any ECR, level 0, 2 hours, re-granted as it
+   runs down). The module's policy gate (`../module/src/scope.ts`) then refuses it a value someone gave,
+   an approved ECR, a baseline assumption and every reducer but comments and assumptions. A refusal
+   returns normally from a scoped call, so the worker looks for the assumption in the table after each
+   call and reports a missing one as failed, with the action log's reason.
+
+**Do the researched numbers reach the impact page without a worker change?** Yes, by reading the code:
+`record_assumption` calls `reconcile` for the ECR (`../module/src/reducers.ts`, `recordAssumption`),
+`stageInfos` puts the ECR's current assumptions (filtered by `affects`) in each code stage's inputs, so
+the input hash changes (`../module/src/core.ts`, `stageInfos`, `reconcile`), the old runs become `stale`
+and a new `s2_cost` run is queued. The worker reads the assumptions the run names
+(`../workers/src/impact.ts`, `assumptionsOf`, `toOverride`) and the impact page reads the newest run.
+`../workers/src/checks-pipeline.ts` already tests this path with an `agent_estimated` assumption.
+
+**What it does not do (needs a change outside this package).**
+- **Level 1 does not re-write its statement.** The dispatcher starts one session per change-request
+  revision as soon as the cost run is done (`../workers/src/level1/plan.ts`). If it starts before the
+  research lands, its statement carries the numbers from before. The impact page updates; the
+  statement does not. The fix is in the dispatcher: wait for the revision's `research_result` event
+  (or its attempts running out) before dispatching. Until then, start the research worker first, or
+  accept a Level 1 statement on the unresearched numbers.
+- The web does not show the held proposals or the `research_result` record. They are in the ECR's
+  comments (below).
+
+**Where held, rejected and flagged proposals go.** No schema change was needed.
+- **A comment on the ECR** (`add_comment`, anchor `check_run:<id>`), one per run, when anything was held,
+  rejected, flagged, not found or not recorded. For a held proposal it gives the question, the proposed
+  value, the URL, the quote, the date, the confidence, why it was held, and the `distJson` a person
+  can record by hand on the input to use it.
+- **The `research_result` event** under the run's job id in `agent_event` (`record_agent_events`),
+  with every proposal's status and reasons. It is also what makes a restart start nothing twice.
+- A JSON copy in `norn/research/logs/` (gitignored) on the machine that ran it.
+
+**Once per revision.** The key is the ECR number and the revision's digest (`ECR-0417@<digest>`). A run
+that stored a `research_result` is never repeated, across restarts. A run that failed (usage limit, a
+timeout, unreadable output) is retried after `NORN_RESEARCH_RETRY_DELAY_MS`, up to
+`NORN_RESEARCH_MAX_ATTEMPTS`; the attempts are the stored `job_started` events. The cap per hour counts
+those events too. If the process dies after recording assumptions and before storing the result, the
+revision is researched again: the second run replaces its own earlier estimates and leaves anyone
+else's alone.
+
+### How to run it live
+
+```
+# 1. In the environment or the .env the other processes read (names only; the values are never printed):
+BRIGHT_DATA_API_TOKEN       # required. Bright Data API token.
+#    A Claude login on this machine (run `claude`, /login once), or CLAUDE_CODE_OAUTH_TOKEN.
+# 2. Optional:
+NORN_DB, NORN_URI                   # the database and server (default norn, ws://127.0.0.1:3000)
+NORN_RESEARCH_ECRS                  # only these ECRs, comma separated (or --ecr, repeatable)
+NORN_RESEARCH_MAX_PER_HOUR=4        # research runs started per rolling hour
+NORN_RESEARCH_MAX_TURNS=16          # per run: model turns, about one web search or page read each
+NORN_RESEARCH_TIMEOUT_MS=300000     # per run: wall clock
+NORN_RESEARCH_TARGETS=3             # questions per run
+NORN_RESEARCH_MAX_ATTEMPTS=2        # per revision
+NORN_RESEARCH_RETRY_DELAY_MS=120000
+NORN_RESEARCH_POLL_MS=30000
+NORN_RESEARCH_MODEL                 # default: the runner's (claude-sonnet-5-5)
+NORN_RESEARCH_LOG_DIR               # default norn/research/logs
+# The leak check and the page checks use the baseline the worker uses: NORN_ERP_SETTINGS (or NORN_BASELINE_FILE),
+# or the worker's cache (norn/workers/.cache/baselines) on the same machine.
+
+# 3. Run, from norn/. Rehearse on a scratch database first (the demo instance is never a test instance):
+NORN_DB=norn-research npm run worker -w @norn/research -- --dry-run --once --ecr ECR-0417   # researches, prints, writes nothing
+NORN_DB=norn-research npm run worker -w @norn/research                                      # the real thing
+npm run demo -w @norn/workers -- --research                                                 # inside the demo stack (opt-in)
+```
+
+It needs the existing worker running (it computes the cost runs this one reads and re-computes them
+after an assumption lands) and, for Level 1, the rest of the demo stack. Without `BRIGHT_DATA_API_TOKEN`
+or a Claude login it prints which is missing and exits with code 64. `--replay <recording>` runs the
+worker's steps on a recording with no database: every line starts with `RECORDED`.
+
+**What to watch**
+- The process log: `starting`/`recorded n/m assumption(s); held n, rejected n`, and `COULD NOT STORE`
+  (the result is in `logs/`, and the revision may be researched again after a restart).
+- The ECR page: the agent timeline for the `researcher` run, then the comment, then the cost run
+  that follows (the new `s2_cost` run names the assumptions).
+- The assumptions: `SELECT * FROM assumption WHERE source = 'agent_estimated'`; the action log for
+  `record_assumption` rows with outcome `denied` or `rejected`.
+- A first run costs one Claude session (up to `NORN_RESEARCH_MAX_TURNS` turns) and its Bright Data
+  calls. A `usage_limit` pauses the worker until the limit resets; an `auth` error stops it.
+
+**Rolling back.** The module has no reducer that deletes an assumption, and this PR does not add one.
+- Stop the worker. It records nothing else.
+- To take an estimate out of the forecast, supersede it with the value before: call `record_assumption`
+  on the same `prId` and `key`, as a person, with `source` `default`, the original distribution (in
+  the `detail` row of the last `s2_cost` run before the research: `inputs[]` for that key), and
+  `expectedRev` equal to the estimate's current `rev`. The check re-runs on the old value. (Not tried:
+  for a blank cost-page row the old value is a missing number, so there is nothing to put back; use
+  the scratch database's reset, or leave the estimate and say so.)
+- Find the estimates: `SELECT * FROM assumption WHERE source = 'agent_estimated' AND current = true`,
+  and the research agent's identity in `principal` (name `norn research agent (cost engineer)`).
+- On a scratch database, `npm run db:reset` is cleaner.
+- A follow-up in the module (a retract reducer) would make this one call.
+
+## Not verified (the worker)
+
+No SpacetimeDB, ERPNext, PLM, Bright Data or Claude login was reachable from the build environment.
+- **Tested offline** (`test/live-*.test.ts`): which ECR is due and when not (including restarts, the
+  attempt limit and the hourly cap), targets from a stored detail row, the exact `record_assumption`
+  and `add_comment` arguments (typed against the generated bindings, and read back through the
+  worker's own `toOverride`), the comment text, the start-up refusal, and `--replay`.
+- **Not run:** the rollback procedure above, the connection, the subscriptions, `grant_scope` and the scope rule on this agent's
+  writes, the real `record_assumption` and the reconcile that follows (read, not run), the
+  `record_agent_events` write of the result, the runner with Bright Data's MCP server, the leak check on
+  an ERP-read baseline, and the demo-script flag. Rehearse with `--dry-run --once` on a scratch
+  database before anything else.
+- Smoke-test the first real run once and read its `research_result` before leaving it running.
+
+## Other follow-ups
+
 - `norn/web`: the report on the impact page (held and rejected proposals, flags, before and after),
   with the quote and URL one click from the number.
 - Policy: `needs_person` and flagged proposals need a person's approve action. Bowman's autonomy
-  limits decide whether an accepted, unflagged one applies without a person.
-- Runner config: a role model for `researcher`, the token as an environment variable on the home
-  server, and a log sink into the action log.
-- Timeline targets exist for defaulted lead times (`:lead` inputs) but the current ECRs have none.
+  limits decide whether an accepted, unflagged one applies without a person. Today every accepted
+  proposal is recorded, flagged ones with their flag in the rationale and the comment.
+- Timeline targets exist for defaulted lead times (`:lead` inputs) but the current ECRs have none, and
+  the worker passes no timeline result, so none is asked for yet.
