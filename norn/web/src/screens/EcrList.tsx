@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react';
 import {
-  AlertFillIcon, CheckCircleFillIcon, CheckIcon, CommentIcon, DotFillIcon, GitPullRequestIcon, SearchIcon,
+  AlertFillIcon, CheckCircleFillIcon, CheckIcon, CommentIcon, DotFillIcon, SearchIcon,
 } from '@primer/octicons-react';
 import { ActionList, ActionMenu, AvatarStack, CounterLabel, Label, TextInput } from '@primer/react';
 import { source, useEcrList } from '../assessment/source.ts';
 import type { EcrSummary } from '../assessment/types.ts';
-import { isOpen, LevelLabel, Person, StaleNote, StateIcon } from '../ui/Bits.tsx';
+import { isOpen, LevelLabel, Person, RequestNumber, StaleNote, StateIcon } from '../ui/Bits.tsx';
+import { AircraftIcon, EcrIcon } from '../ui/EngineeringIcons.tsx';
 import { ago, usdK } from '../ui/fmt.ts';
 import { Link, navigate } from '../router.tsx';
-import { RepoHeader } from './Shell.tsx';
 
 type Pick1 = string | null;
 
@@ -93,9 +93,11 @@ export function EcrList() {
 
   return (
     <>
-      <RepoHeader mock={source.isMock} />
       <main className="nx-container nx-list">
-        <h2 className="nx-list-title">All ECRs</h2>
+        <div className="nx-list-heading">
+          <h1 className="nx-list-title">Engineering changes</h1>
+          {source.isMock && <Label variant="attention" title="Costs are saved runs of the checks; reviewers, comments and flags are mock">Saved runs + mock data</Label>}
+        </div>
         <div className="nx-searchbar">
           <TextInput
             block
@@ -111,10 +113,10 @@ export function EcrList() {
           <div className="nx-box-head">
             <div className="nx-states">
               <button type="button" className={`nx-state ${state === 'open' ? 'on' : ''}`} onClick={() => setState('open')}>
-                <GitPullRequestIcon size={16} /> Open <CounterLabel>{nOpen}</CounterLabel>
+                <EcrIcon size={18} /> Open <CounterLabel>{nOpen}</CounterLabel>
               </button>
               <button type="button" className={`nx-state ${state === 'closed' ? 'on' : ''}`} onClick={() => setState('closed')}>
-                <CheckIcon size={16} /> Closed <CounterLabel>{nClosed}</CounterLabel>
+                <CheckIcon size={18} /> Closed <CounterLabel>{nClosed}</CounterLabel>
               </button>
             </div>
             <span className="nx-sp" />
@@ -151,7 +153,7 @@ export function EcrList() {
                     </span>
                   </div>
                   <div className="nx-row-sub">
-                    {e.id} filed {ago(e.filedOn + 'T12:00:00-07:00')} by {e.originator} &middot; {reviewText(e)}
+                    <RequestNumber id={e.id} /> <span className="nx-row-program"><AircraftIcon size={13} /> {e.program}</span> filed {ago(e.filedOn + 'T12:00:00-07:00')} by {e.originator} &middot; {reviewText(e)}
                     {e.flag && isOpen(e.status) && (
                       <span className="nx-flag"> &middot; <AlertFillIcon size={12} className="nx-fg-attention" /> {e.flag}</span>
                     )}

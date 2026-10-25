@@ -31,49 +31,23 @@ body { margin: 0; }
 
 .nx-container { max-width: 1280px; margin: 0 auto; padding: 0 32px; }
 
-/* Evidence classes: Primer's functional colours. Fact is accent blue, assumption severe orange,
-   computation success green, judgment sponsors pink. */
+/* Evidence classes: subtle text highlights, with the same hue in charts and the detail panel. */
 :root, [data-color-mode] { --ev-fact: var(--fgColor-accent); --ev-assumption: var(--fgColor-severe); --ev-computation: var(--fgColor-success); --ev-judgment: var(--fgColor-sponsors); }
-.nx-ev-fact { --c: var(--ev-fact); }
-.nx-ev-assumption { --c: var(--ev-assumption); }
-.nx-ev-computation { --c: var(--ev-computation); }
-.nx-ev-judgment { --c: var(--ev-judgment); }
-.nx-glyph { flex: none; display: inline-block; vertical-align: -1px; }
+.nx-ev-fact { --c: var(--ev-fact); --ev-bg: var(--bgColor-accent-muted); }
+.nx-ev-assumption { --c: var(--ev-assumption); --ev-bg: var(--bgColor-severe-muted); }
+.nx-ev-computation { --c: var(--ev-computation); --ev-bg: var(--bgColor-success-muted); }
+.nx-ev-judgment { --c: var(--ev-judgment); --ev-bg: var(--bgColor-sponsors-muted); }
+.nx-highlight { color: inherit; background: var(--ev-bg); padding: 0 2px; border-radius: 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 
-/* A marked number or claim: ink text with a thin underline in the class colour. The underline's style
-   also says the class (solid fact, dashed assumption, dotted computation, double judgment). */
+/* A marked number or claim: standard clickable treatment with hover/selected background and focus ring. */
 .nx-mark {
   appearance: none; border: 0; background: none; padding: 0; margin: 0; cursor: pointer;
   font: inherit; color: inherit; text-align: inherit; line-height: inherit; border-radius: 3px;
-  text-decoration-line: underline; text-decoration-color: var(--c); text-decoration-thickness: 1px;
-  text-underline-offset: 3px; text-decoration-skip-ink: none;
+  max-width: 100%;
 }
-.nx-mark.nx-ev-fact { text-decoration-style: solid; }
-.nx-mark.nx-ev-assumption { text-decoration-style: dashed; }
-.nx-mark.nx-ev-computation { text-decoration-style: dotted; text-decoration-thickness: 2px; }
-.nx-mark.nx-ev-judgment { text-decoration-style: double; text-decoration-thickness: 3px; text-underline-offset: 4px; }
-.nx-mark:hover, .nx-mark.open { background: var(--bgColor-neutral-muted); }
+.nx-evidence-label { flex: none; vertical-align: baseline; }
+.nx-mark:hover .nx-highlight, .nx-mark.open .nx-highlight { filter: brightness(0.94); }
 .nx-mark:focus-visible { outline: 2px solid var(--fgColor-accent); outline-offset: 1px; }
-.nx-mark.claim { text-decoration: none; }
-.nx-mark.claim:hover, .nx-mark.claim.open { text-decoration: underline; text-decoration-color: var(--c); }
-
-/* ---------- GitHub's global header ---------- */
-.nx-gh {
-  display: flex; align-items: center; gap: 16px; height: 64px; padding: 0 32px;
-  background: var(--bgColor-emphasis); color: var(--fgColor-onEmphasis);
-}
-.nx .nx-gh-logo { display: inline-flex; color: var(--fgColor-onEmphasis); }
-.nx-gh-logo:hover { text-decoration: none; }
-.nx-gh-crumbs { display: flex; align-items: center; gap: 6px; font-size: 14px; }
-.nx .nx-gh-crumbs a { color: var(--fgColor-onEmphasis); }
-.nx-gh-crumbs span { color: #9198a1; }
-.nx .nx-gh-link { color: #9198a1; font-size: 13px; }
-
-/* ---------- the repository title row ---------- */
-.nx-repoband { background: var(--bgColor-muted); border-bottom: 1px solid var(--borderColor-default); padding-top: 16px; }
-.nx-repo { display: flex; align-items: center; gap: 8px; font-size: 16px; margin-bottom: 12px; }
-.nx-repo-owner { color: var(--fgColor-accent) !important; }
-.nx-repo-name { font-weight: 600; }
 
 /* ---------- boxes ---------- */
 .nx-box {
@@ -126,7 +100,6 @@ body { margin: 0; }
 /* ---------- the ECR header ---------- */
 .nx-pr-head { padding-top: 16px; border-bottom: 1px solid var(--borderColor-default); }
 .nx-pr-head h1, .nx-pr-head [class*="Title"] { font-weight: 400 !important; }
-.nx-num-muted { color: var(--fgColor-muted); font-weight: 300; }
 .nx-pr-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--fgColor-muted); font-size: 14px; }
 .nx-pr-sub b { color: var(--fgColor-default); font-weight: 600; }
 .nx-chip-code {
@@ -160,7 +133,6 @@ body { margin: 0; }
 .nx-bot-table tr:last-child td { border-bottom: 0; }
 .nx-reasons, .nx-drivers { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
 .nx-reasons li { display: flex; gap: 8px; align-items: baseline; }
-.nx-reasons li .nx-glyph { transform: translateY(1px); }
 .nx-ev { display: flex; align-items: center; gap: 8px; }
 .nx-ev-detail { margin: 2px 0 0 24px; color: var(--fgColor-muted); font-size: 12px; }
 
@@ -217,16 +189,16 @@ button.nx-merge-head:hover { background: var(--bgColor-muted); }
 .nx-legend-title { font-weight: 600; }
 .nx .nx-legend-entries { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; list-style: none; padding: 0; }
 .nx-legend-entries li { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
-.nx-legend-entries .nx-glyph { margin-top: 4px; }
 .nx-legend-copy { flex: 1; min-width: 0; }
 .nx-legend-label { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
-.nx-legend-label b { font-weight: 600; }
 .nx-legend .hint { color: var(--fgColor-muted); }
 .nx-legend .n { padding: 0 6px; border-radius: 12px; background: var(--bgColor-neutral-muted); font-variant-numeric: tabular-nums; }
 @container (min-width: 400px) { .nx .nx-legend-entries { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container (min-width: 800px) { .nx .nx-legend-entries { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
 .nx-table { width: 100%; border-collapse: collapse; }
+.nx-table-scroll { overflow-x: auto; max-width: 100%; }
+.nx-table-scroll:focus-visible { outline: 2px solid var(--fgColor-accent); outline-offset: -2px; }
 .nx-table th {
   text-align: left; font-size: 12px; font-weight: 600; color: var(--fgColor-muted); padding: 8px 16px; border-bottom: 1px solid var(--borderColor-default);
 }
@@ -275,10 +247,9 @@ button.nx-merge-head:hover { background: var(--bgColor-muted); }
 .nx-tornado-ends > span { display: flex; flex-direction: column; overflow-wrap: anywhere; }
 .nx-tornado-ends > span:last-child { text-align: right; }
 .nx-tornado-ends b { font-weight: 600; }
-.nx-tornado-evidence { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .nx-tornado-axis { position: relative; height: 20px; margin-top: 8px; color: var(--fgColor-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .nx-tornado-axis span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
-@container (max-width: 420px) { .nx-tornado-heading { flex-direction: column; gap: 4px; } .nx-tornado-swing { padding-left: 18px; } .nx-tornado-axis span:nth-child(even) { visibility: hidden; } }
+@container (max-width: 420px) { .nx-tornado-heading { flex-direction: column; gap: 4px; } .nx-tornado-name { flex-wrap: wrap; } .nx-tornado-axis span:nth-child(even) { visibility: hidden; } }
 @media (max-width: 800px) { .nx-checks { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---------- the changes (files changed) ---------- */

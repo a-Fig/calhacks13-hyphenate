@@ -3,7 +3,7 @@ import { ArrowLeftIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { ActionList, Dialog, IconButton, Label } from '@primer/react';
 import type { ImpactAssessment, Origin } from '../assessment/types.ts';
 import { Person } from './Bits.tsx';
-import { EV, Glyph } from './Evidence.tsx';
+import { EV, EvidenceLabel } from './Evidence.tsx';
 import { ago, fig as figText, range as rangeText } from './fmt.ts';
 import { figureIndex } from './trace.ts';
 
@@ -52,8 +52,8 @@ export function WhyPanel({
               <IconButton icon={ArrowLeftIcon} variant="invisible" size="small" aria-label={`Back to ${prev.title}`} onClick={onBack} />
             )}
             <div className="nx-why-head-text">
-              <span className={`nx-why-class nx-ev-${t.evidence}`}>
-                <Glyph ev={t.evidence} size={11} /> {EV[t.evidence].label}
+              <span className="nx-why-class">
+                <EvidenceLabel ev={t.evidence} />
                 <span className="nx-fg-muted"> &middot; {EV[t.evidence].hint}</span>
               </span>
               <Dialog.Title>{t.title}</Dialog.Title>
@@ -88,7 +88,7 @@ export function WhyPanel({
                 const target = i.traceId && a.traces[i.traceId] && i.traceId !== id ? i.traceId : undefined;
                 return (
                   <ActionList.Item key={k} onSelect={target ? () => onOpen(target) : undefined} disabled={false} className={target ? '' : 'nx-noact'}>
-                    <ActionList.LeadingVisual><span className={`nx-ev-${i.evidence}`}><Glyph ev={i.evidence} /></span></ActionList.LeadingVisual>
+                    <ActionList.LeadingVisual><EvidenceLabel ev={i.evidence} /></ActionList.LeadingVisual>
                     {i.label}
                     <ActionList.TrailingVisual>
                       <span className="num nx-trail">{i.display}{target && <ChevronRightIcon size={14} />}</span>
@@ -106,7 +106,7 @@ export function WhyPanel({
             <ActionList variant="full">
               {t.assumptions.map((s, k) => (
                 <ActionList.Item key={k} className="nx-noact">
-                  <ActionList.LeadingVisual><span className="nx-ev-assumption"><Glyph ev="assumption" /></span></ActionList.LeadingVisual>
+                  <ActionList.LeadingVisual><EvidenceLabel ev="assumption" /></ActionList.LeadingVisual>
                   {s.label}
                   <ActionList.Description variant="block">
                     <Label variant={s.origin === 'agent_estimated' ? 'attention' : 'secondary'} size="small">{ORIGIN[s.origin]}</Label> {s.source}
