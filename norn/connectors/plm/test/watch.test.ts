@@ -26,6 +26,7 @@ function plm(initial: Row[] = []) {
   const requests: URLSearchParams[] = [];
   const reads: string[] = [];
   let failNext = 0;
+  let failReads = 0;
   globalThis.fetch = (async (input: URL | string) => {
     const url = new URL(String(input));
     const path = decodeURIComponent(url.pathname);
@@ -33,6 +34,7 @@ function plm(initial: Row[] = []) {
     const doc = /^\/api\/resource\/ECR\/(.+)$/.exec(path);
     if (doc) {
       reads.push(doc[1]);
+      if (failReads > 0) { failReads--; return new Response(JSON.stringify({ exc_type: 'ServiceUnavailable' }), { status: 503 }); }
       const r = rows.find((x) => x.name === doc[1]);
       if (!r) return new Response(JSON.stringify({ exc_type: 'DoesNotExistError' }), { status: 404 });
       return new Response(JSON.stringify({ data: { ...ecrDoc(), name: r.name, title: r.title, workflow_state: r.workflow_state, modified: r.modified, modified_by: r.modified_by, ...r.extra } }), { status: 200 });
@@ -63,6 +65,8 @@ function plm(initial: Row[] = []) {
       if (i >= 0) rows[i] = row; else rows.push(row);
     },
     failNext(n = 1) { failNext = n; },
+    /** The next n reads of a request's document answer 503. */
+    failReads(n = 1) { failReads = n; },
   };
 }
 const seed = (): Row[] => [
@@ -314,4 +318,33 @@ test('each pass is one request that asks only for what is newer than the mark, l
   assert.equal(filter(2), t('09.500000'));
   assert.equal(filter(3), '2026-10-24 12:00:25.000000', 'five seconds behind the mark');
   assert.equal(p.requests.length, 4);
+});
+
+test('a read of the request that fails for the PLM, not the ECR, is not a failed delivery: the request is delivered, never given up on, and the mark moves on', async () => {
+  const p = plm(seed());
+  const errors: string[] = [];
+  const got: string[] = [];
+  const w = new EcrWatcher(opts, (c) => { got.push(c.name); }, { maxAttempts: 2, onError: (e) => errors.push((e as Error).message) });
+  await w.tick();
+  p.set('ECR-0003', t('12.000000'));
+  p.failReads(5); // the watcher's own read of the request fails, as would any other in this pass
+  await w.tick();
+  assert.deepEqual(got, ['ECR-0003'], 'delivered without a fingerprint: the handler reads it again and owns the retry');
+  assert.equal(errors.some((e) => e.includes('giving up')), false, errors.join(' | '));
+  assert.equal(w.highWater(), t('12.000000'));
+});
+
+test('a read that fails on the PLM side is not counted toward giving up on a request whose handler keeps failing for its own reasons only', async () => {
+  const p = plm(seed());
+  const errors: string[] = [];
+  const attempts: string[] = [];
+  const w = new EcrWatcher(opts, (c) => { attempts.push(c.name); if (attempts.length < 3) throw new Error('Norn unreachable'); }, { maxAttempts: 3, onError: (e) => errors.push((e as Error).message) });
+  await w.tick();
+  p.set('ECR-0003', t('12.000000'));
+  p.failReads(2);
+  await w.tick(); // read fails (not counted), handler fails: failure 1
+  await w.tick(); // read fails (not counted), handler fails: failure 2
+  await w.tick(); // read works, handler works
+  assert.deepEqual(attempts, ['ECR-0003', 'ECR-0003', 'ECR-0003']);
+  assert.equal(errors.some((e) => e.includes('giving up')), false, errors.join(' | '));
 });
