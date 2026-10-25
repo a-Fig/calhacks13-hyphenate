@@ -972,37 +972,28 @@ test('(#128) the guard reads the run id from norn:check_run:N and from norn:chec
 
 // ---- Sol round 4 -------------------------------------------------------------------------------------------
 
-test("(rounds 4 and 5) a money figure must be a computation: a number that is not one is refused if its unit or label is money, or its unit is not on the list", () => {
+test("(rounds 4 to 6) a Level 1 statement's numbers are computations only: any other is refused, whatever its label, key or unit", () => {
   const guard = statementGuardFor(healthy('ECR-0421'));
   const pr0421 = { ...pr5, plmEcrNumber: 'ECR-0421' };
   const base = statementFor('ECR-0421');
   const withNumber = (n: object) => guard(pr0421, 'norn:check_run:3', proseOfDoc({ ...base, numbers: [...base.numbers, n as any] }));
-  const judged = (label: string, unit: string, v = 999999) => withNumber({ key: 'x', label, unit, evidence: 'judgment', p10: v, p50: v, p90: v });
-  const told = /Money figures must be computation numbers copied from the checks' results; give this one a unit that is not money \(weeks, days, hours, months, years, %, percent, count, units, parts, aircraft, serials, ratio\) or leave it out\./;
-  // round 4: Sol's repro
-  assert.match(judged('Annual cost', 'USD') ?? '', /^Not posted\. Your number \d+ \(Annual cost\) is money \(unit "USD"\) but is not a computation\./);
-  assert.match(judged('Annual cost', 'USD') ?? '', told);
-  // round 5: the currency in the label, and a scaled unit that matched a $250 bar
-  assert.match(judged('Annual cost (USD)', '') ?? '', /is money \(label "Annual cost \(USD\)"\)/);
-  assert.match(judged('Cost (USD)', 'count') ?? '', /is money \(label "Cost \(USD\)"\)/);
-  assert.match(judged('Cost ($k)', 'weeks') ?? '', /is money \(label "Cost \(\$k\)"\)/);
-  assert.match(judged('Bundle saving', 'kUSD', 250) ?? '', /is money \(unit "kUSD"\)/);
-  // the checks' own amount does not make a judged money number acceptable
-  const net = storedRows('ECR-0421').find(r => r.key === 'net_total_year_one')!;
-  assert.match(withNumber({ key: 'x', label: 'Spend', unit: 'USD', evidence: 'judgment', p10: net.p10, p50: net.p50, p90: net.p90 }) ?? '', told);
-  // every money marker, scaled or not, in the unit and in the label
-  for (const m of ['$', 'USD', 'usd/unit', 'kUSD', 'MUSD', 'k$', '$k', '$m', 'dollars', '€', 'EUR', 'kEUR', '£', 'GBP']) {
-    assert.match(judged('Spend', m) ?? '', /is money \(unit/, `unit ${m}`);
-    assert.match(judged(`Spend (${m})`, 'count') ?? '', /is money \(label/, `label ${m}`);
-  }
-  // no unit, or one Norn cannot tell is not money
-  assert.match(judged('Annual figure', '') ?? '', /has no unit, so Norn cannot tell it is not money/);
-  assert.match(judged('Annual figure', 'bucks') ?? '', /has the unit "bucks", which Norn cannot tell is not money/);
-  // what passes: judged weeks, a percentage, hours, a count, a ratio
-  for (const unit of ['weeks', '%', 'percent', 'h', 'hours', 'count', 'ratio', 'aircraft', 'Weeks', ' days ']) assert.equal(judged('Retrofit slip', unit, 3), undefined, unit);
-  assert.equal(judged('European supplier slip', 'weeks', 3), undefined, 'a word containing "eur" is not a currency');
-  // and a computation is never refused for its label or unit (the module replaces both with its check result's)
+  const told = /A Level 1 statement's numbers are exactly the ones the job names, each evidence computation with its key and resultKey; post it as one of those or leave it out\./;
+  // round 4 and 5: Sol's repros
+  assert.match(withNumber({ key: 'annual', label: 'Annual cost', unit: 'USD', evidence: 'judgment', p10: 999999, p50: 999999, p90: 999999 }) ?? '', /^Not posted\. Your number \d+ \(Annual cost\) has evidence "judgment"\./);
+  assert.match(withNumber({ key: 'x', label: 'Annual cost (USD)', unit: '', evidence: 'judgment', p10: 999999, p50: 999999, p90: 999999 }) ?? '', told);
+  assert.match(withNumber({ key: 'x', label: 'Bundle saving', unit: 'kUSD', evidence: 'judgment', p10: 250, p50: 250, p90: 250 }) ?? '', told);
+  // round 6: the key as the label, and labels no money test knew
+  assert.match(withNumber({ key: 'Annual cost (USD)', unit: 'count', evidence: 'judgment', p10: 999999, p50: 999999, p90: 999999 }) ?? '', /Your number \d+ \(Annual cost \(USD\)\) has evidence "judgment"/);
+  for (const label of ['Annual cost (cents)', 'Annual cost (CAD)', 'Annual cost (bucks)', 'Annual cost (¢)', 'Annual cost (＄)'])
+    assert.match(withNumber({ key: 'x', label, unit: 'weeks', evidence: 'judgment', p10: 9, p50: 9, p90: 9 }) ?? '', told, label);
+  // weeks and percentages too, and an assumption or no evidence at all: the job names no such number
+  for (const n of [{ unit: 'weeks', evidence: 'judgment' }, { unit: '%', evidence: 'assumption' }, { unit: 'count' }])
+    assert.match(withNumber({ key: 'x', label: 'Retrofit slip', p10: 3, p50: 3, p90: 3, ...n }) ?? '', told, JSON.stringify(n));
+  // a computation is never refused for its label, key or unit (the module replaces them with its check result's)
   assert.equal(withNumber({ key: 'y', label: 'Annual cost (USD)', unit: 'kUSD', evidence: 'computation', resultKey: 'net_total_year_one' }), undefined);
+  // and Sol's three headlines are refused by the guard
+  for (const headline of ['Annual cost: £999,999.', '＄999,999.', '$  999,999.'])
+    assert.match(guard(pr0421, 'norn:check_run:3', proseOfDoc({ ...base, headline })) ?? '', /999,999 in your headline is not in any check result of ECR-0421/, headline);
 });
 
 test("(round 5) the four ECRs' honest generated statements pass the guard", () => {

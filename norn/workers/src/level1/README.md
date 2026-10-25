@@ -67,8 +67,12 @@ of the main checkout, which a worktree does not have). Run ONE dispatcher per da
 - The agent's words against the rule (#123, `prose.ts`, `guard.ts`). The PLM text lists every derived
   blocker and condition itself, whatever the agent wrote. The MCP server (`mcp/src/main.ts`) runs `guard.ts` on
   every post: a statement that says the checks are clean, or that there are no issues, while the rule has a
-  condition or a check has a finding, or that quotes a dollar figure no check result contains ("$154k",
-  "154,000 USD", "USD 154,000"), is refused with the reason, and the agent posts again. It reads every field the
+  condition or a check has a finding, is refused with the reason, and the agent posts again. So is one with a number
+  that is not a computation (Level 1's numbers are exactly the job's), or a number in its prose that is none of: part
+  of an id or a date (ECR-0417, BW-5120-210, S/N 14-18, 2027-01-22, January 2027), at most 100, or a number Norn
+  produced for the ECR (results and the job's facts, `facts.ts`) at the precision shown, k or million applied. That
+  is an allowlist: detecting money ("$", "USD", "kUSD", a label) was bypassed every round, so whatever currency sits
+  beside a number does not matter. Text is NFKC-normalised first ("＄" is "$"). It reads every field the
   agent wrote that the PLM page or Norn's page shows: headline, change class, route, the labels and units of
   numbers that are not computations, drivers, assumption notes and claims. "The checks are not clean" passes, and
   so does "the cost check is clean" when the cost check found nothing. The guard reads the run id from the

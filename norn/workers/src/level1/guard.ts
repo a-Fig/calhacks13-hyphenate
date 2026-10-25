@@ -14,9 +14,10 @@
 // its wording first, and then for being out of date.
 import type { DbConnection } from '@norn/bindings';
 import { parseSessionSpawn } from '../../../module/src/gate-logic.ts';
-import { cleanClaims, findingsByCheck, findingsOf, judgedNumberProblems, NOT_MONEY_UNITS, numbersIn, QUOTABLE_BARS, unknownAmounts, type Prose } from './prose.ts';
+import { jobFactsOf } from './facts.ts';
+import { cleanClaims, findingsByCheck, findingsOf, nonComputationNumbers, numbersIn, QUOTABLE_BARS, SMALL, unknownAmounts, type Prose } from './prose.ts';
 import { deriveRecommendation } from './recommendation.ts';
-import { ruleInputForRun } from './source.ts';
+import { crSeqOfRun, ruleInputForRun } from './source.ts';
 
 type Db = DbConnection['db'];
 
@@ -51,21 +52,28 @@ export function statementGuardFor(db: Db): StatementGuard {
         `Your ${clean.map(c => `${c.where} says "${c.phrase}"`).join(' and your ')}, but Norn's checks found ${findings.length === 1 ? 'one item' : `${findings.length} items`} for ${pr.plmEcrNumber}: ${findings.map((f, i) => `(${i + 1}) ${f}`).join('; ')}. Do not say the checks are clean or that there are no issues, flags, gaps or conditions. Norn lists these items in the PLM itself.`
       );
 
-    const judged = judgedNumberProblems(statement);
+    const judged = nonComputationNumbers(statement);
     if (judged.length)
       problems.push(
-        `Your ${judged.map(j => `${j.where} ${j.why}`).join(' and your ')}. Money figures must be computation numbers copied from the checks' results; give ${judged.length === 1 ? 'this one' : 'each'} a unit that is not money (${NOT_MONEY_UNITS.join(', ')}) or leave it out.`
+        `Your ${judged.map(j => `${j.where} has evidence "${j.evidence}"`).join(' and your ')}. A Level 1 statement's numbers are exactly the ones the job names, each evidence computation with its key and resultKey; post ${judged.length === 1 ? 'it' : 'them'} as one of those or leave ${judged.length === 1 ? 'it' : 'them'} out.`
       );
 
-    // The amounts the checks produced: every number in the run's results and its timeline and supply rows, and the bars the agent is given.
+    // The numbers Norn produced for this ECR: every number in the run's results and its timeline and supply rows, in
+    // the job's facts (its sentences, the route, the change request), in the findings, and the bars the agent is given.
     const known = [...QUOTABLE_BARS, ...findings.flatMap(f => numbersIn(f))];
+    // Without the facts (a mirror missing a table) fewer numbers are known, which only refuses more.
+    try {
+      numbersIn(jobFactsOf(db, { title: '', ...pr } as Parameters<typeof jobFactsOf>[1], crSeqOfRun(db, run.id) ?? 0, Number(run.id)), known);
+    } catch {
+      /* the results above still count */
+    }
     for (const r of found.results) {
       known.push(r.p10, r.p50, r.p90);
       numbersIn(jsonOr(r.detailJson), known);
     }
     const unknown = unknownAmounts(statement, known);
     if (unknown.length)
-      problems.push(`The ${unknown.map(u => `${u.figure} in your ${u.where}`).join(' and the ')} ${unknown.length === 1 ? 'is' : 'are'} not in any check result of ${pr.plmEcrNumber}. Quote dollar figures only as get_impact shows them, rounded to the dollar, or leave them out.`);
+      problems.push(`The ${unknown.map(u => `${u.figure} in your ${u.where}`).join(' and the ')} ${unknown.length === 1 ? 'is' : 'are'} not in any check result of ${pr.plmEcrNumber}. A number over ${SMALL} must be one Norn gave you (get_impact or the job), as it shows it, or part of an id or a date; leave the others out.`);
 
     return problems.length ? `Not posted. ${problems.join(' ')} Rewrite the wording and post again.` : undefined;
   };

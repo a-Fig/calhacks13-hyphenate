@@ -1,7 +1,7 @@
 // The checks on the agent's words (prose.ts), offline: what counts as "nothing was found", and which dollar figures match a number.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cleanClaims, cleanWording, figuresIn, numbersIn, piecesOf, unknownAmounts, type Prose } from './prose.ts';
+import { cleanClaims, cleanWording, figuresIn, numberTokens, numbersIn, piecesOf, unknownAmounts, type Prose } from './prose.ts';
 
 test('wording that says nothing was found is caught; wording that is specific, or about the cost bars, is not', () => {
   for (const t of ['Checks are clean.', 'The assessment is clean', 'All clear.', 'There are no issues.', 'No flags worth raising', 'We found no gaps.', 'Nothing to flag here.', 'It goes through without any concerns.', 'No further conditions.'])
@@ -37,7 +37,7 @@ test('a figure matches a known amount within its own rounding, in either sign; $
 });
 
 test('every number inside a stored detail is known, and so is a figure in a message', () => {
-  assert.deepEqual(numbersIn({ a: 1, b: [2, { c: 3.5 }], s: 'quote of $1,200 and 5 weeks', n: null }).sort((x, y) => x - y), [1, 2, 3.5, 1200]);
+  assert.deepEqual(numbersIn({ a: 1, b: [2, { c: 3.5 }], s: 'quote of $1,200 and 5 weeks', n: null }).sort((x, y) => x - y), [1, 2, 3.5, 5, 1200]);
 });
 
 // ---- #123 round 3 ------------------------------------------------------------------------------------
@@ -123,4 +123,23 @@ test('(round 4) "999,999 dollars" is a dollar figure, and "no known issues" says
   assert.equal(cleanWording('There are no known issues.'), 'no known issues');
   const p: Prose = { headline: 'It costs 999,999 dollars.', drivers: [], claims: [] };
   assert.deepEqual(unknownAmounts(p, [1_000]), [{ where: 'headline', figure: '999,999 dollars' }]);
+});
+
+test('(round 6) every number in prose is an identifier or date, at most 100, or a known one, whatever currency is beside it', () => {
+  const known = [154_000, 1_203_000, 2_480.2];
+  const bad = (headline: string) => unknownAmounts({ headline, drivers: [], claims: [] }, known).map(u => u.figure);
+  // Sol's three headlines, and the same number with no currency, or another one
+  assert.deepEqual(bad('Annual cost: £999,999.'), ['£999,999']);
+  assert.deepEqual(bad('＄999,999.'), ['$999,999'], 'NFKC: a full-width dollar sign is a dollar sign');
+  assert.deepEqual(bad('$  999,999.'), ['$ 999,999'], 'runs of white space are one space');
+  for (const t of ['999,999 a year', 'CAD 999,999', '999,999 bucks', '99,999,9¢', 'about 0.999999 million', '1,99999']) assert.ok(bad(t).length, t);
+  // known numbers at their shown precision, with a scale applied, in either sign
+  assert.deepEqual(bad('$154,000, $154k, 154 thousand, (2,480), $1.2 million, 1,203,000 euros'), []);
+  assert.deepEqual(bad('$155k'), ['$155k']);
+  // identifiers, dates and small numbers
+  assert.deepEqual(bad('ECR-0417 and ECO-0319 replace BW-5120-210 from S/N 14-18, cut in 2027-01-22 (January 2027, 22 Jan 2027, March 3, 2027, FY2027), Rule 2, Class I, 14 weeks, 62%, P90, 100 parts'), []);
+  assert.deepEqual(bad('101 parts'), ['101']);
+  // a number glued to letters is still a number
+  assert.deepEqual(bad('USD999999 and x999999'), ['999999', '999999']);
+  assert.deepEqual(numberTokens('$1.2m').map(t => t.value), [1_200_000]);
 });

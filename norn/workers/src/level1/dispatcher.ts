@@ -25,16 +25,16 @@ import type { DbConnection } from '@norn/bindings';
 import { NORN_MCP_SERVER_NAME, loadSigningKey, nornMcpFor, nornMcpUrl, nornTools } from '../../../mcp/src/index.ts';
 import { Runner, jsonlFileSink, teeSink, type JobSpec } from '../../../runner/src/index.ts';
 import { connect, subscribe } from '../connect.ts';
-import { provenanceOf, type Inputs } from '../impact.ts';
+import type { Inputs } from '../impact.ts';
 import { agentEventWriter } from './agent-events.ts';
 import { actorFor, decide, jobIdFor, jobsFromEvents, spawnedByFor, supersededJobs, type EcrFacts, type EventRow } from './plan.ts';
-import { deriveRecommendation, ruleInputOf } from './recommendation.ts';
-import { jobPrompt, systemPromptFor, screenDetail, type Detail, type HeadlineKey } from './prompt.ts';
-import { costCheckOf, routeFor, storedCompanyConfig } from './routing.ts';
+import { jobFactsOf } from './facts.ts';
+import { jobPrompt, systemPromptFor } from './prompt.ts';
 import { settingsFromEnv, type Level1Settings } from './settings.ts';
 import { SIBLING_STAGES, siblingCutoffUs, siblingOf } from './siblings.ts';
-import { crSeqOfRun, failedChecksForRun, ruleSiblingsOf, runRowsOf, siblingsForRun, toRunRow } from './source.ts';
-import { timelineSupplyFacts } from './timeline-supply.ts';
+import { crSeqOfRun, runRowsOf, toRunRow } from './source.ts';
+
+export { jobFactsOf };
 
 type Db = DbConnection['db'];
 type Pr = NonNullable<ReturnType<Db['pullRequest']['id']['find']>>;
@@ -83,45 +83,6 @@ export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
     // The revision of the run a statement was written from (the module records it), not of the moment it was posted.
     statements: [...db.impactStatement.prId.filter(pr.id)].map(s => ({ level: s.level, createdMs: ms(s.createdAt), crSeq: crSeqOfRun(db, s.checkRunId) })),
     jobs: jobsFromEvents(events),
-  };
-}
-
-/** The job prompt's facts for one finished s2_cost run. */
-export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
-  const run = db.checkRun.id.find(BigInt(s2RunId))!;
-  const inputs = jsonOr<Inputs>(run.inputsJson, {});
-  const p = provenanceOf(inputs);
-  const rows = [...db.checkResult.prId.filter(pr.id)].filter(r => r.checkRunId === run.id);
-  const numbers: HeadlineKey[] = rows
-    .filter(r => r.key.startsWith('unit_cost_delta:') || r.key === 'one_time_total' || r.key === 'net_total_year_one')
-    .sort((a, b) => Number(a.id - b.id))
-    .map(r => ({ key: r.key.replace(/[^A-Za-z0-9_]/g, '_'), resultKey: r.key, label: r.label }));
-  const year = rows.find(r => r.key === 'net_total_year_one');
-  const detail = jsonOr<Detail>(rows.find(r => r.key === 'detail')?.detailJson ?? '{}', {});
-  const screened = screenDetail(detail, year ? year.p90 - year.p10 : 0);
-  const routing = routeFor(
-    { number: pr.plmEcrNumber, title: pr.title, revision },
-    { numbers: Object.fromEntries(rows.filter(r => r.key !== 'detail').map(r => [r.key, { p10: r.p10, p50: r.p50, p90: r.p90, unit: r.unit }])), costCheck: costCheckOf(rows) },
-    storedCompanyConfig(db)
-  );
-  // The same rule and the same rows the publisher applies, so the agent is told what the PLM will say.
-  // The timeline and supply checks of the same snapshot the publisher will read (siblings.ts). The agent posts none of
-  // their numbers (the module would check them against the newest finished runs, which a later re-run can change
-  // under it); the publisher shows them from these runs. The agent gets sentences built from the same rows.
-  const siblings = siblingsForRun(db, pr.id, run.id);
-  const recommendation = deriveRecommendation(ruleInputOf(rows, failedChecksForRun(db, pr.id, run.id), ruleSiblingsOf(siblings, pr.plmEcrNumber)));
-  return {
-    ecr: pr.plmEcrNumber,
-    title: pr.title,
-    revision,
-    s2RunId,
-    baseline: p.baseline,
-    changeRequest: p.changeRequest,
-    numbers,
-    screened,
-    routing,
-    recommendation,
-    ...(siblings ? { timelineSupply: timelineSupplyFacts(siblings.timeline, siblings.supply) } : {}),
   };
 }
 

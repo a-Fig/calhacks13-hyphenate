@@ -6,11 +6,12 @@
 //   - it never says the checks are clean, or that there are no issues, while the rule has a blocker or a condition, or
 //     a check has a finding (`cleanWording`). "The checks are not clean" is not that, and "the cost check is clean" is
 //     true when the cost check found nothing;
-//   - it quotes no dollar figure that no check produced (`unknownAmounts`), allowing for rounding, for $154k against
-//     $154,000, and for "154,000 USD" or "154,000 dollars";
-//   - a number that is not a computation is never money (`judgedNumberProblems`): its unit and label carry no money
-//     marker, and its unit is one of a short list that are not money (weeks, %, count...). A computation takes its
-//     label, unit and values from its check result (the module copies them), so a money figure must be one.
+//   - every number in its prose is allowed (`unknownAmounts`), whatever currency sits next to it, if any: part of an
+//     identifier or a date (ECR-0417, BW-5120-210, S/N 14-18, 2027-01-22, January 2027), at most 100 (counts, weeks,
+//     percentages, rule numbers), or a number Norn produced for this ECR (its check results and the job's facts) at
+//     the precision shown, with k or million applied. Text is NFKC-normalised first, so a full-width "＄" is "$";
+//   - it posts no number that is not a computation (`nonComputationNumbers`): the module copies a computation's
+//     label, unit and values from its check result, and any other number would be the agent's own.
 // Both checks read every piece of agent-written text the pages display (`piecesOf`), not only the prose fields.
 // The publisher (format.ts) does not refuse: it lists every derived condition itself, and notes a clean wording it finds.
 import { MATERIALITY } from './prompt.ts';
@@ -175,53 +176,68 @@ export function numbersIn(value: unknown, out: number[] = []): number[] {
   if (typeof value === 'number' && Number.isFinite(value)) out.push(value);
   else if (Array.isArray(value)) for (const v of value) numbersIn(v, out);
   else if (typeof value === 'object' && value !== null) for (const v of Object.values(value)) numbersIn(v, out);
-  else if (typeof value === 'string') for (const f of figuresIn(value)) out.push(f.value);
+  else if (typeof value === 'string') for (const f of numberTokens(value)) out.push(f.value);
   return out;
 }
 
 /**
- * The figures in the prose that match no known amount. `known` is every number the checks produced (their results and
- * detail) plus the bars the agent is given; a figure matches when it is within its own rounding of one, in either sign
- * (a saving is written in parentheses). $0 always matches.
+ * The numbers in the prose that are not allowed. `known` is every number Norn produced for the ECR (its check results
+ * and their detail, the job's facts) plus the bars the agent is given. A number is allowed when it is part of an
+ * identifier or a date, is at most 100, or is within its own rounding of a known one in either sign (a saving is
+ * written in parentheses). Which currency, if any, sits next to it does not matter.
  */
 export function unknownAmounts(p: Prose, known: readonly number[]): { where: string; figure: string }[] {
   const abs = known.map(Math.abs);
   const out: { where: string; figure: string }[] = [];
   for (const { where, text } of piecesOf(p))
-    for (const f of figuresIn(text))
-      if (f.value !== 0 && !abs.some(k => Math.abs(k - f.value) <= f.tolerance)) out.push({ where, figure: f.text });
+    for (const f of numberTokens(text))
+      if (Math.abs(f.value) > SMALL && !abs.some(k => Math.abs(k - Math.abs(f.value)) <= f.tolerance)) out.push({ where, figure: f.text });
+  return out;
+}
+
+/** Numbers up to this are counts, weeks, percentages and rule numbers, and need no source. */
+export const SMALL = 100;
+
+/** The text as the checks read it: NFKC-normalised (full-width "＄999" is "$999"), with runs of white space as one space. */
+export const normalised = (text: string): string => text.normalize('NFKC').replace(/\s+/g, ' ');
+
+const MONTH = String.raw`(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)`;
+/** Identifiers and dates, whose digits are not amounts. */
+const IDENTIFIERS = [
+  /\b\d{4}-\d{2}-\d{2}\b/g, // 2027-01-22
+  new RegExp(String.raw`\b(?:\d{1,2} )?${MONTH}\.?(?: \d{1,2})?,? \d{4}\b`, 'gi'), // January 2027, 22 Jan 2027, March 3, 2027
+  /\b(?:Q[1-4]|H[12]|FY) ?\d{2,4}\b/gi, // Q1 2027 is caught by the year below; FY2027
+  /\bS\/N ?\d+(?: ?(?:-|–|—|to) ?\d+)?/gi, // S/N 14, S/N 14-18
+  /\b[A-Z]{2,6}(?:-[A-Z0-9]*\d[A-Z0-9]*)+\b/g, // ECR-0417, ECO-0319, BW-5120-210
+];
+/** A number with its shown precision and scale, and a currency sign or word beside it if there is one (kept for the message only). */
+const TOKEN = /(?<!\d)(?:[$€£¥] ?)?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(?: ?(thousand|million|billion|bn|[kmb])(?![\p{L}\d]))?(?: ?(?:USD|EUR|GBP|CAD|dollars?|euros?|pounds?)\b)?/giu;
+
+/** Every number in the text that is not part of an identifier or a date, with k, million and the like applied. */
+export function numberTokens(text: string): Figure[] {
+  let t = normalised(text);
+  for (const re of IDENTIFIERS) t = t.replace(re, ' ');
+  const out: Figure[] = [];
+  for (const m of t.matchAll(TOKEN)) {
+    const digits = m[1]!.replace(/,/g, '');
+    const decimals = m[2] ?? '';
+    const scale = SCALE[(m[3] ?? '').toLowerCase()] ?? 1;
+    // Rounded to the shown digit; a whole number is "rounded to the dollar" in the prompt, so one either way.
+    const tolerance = scale === 1 ? Math.max(1, 0.5 * 10 ** -decimals.length) : 0.5 * 10 ** -decimals.length * scale;
+    out.push({ text: m[0].trim(), value: Number(decimals ? `${digits}.${decimals}` : digits) * scale, tolerance });
+  }
   return out;
 }
 
 // ---- numbers that are not computations --------------------------------------------------------------
 
 /**
- * A money marker in a unit or a label: a currency sign or code, scaled or not ("$", "$k", "k$", "USD", "kUSD", "MUSD",
- * "€", "EUR", "kEUR", "£", "GBP", "dollars"). Matching a value against the checks' amounts cannot close this: "250 kUSD"
- * is $250,000 on the page and matches the $250 bar, and "Annual cost (USD)" puts the currency in the label.
+ * The numbers the agent posted that are not computations. A Level 1 statement's numbers are exactly the ones the job
+ * names, each a computation the module copies from its check result (label, unit and values). Any other number is
+ * the agent's own, and no test of its label, key or unit can tell that it is not money, so none is allowed.
  */
-const MONEY = /[$€£¥]|usd|dollar|gbp|\b[km]?eur(?:os?)?\b|\beuros?\b|\bpounds? sterling\b/i;
-export const hasMoneyMarker = (s: string | undefined): boolean => !!s && MONEY.test(s);
-
-/** The units a number that is not a computation may have: none of them is money. Anything else, and no unit, is refused. */
-export const NOT_MONEY_UNITS = ['weeks', 'days', 'hours', 'months', 'years', '%', 'percent', 'count', 'units', 'parts', 'aircraft', 'serials', 'ratio'] as const;
-const NOT_MONEY = new Set<string>([...NOT_MONEY_UNITS, 'week', 'wk', 'wks', 'day', 'hour', 'h', 'hr', 'hrs', 'month', 'year', 'unit', 'part', 'serial', 's/n', 'fraction']);
-const unitWord = (unit: string | undefined) => (unit ?? '').trim().toLowerCase().replace(/^\((.*)\)$/, '$1').trim();
-
-/**
- * The numbers the agent posted that are not computations and could be read as money, each with what is wrong. The
- * pages show such a number's label, unit and values as the agent wrote them, so a money figure must be a computation:
- * its unit and label carry no money marker, and its unit is on `NOT_MONEY_UNITS`.
- */
-export function judgedNumberProblems(p: Prose): { where: string; why: string }[] {
-  const out: { where: string; why: string }[] = [];
-  (p.numbers ?? []).forEach((n, i) => {
-    if (n.evidence === 'computation') return;
-    const where = `number ${i + 1} (${n.label ?? n.key ?? 'no label'})`;
-    if (hasMoneyMarker(n.unit) || hasMoneyMarker(n.label)) out.push({ where, why: `is money (${hasMoneyMarker(n.unit) ? `unit "${n.unit}"` : `label "${n.label}"`}) but is not a computation` });
-    else if (!NOT_MONEY.has(unitWord(n.unit))) out.push({ where, why: unitWord(n.unit) ? `has the unit "${n.unit}", which Norn cannot tell is not money` : 'has no unit, so Norn cannot tell it is not money' });
-  });
-  return out;
+export function nonComputationNumbers(p: Prose): { where: string; evidence: string }[] {
+  return (p.numbers ?? []).flatMap((n, i) => (n.evidence === 'computation' ? [] : [{ where: `number ${i + 1} (${n.label ?? n.key ?? 'no label'})`, evidence: n.evidence ?? 'none' }]));
 }
 
 /** The bars in the system prompt, which the agent may quote. */
