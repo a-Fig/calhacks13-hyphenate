@@ -10,6 +10,7 @@ import { Legend, Mark, Num } from '../ui/Evidence.tsx';
 import { dateLong, range as rangeText, staleNote, usd } from '../ui/fmt.ts';
 import { evidenceCounts } from '../ui/trace.ts';
 import { Link, navigate } from '../router.tsx';
+import { OptionsBox } from './OptionsBox.tsx';
 
 const BLOCKS: { id: CostBlock; label: string }[] = [
   { id: 'production', label: 'Production' },
@@ -102,6 +103,7 @@ function CostCheck({ a }: { a: ImpactAssessment }) {
         </div>
       </div>
       <ScenarioBox a={a} />
+      <OptionsBox id={a.ecr.id} />
       {a.sCurve && (
         <div className="nx-box">
           <div className="nx-box-title">

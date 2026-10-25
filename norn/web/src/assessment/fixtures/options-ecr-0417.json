@@ -1,0 +1,287 @@
+{
+  "ecr": "ECR-0417",
+  "title": "Motor-controller mounting bracket BW-5120-210, Rev B to Rev C: fillet fatigue crack",
+  "seed": "norn-seed-1",
+  "draws": 10000,
+  "computedAt": "2026-10-25T07:49:42.866Z",
+  "basis": "Options are decisions on the ECR run through the same cost, timeline and supply checks with one seed. Ranked on the 12-month total at p50.",
+  "options": [
+    {
+      "id": "as-filed",
+      "label": "As filed",
+      "decisions": [],
+      "overrides": [],
+      "oneTime": {
+        "p10": 142082.62,
+        "p50": 148520.65,
+        "p90": 155795.04
+      },
+      "window12": {
+        "p10": 150665.37,
+        "p50": 157149.82,
+        "p90": 164488.66
+      },
+      "plan": {
+        "p10": 503286.12,
+        "p50": 514748.13,
+        "p90": 531159.57
+      },
+      "cutIn": {
+        "serial": 15,
+        "date": "2027-02-16",
+        "placed": true
+      },
+      "weeksLate": 13.12,
+      "vsFiled": {
+        "oneTime": 0,
+        "window12": 0,
+        "plan": 0,
+        "weeksLate": 0
+      },
+      "asFiled": true,
+      "eligible": true,
+      "exclusions": [],
+      "notes": []
+    },
+    {
+      "id": "disposition-use_up_all+retrofit-none+cut_in-after_use_up",
+      "label": "Use up the old stock, Do not retrofit built aircraft",
+      "decisions": [
+        {
+          "kind": "disposition",
+          "mode": "use_up_all"
+        },
+        {
+          "kind": "retrofit",
+          "mode": "none"
+        },
+        {
+          "kind": "cut_in",
+          "mode": "after_use_up",
+          "serial": 33
+        }
+      ],
+      "overrides": [
+        {
+          "id": "effectivity:ECR-0417:vesper",
+          "source": "agent_estimated",
+          "value": 33,
+          "replacesGiven": true,
+          "rationale": "Option: cut in at S/N 33, the first serial after the old stock is used up (timeline check)."
+        }
+      ],
+      "oneTime": {
+        "p10": 43086.05,
+        "p50": 48079.05,
+        "p90": 53883.88
+      },
+      "window12": {
+        "p10": 68624.01,
+        "p50": 73691.7,
+        "p90": 79602.71
+      },
+      "plan": {
+        "p10": 395192.64,
+        "p50": 405153.62,
+        "p90": 419751.83
+      },
+      "cutIn": {
+        "serial": 33,
+        "date": "2027-11-17",
+        "placed": true
+      },
+      "weeksLate": 52.21,
+      "vsFiled": {
+        "oneTime": -100441.6,
+        "window12": -83458.12,
+        "plan": -109594.51,
+        "weeksLate": 39.09
+      },
+      "asFiled": false,
+      "eligible": false,
+      "exclusions": [
+        {
+          "rule": "no-old-design-after-failure",
+          "reason": "This change fixes a failure, so building or fitting more of the old design is not allowed unless certification accepted it.",
+          "evidence": [
+            {
+              "source": "NCR-0119 disposition",
+              "quote": "MRB 2026-10-09: Rev B is not acceptable for flight."
+            },
+            {
+              "source": "ECR-0417 originatingNcr",
+              "quote": "Filed after NCR-0119, a non-conformance record."
+            },
+            {
+              "source": "ECR-0417 need",
+              "quote": "NCR-0119: crack at the lower fillet at 8.2 h of the 20 h endurance profile; three of twelve rig brackets have initiated by 20 h."
+            },
+            {
+              "source": "ECR-0417 failure data",
+              "quote": "Rig EP-3, controller position 4: crack at 8.2 h, 14 mm from flange edge into web."
+            }
+          ]
+        },
+        {
+          "rule": "retrofit-is-mandatory",
+          "reason": "The ECR or its non-conformance record makes the retrofit of built aircraft mandatory.",
+          "evidence": [
+            {
+              "source": "NCR-0119 disposition",
+              "quote": "MRB 2026-10-09: Rev B is not acceptable for flight."
+            },
+            {
+              "source": "ECR-0417 in-field proposal",
+              "quote": "Replace Rev B on S/N 001-010 with Rev C; returned Rev B is scrapped."
+            }
+          ]
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "retrofit-none",
+      "label": "Do not retrofit built aircraft",
+      "decisions": [
+        {
+          "kind": "retrofit",
+          "mode": "none"
+        }
+      ],
+      "overrides": [],
+      "oneTime": {
+        "p10": 81520.72,
+        "p50": 86524.52,
+        "p90": 92340.62
+      },
+      "window12": {
+        "p10": 90133.19,
+        "p50": 95150.45,
+        "p90": 100986.19
+      },
+      "plan": {
+        "p10": 442574.74,
+        "p50": 452756.09,
+        "p90": 467711.78
+      },
+      "cutIn": {
+        "serial": 15,
+        "date": "2027-02-16",
+        "placed": true
+      },
+      "weeksLate": 13.12,
+      "vsFiled": {
+        "oneTime": -61996.13,
+        "window12": -61999.37,
+        "plan": -61992.04,
+        "weeksLate": 0
+      },
+      "asFiled": false,
+      "eligible": false,
+      "exclusions": [
+        {
+          "rule": "retrofit-is-mandatory",
+          "reason": "The ECR or its non-conformance record makes the retrofit of built aircraft mandatory.",
+          "evidence": [
+            {
+              "source": "NCR-0119 disposition",
+              "quote": "MRB 2026-10-09: Rev B is not acceptable for flight."
+            },
+            {
+              "source": "ECR-0417 in-field proposal",
+              "quote": "Replace Rev B on S/N 001-010 with Rev C; returned Rev B is scrapped."
+            }
+          ]
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "disposition-use_up_all+cut_in-after_use_up",
+      "label": "Use up the old stock",
+      "decisions": [
+        {
+          "kind": "disposition",
+          "mode": "use_up_all"
+        },
+        {
+          "kind": "cut_in",
+          "mode": "after_use_up",
+          "serial": 33
+        }
+      ],
+      "overrides": [
+        {
+          "id": "effectivity:ECR-0417:vesper",
+          "source": "agent_estimated",
+          "value": 33,
+          "replacesGiven": true,
+          "rationale": "Option: cut in at S/N 33, the first serial after the old stock is used up (timeline check)."
+        }
+      ],
+      "oneTime": {
+        "p10": 103726.45,
+        "p50": 110079.51,
+        "p90": 117334.62
+      },
+      "window12": {
+        "p10": 129169.61,
+        "p50": 135713.94,
+        "p90": 143076.55
+      },
+      "plan": {
+        "p10": 455929.28,
+        "p50": 467152.24,
+        "p90": 483172.66
+      },
+      "cutIn": {
+        "serial": 33,
+        "date": "2027-11-17",
+        "placed": true
+      },
+      "weeksLate": 52.21,
+      "vsFiled": {
+        "oneTime": -38441.14,
+        "window12": -21435.88,
+        "plan": -47595.89,
+        "weeksLate": 39.09
+      },
+      "asFiled": false,
+      "eligible": false,
+      "exclusions": [
+        {
+          "rule": "no-old-design-after-failure",
+          "reason": "This change fixes a failure, so building or fitting more of the old design is not allowed unless certification accepted it.",
+          "evidence": [
+            {
+              "source": "NCR-0119 disposition",
+              "quote": "MRB 2026-10-09: Rev B is not acceptable for flight."
+            },
+            {
+              "source": "ECR-0417 originatingNcr",
+              "quote": "Filed after NCR-0119, a non-conformance record."
+            },
+            {
+              "source": "ECR-0417 need",
+              "quote": "NCR-0119: crack at the lower fillet at 8.2 h of the 20 h endurance profile; three of twelve rig brackets have initiated by 20 h."
+            },
+            {
+              "source": "ECR-0417 failure data",
+              "quote": "Rig EP-3, controller position 4: crack at 8.2 h, 14 mm from flange edge into web."
+            }
+          ]
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "recommended": "as-filed",
+  "recommendation": {
+    "text": "Recommended: the ECR as filed. No eligible option is cheaper than the ECR as filed: $148,521 one-time at p50 ($142,083 to $155,795), $157,150 over 12 months. Schedule: the change reaches the line about 13 weeks after the date stated. Cheaper but not allowed: \"Use up the old stock, Do not retrofit built aircraft\" would save $83,458 over 12 months; this change fixes a failure, so building or fitting more of the old design is not allowed unless certification accepted it.",
+    "tradeoffs": [
+      "No eligible option is cheaper than the ECR as filed: $148,521 one-time at p50 ($142,083 to $155,795), $157,150 over 12 months.",
+      "Schedule: the change reaches the line about 13 weeks after the date stated.",
+      "Cheaper but not allowed: \"Use up the old stock, Do not retrofit built aircraft\" would save $83,458 over 12 months; this change fixes a failure, so building or fitting more of the old design is not allowed unless certification accepted it."
+    ]
+  }
+}
