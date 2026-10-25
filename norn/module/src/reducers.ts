@@ -179,8 +179,10 @@ export const setConfig = write('set_config', { key: t.string(), value: t.string(
 // 'NORN-<id>' until the PLM assigns one.
 type RevisionIn = { changeRequestJson: string; source: string; sourceRef: string };
 
-// Open an ECR, with its first change request if one came with it, in the caller's transaction.
-function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description: string }, first?: RevisionIn, call?: Call) {
+// Open an ECR, with its first change request if one came with it, in the caller's transaction. It opens as a
+// draft, unless the caller says it is already filed for review: the ingest path only reports ECRs the PLM
+// has submitted, so Norn shows the status the change control board sees (the fast track decides ECRs in review).
+function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description: string }, first?: RevisionIn, call?: Call, status: PrStatus = 'draft') {
   const title = nonEmpty(a.title, 'title', 200);
   if (a.description.length > 20000) throw new SenderError('description is too long (max 20000 characters)');
   const plm = a.plmEcrNumber.trim();
@@ -196,7 +198,7 @@ function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description:
     plmEcrNumber: plm || `pending-${ctx.newUuidV4().toString()}`,
     title,
     description: a.description,
-    status: 'draft',
+    status,
     baseVersion: base,
     revision: 1,
     inputsDigest: '',
@@ -219,7 +221,7 @@ function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description:
   return {
     prId: pr.id,
     entity: `pull_request:${pr.id}`,
-    summary: `opened ECR '${title}' (${plm || `NORN-${pr.id}`}) on baseline v${base}${first ? ', change request rev 1' : ''}; ${outcome}${deep ? `; ${deep} deep run(s) requested by config` : ''}${others ? `; ${others} other open ECR(s) checked against it` : ''}`,
+    summary: `opened ECR '${title}' (${plm || `NORN-${pr.id}`}) ${status === 'review' ? 'in review' : 'as a draft'} on baseline v${base}${first ? ', change request rev 1' : ''}; ${outcome}${deep ? `; ${deep} deep run(s) requested by config` : ''}${others ? `; ${others} other open ECR(s) checked against it` : ''}`,
   };
 }
 
@@ -274,7 +276,8 @@ export const ingestEcr = write(
     const plm = nonEmpty(a.plmEcrNumber, 'plmEcrNumber', 64);
     const rev: RevisionIn = { changeRequestJson: a.changeRequestJson, source: a.source, sourceRef: a.sourceRef };
     const existing = ctx.db.pullRequest.plmEcrNumber.find(plm);
-    if (!existing) return openPr(ctx, { plmEcrNumber: plm, title: a.title, description: a.description }, rev, call);
+    // An ECR the PLM reports has been filed there for review, so it opens in review (a draft is one a person has not submitted).
+    if (!existing) return openPr(ctx, { plmEcrNumber: plm, title: a.title, description: a.description }, rev, call, 'review');
 
     const digest = checkedChangeRequest(a.changeRequestJson, plm);
     const title = nonEmpty(a.title, 'title', 200);

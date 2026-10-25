@@ -308,3 +308,10 @@ Arguments are checked against the configuration before anything is sent. A class
 the tests need, and the answer says so (`classesFilledIn`): Bowman's tests need Class II and FAA minor, which the Level 1
 prompt does not pass. The reducer's refusals (not in review, checks not finished, no configuration) and the scope
 refusal come back in words. Only the mirror's rows are read, so the signal assumes a `done` run is current, as `get_impact` does.
+
+The fast track decides ECRs in review. `ingest_ecr` opens an ECR the PLM reports in review (the ingest loop only takes
+in filed ECRs: Submitted, In CM Review, CCB Review by default), so Norn shows the status the change control board sees.
+An ECR filed in Norn with `create_pr` is a draft, and a draft is never a candidate. ECRs ingested before this change
+stay as they were opened (drafts); `set_pr_status` moves them to review. When a check is still running, `fastTrack.why`
+says "The checks are still running" and the Level 1 job takes the normal route for that revision; dispatch waiting for
+the slower checks (#123) is what makes that rare.

@@ -82,8 +82,8 @@ try {
   const sent = new Map<string, string>();
   await ingestOnce(setup.R, stubSource(ecrDir), sent, m => console.log(`  ingest: ${m}`));
   for (const plm of ['ECR-0423', 'ECR-0417', drawnId]) await until(() => codeDone(plm), 120_000, `${plm} to have every code check done`);
-  for (const plm of ['ECR-0423', 'ECR-0417', drawnId]) await setup.R.setPrStatus({ prId: ecr(plm).id, status: 'review' });
-  await until(() => ['ECR-0423', 'ECR-0417', drawnId].every(p => ecr(p).status === 'review'), 10_000, 'the ECRs to be in review');
+  // No promotion by hand: ingest_ecr opens an ECR the PLM reports in review, which is what the fast track needs.
+  check('ingest opens the PLM-reported ECRs in review', ['ECR-0423', 'ECR-0417', drawnId].every(p => ecr(p).status === 'review'), ['ECR-0423', 'ECR-0417', drawnId].map(p => ecr(p).status).join(', '));
   // ---- the MCP server and three scoped agents ------------------------------------------------------------
   const server = await startServer({ norn, signingKey: key, port: 0 });
   const agentFor = async (name: string, ecrs: string[]) => {
@@ -161,16 +161,23 @@ try {
   writeFileSync(join(ecrDir, `${unfinishedId}.json`), JSON.stringify(ecrAs('ECR-0423', unfinishedId)));
   await ingestOnce(setup.R, stubSource(ecrDir), sent, m => console.log(`  ingest: ${m}`));
   await until(() => ecr(unfinishedId), 10_000, `${unfinishedId} to be filed`);
-  await setup.R.setPrStatus({ prId: ecr(unfinishedId).id, status: 'review' });
   await until(() => ecr(unfinishedId).status === 'review', 10_000, `${unfinishedId} to be in review`);
 
   const AUnfinished = await agentFor('aunfin', [unfinishedId]);
   const iUn = (await call(AUnfinished, 'get_impact', { ecr: unfinishedId })).json;
-  check('get_impact: an ECR whose checks have not finished is not a candidate, and says so', iUn.fastTrack.candidate === false && /checks have not all finished/.test(iUn.fastTrack.why), iUn.fastTrack.why);
+  check('get_impact: an ECR whose checks have not finished is not a candidate, and says so', iUn.fastTrack.candidate === false && /checks are still running/.test(iUn.fastTrack.why), iUn.fastTrack.why);
   const rUn = await call(AUnfinished, 'request_fast_track_approval', { ecr: unfinishedId, answers: answersFor(iUn) });
   check('and asking anyway is refused: the checks have not finished', rUn.isError && /have not finished on its current inputs/.test(rUn.text) && /Nothing was changed/.test(rUn.text), rUn.text.slice(0, 250));
 
-  for (const c of [A423, A417, ADrawn, AUnfinished]) await c.close();
+  // A draft (filed in Norn, not submitted) stays ineligible, whatever its checks say.
+  const draftId = `ECR-9501-${stamp}`.slice(0, 40);
+  await setup.R.createPr({ plmEcrNumber: draftId, title: 'ftt draft', description: 'a draft, not yet submitted for review' });
+  await until(() => ecr(draftId), 10_000, `${draftId} to be filed`);
+  const ADraft = await agentFor('adraft', [draftId]);
+  const iDr = (await call(ADraft, 'get_impact', { ecr: draftId })).json;
+  check('a draft ECR is not a candidate: the fast track decides ECRs in review', iDr.fastTrack.candidate === false && /is draft/.test(iDr.fastTrack.why), iDr.fastTrack.why);
+
+  for (const c of [A423, A417, ADrawn, AUnfinished, ADraft]) await c.close();
   await server.close();
 } finally {
   worker.kill();

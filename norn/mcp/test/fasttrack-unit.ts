@@ -59,7 +59,7 @@ test('Bowman: ECR-0417 is not a candidate: over the cost limit and late', () => 
 
 test('the signal is false, with the reason, when something other than an answer is in the way', () => {
   assert.match(signal('ECR-0423', { status: 'approved' }).why, /ECR is approved; the fast track decides ECRs in review/);
-  assert.match(signal('ECR-0423', { checksFinished: false }).why, /checks have not all finished/);
+  assert.match(signal('ECR-0423', { checksFinished: false }).why, /checks are still running/);
   const noCost = signal('ECR-0423', { cost: [] });
   assert.equal(noCost.candidate, false);
   assert.match(noCost.why, /unmeasured/);

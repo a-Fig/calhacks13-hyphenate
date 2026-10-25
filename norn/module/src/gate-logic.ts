@@ -339,7 +339,7 @@ export function fastTrackSignal(
     return out(false, `No choice of company and regulatory class lets the fast track apply. ${r.fastTrack.why}`);
   }
   if (input.status !== 'review') return out(false, `The ECR is ${input.status}; the fast track decides ECRs in review.`);
-  if (!input.checksFinished) return out(false, "The checks have not all finished on the ECR's current inputs, so there are no numbers to decide on yet.");
+  if (!input.checksFinished) return out(false, "The checks are still running: they have not all finished on the ECR's current inputs, so there are no numbers to decide on yet. Do not ask for the fast track on this revision; the ECR takes the normal route.");
 
   // The report the limits need, if the agent can still write it.
   const rule = config.autonomy.actions.find((a) => a.action === FAST_TRACK);
