@@ -304,6 +304,13 @@ button.nx-merge-head:hover { background: var(--bgColor-muted); }
 /* ---------- parts that are mock, saved or not assessed yet ---------- */
 .nx-mock { margin-left: 6px; display: inline-flex; vertical-align: middle; }
 .nx-flash { margin-bottom: 16px; }
+/* A check's notes, folded to one line (Impact.tsx, Notes) */
+.nx-notes { margin-bottom: 16px; font-size: 13px; color: var(--fgColor-muted); }
+.nx-notes > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; }
+.nx-notes > summary::-webkit-details-marker { display: none; }
+.nx-notes > summary:hover { color: var(--fgColor-default); }
+.nx-notes ul { margin: 8px 0 0; padding-left: 22px; }
+.nx-notes li { margin: 4px 0; color: var(--fgColor-default); }
 .nx-pending-card {
   display: flex; align-items: flex-start; gap: 12px; padding: 16px; border: 1px dashed var(--borderColor-default);
   border-radius: 6px; background: var(--bgColor-muted); margin-bottom: 16px;
