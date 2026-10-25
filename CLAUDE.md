@@ -67,7 +67,8 @@ issues, grouped into those milestones and labelled by folder (`area: norn` and s
 
 ## Commands
 
-None yet (2026-10-24). When the first runnable piece lands, add one fenced block here with every
-command, each line commented.
+```
+node norn/checks/proof.ts   # runs the checks on the planted scenarios and rewrites docs/PROOF.md (about 40 s, offline)
+```
 
 @docs/WORKFLOW.md
