@@ -2,9 +2,11 @@
 // it keeps the fields it was given and answers with them.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { statementToPlmFields, type Provenance, type StatementDoc } from './format.ts';
+import { statementToPlmFields, type Formatted, type Provenance, type StatementDoc } from './format.ts';
 import type { ImpactFields, ImpactState, PlmApi } from './plm.ts';
-import { gather, pickStatement, publishStatement, type Lease } from './publisher.ts';
+import { gather, overrideComment, pickStatement, publishDetailed, publishStatement, recordOverride, statementIdOf, type Lease, type OverrideDeps } from './publisher.ts';
+import { ruleInputOf } from './recommendation.ts';
+import { storedRows } from './routing-fixture.ts';
 
 class FakePlm implements PlmApi {
   ecrs = new Map<string, ImpactState>();
@@ -221,7 +223,7 @@ function fakeDb(o: { current: { seq: number }; runs: { id: bigint; inputs: objec
   return {
     ecrRevision: { prId: by([{ seq: o.current.seq, current: true, createdAt: t(0), prId: 1n }], r => r.prId) },
     impactStatement: { prId: by(o.statements.map(s => ({ ...s, prId: 1n })), r => r.prId) },
-    checkRun: { id: { find: (id: bigint) => o.runs.map(r => ({ id: r.id, inputsJson: JSON.stringify(r.inputs) })).find(r => r.id === id) } },
+    checkRun: { prId: by(o.runs.map(r => ({ id: r.id, stage: 's2_cost', status: 'done', prId: 1n })), r => r.prId), id: { find: (id: bigint) => o.runs.map(r => ({ id: r.id, inputsJson: JSON.stringify(r.inputs) })).find(r => r.id === id) } },
     checkResult: { prId: by(o.results.map(r => ({ id: r.id, checkRunId: r.run, key: r.key, p10: r.p[0], p50: r.p[1], p90: r.p[2], mock: r.mock ?? false, detailJson: JSON.stringify(r.detail ?? {}), prId: 1n })), r => r.prId) },
   } as any;
 }
@@ -323,4 +325,83 @@ test('no remembered ref hides a change: if the PLM no longer shows the statement
   plm.ecrs.set('ECR-0417', { impact_statement: '<p>stale text</p>' });
   assert.equal(await publishStatement(d, 'ECR-0417', f, prov), 'written');
   assert.equal(plm.writes.length, 2);
+});
+
+// ---- recording an override in Norn (review of #112) ---------------------------------------------------
+
+const ruleProv: Provenance = { ...prov, ruleInput: ruleInputOf(storedRows('ECR-0417'), []) };
+/** A statement whose agent wrote `rec`; ECR-0417's rule gives Approve with conditions. */
+const fmtRule = (id: number, rec: string) =>
+  statementToPlmFields({ ...statement(id), claims: [{ text: `Recommendation: ${rec}. Some reasoning.`, evidence: 'judgment' }] }, { number: 'ECR-0417', title: 't', revision: 1 }, ruleProv, { nornBaseUrl: 'http://127.0.0.1:5173' });
+
+/** Norn's comments on the ECR, with a delay on every read and write, as the real database has. */
+class FakeComments {
+  bodies: string[] = [];
+  deps(): OverrideDeps & { recorded: (f: Formatted) => boolean; record: (f: Formatted) => Promise<unknown> } {
+    const od: OverrideDeps = {
+      existing: async () => (await new Promise(r => setTimeout(r, 10)), [...this.bodies]),
+      add: async b => (await new Promise(r => setTimeout(r, 10)), void this.bodies.push(b)),
+    };
+    return { ...od, recorded: f => !f.overridden || this.bodies.includes(overrideComment(statementIdOf(f), f.overridden)), record: f => recordOverride(od, statementIdOf(f), f) };
+  }
+}
+const withOverride = (plm: PlmApi, lease: Lease | undefined, c: FakeComments) => ({ plm, lease, override: c.deps(), log: () => {} });
+
+test('two publishers at the same moment record one override comment, because it is posted under the lease', async () => {
+  const plm = new SlowPlm('ECR-0417');
+  const claims = new FakeClaims();
+  const c = new FakeComments();
+  const f = fmtRule(12, 'Send back');
+  assert.equal(f.recommendation, 'Approve with conditions');
+  const [ra, rb] = await Promise.all([publishDetailed(withOverride(plm, claims.lease('ECR-0417', 'A'), c), 'ECR-0417', f, prov), publishDetailed(withOverride(plm, claims.lease('ECR-0417', 'B'), c), 'ECR-0417', f, prov)]);
+  assert.deepEqual([ra.result, rb.result].sort(), ['busy', 'written']);
+  assert.equal(c.bodies.length, 1);
+  assert.equal((await publishDetailed(withOverride(plm, claims.lease('ECR-0417', 'B'), c), 'ECR-0417', f, prov)).result, 'unchanged');
+  assert.equal(c.bodies.length, 1, 'the loser\'s next sweep finds the comment and adds none');
+});
+
+test('written to the PLM but never recorded in Norn (a crash between): the next sweep records it, once, under the lease', async () => {
+  const plm = new FakePlm('ECR-0417');
+  const claims = new FakeClaims();
+  const f = fmtRule(12, 'Send back');
+  await publishStatement(deps(plm), 'ECR-0417', f, prov); // the PLM has it, Norn has no comment
+  const c = new FakeComments();
+  const d = withOverride(plm, claims.lease('ECR-0417', 'A'), c);
+  assert.equal((await publishDetailed(d, 'ECR-0417', f, prov)).result, 'unchanged');
+  assert.equal(c.bodies.length, 1);
+  assert.equal(plm.writes.length, 1, 'nothing was written to the PLM again');
+  assert.equal((await publishDetailed(d, 'ECR-0417', f, prov)).result, 'unchanged');
+  assert.equal(c.bodies.length, 1);
+  assert.equal(claims.held.size, 0);
+});
+
+test('the comment is about the statement actually written: a newer one that takes over under the lease', async () => {
+  const plm = new FakePlm('ECR-0417');
+  const c = new FakeComments();
+  const claims = new FakeClaims();
+  const old = fmtRule(12, 'Send back');
+  const newer = fmtRule(13, 'Reject');
+  const out = await publishDetailed(withOverride(plm, claims.lease('ECR-0417', 'A'), c), 'ECR-0417', old, prov, () => ({ f: newer, prov }));
+  assert.equal(out.result, 'written');
+  assert.equal(out.f?.ref, newer.ref, 'returned: the statement written');
+  assert.equal(c.bodies.length, 1);
+  assert.ok(c.bodies[0]!.includes('wrote "Reject"') && c.bodies[0]!.includes('statement 13'), c.bodies[0]);
+  assert.ok(!c.bodies.some(b => b.includes('statement 12')), 'no record of the obsolete one');
+});
+
+test('the old statement had an override and the newer one agrees with the rule: nothing is recorded', async () => {
+  const plm = new FakePlm('ECR-0417');
+  const c = new FakeComments();
+  const out = await publishDetailed(withOverride(plm, new FakeClaims().lease('ECR-0417', 'A'), c), 'ECR-0417', fmtRule(12, 'Send back'), prov, () => ({ f: fmtRule(13, 'Approve with conditions'), prov }));
+  assert.equal(out.result, 'written');
+  assert.equal(out.f?.overridden, undefined);
+  assert.deepEqual(c.bodies, []);
+});
+
+test('the real override of the newer statement is recorded when the one passed in agreed with the rule', async () => {
+  const plm = new FakePlm('ECR-0417');
+  const c = new FakeComments();
+  await publishDetailed(withOverride(plm, new FakeClaims().lease('ECR-0417', 'A'), c), 'ECR-0417', fmtRule(12, 'Approve with conditions'), prov, () => ({ f: fmtRule(13, 'Send back'), prov }));
+  assert.equal(c.bodies.length, 1);
+  assert.ok(c.bodies[0]!.includes('statement 13'));
 });

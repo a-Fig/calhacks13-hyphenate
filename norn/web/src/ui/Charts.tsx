@@ -121,12 +121,10 @@ export function SCurveChart({ data }: { data: SCurve }) {
  */
 export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: number }) {
   const why = useWhy();
-  const [hover, setHover] = useState<string | null>(null);
-  const rowH = 52, W = 760, L = 214, R = 70, T = 34, B = 34;
-  const H = T + drivers.length * rowH + B;
+  const W = 760, L = 32, R = 32;
   const all = drivers.flatMap(d => [d.low, d.high]).concat(base);
   const lo = Math.min(...all), hi = Math.max(...all);
-  const pad = (hi - lo) * 0.05;
+  const pad = (hi - lo) * 0.05 || Math.max(Math.abs(base) * 0.05, 1);
   const ticks = niceTicks(lo - pad, hi + pad, 5);
   const xmin = Math.min(ticks[0], lo - pad), xmax = Math.max(ticks[ticks.length - 1], hi + pad);
   const sx = (v: number) => L + ((v - xmin) / (xmax - xmin)) * (W - L - R);
@@ -142,18 +140,10 @@ export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: numbe
   };
 
   return (
-    <div className="nx-chart">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Top drivers of the first-12-months cost">
-        {ticks.map(t => (
-          <g key={t}>
-            <line className="grid" x1={sx(t)} x2={sx(t)} y1={T - 6} y2={H - B} />
-            <text x={sx(t)} y={H - B + 20} textAnchor="middle">{usdK(t)}</text>
-          </g>
-        ))}
-        <text x={bx} y={T - 14} textAnchor="middle" className="ink">Point estimate {usdK(base)}</text>
-
-        {drivers.map((d, i) => {
-          const y = T + i * rowH + (rowH - th) / 2;
+    <div className="nx-tornado" role="group" aria-label="Top drivers of cost">
+      <div className="nx-tornado-base">Point estimate <b className="num">{usdK(base)}</b></div>
+      <div className="nx-tornado-rows">
+        {drivers.map(d => {
           // Each end keeps its input: the P10 end and the P90 end, wherever they fall.
           const lowIsLeft = d.low <= d.high;
           const leftVal = lowIsLeft ? d.low : d.high, rightVal = lowIsLeft ? d.high : d.low;
@@ -161,37 +151,34 @@ export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: numbe
           const color = `var(--ev-${d.evidence})`;
           const swing = rightVal - leftVal;
           return (
-            <g
+            <button
               key={d.id}
-              className="nx-bar-hit"
-              tabIndex={0}
-              role="button"
-              aria-label={`${d.label}: ${usdK(leftVal)} to ${usdK(rightVal)}`}
+              type="button"
+              className="nx-tornado-row"
               onClick={() => why.open(d.id)}
-              onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && why.open(d.id)}
-              onPointerEnter={() => setHover(d.id)}
-              onPointerLeave={() => setHover(null)}
             >
-              <rect x={0} y={y - (rowH - th) / 2} width={W} height={rowH} fill={hover === d.id ? 'var(--bgColor-muted)' : 'transparent'} />
-              <foreignObject x={0} y={y - 6} width={L - 14} height={34}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, fontSize: 13, lineHeight: 1.2, color: 'var(--fgColor-default)' }}>
-                  <Glyph ev={d.evidence} />
-                  <span>{d.label.length > 44 ? d.label.slice(0, 43) + '…' : d.label}</span>
-                </div>
-              </foreignObject>
-              {leftVal < base && <path className="bar" d={seg(bx, sx(leftVal), y)} fill={color} />}
-              {rightVal > base && <path className="bar" d={seg(bx, sx(rightVal), y)} fill={color} />}
-              {leftVal < base && leftLab && <text x={sx(leftVal) - 7} y={y + 15} textAnchor="end" className="ink2">{leftLab}</text>}
-              {rightVal > base && rightLab && <text x={sx(rightVal) + 7} y={y + 15} textAnchor="start" className="ink2">{rightLab}</text>}
-              {hover === d.id && (
-                <text x={W - R + 66} y={y + 15} textAnchor="end" className="ink">{usdK(swing)} swing</text>
-              )}
-              <title>{`${d.label}: ${EV[d.evidence].label}. ${usdK(leftVal)} to ${usdK(rightVal)}`}</title>
-            </g>
+              <span className="nx-tornado-heading">
+                <span className="nx-tornado-name"><Glyph ev={d.evidence} /><span>{d.label}</span></span>
+                <span className="nx-tornado-swing num">{usdK(swing)} swing</span>
+              </span>
+              <svg viewBox={`0 0 ${W} 36`} preserveAspectRatio="none" aria-hidden="true">
+                {ticks.map(t => <line key={t} className="grid" x1={sx(t)} x2={sx(t)} y1={0} y2={36} />)}
+                {leftVal < base && <path className="bar" d={seg(bx, sx(leftVal), 7)} fill={color} />}
+                {rightVal > base && <path className="bar" d={seg(bx, sx(rightVal), 7)} fill={color} />}
+                <line x1={bx} x2={bx} y1={0} y2={36} stroke="var(--fgColor-default)" strokeWidth="1.5" />
+              </svg>
+              <span className="nx-tornado-ends">
+                <span><span className="nx-fg-muted">{leftLab ?? 'Lower cost'}</span><b className="num">Net {usdK(leftVal)}</b></span>
+                <span><span className="nx-fg-muted">{rightLab ?? 'Higher cost'}</span><b className="num">Net {usdK(rightVal)}</b></span>
+              </span>
+              <span className="nx-tornado-evidence">{EV[d.evidence].label}</span>
+            </button>
           );
         })}
-        <line x1={bx} x2={bx} y1={T - 6} y2={H - B} stroke="var(--fgColor-default)" strokeWidth="1.5" />
-      </svg>
+      </div>
+      <div className="nx-tornado-axis" aria-hidden="true">
+        {ticks.map(t => <span key={t} style={{ left: `${sx(t) / W * 100}%` }}>{usdK(t)}</span>)}
+      </div>
     </div>
   );
 }
