@@ -11,7 +11,7 @@ const unitAsk = (u: AskRule['unit']) =>
 export function askBody(ecr: string, gap: Gap, to: Person, rule: AskRule): string {
   const why = gap.kind === 'blank_row'
     ? `It is blank on the cost page and counted as $0 until someone who owns it gives a figure.`
-    : `Norn is using a default for it, and it moves the 12-month total by about ${usd(gap.swing ?? 0)}.`;
+    : `Fern is using a default for it, and it moves the 12-month total by about ${usd(gap.swing ?? 0)}.`;
   return `${first(to)}, for ${ecr}: what is your estimate for "${gap.label}"? ${why} Please answer with ${unitAsk(rule.unit)}. Asking you because ${rule.why}`;
 }
 

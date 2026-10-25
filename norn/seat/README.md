@@ -1,6 +1,6 @@
-# Norn's seats
+# Fern's seats
 
-A seat is a job a company gives Norn: the duties it owns, who it asks for what, its deadlines and who
+A seat is a job a company gives Fern: the duties it owns, who it asks for what, its deadlines and who
 it escalates to. Written 2026-10-25 for #155. The first seat is Bowman's Product Cost Engineer
 (`bowman/norn-config/seats/cost-engineer.ts`), the job held by Wei-Lin Zhao in the dataset.
 
@@ -17,7 +17,7 @@ Nothing here names a company. A seat file is data; another company writes its ow
 3. **Ask** (`question.ts`): one short question per gap, saying what it is for, the unit wanted and why
    that person.
 4. **Read the reply** (`answer.ts`): deterministic. One clear figure, a range ("$3,000 to $5,000") or an
-   explicit zero is recorded; anything else gets one follow-up. A single figure gets the spread Norn
+   explicit zero is recorded; anything else gets one follow-up. A single figure gets the spread Fern
    uses for an engineer's estimate (lognormal, sigma 0.15); a range becomes p10 and p90.
 5. **Record** (`plan.ts`): the answer becomes an assumption override on that input, source `given`,
    `by` the person, with their words quoted in the rationale, and the checks re-run on it.
@@ -67,7 +67,7 @@ $5,000" from Quality, the one-time total moves from $148,521 to $152,445 at p50,
 
 ## Live: chasing on the running stack (#162)
 
-`src/worker.ts` is a process that connects to SpacetimeDB as "Norn · Product Cost Engineer" (an agent of
+`src/worker.ts` is a process that connects to SpacetimeDB as "Fern · Product Cost Engineer" (an agent of
 origin `norn`) and, for each draft or in-review ECR whose newest s2 cost run is done and not mock, reads
 the gaps from the run's stored detail row, derives the seat's state from the ECR's comments, runs
 `nextActions` on the real clock and carries the actions out. It keeps no state of its own, so a restart

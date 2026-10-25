@@ -46,4 +46,4 @@ export function parseAnchor(anchor: string): SeatAnchor | undefined {
 }
 
 /** The seat's own words in the conversation: who they are posted as. */
-export const SEAT_DISPLAY_PREFIX = 'Norn · ';
+export const SEAT_DISPLAY_PREFIX = 'Fern · ';

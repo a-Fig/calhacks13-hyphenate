@@ -20,7 +20,7 @@ const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
 
 const before = costCheck(bowman, ecr, { seed: 'norn-seed-1' });
 const state: SeatState = { ecr: id, program: ecr.program, originator, gaps: findGaps(seat, before), questions: [], replies: [], recorded: [], reminded: [], escalated: {}, followedUp: [] };
-console.log(`Norn, ${seat.title} seat${seat.replaces ? ` (the job held by ${people.find((p) => p.id === seat.replaces)?.name})` : ''}: ${id}`);
+console.log(`Fern, ${seat.title} seat${seat.replaces ? ` (the job held by ${people.find((p) => p.id === seat.replaces)?.name})` : ''}: ${id}`);
 console.log(`One-time total before: ${usd(before.headline.oneTimeTotal.p50)} [${usd(before.headline.oneTimeTotal.p10)} to ${usd(before.headline.oneTimeTotal.p90)}]`);
 console.log(`\nGaps worth asking about: ${state.gaps.length}`);
 for (const g of state.gaps) console.log(`  - ${g.label} (${g.kind === 'blank_row' ? 'blank on the cost page' : `default, swing ${usd(g.swing ?? 0)}`})`);
@@ -39,7 +39,7 @@ const step = (now: string, label: string) => {
 };
 
 const t0 = '2026-10-24T09:00:00Z';
-step(t0, 'Norn picks up the ECR');
+step(t0, 'Fern picks up the ECR');
 // SIMULATED replies: the first asked person answers with a range, a second gives no figure (a follow-up), the rest stay silent.
 const say = (inputId: string, text: string, at: string) => {
   const q = state.questions.find((x) => x.gap.inputId === inputId)!;

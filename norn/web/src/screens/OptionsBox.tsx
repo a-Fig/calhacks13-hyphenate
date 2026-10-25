@@ -31,7 +31,7 @@ export function OptionsBox({ id }: { id: string }) {
   return (
     <div className="nx-box">
       <div className="nx-box-title">
-        Options <span title="Norn's checks run on each option and saved as a fixture; not a live run" className="nx-mock"><Label variant="accent" size="small">Saved run</Label></span>{' '}
+        Options <span title="Fern's checks run on each option and saved as a fixture; not a live run" className="nx-mock"><Label variant="accent" size="small">Saved run</Label></span>{' '}
         <span className="nx-fg-muted">&middot; computed {when}; the cheapest option that passes the safety screen is highlighted</span>
       </div>
       {r.recommendation && <div className="nx-opt-sum">{r.recommendation.text}</div>}

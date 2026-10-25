@@ -50,7 +50,7 @@ export function nextActions(seat: SeatDefinition, people: Person[], s: SeatState
           id,
           source: 'given',
           dist: parsed.dist,
-          rationale: `${reply.from.name}, ${reply.from.title}, answered on ${s.ecr} at ${reply.at}: "${parsed.quote}". Recorded as ${round(parsed.value)}${range} by Norn's ${seat.title} seat.`,
+          rationale: `${reply.from.name}, ${reply.from.title}, answered on ${s.ecr} at ${reply.at}: "${parsed.quote}". Recorded as ${round(parsed.value)}${range} by Fern's ${seat.title} seat.`,
           by: reply.from.name,
         };
         actions.push({ kind: 'record', reply, override });
