@@ -12,11 +12,30 @@ import type { ActorHandle, Norn } from './norn.ts';
 import type { Claims } from './token.ts';
 import { affectedParts, assumptionView, bareResultKey, currentResult, currentResultKeys, ecrSummary, ecrView, effectiveAssumptions, historyOf, impactOf, partView, provenanceIndex } from './views.ts';
 
+/**
+ * A check on a statement's own words before it is saved (post_impact_statement). It returns why the statement may not be
+ * posted, which goes back to the agent like any other refusal of the tool, or undefined. The server knows nothing of the
+ * rules behind it: whoever starts the server supplies it (main.ts).
+ */
+/** Every piece of the statement the agent wrote that a page displays, not only the prose fields (#123). */
+export interface StatementProse {
+  headline: string;
+  changeClass?: string;
+  route?: string;
+  numbers?: { key?: string; label?: string; unit?: string; evidence?: string; p10?: number; p50?: number; p90?: number }[];
+  drivers: { text: string }[];
+  assumptions?: { key?: string; note?: string }[];
+  claims: { text: string }[];
+}
+
+export type StatementGuard = (pr: PullRequest, spawnedBy: string, statement: StatementProse) => string | undefined;
+
 export interface ToolContext {
   norn: Norn;
   claims: Claims;
   actor: ActorHandle;
   log: (message: string) => void;
+  statementGuard?: StatementGuard;
 }
 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean };
@@ -267,6 +286,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     tool(ctx, 'post_impact_statement', async (a: any) => {
       const pr = ecrOf(ctx, a.ecr);
+      const refused = ctx.statementGuard?.(pr, ctx.claims.spawnedBy, { headline: a.headline, changeClass: a.changeClass, route: a.route, numbers: a.numbers, drivers: a.drivers, assumptions: a.assumptions, claims: a.claims });
+      if (refused) throw new ToolFailure(refused);
       const numbers = (a.numbers as any[]).map(n => {
         if (n.evidence === 'computation') {
           if (!n.resultKey) throw new ToolFailure(`Number '${n.key}' is a computation, so it needs resultKey (a key from get_impact).`);

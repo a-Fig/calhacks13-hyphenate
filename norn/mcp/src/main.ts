@@ -7,6 +7,7 @@ import { DEFAULT_PORT } from './client.ts';
 import { loadSigningKey } from './env.ts';
 import { Norn } from './norn.ts';
 import { startServer } from './server.ts';
+import { statementGuardFor } from '../../workers/src/level1/guard.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const stamp = () => new Date().toISOString();
@@ -21,7 +22,8 @@ const uri = process.env.NORN_URI ?? 'ws://127.0.0.1:3000';
 const database = process.env.NORN_DB ?? 'norn';
 const norn = await Norn.open({ uri, database, stateDir: process.env.NORN_MCP_STATE_DIR ?? join(here, '..', '.state'), log });
 const port = Number(process.env.NORN_MCP_PORT ?? DEFAULT_PORT);
-const server = await startServer({ norn, signingKey: key, port, log });
+// Level 1 statements are checked against the rule's findings before they are saved (workers/src/level1/guard.ts).
+const server = await startServer({ norn, signingKey: key, port, log, statementGuard: statementGuardFor(norn.db) });
 log(`serving ${server.url} for database '${database}' at ${uri}`);
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {

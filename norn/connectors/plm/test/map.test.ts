@@ -251,3 +251,13 @@ test('an error from the PLM names the status and the path, and never the token',
   await assert.rejects(readChangeRequest(opts, 'ECR-9'), (e: any) => e.name === 'PlmError' && e.status === 404
     && e.message.includes('/api/resource/ECR/ECR-9') && e.message.includes('not found') && !e.message.includes('test-secret') && !e.message.includes('test-key'));
 });
+
+test('the priority is in the change request itself, not only the record: the timeline check decides an urgent change faster', () => {
+  const urgent = mapEcr(settings, ecrDoc());
+  assert.equal(urgent.record.priority, 'urgent');
+  assert.equal(urgent.change.priority, 'urgent', 'Rush in the PLM');
+  const routine = mapEcr(settings, { ...ecrDoc(), priority: 'Normal' });
+  assert.equal(routine.change.priority, 'routine');
+  const emergency = mapEcr(settings, { ...ecrDoc(), priority: 'Critical' });
+  assert.equal(emergency.change.priority, 'emergency');
+});

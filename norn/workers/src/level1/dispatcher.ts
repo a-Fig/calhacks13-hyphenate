@@ -25,14 +25,16 @@ import type { DbConnection } from '@norn/bindings';
 import { NORN_MCP_SERVER_NAME, loadSigningKey, nornMcpFor, nornMcpUrl, nornTools } from '../../../mcp/src/index.ts';
 import { Runner, jsonlFileSink, teeSink, type JobSpec } from '../../../runner/src/index.ts';
 import { connect, subscribe } from '../connect.ts';
-import { provenanceOf, type Inputs } from '../impact.ts';
+import type { Inputs } from '../impact.ts';
 import { agentEventWriter } from './agent-events.ts';
 import { actorFor, decide, jobIdFor, jobsFromEvents, spawnedByFor, supersededJobs, type EcrFacts, type EventRow } from './plan.ts';
-import { deriveRecommendation, ruleInputOf } from './recommendation.ts';
-import { jobPrompt, systemPromptFor, screenDetail, type Detail, type HeadlineKey } from './prompt.ts';
-import { costCheckOf, routeFor, storedCompanyConfig } from './routing.ts';
+import { jobFactsOf } from './facts.ts';
+import { jobPrompt, systemPromptFor } from './prompt.ts';
 import { settingsFromEnv, type Level1Settings } from './settings.ts';
-import { crSeqOfRun, failedChecksForRun } from './source.ts';
+import { SIBLING_STAGES, siblingCutoffUs, siblingOf } from './siblings.ts';
+import { crSeqOfRun, runRowsOf, toRunRow } from './source.ts';
+
+export { jobFactsOf };
 
 type Db = DbConnection['db'];
 type Pr = NonNullable<ReturnType<Db['pullRequest']['id']['find']>>;
@@ -56,14 +58,20 @@ export const LEVEL1_TOOLS = nornTools('get_ecr', 'get_impact', 'list_assumptions
 export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
   const cur = [...db.ecrRevision.prId.filter(pr.id)].find(r => r.current);
   const results = [...db.checkResult.prId.filter(pr.id)];
+  const runs = runRowsOf(db, pr.id);
   const s2Done = [...db.checkRun.prId.filter(pr.id)]
     .filter(r => r.stage === 's2_cost' && r.status === 'done')
     .sort((a, b) => Number(a.id - b.id))
-    .map(r => ({
-      id: Number(r.id),
-      inputsRevision: typeof jsonOr<Inputs>(r.inputsJson, {}).revision === 'number' ? jsonOr<Inputs>(r.inputsJson, {}).revision! : null,
-      mock: results.some(x => x.checkRunId === r.id && x.mock),
-    }));
+    .map(r => {
+      const own = runs.find(x => x.id === r.id) ?? toRunRow(r);
+      return {
+        id: Number(r.id),
+        inputsRevision: typeof jsonOr<Inputs>(r.inputsJson, {}).revision === 'number' ? jsonOr<Inputs>(r.inputsJson, {}).revision! : null,
+        mock: results.some(x => x.checkRunId === r.id && x.mock),
+        // Whether the timeline and supply checks of this run's snapshot have settled (siblings.ts).
+        siblings: { pending: SIBLING_STAGES.some(stage => siblingOf(runs, own, stage).state === 'pending'), cutoffUs: siblingCutoffUs(own) },
+      };
+    });
   const events: EventRow[] = [...db.agentEvent.prId.filter(pr.id)].filter(e => e.role === role).map(e => ({ jobId: e.jobId, eventType: e.eventType, tsMs: ms(e.ts), payloadJson: e.payloadJson }));
   return {
     number: pr.plmEcrNumber,
@@ -76,29 +84,6 @@ export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
     statements: [...db.impactStatement.prId.filter(pr.id)].map(s => ({ level: s.level, createdMs: ms(s.createdAt), crSeq: crSeqOfRun(db, s.checkRunId) })),
     jobs: jobsFromEvents(events),
   };
-}
-
-/** The job prompt's facts for one finished s2_cost run. */
-export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
-  const run = db.checkRun.id.find(BigInt(s2RunId))!;
-  const inputs = jsonOr<Inputs>(run.inputsJson, {});
-  const p = provenanceOf(inputs);
-  const rows = [...db.checkResult.prId.filter(pr.id)].filter(r => r.checkRunId === run.id);
-  const numbers: HeadlineKey[] = rows
-    .filter(r => r.key.startsWith('unit_cost_delta:') || r.key === 'one_time_total' || r.key === 'net_total_year_one')
-    .sort((a, b) => Number(a.id - b.id))
-    .map(r => ({ key: r.key.replace(/[^A-Za-z0-9_]/g, '_'), resultKey: r.key, label: r.label }));
-  const year = rows.find(r => r.key === 'net_total_year_one');
-  const detail = jsonOr<Detail>(rows.find(r => r.key === 'detail')?.detailJson ?? '{}', {});
-  const screened = screenDetail(detail, year ? year.p90 - year.p10 : 0);
-  const routing = routeFor(
-    { number: pr.plmEcrNumber, title: pr.title, revision },
-    { numbers: Object.fromEntries(rows.filter(r => r.key !== 'detail').map(r => [r.key, { p10: r.p10, p50: r.p50, p90: r.p90, unit: r.unit }])), costCheck: costCheckOf(rows) },
-    storedCompanyConfig(db)
-  );
-  // The same rule and the same rows the publisher applies, so the agent is told what the PLM will say.
-  const recommendation = deriveRecommendation(ruleInputOf(rows, failedChecksForRun(db, pr.id, run.id)));
-  return { ecr: pr.plmEcrNumber, title: pr.title, revision, s2RunId, baseline: p.baseline, changeRequest: p.changeRequest, numbers, screened, routing, recommendation };
 }
 
 export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; ecrRevision: number; prompt: string; settings: Level1Settings; signingKey?: string; mcpUrl?: string }): JobSpec {

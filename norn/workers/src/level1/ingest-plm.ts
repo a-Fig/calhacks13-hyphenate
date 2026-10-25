@@ -76,8 +76,8 @@ export const startupWanted = (o: PlmIngestOptions, e: Pick<EcrListing, 'name' | 
 export function storedChangeRequest(r: Pick<ReadResult, 'change' | 'record'>): Record<string, unknown> {
   const { record: e } = r;
   const filed: Record<string, unknown> = {
+    // The priority is the change request's own (connectors/plm map.ts sets it there for the timeline check), so it is not repeated here.
     originator: e.originator || undefined,
-    priority: e.priority,
     justificationCode: e.justificationCode || undefined,
     companyClass: e.companyClass,
     faaClass: e.faaClass,

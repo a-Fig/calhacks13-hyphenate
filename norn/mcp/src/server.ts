@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { ActorError, type Norn } from './norn.ts';
-import { INSTRUCTIONS, registerTools } from './tools.ts';
+import { INSTRUCTIONS, registerTools, type StatementGuard } from './tools.ts';
 import { TokenError, verifyToken } from './token.ts';
 
 export interface ServerOptions {
@@ -14,6 +14,8 @@ export interface ServerOptions {
   /** 0 picks a free port. */
   port: number;
   log?: (message: string) => void;
+  /** Checked on every post_impact_statement before it is saved (tools.ts). */
+  statementGuard?: StatementGuard;
 }
 
 export interface RunningServer {
@@ -96,7 +98,7 @@ export function startServer(opts: ServerOptions): Promise<RunningServer> {
 
       // 3. Serve this one request as that actor.
       const server = new McpServer({ name: 'norn', version: '0.1.0' }, { instructions: INSTRUCTIONS });
-      registerTools(server, { norn: opts.norn, claims, actor, log });
+      registerTools(server, { norn: opts.norn, claims, actor, log, statementGuard: opts.statementGuard });
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
       res.on('close', () => {
         void transport.close();

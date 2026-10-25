@@ -2,7 +2,7 @@
 // the routing tests run on what Norn would hold, not on hand-made numbers. Not imported by the product.
 import { fileURLToPath } from 'node:url';
 import { bowman } from '../../../../bowman/data/index.ts';
-import { costCheck, costCheckRows } from '../../../checks/src/index.ts';
+import { costCheck, costCheckRows, supplyCheck, supplyCheckRows, timelineCheck, timelineRows } from '../../../checks/src/index.ts';
 import { formatIssue, loadConfigFile, type CompanyConfig } from '../../../config/src/index.ts';
 
 const BOWMAN_CONFIG = fileURLToPath(new URL('../../../../bowman/norn-config/bowman.config.ts', import.meta.url));
@@ -43,3 +43,21 @@ export const blankAmountRows = () =>
 
 /** ECR-0423 with the proposal for its old stock taken out: the check says "no disposition proposed" as information only. */
 export const noDispositionRows = () => rowsOf0423(e => ({ ...e, inventoryProposal: [] }));
+
+/** The rows the s3_timeline stage stores for one of Bowman's ECRs: the real check, the test seed. */
+export function storedTimelineRows(ecrId: string) {
+  const ecr = bowman.ecrs.find(e => e.id === ecrId);
+  if (!ecr) throw new Error(`no ${ecrId} in Bowman's data`);
+  return timelineRows(timelineCheck(bowman, ecr, { seed: 'norn-seed-1' }));
+}
+
+/**
+ * The rows the s4_supply stage stores: the real check, the test seed, with the other ECRs of Bowman's data as the
+ * open peers (the module names every other open ECR; the check works out which share a supplier).
+ */
+export function storedSupplyRows(ecrId: string, peerIds?: string[]) {
+  const ecr = bowman.ecrs.find(e => e.id === ecrId);
+  if (!ecr) throw new Error(`no ${ecrId} in Bowman's data`);
+  const peers = bowman.ecrs.filter(e => e.id !== ecrId && (!peerIds || peerIds.includes(e.id)));
+  return supplyCheckRows(supplyCheck(bowman, ecr, { seed: 'norn-seed-1', peers }));
+}
