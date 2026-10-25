@@ -80,7 +80,7 @@ export function costViewOf(rows: CheckResultRow[]): { view: ChecksView; why?: un
   try {
     return { view: fromChecks(rows) };
   } catch (e) {
-    return { why: `Cost not available for this revision: Norn could not read the cost check's output (${e instanceof Error ? e.message : String(e)}).` };
+    return { why: `Cost not available for this revision: Fern could not read the cost check's output (${e instanceof Error ? e.message : String(e)}).` };
   }
 }
 
@@ -162,7 +162,7 @@ function waitingWords(name: string, r: RunRow | undefined): string {
  * nothing readable needs attention rather than passing; a stage with no rows says what it is doing instead.
  */
 function stageCheck(id: 'timeline' | 'supply', name: string, pick: StagePick, read: { summary: string; attention: boolean } | undefined, why: string | undefined, mock: boolean): Check {
-  const by = id === 'timeline' ? 'Norn timeline check' : 'Norn supply check';
+  const by = id === 'timeline' ? 'Fern timeline check' : 'Fern supply check';
   const staleLine = pick.stale ? ` ${staleNote(pick.stale)}` : '';
   if (read) {
     const newer = pick.latest && pick.run && pick.latest.id !== pick.run.id ? pick.latest : undefined;
@@ -366,7 +366,7 @@ function statementView(s: Snapshot, st: StatementRow, pr: PrRow, src: StatementR
         ? resultTrace(n.resultKey, { text: fmt(n, n.p50), range: n.p10 !== n.p90 ? `${fmt(n, n.p10)} – ${fmt(n, n.p90)}` : undefined })
         : n.resultKey && traces[n.resultKey]
           ? n.resultKey
-          : synth(`n${i}`, n.label, e(n.evidence), `Stated in Norn's Level ${st.level} impact statement. It is not a check result.`, { text: fmt(n, n.p50), range: n.p10 !== n.p90 ? `${fmt(n, n.p10)} – ${fmt(n, n.p90)}` : undefined }),
+          : synth(`n${i}`, n.label, e(n.evidence), `Stated in Fern's Level ${st.level} impact statement. It is not a check result.`, { text: fmt(n, n.p50), range: n.p10 !== n.p90 ? `${fmt(n, n.p10)} – ${fmt(n, n.p90)}` : undefined }),
     })),
     drivers: st.drivers.map((d, i) => ({ text: d.text, evidence: e(d.evidence), traceId: synth(`d${i}`, 'A driver', e(d.evidence), d.text) })),
     claims: st.claims.map((c, i) => ({ text: c.text, evidence: e(c.evidence), traceId: synth(`c${i}`, 'A claim', e(c.evidence), c.text) })),
@@ -411,7 +411,7 @@ function agentRuns(s: Snapshot, pr: PrRow): ActivityEvent[] {
     }
     const first = evs[0];
     const role = first.role || 'agent';
-    const actor = `Norn ${role} agent`;
+    const actor = `Fern ${role} agent`;
     out.push({
       id: `run:${jobId}`, at: iso(first.ts), actor, actorKind: 'norn', onBehalfOf: first.onBehalfOf, kind: 'research',
       text: state === 'running' ? 'is working' : state === 'done' ? 'finished its work' : 'stopped with an error',
@@ -456,14 +456,14 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
   const timePick = stageFor(s, runs, 's3_timeline'), supplyPick = stageFor(s, runs, 's4_supply');
   const srcOf = (pick: StagePick, check: string, actor: string) => ({ check, actor, at: iso(pick.run?.finishedAt ?? pick.run?.createdAt ?? s2.createdAt), note: pick.run ? `Run ${pick.run.id}` : '' });
   const timeMock = timePick.rows.some(r => r.mock), supplyMock = supplyPick.rows.some(r => r.mock);
-  const whyOf = (e: unknown) => `Norn could not read the check's output (${e instanceof Error ? e.message : String(e)})`;
+  const whyOf = (e: unknown) => `Fern could not read the check's output (${e instanceof Error ? e.message : String(e)})`;
   let timeRead: TimelineRead | undefined, timeWhy: string | undefined;
   if (timePick.run && !timeMock) {
-    try { timeRead = readTimeline(timePick.rows.map(toStage), traces, srcOf(timePick, 'Time to the line (S3)', 'Norn timeline check'), pr.plmEcrNumber, timePick.stale); } catch (e) { timeWhy = whyOf(e); }
+    try { timeRead = readTimeline(timePick.rows.map(toStage), traces, srcOf(timePick, 'Time to the line (S3)', 'Fern timeline check'), pr.plmEcrNumber, timePick.stale); } catch (e) { timeWhy = whyOf(e); }
   }
   let supplyRead: SupplyRead | undefined, supplyWhy: string | undefined;
   if (supplyPick.run && !supplyMock) {
-    try { supplyRead = readSupply(supplyPick.rows.map(toStage), traces, srcOf(supplyPick, 'Supply risk (S4)', 'Norn supply check'), pr.plmEcrNumber, supplyPick.stale); } catch (e) { supplyWhy = whyOf(e); }
+    try { supplyRead = readSupply(supplyPick.rows.map(toStage), traces, srcOf(supplyPick, 'Supply risk (S4)', 'Fern supply check'), pr.plmEcrNumber, supplyPick.stale); } catch (e) { supplyWhy = whyOf(e); }
   }
   const mockTime = timeMock ? timePick.rows.find(r => r.key === 'effectivity_weeks') : undefined;
   const mockMiss = supplyMock ? supplyPick.rows.find(r => r.key === 'p_miss_effectivity') : undefined;
@@ -474,12 +474,12 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
     {
       id: 'bom', name: 'BOM delta', state: runState(bomRun) === 'passed' && num('conflicts') > 0 ? 'attention' : runState(bomRun),
       summary: bomRes.length ? `${num('items_changed')} item${num('items_changed') === 1 ? '' : 's'} revised, ${num('bom_lines_changed')} BOM line${num('bom_lines_changed') === 1 ? '' : 's'} changed${num('conflicts') ? `, ${num('conflicts')} conflicts` : ''}` : 'Waiting for the run',
-      by: 'Norn BOM check',
+      by: 'Fern BOM check',
     },
     {
       id: 'cost', name: 'Cost', state: costRun && costRun.status !== 'done' ? runState(costRun) : need > 0 ? 'attention' : 'passed',
       summary: `Net ${v.headline.year1.point !== undefined ? `$${Math.round(v.headline.year1.point).toLocaleString('en-US')}` : ''} in ${v.cost.window.label}${v.cost.scenarios ? ', at the requested effectivity' : ''}${need ? `; ${need} line${need > 1 ? 's need' : ' needs'} an estimate` : ''}${pick.stale ? `. ${staleNote(pick.stale)}` : ''}`,
-      by: 'Norn cost check',
+      by: 'Fern cost check',
     },
     stageCheck('timeline', 'Time to the line', timePick, timeRead ?? mockTimeSummary, timeWhy, timeMock),
     stageCheck('supply', 'Supply risk', supplyPick, supplyRead ?? mockSupplySummary, supplyWhy, supplyMock),
@@ -530,7 +530,7 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
   for (const a of s.actions.filter(x => x.prId === pr.id)) {
     const base = { id: `log:${a.id}`, at: iso(a.at), actor: a.actorName, actorKind: actorKind(a), onBehalfOf: a.onBehalfOf, spawnedBy: a.spawnedBy };
     const why = plain(`${allowed(a.policy)} · ${ACTION_WORD[a.reducer] ?? a.reducer.replace(/_/g, ' ')}${a.outcome !== 'applied' ? `, ${a.outcome}` : ''}`);
-    if (a.reducer === 'ingest_ecr') events.push({ ...base, kind: 'policy', text: 'opened the ECR in Norn from the feed', detail: `${sum(a.summary)}. ${why}` });
+    if (a.reducer === 'ingest_ecr') events.push({ ...base, kind: 'policy', text: 'opened the ECR in Fern from the feed', detail: `${sum(a.summary)}. ${why}` });
     else if (a.reducer === 'complete_check' && /^s[12]_/.test(a.summary)) {
       // A run an input change has since replaced is not shown: the timeline keeps the checks that stand.
       const ran = runs.find(r => `check_run:${r.id}` === a.entity);
@@ -552,7 +552,7 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
   // A queued or running check is an event too, so the page shows the run that is still going.
   for (const r of runs.filter(live).filter(x => x.status === 'queued' || x.status === 'running')) {
     if (!CHECK_STAGES[r.stage]) continue;
-    events.push({ id: `run-pending:${r.id}`, at: iso(r.createdAt), actor: 'Norn', actorKind: 'norn', kind: 'ran_checks', text: `${r.status === 'running' ? 'is running' : 'queued'} the ${CHECK_STAGES[r.stage].name.toLowerCase()} check`, state: 'running' });
+    events.push({ id: `run-pending:${r.id}`, at: iso(r.createdAt), actor: 'Fern', actorKind: 'norn', kind: 'ran_checks', text: `${r.status === 'running' ? 'is running' : 'queued'} the ${CHECK_STAGES[r.stage].name.toLowerCase()} check`, state: 'running' });
   }
   events.push(...gate.events, ...agentRuns(s, pr));
   events.sort((a, b) => a.at.localeCompare(b.at));

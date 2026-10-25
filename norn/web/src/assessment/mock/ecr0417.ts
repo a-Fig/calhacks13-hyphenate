@@ -41,11 +41,11 @@ const arrivalTrace: Trace = {
   ],
   inputs: [],
   assumptions: [
-    { label: 'Order placed on approval day', display: 'Nov 12, 2026', origin: 'default', source: 'Norn configuration for Bowman' },
-    { label: 'Receiving and first-article review', display: '1 week', origin: 'agent_estimated', source: 'Norn planner agent, from the last four Halden lots' },
+    { label: 'Order placed on approval day', display: 'Nov 12, 2026', origin: 'default', source: 'Fern configuration for Bowman' },
+    { label: 'Receiving and first-article review', display: '1 week', origin: 'agent_estimated', source: 'Fern planner agent, from the last four Halden lots' },
   ],
   formula: { expression: 'Rev C on the line = CCB approval + first-lot lead time + receiving', worked: 'Nov 12, 2026 + 14 weeks + 1 week = Feb 25, 2027' },
-  producedBy: { check: 'Timeline estimate (the check, S3, is not built yet)', actor: 'Norn planner agent', onBehalfOf: 'Wei-Lin Zhao', note: 'Mock: a stand-in agent, not a live model' },
+  producedBy: { check: 'Timeline estimate (the check, S3, is not built yet)', actor: 'Fern planner agent', onBehalfOf: 'Wei-Lin Zhao', note: 'Mock: a stand-in agent, not a live model' },
 };
 
 const traces: Record<string, Trace> = {
@@ -56,8 +56,8 @@ const traces: Record<string, Trace> = {
     summary: 'Halden is the only qualified source for the bracket, and there is no Rev C stock to bridge a delay. A slip of two weeks or more is unlikely, but a longer outage has no fallback.',
     value: { text: 'Moderate', range: 'One source, no Rev C stock' },
     sources: [{ system: 'ERP', ref: 'Sourcing, BW-5120-210', detail: 'Sole source: Halden Precision. Not on the strategic single-source list' }, { system: 'Quote', ref: 'Q-HAL-26-1187' }],
-    inputs: [], assumptions: [{ label: 'Outages are shown as scenarios, not blended into the range', display: 'what-ifs below', origin: 'default', source: 'Norn configuration' }],
-    producedBy: { check: 'Supply risk (the check, S4, is not built yet)', actor: 'Norn supply agent', note: 'Mock' },
+    inputs: [], assumptions: [{ label: 'Outages are shown as scenarios, not blended into the range', display: 'what-ifs below', origin: 'default', source: 'Fern configuration' }],
+    producedBy: { check: 'Supply risk (the check, S4, is not built yet)', actor: 'Fern supply agent', note: 'Mock' },
   },
   class: {
     id: 'class', title: 'Change class', evidence: 'judgment',
@@ -65,23 +65,23 @@ const traces: Record<string, Trace> = {
     value: { text: 'Class I · FAA minor', range: 'Company class and FAA class are set separately' },
     sources: [{ system: 'PLM', ref: 'ECR-0417 classification', detail: 'Originator proposes Class I and FAA minor under 14 CFR 21.93(a)' }, { system: 'Policy', ref: 'Bowman change classes', detail: 'Class I: cost, retrofit of built aircraft, interchangeability' }],
     inputs: [], assumptions: [{ label: 'FAA minor', display: 'proposed by the originator', origin: 'given', source: 'Gideon Falk decides as design approval holder' }],
-    producedBy: { check: 'Change class (#33)', actor: 'Norn router', note: 'Mock' },
+    producedBy: { check: 'Change class (#33)', actor: 'Fern router', note: 'Mock' },
   },
   rec: {
-    id: 'rec', title: 'Norn’s recommendation', evidence: 'judgment',
+    id: 'rec', title: 'Fern’s recommendation', evidence: 'judgment',
     summary: 'Approve. Rev B cannot fly past its 5 hour inspection interval, the fix is proven on the rig, and each week of delay costs far more than the part does in a year.',
     value: { text: 'Approve', range: 'At the Nov 12 CCB' },
-    sources: [{ system: 'PLM', ref: 'NCR-0119 and ECR-0417', detail: 'Fatigue margin +14% for Rev C against −31% for Rev B' }, { system: 'Norn', ref: 'Cost check and the planner agent’s estimates' }],
+    sources: [{ system: 'PLM', ref: 'NCR-0119 and ECR-0417', detail: 'Fatigue margin +14% for Rev C against −31% for Rev B' }, { system: 'Fern', ref: 'Cost check and the planner agent’s estimates' }],
     inputs: [{ label: 'Net cost, first 12 months', display: `${usdK(pointOf(net3), { plus: true })}, ${usdK(net3.p10!)} to ${usdK(net3.p90!)}`, evidence: 'computation', traceId: net3.id }],
     assumptions: [{ label: 'Four alternatives were ruled out in the ECR', display: 'peening, doubler, isolator, inspection', origin: 'given', source: 'Jeff Hargrove, originator' }],
-    producedBy: { check: 'Impact statement (S5)', actor: 'Norn reviewer', note: 'Mock: written by a stand-in, not a live model' },
+    producedBy: { check: 'Impact statement (S5)', actor: 'Fern reviewer', note: 'Mock: written by a stand-in, not a live model' },
   },
   coupling: {
     id: 'coupling', title: 'Interaction with ECR-0409', evidence: 'judgment',
     summary: 'ECR-0409 changes the aft propellers to four blades, which changes the vibration spectrum the Rev C bracket was qualified in. The two ECRs share no part, so only a reader of both would notice.',
     value: { text: 'Flagged', range: 'Not detectable from shared parts' },
     sources: [{ system: 'PLM', ref: 'ECR-0409 alternatives considered' }, { system: 'PLM', ref: 'ECR-0417 need', detail: 'Rev C moves the mode to 262 Hz, between the 6th and 7th orders' }],
-    inputs: [], assumptions: [], producedBy: { check: 'Interaction review', actor: 'Norn reviewer', note: 'Mock' },
+    inputs: [], assumptions: [], producedBy: { check: 'Interaction review', actor: 'Fern reviewer', note: 'Mock' },
   },
 };
 
@@ -91,18 +91,18 @@ const recurringYear = v3.cost.recurring.point ?? v3.cost.recurring.p50;
 
 const activity: ActivityEvent[] = [
   { id: 'a1', at: '2026-10-19T14:02:00-07:00', actor: 'Jeff Hargrove', actorKind: 'person', kind: 'filed', text: 'filed the ECR', detail: 'From NCR-0119, the fillet crack at 8.2 h.' },
-  { id: 'a2', at: '2026-10-19T14:02:30-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Jeff Hargrove', kind: 'ran_checks', text: 'ran the impact checks', detail: 'BOM delta and cost ran. The timeline and supply checks are not built yet.' },
-  { id: 'a3', at: '2026-10-19T14:03:00-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Jeff Hargrove', kind: 'label', text: 'added the labels Class I, FAA minor, Urgent and Vesper' },
-  { id: 'a4', at: '2026-10-19T14:03:10-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Jeff Hargrove', kind: 'review_requested', text: 'requested review from Samir Vaidya, Hamid Barzani, Colleen Rourke, Beatriz Nowak, Gideon Falk and the CCB', detail: 'Over $150,000, so the CCB decides.' },
-  { id: 'a5', at: '2026-10-19T14:03:20-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Jeff Hargrove', kind: 'report', text: 'posted the impact statement, Level 1', detail: `Provisional: year 1 ${usdK(pointOf(net1), { plus: true })} (${usdK(net1.p10!)} to ${usdK(net1.p90!)}). ${v1.cost.needsEstimate.length} lines the originator left blank need an estimate and count as $0.`, level: 1 },
+  { id: 'a2', at: '2026-10-19T14:02:30-07:00', actor: 'Fern', actorKind: 'norn', spawnedBy: 'Norn, for Jeff Hargrove', kind: 'ran_checks', text: 'ran the impact checks', detail: 'BOM delta and cost ran. The timeline and supply checks are not built yet.' },
+  { id: 'a3', at: '2026-10-19T14:03:00-07:00', actor: 'Fern', actorKind: 'norn', spawnedBy: 'Norn, for Jeff Hargrove', kind: 'label', text: 'added the labels Class I, FAA minor, Urgent and Vesper' },
+  { id: 'a4', at: '2026-10-19T14:03:10-07:00', actor: 'Fern', actorKind: 'norn', spawnedBy: 'Norn, for Jeff Hargrove', kind: 'review_requested', text: 'requested review from Samir Vaidya, Hamid Barzani, Colleen Rourke, Beatriz Nowak, Gideon Falk and the CCB', detail: 'Over $150,000, so the CCB decides.' },
+  { id: 'a5', at: '2026-10-19T14:03:20-07:00', actor: 'Fern', actorKind: 'norn', spawnedBy: 'Norn, for Jeff Hargrove', kind: 'report', text: 'posted the impact statement, Level 1', detail: `Provisional: year 1 ${usdK(pointOf(net1), { plus: true })} (${usdK(net1.p10!)} to ${usdK(net1.p90!)}). ${v1.cost.needsEstimate.length} lines the originator left blank need an estimate and count as $0.`, level: 1 },
   { id: 'a6', at: '2026-10-21T09:12:00-07:00', actor: 'Wei-Lin Zhao', actorKind: 'person', kind: 'comment', text: 'asked for the full assessment' },
-  { id: 'a7', at: '2026-10-21T09:21:00-07:00', actor: 'Norn researcher', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'research', text: 'read Halden’s quote and the stock in the ERP', detail: '6 purchase lines, 5 stock locations.' },
-  { id: 'a8', at: '2026-10-21T09:30:00-07:00', actor: 'Norn reviewer', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'changes_requested', text: 'requested changes to Level 1', detail: 'The hold on S/N 011 onward is $0 because the originator left it blank, but the first aircraft reaches the install station in about three weeks and Rev C cannot arrive before late February.' },
-  { id: 'a9', at: '2026-10-21T09:52:00-07:00', actor: 'Norn planner agent', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'research', text: 'estimated the three blank lines', detail: `Hold on S/N 011 onward ${usdK(hold.total.point ?? hold.total.p50)}, re-inspection, manual update. Each is an agent estimate with its rationale.` },
-  { id: 'a10', at: '2026-10-21T09:53:00-07:00', actor: 'Norn', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'report', text: 'posted Level 2', level: 2 },
-  { id: 'a11', at: '2026-10-21T10:36:00-07:00', actor: 'Norn blind checker', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'research', text: 'formed its own estimate without seeing the answer', detail: `${usdK(Math.round((pointOf(net3) * 0.96) / 1000) * 1000)}, within 4% of the verdict.` },
-  { id: 'a12', at: '2026-10-21T10:41:00-07:00', actor: 'Norn', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'report', text: 'posted Level 3: Norn’s final verdict', detail: `Year 1 ${usdK(pointOf(net3), { plus: true })}, up from ${usdK(pointOf(net1))} at Level 1.`, level: 3 },
-  { id: 'a13', at: '2026-10-22T16:20:00-07:00', actor: 'Hamid Barzani’s agent', actorKind: 'person_agent', onBehalfOf: 'Hamid Barzani', kind: 'comment', text: 'confirmed the 14 week lead time with Halden', detail: 'Reported by agent. Norn has not fetched the source itself.', reportedByAgent: true },
+  { id: 'a7', at: '2026-10-21T09:21:00-07:00', actor: 'Fern researcher', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'research', text: 'read Halden’s quote and the stock in the ERP', detail: '6 purchase lines, 5 stock locations.' },
+  { id: 'a8', at: '2026-10-21T09:30:00-07:00', actor: 'Fern reviewer', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'changes_requested', text: 'requested changes to Level 1', detail: 'The hold on S/N 011 onward is $0 because the originator left it blank, but the first aircraft reaches the install station in about three weeks and Rev C cannot arrive before late February.' },
+  { id: 'a9', at: '2026-10-21T09:52:00-07:00', actor: 'Fern planner agent', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'research', text: 'estimated the three blank lines', detail: `Hold on S/N 011 onward ${usdK(hold.total.point ?? hold.total.p50)}, re-inspection, manual update. Each is an agent estimate with its rationale.` },
+  { id: 'a10', at: '2026-10-21T09:53:00-07:00', actor: 'Fern', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'report', text: 'posted Level 2', level: 2 },
+  { id: 'a11', at: '2026-10-21T10:36:00-07:00', actor: 'Fern blind checker', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'research', text: 'formed its own estimate without seeing the answer', detail: `${usdK(Math.round((pointOf(net3) * 0.96) / 1000) * 1000)}, within 4% of the verdict.` },
+  { id: 'a12', at: '2026-10-21T10:41:00-07:00', actor: 'Fern', actorKind: 'norn', onBehalfOf: 'Wei-Lin Zhao', kind: 'report', text: 'posted Level 3: Fern’s final verdict', detail: `Year 1 ${usdK(pointOf(net3), { plus: true })}, up from ${usdK(pointOf(net1))} at Level 1.`, level: 3 },
+  { id: 'a13', at: '2026-10-22T16:20:00-07:00', actor: 'Hamid Barzani’s agent', actorKind: 'person_agent', onBehalfOf: 'Hamid Barzani', kind: 'comment', text: 'confirmed the 14 week lead time with Halden', detail: 'Reported by agent. Fern has not fetched the source itself.', reportedByAgent: true },
   { id: 'a14', at: '2026-10-22T16:25:00-07:00', actor: 'Hamid Barzani', actorKind: 'person', kind: 'approved', text: 'approved these changes' },
   { id: 'a15', at: '2026-10-23T10:05:00-07:00', actor: 'Samir Vaidya', actorKind: 'person', kind: 'approved', text: 'approved these changes' },
 ];
@@ -110,9 +110,9 @@ const activity: ActivityEvent[] = [
 const checks: Check[] = [
   { id: 'bom', name: 'BOM delta', state: 'passed', summary: '1 item revised, no BOM line changes', by: 'Reader' },
   { id: 'cost', name: 'Cost', state: 'passed', summary: `Net ${usdK(pointOf(net3), { plus: true })} in the first 12 months, range ${usdK(net3.p10!)} to ${usdK(net3.p90!)}`, by: 'Cost check' },
-  { id: 'timeline', name: 'Time to the line', state: 'passed', summary: `Rev C reaches the line about ${dateShort(arrives.p50)}, not ${v3.cutIn.month} as filed (agent estimate)`, by: 'Norn planner agent' },
-  { id: 'supply', name: 'Supply risk', state: 'attention', summary: 'Sole source: Halden, and no Rev C stock to bridge a delay', by: 'Norn supply agent' },
-  { id: 'class', name: 'Classification', state: 'passed', summary: 'Class I, FAA minor, set separately', by: 'Norn router' },
+  { id: 'timeline', name: 'Time to the line', state: 'passed', summary: `Rev C reaches the line about ${dateShort(arrives.p50)}, not ${v3.cutIn.month} as filed (agent estimate)`, by: 'Fern planner agent' },
+  { id: 'supply', name: 'Supply risk', state: 'attention', summary: 'Sole source: Halden, and no Rev C stock to bridge a delay', by: 'Fern supply agent' },
+  { id: 'class', name: 'Classification', state: 'passed', summary: 'Class I, FAA minor, set separately', by: 'Fern router' },
 ];
 
 const list = listCosts['ECR-0417'];
@@ -170,7 +170,7 @@ export const ecr0417: ImpactAssessment = {
   },
   recommendation: {
     verdict: 'approve',
-    headline: 'Norn recommends approval',
+    headline: 'Fern recommends approval',
     reasons: [
       { text: 'Rev B cannot fly past its 5 hour inspection', evidence: 'fact', traceId: 'rec' },
       { text: 'Rev C fatigue margin is +14%, against −31% for Rev B', evidence: 'fact', traceId: 'rec' },

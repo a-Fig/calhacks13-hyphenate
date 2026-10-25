@@ -55,7 +55,7 @@ const total = reply('The one-time cost is $304,745 [c1].', [{ id: 'c1', refId: '
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 test('the job gets only the read tools, no web, and the question as a question', async () => {
-  const { deps, specs } = fakeRun({ answer: reply('Norn has no record of that.', []) });
+  const { deps, specs } = fakeRun({ answer: reply('Fern has no record of that.', []) });
   await ask(req, deps);
   const spec = specs[0]!;
   assert.deepEqual(spec.allowedTools, ASK_TOOLS.map(t => `mcp__norn__${t}`));
@@ -287,11 +287,11 @@ test('the browser giving up cancels the question', async () => {
 test('the server reports status, refuses when unavailable and answers when available', async () => {
   const { deps } = fakeRun({ answer: total });
   let available = false;
-  const s = await startAskServer({ port: 0, deps, status: async () => (available ? { available: true } : { available: false, reason: 'Ask Norn is unavailable: test.' }) });
+  const s = await startAskServer({ port: 0, deps, status: async () => (available ? { available: true } : { available: false, reason: 'Ask Fern is unavailable: test.' }) });
   const base = `http://127.0.0.1:${s.port}`;
   const post = (body: unknown, headers: Record<string, string> = {}) => fetch(`${base}/ask`, { method: 'POST', body: JSON.stringify(body), headers });
   try {
-    assert.deepEqual(await (await fetch(`${base}/status`)).json(), { available: false, reason: 'Ask Norn is unavailable: test.' });
+    assert.deepEqual(await (await fetch(`${base}/status`)).json(), { available: false, reason: 'Ask Fern is unavailable: test.' });
     const down = (await (await post(req)).json()) as AskResponse;
     assert.deepEqual([down.ok, (down as { kind: string }).kind], [false, 'unavailable']);
     available = true;

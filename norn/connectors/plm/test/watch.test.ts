@@ -153,7 +153,7 @@ const impact = (n: number) => ({ impact_report_level: '1', impact_recommendation
 /** A person's edit to the ECR's costs. */
 const edit = (unitCost: number) => ({ cost_production: [{ name: 'cp1', label: 'Bracket unit cost', basis: 'Quote', unit_cost: unitCost, quantity: 12 }] });
 
-test('Norn\'s own writes are not delivered, but the mark moves past them; a person\'s edit after one is', async () => {
+test('Fern\'s own writes are not delivered, but the mark moves past them; a person\'s edit after one is', async () => {
   const p = plm(seed());
   const got: string[] = [];
   const w = new EcrWatcher(opts, (c) => { got.push(`${c.name}@${c.modified}`); });
@@ -162,7 +162,7 @@ test('Norn\'s own writes are not delivered, but the mark moves past them; a pers
   await w.tick();
   p.set('ECR-0002', t('13.000000'), NORN, 'Submitted', impact(1)); // Norn's assessment of that edit
   assert.deepEqual(await w.tick(), []);
-  assert.equal(w.highWater(), t('13.000000'), 'moved past Norn\'s write');
+  assert.equal(w.highWater(), t('13.000000'), 'moved past Fern\'s write');
   p.set('ECR-0002', t('14.000000'), PERSON, 'Submitted', edit(40));
   await w.tick();
   p.set('ECR-0002', t('16.000000'), NORN, 'Submitted', impact(2));
@@ -172,7 +172,7 @@ test('Norn\'s own writes are not delivered, but the mark moves past them; a pers
   assert.deepEqual(got, [`ECR-0002@${t('12.000000')}`, `ECR-0002@${t('14.000000')}`]);
 });
 
-test('a person\'s edit that Norn\'s write lands on before the next pass is still delivered', async () => {
+test('a person\'s edit that Fern\'s write lands on before the next pass is still delivered', async () => {
   const p = plm(seed());
   const got: string[] = [];
   const w = new EcrWatcher(opts, (c) => { got.push(`${c.name}:${c.modifiedBy === NORN ? 'norn' : 'person'}`); });
@@ -183,7 +183,7 @@ test('a person\'s edit that Norn\'s write lands on before the next pass is still
   p.set('ECR-0002', t('14.000000'), PERSON, 'Submitted', edit(34.6));
   p.set('ECR-0002', t('14.800000'), NORN, 'Submitted', impact(1));
   const delivered = await w.tick();
-  assert.deepEqual(delivered.map((c) => [c.name, c.modifiedBy]), [['ECR-0002', NORN]], 'the row\'s last modifier is Norn, but its inputs changed');
+  assert.deepEqual(delivered.map((c) => [c.name, c.modifiedBy]), [['ECR-0002', NORN]], 'the row\'s last modifier is Fern, but its inputs changed');
   assert.equal(w.highWater(), t('14.800000'));
   // Norn assesses 34.6 and writes it: that is an echo of a delivered state
   p.set('ECR-0002', t('16.000000'), NORN, 'Submitted', impact(2));
@@ -338,7 +338,7 @@ test('a read that fails on the PLM side is not counted toward giving up on a req
   const p = plm(seed());
   const errors: string[] = [];
   const attempts: string[] = [];
-  const w = new EcrWatcher(opts, (c) => { attempts.push(c.name); if (attempts.length < 3) throw new Error('Norn unreachable'); }, { maxAttempts: 3, onError: (e) => errors.push((e as Error).message) });
+  const w = new EcrWatcher(opts, (c) => { attempts.push(c.name); if (attempts.length < 3) throw new Error('Fern unreachable'); }, { maxAttempts: 3, onError: (e) => errors.push((e as Error).message) });
   await w.tick();
   p.set('ECR-0003', t('12.000000'));
   p.failReads(2);

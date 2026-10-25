@@ -25,13 +25,13 @@ function cache(ecrId: string, stored?: string): { db: Db; pr: Pr } {
   return { db, pr };
 }
 
-test('with the company configuration stored, the agent is told the route Norn decided and not to name a board', () => {
+test('with the company configuration stored, the agent is told the route Fern decided and not to name a board', () => {
   const { db, pr } = cache('ECR-0417', JSON.stringify(config));
   const facts = jobFactsOf(db, pr, 1, 7);
   assert.match(facts.routing.route!, /^Change Control Board, with Technical Review Committee review \(p90 cost about 16\d,\d{3} USD, above 150,000 USD\)$/);
   assert.equal(facts.routing.class, undefined, 'no class was decided, so the agent still proposes its own');
   const p = jobPrompt(facts);
-  assert.ok(p.includes(`"${facts.routing.route}" (decided by Norn's routing; use it as given)`));
+  assert.ok(p.includes(`"${facts.routing.route}" (decided by Fern's routing; use it as given)`));
   assert.ok(!p.includes(ROUTE_PENDING));
   assert.ok(p.includes('Proposed change class: '), 'the class proposal is still asked for');
 });

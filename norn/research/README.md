@@ -1,6 +1,6 @@
-# Norn's research agent (#138)
+# Fern's research agent (#138)
 
-Written 2026-10-24. The cost-engineer agent that replaces a Norn default, or fills a blank cost-page
+Written 2026-10-24. The cost-engineer agent that replaces a Fern default, or fills a blank cost-page
 row, with a researched number, and the code that decides whether to believe it. The agent proposes
 inputs. Code decides which to use and computes every number (`../ARCHITECTURE.md` §3).
 
@@ -155,7 +155,7 @@ and `npm view @brightdata/mcp` (version 4.1.0, modified 2026-10-20):
 
 - package `@brightdata/mcp`, run with `npx @brightdata/mcp` (the job pins `@4.1.0`);
 - the token is the environment variable `API_TOKEN` ("Your Bright Data API token (required)");
-  Norn reads it from `BRIGHT_DATA_API_TOKEN` and puts it only in the server's `env`;
+  Fern reads it from `BRIGHT_DATA_API_TOKEN` and puts it only in the server's `env`;
 - `TOOLS` limits the server to the tools listed ("Comma-separated individual tool names"); the job
   sets `search_engine,scrape_as_markdown`, two of the 32 tools. The README's default exposes all of
   them, including a remote browser;
@@ -210,7 +210,7 @@ recording.
 
 ## Running it on live ECRs (#148)
 
-`src/worker.ts` is a long-running process, like the Level 1 dispatcher. It watches the ECRs in the Norn
+`src/worker.ts` is a long-running process, like the Level 1 dispatcher. It watches the ECRs in the Fern
 database and, for each change-request revision whose cost run is current, runs the research job above
 and stores what passes the guardrails. It changes nothing in the other workers.
 
@@ -225,7 +225,7 @@ and stores what passes the guardrails. It changes nothing in the other workers.
    drivers and inventory), through `pickTargets`. The check is not run again. An input outside the
    check's top eight drivers has no measured swing here and ranks after the measured ones.
 3. **Identifiers for the leak check.** From the baseline the run names (the worker's own cache by hash,
-   else read from the ERP, read only; nothing is recorded in Norn from here), plus the ERP's company
+   else read from the ERP, read only; nothing is recorded in Fern from here), plus the ERP's company
    name and the ECR's change request. Supplier display names are not in the baseline, so a supplier is
    known by its id.
 4. **The agent job.** `buildResearchJob` with the budgets below, through `norn/runner`, with

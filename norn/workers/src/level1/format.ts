@@ -187,7 +187,7 @@ const TDR = 'style="border:1px solid #c8ccd0;padding:4px 8px;text-align:right;wh
 const LEVELS: Record<number, string> = {
   1: 'Level 1, provisional: a quick first read that deeper research may change',
   2: 'Level 2: researched, and reviewed by a second agent',
-  3: "Level 3: Norn's final verdict",
+  3: "Level 3: Fern's final verdict",
 };
 
 // ---- the statement ------------------------------------------------------------------------------
@@ -228,12 +228,12 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
   const url = nornUrl(opts.nornBaseUrl, ecr.number);
 
   const out: string[] = [];
-  out.push(`<h4 style="margin:0 0 6px 0">Norn impact statement</h4>`);
+  out.push(`<h4 style="margin:0 0 6px 0">Fern impact statement</h4>`);
   out.push(`<p style="margin:0 0 8px 0;color:#555555">${esc(LEVELS[s.level] ?? `Level ${s.level}`)}. Revision ${ecr.revision} of ${esc(ecr.number)}.${prov.mock ? ' <b style="color:#b00020">MOCK numbers: placeholders, not a forecast.</b>' : ''}</p>`);
   out.push(`<p style="margin:0 0 8px 0"><b>Bottom line.</b> ${esc(s.headline)}</p>`);
   if (rec) {
     const note = overridden
-      ? `<br><i style="color:#555555">Norn's rule gave this recommendation (rule ${overridden.derived.rule}); the Level 1 agent ${overridden.agent ? `wrote "${esc(overridden.agent)}"` : 'wrote none'}, so the rule's stands.</i>`
+      ? `<br><i style="color:#555555">Fern's rule gave this recommendation (rule ${overridden.derived.rule}); the Level 1 agent ${overridden.agent ? `wrote "${esc(overridden.agent)}"` : 'wrote none'}, so the rule's stands.</i>`
       : '';
     out.push(`<p style="margin:0 0 8px 0"><b>Recommendation: ${esc(rec.value)}</b> ${tag('judgment')}${rec.reasoning ? `<br>${esc(rec.reasoning)}` : ''}${note}</p>`);
   }
@@ -244,12 +244,12 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
       if (!items.length) return;
       out.push(`<p style="margin:0 0 4px 0"><b>${esc(title)}</b> ${tag('computation')}</p><ul style="margin:0 0 8px 0">${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>`);
     };
-    list("Why it cannot be assessed as filed (Norn's rule)", derived.blockers);
-    list("Conditions for the CCB (Norn's rule)", derived.conditions);
+    list("Why it cannot be assessed as filed (Fern's rule)", derived.blockers);
+    list("Conditions for the CCB (Fern's rule)", derived.conditions);
   }
   // The agent's words are never rewritten; where they say nothing was found although the checks found something, the page says so.
   if (derived && cleanClaims(s, findingsOf(prov.ruleInput, derived), findingsByCheck(prov.ruleInput, derived)).length)
-    out.push(`<p style="margin:0 0 8px 0;color:#555555"><i>Norn's checks found the items named under the recommendation. Wording elsewhere in this statement that says there are none is the agent's, and the checks stand.</i></p>`);
+    out.push(`<p style="margin:0 0 8px 0;color:#555555"><i>Fern's checks found the items named under the recommendation. Wording elsewhere in this statement that says there are none is the agent's, and the checks stand.</i></p>`);
 
   // Headline numbers: the cost's. The timeline and supply checks' numbers have their own section below.
   const numberTable = (nums: StatementNumber[]) => {
@@ -257,7 +257,7 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
     t.push(`<table style="border-collapse:collapse"><thead><tr><th ${TH}>Measure</th><th ${THR}>Low (p10)</th><th ${THR}>Median (p50)</th><th ${THR}>High (p90)</th><th ${TH}>Where it comes from</th></tr></thead><tbody>`);
     for (const n of nums) {
       const formula = n.resultKey ? prov.formulas[n.resultKey] : undefined;
-      const basis = n.evidence === 'computation' ? `Norn's check ${esc(n.resultKey)}${formula ? `: ${esc(formula)}` : ''}` : `${esc((EVIDENCE[n.evidence] ?? { label: n.evidence }).label)}, stated by the agent`;
+      const basis = n.evidence === 'computation' ? `Fern's check ${esc(n.resultKey)}${formula ? `: ${esc(formula)}` : ''}` : `${esc((EVIDENCE[n.evidence] ?? { label: n.evidence }).label)}, stated by the agent`;
       // A count or a certain date has one value: the low and high say "same" rather than repeat it.
       const same = n.p10 === n.p50 && n.p50 === n.p90;
       t.push(`<tr><td ${TD}>${esc(n.label)} ${tag(n.evidence)}</td><td ${TDR}>${same ? 'same' : esc(show(n.p10, n.unit))}</td><td ${TDR}><b>${esc(show(n.p50, n.unit))}</b></td><td ${TDR}>${same ? 'same' : esc(show(n.p90, n.unit))}</td><td ${TD}>${basis}</td></tr>`);
@@ -341,7 +341,7 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
   out.push(`<h5 style="margin:12px 0 4px 0">Change class and approval route</h5><ul style="margin:0">`);
   if (cls && !classIsProposal) out.push(`<li>Change class: ${esc(cls)}.</li>`);
   else if (cls || proposal)
-    out.push(`<li>Change class: ${esc(cls ?? proposal?.cls ?? '')} <b>(proposed by Norn's Level 1 agent; the CM analyst decides)</b> ${tag('judgment')}${proposal?.reason ? `. ${esc(proposal.reason)}` : ''}</li>`);
+    out.push(`<li>Change class: ${esc(cls ?? proposal?.cls ?? '')} <b>(proposed by Fern's Level 1 agent; the CM analyst decides)</b> ${tag('judgment')}${proposal?.reason ? `. ${esc(proposal.reason)}` : ''}</li>`);
   else out.push(`<li>Change class: none proposed.</li>`);
   out.push(`<li>Approval route: ${esc(route)}${routed.route === undefined ? ' (not yet decided)' : ''}.</li></ul>`);
 
@@ -349,14 +349,14 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
   out.push(`<h5 style="margin:12px 0 4px 0">Sources</h5><ul style="margin:0">`);
   out.push(`<li>Baseline (costs, BOMs, stock, volume plan): ${esc(prov.baseline)}.</li>`);
   out.push(`<li>The request: ${esc(prov.changeRequest)} (${esc(ecr.number)}, filed in the PLM).</li>`);
-  out.push(`<li>Numbers: computed by Norn's cost check${prov.codeVersion ? ` (${esc(prov.codeVersion)}` : ''}${prov.draws ? `, ${prov.draws.toLocaleString('en-US')} simulated outcomes` : ''}${prov.codeVersion ? ')' : ''}${prov.s2RunId ? `, run ${prov.s2RunId}` : ''}. The ERP was only read.</li>`);
+  out.push(`<li>Numbers: computed by Fern's cost check${prov.codeVersion ? ` (${esc(prov.codeVersion)}` : ''}${prov.draws ? `, ${prov.draws.toLocaleString('en-US')} simulated outcomes` : ''}${prov.codeVersion ? ')' : ''}${prov.s2RunId ? `, run ${prov.s2RunId}` : ''}. The ERP was only read.</li>`);
   const tsRuns = [prov.timelineRunId ? `timeline run ${prov.timelineRunId}` : '', prov.supplyRunId ? `supply run ${prov.supplyRunId}` : ''].filter(Boolean);
-  if (tsNumbers.length) out.push(`<li>Timeline and supply: computed by Norn's timeline and supply checks${tsRuns.length ? ` (${tsRuns.join(', ')})` : ''}, on the same baseline and change request.</li>`);
+  if (tsNumbers.length) out.push(`<li>Timeline and supply: computed by Fern's timeline and supply checks${tsRuns.length ? ` (${tsRuns.join(', ')})` : ''}, on the same baseline and change request.</li>`);
   out.push(`</ul>`);
 
   const body = out.join('\n');
   const ref = `${s.id}.${createHash('sha256').update(body).update(JSON.stringify([cls ?? null, route, rec?.value ?? null, url, s.level])).digest('hex').slice(0, 8)}`;
-  const footer = `<p style="margin:12px 0 0 0;color:#555555;font-size:12px">Written by Norn on ${esc(s.createdAtIso.slice(0, 16).replace('T', ' '))} UTC. <a href="${esc(url)}">Open in Norn</a> for the checks, the trace behind each number and the agent's work. Ref ${ref}</p>`;
+  const footer = `<p style="margin:12px 0 0 0;color:#555555;font-size:12px">Written by Fern on ${esc(s.createdAtIso.slice(0, 16).replace('T', ' '))} UTC. <a href="${esc(url)}">Open in Fern</a> for the checks, the trace behind each number and the agent's work. Ref ${ref}</p>`;
 
   const fields: ImpactFields = {
     impact_report_level: String(s.level),

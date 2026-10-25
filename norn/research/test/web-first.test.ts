@@ -73,7 +73,7 @@ describe('the leak guard covers WebSearch and WebFetch before anything is sent',
       assert.equal(await s.call(WEB_SEARCH_TOOL, { query }), 'denied', query);
     }
     assert.deepEqual(s.sent, [], 'nothing reached the search');
-    assert.match(s.denials[0]!, /WebSearch refused by Norn: the search contains an identifier from the company's data \(supplier/);
+    assert.match(s.denials[0]!, /WebSearch refused by Fern: the search contains an identifier from the company's data \(supplier/);
     assert.ok(!s.denials.join('\n').includes('Halden'), 'the reason names the kind, not the text');
   });
   it('denies a WebSearch whose domain list or other argument carries one', async () => {
@@ -92,7 +92,7 @@ describe('the leak guard covers WebSearch and WebFetch before anything is sent',
       { url: 'https://93.184.216.34/prices?supplier=Halden', prompt: 'the price' },
     ]) assert.equal(await s.call(WEB_FETCH_TOOL, input), 'denied', JSON.stringify(input));
     assert.deepEqual(s.sent, []);
-    assert.match(s.denials.join('\n'), /WebFetch refused by Norn: the URL contains an identifier/);
+    assert.match(s.denials.join('\n'), /WebFetch refused by Fern: the URL contains an identifier/);
   });
   it('denies a call with no query or no url, or arguments too deep to check', async () => {
     const s = session();
@@ -125,7 +125,7 @@ describe('the identifier guards run before any guard that looks a name up', () =
     }
     assert.deepEqual(dns.asked, [], 'no lookup was made for any of them');
     assert.deepEqual(s.sent, []);
-    assert.match(s.denials[0]!, /WebFetch refused by Norn: the URL contains an identifier/);
+    assert.match(s.denials[0]!, /WebFetch refused by Fern: the URL contains an identifier/);
   });
   it('resolves, and so checks the address, only for a call the identifier guards allowed', async () => {
     const dns = resolver();

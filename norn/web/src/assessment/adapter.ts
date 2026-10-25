@@ -81,7 +81,7 @@ function evidenceOfBasis(basis: string, needsEstimate?: boolean): Evidence {
 const BASIS_TEXT: Record<string, string> = {
   supplier_quote: 'From the supplier’s quote',
   engineer_estimate: 'The originator’s estimate',
-  agent_estimated: 'Norn’s agent estimate',
+  agent_estimated: 'Fern’s agent estimate',
   default: 'A default',
   given: 'Given',
   computed: 'Computed from the BOM delta and the volume plan',
@@ -137,7 +137,7 @@ export function describeInput(rec: InputRecord): { text: string; range?: string 
 }
 
 export const sourceSystem = (ref = ''): TraceSource['system'] =>
-  /quote|^Q-/i.test(ref) ? 'Quote' : /^ECR|^NCR/.test(ref) ? 'PLM' : /baseline|dataset|ERP|sourcing|stock|volume/i.test(ref) ? 'ERP' : /default/i.test(ref) ? 'Policy' : 'Norn';
+  /quote|^Q-/i.test(ref) ? 'Quote' : /^ECR|^NCR/.test(ref) ? 'PLM' : /baseline|dataset|ERP|sourcing|stock|volume/i.test(ref) ? 'ERP' : /default/i.test(ref) ? 'Policy' : 'Fern';
 
 // ---------------------------------------------------------------- the adapter
 
@@ -154,7 +154,7 @@ export function inputTraceOf(tid: string, id: string, rec: InputRecord | undefin
     sources: rec?.ref ? [{ system: sourceSystem(rec.ref), ref: rec.ref }] : undefined,
     inputs: [],
     assumptions: rec && rec.source !== 'given'
-      ? [{ label: rec.label, display: d.text + (d.range ? ` (${d.range})` : ''), origin: rec.source, source: rec.rationale ?? rec.ref ?? 'Norn configuration' }]
+      ? [{ label: rec.label, display: d.text + (d.range ? ` (${d.range})` : ''), origin: rec.source, source: rec.rationale ?? rec.ref ?? 'Fern configuration' }]
       : [],
   };
 }
@@ -195,7 +195,7 @@ export function fromChecks(rows: CheckResultRow[]): ChecksView {
     });
     traces[id] = {
       id, title, evidence, summary, inputs: uses, assumptions, formula: m ? { expression: m.trace.formula } : undefined,
-      producedBy: { check: 'Cost check (S2)', actor: 'Norn cost check', onBehalfOf: 'Norn, for the ECR', note: `${detail.draws.toLocaleString('en-US')} paired draws, seed ${detail.seed}, ${detail.codeVersion}` },
+      producedBy: { check: 'Cost check (S2)', actor: 'Fern cost check', onBehalfOf: 'Fern, for the ECR', note: `${detail.draws.toLocaleString('en-US')} paired draws, seed ${detail.seed}, ${detail.codeVersion}` },
       ...extra,
     };
   };

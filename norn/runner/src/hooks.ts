@@ -23,7 +23,7 @@ export function promptRecorder(emitter: JobEmitter, jobPrompt: string, maxChars:
     try {
       await emitter.emit({ type: 'user_message', text, truncated, origin: null, from: null, synthetic: false, source: 'prompt_hook' });
     } catch {
-      return { decision: 'block', reason: 'Norn could not record this message, so it was not delivered' };
+      return { decision: 'block', reason: 'Fern could not record this message, so it was not delivered' };
     }
     return {};
   };
@@ -50,7 +50,7 @@ export function toolInputGuardHook(
     }
     if (verdict?.allow === true) return {};
     const why = verdict?.allow === false && typeof verdict.reason === 'string' ? verdict.reason : 'the check gave no answer';
-    const reason = `${input.tool_name} refused by Norn: ${why}`;
+    const reason = `${input.tool_name} refused by Fern: ${why}`;
     onDeny(toolUseId, reason);
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } };
   };

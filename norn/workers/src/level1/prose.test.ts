@@ -83,7 +83,7 @@ test('the checked pieces are every agent-written field that is displayed, named 
   assert.deepEqual(
     piecesOf(p).map(x => `${x.where}=${x.text}`),
     ['headline=H', 'change class=CC', 'approval route=R', 'number 2 label=L', 'number 2 unit=U', 'number 3 label=k3', 'driver 1=D', 'assumption 1 note=N', 'claim 1=C'],
-    "a computation number's label and unit are Norn's, not the agent's; a number with no label is shown under its key"
+    "a computation number's label and unit are Fern's, not the agent's; a number with no label is shown under its key"
   );
   // a statement as stored (no change class etc. on an older caller) still works
   assert.deepEqual(piecesOf({ headline: 'H', drivers: [], claims: [] }).map(x => x.where), ['headline']);

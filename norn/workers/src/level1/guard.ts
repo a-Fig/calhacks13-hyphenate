@@ -49,7 +49,7 @@ export function statementGuardFor(db: Db): StatementGuard {
     const clean = cleanClaims(statement, findings, findingsByCheck(found.input, derived));
     if (clean.length)
       problems.push(
-        `Your ${clean.map(c => `${c.where} says "${c.phrase}"`).join(' and your ')}, but Norn's checks found ${findings.length === 1 ? 'one item' : `${findings.length} items`} for ${pr.plmEcrNumber}: ${findings.map((f, i) => `(${i + 1}) ${f}`).join('; ')}. Do not say the checks are clean or that there are no issues, flags, gaps or conditions. Norn lists these items in the PLM itself.`
+        `Your ${clean.map(c => `${c.where} says "${c.phrase}"`).join(' and your ')}, but Fern's checks found ${findings.length === 1 ? 'one item' : `${findings.length} items`} for ${pr.plmEcrNumber}: ${findings.map((f, i) => `(${i + 1}) ${f}`).join('; ')}. Do not say the checks are clean or that there are no issues, flags, gaps or conditions. Fern lists these items in the PLM itself.`
       );
 
     const judged = nonComputationNumbers(statement);
@@ -73,7 +73,7 @@ export function statementGuardFor(db: Db): StatementGuard {
     }
     const unknown = unknownAmounts(statement, known);
     if (unknown.length)
-      problems.push(`The ${unknown.map(u => `${u.figure} in your ${u.where}`).join(' and the ')} ${unknown.length === 1 ? 'is' : 'are'} not in any check result of ${pr.plmEcrNumber}. A number over ${SMALL} must be one Norn gave you (get_impact or the job), as it shows it, or part of an id or a date; leave the others out.`);
+      problems.push(`The ${unknown.map(u => `${u.figure} in your ${u.where}`).join(' and the ')} ${unknown.length === 1 ? 'is' : 'are'} not in any check result of ${pr.plmEcrNumber}. A number over ${SMALL} must be one Fern gave you (get_impact or the job), as it shows it, or part of an id or a date; leave the others out.`);
 
     return problems.length ? `Not posted. ${problems.join(' ')} Rewrite the wording and post again.` : undefined;
   };

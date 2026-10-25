@@ -58,14 +58,14 @@ export interface AskServerOptions {
 
 /** Is Norn's MCP server up and is there a key to talk to it? (The Claude login itself is only known when a session starts.) */
 export async function mcpStatus(): Promise<AskStatus> {
-  if (!loadSigningKey()) return { available: false, reason: 'Ask Norn is unavailable: Norn has no MCP signing key on this machine.' };
+  if (!loadSigningKey()) return { available: false, reason: 'Ask Fern is unavailable: Fern has no MCP signing key on this machine.' };
   try {
     const r = await fetch(nornMcpUrl().replace(/\/mcp$/, '/healthz'), { signal: AbortSignal.timeout(2000) });
     if (r.ok) return { available: true };
   } catch {
     // fall through
   }
-  return { available: false, reason: "Ask Norn is unavailable: Norn's database and tools are not running here." };
+  return { available: false, reason: "Ask Fern is unavailable: Fern's database and tools are not running here." };
 }
 
 /** The real runner behind Ask Norn. `runnerOptions` is for tests of the queue (a fake `execute`, a smaller `concurrency`). */
@@ -148,8 +148,8 @@ export function startAskServer(opts: AskServerOptions): Promise<{ port: number; 
       if (!v.ok) return send(req, res, 400, v);
       const receivedAt = now();
       const st = await status();
-      if (!st.available) return send(req, res, 200, { ok: false, kind: 'unavailable', message: st.reason ?? 'Ask Norn is unavailable.' } satisfies AskResponse);
-      if (waiting >= MAX_WAITING) return send(req, res, 200, { ok: false, kind: 'busy', message: 'Norn is answering other questions. Try again in a minute.' } satisfies AskResponse);
+      if (!st.available) return send(req, res, 200, { ok: false, kind: 'unavailable', message: st.reason ?? 'Ask Fern is unavailable.' } satisfies AskResponse);
+      if (waiting >= MAX_WAITING) return send(req, res, 200, { ok: false, kind: 'busy', message: 'Fern is answering other questions. Try again in a minute.' } satisfies AskResponse);
       const taken = takeQuestion(asked, limits, receivedAt);
       if (!taken.ok) {
         const minutes = Math.max(1, Math.ceil(taken.retryAfterMs / 60_000));
@@ -158,7 +158,7 @@ export function startAskServer(opts: AskServerOptions): Promise<{ port: number; 
           req,
           res,
           429,
-          { ok: false, kind: 'limited', message: `Too many questions in a short time. Norn takes ${limits.per10Minutes} every 10 minutes and ${limits.perHour} an hour. Try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.` } satisfies AskResponse,
+          { ok: false, kind: 'limited', message: `Too many questions in a short time. Fern takes ${limits.per10Minutes} every 10 minutes and ${limits.perHour} an hour. Try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.` } satisfies AskResponse,
           { 'retry-after': String(Math.ceil(taken.retryAfterMs / 1000)) }
         );
       }
@@ -173,7 +173,7 @@ export function startAskServer(opts: AskServerOptions): Promise<{ port: number; 
       }
     } catch (e) {
       log(`500 ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
-      if (!res.headersSent) send(req, res, 500, { ok: false, kind: 'failed', message: 'Ask Norn hit an internal error.' });
+      if (!res.headersSent) send(req, res, 500, { ok: false, kind: 'failed', message: 'Ask Fern hit an internal error.' });
       else res.end();
     }
   });

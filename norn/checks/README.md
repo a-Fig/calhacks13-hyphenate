@@ -1,4 +1,4 @@
-# Norn's impact checks
+# Fern's impact checks
 
 The code checks of the impact screen, as a pure TypeScript library: **S1, the BOM delta**,
 **S2, cost**, **S3, timeline** and **S4, supply** (`../ARCHITECTURE.md` §5). No database, no I/O,
@@ -98,7 +98,7 @@ probability the parts miss the stated effectivity, year-one spend and the single
 it, and capacity use against a `capacity` constraint. When `peers` (the other open ECRs'
 change requests) share a supplier with this one, it adds the interaction:
 - **Slots.** Per draw, ECRs take slots in the order they were filed (`filedOn`, then id). The ECR
-  filed second waits for the next slot. This is a rule Norn assumes, not one the supplier states.
+  filed second waits for the next slot. This is a rule Fern assumes, not one the supplier states.
   The headline numbers treat the ECR alone; the interaction is shown beside them (cut-in alone and
   with the peers, the shift in weeks, the probability it is later).
 - **Bundles.** Two part numbers from one supplier within the constraint's window get a cheaper

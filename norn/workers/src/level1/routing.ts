@@ -209,7 +209,7 @@ export function routeText(config: CompanyConfig, route: Route): string {
   }
   // The field is short. If the long form does not fit, drop the other bodies, then the reason: the body is the route.
   // A body name longer than the field is cut, so the publication is never refused for its length.
-  return [`${also} (${reason})`, `${alone} (${reason})`, alone].find(t => t.length <= ROUTE_MAX) ?? `${alone.slice(0, ROUTE_MAX - 1)}…`;
+  return [`${also} (${reason})`, `${alone} (${reason})`, alone].find(t => t.length <= ROUTE_MAX) ?? `${alone.slice(0, ROUTE_MAX - 1)}ï¿½`;
 }
 
 /**
@@ -224,4 +224,4 @@ export function routeFor(ecr: EcrRef, assessment: AssessmentRef, config?: Compan
 }
 
 /** What the agent writes as the route when routing has not decided one. */
-export const ROUTE_PENDING = "Pending Norn's routing";
+export const ROUTE_PENDING = "Pending Fern's routing";

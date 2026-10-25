@@ -52,7 +52,7 @@ await (A.R as any).postImpactStatement({
   prId: pr.id, level: 1,
   changeClass: `Class ${companyClass}, FAA ${faa} (as filed)`,
   route: routedTo.length ? `As filed: ${routedTo.join(', ')}` : 'As filed',
-  headline: `Demo statement, written by a script (post-demo-statement.ts), not by Norn's agent. The cost check puts the net cost of the first 12 months at ${money(net.p50)} (P10 ${money(net.p10)}, P90 ${money(net.p90)}), with ${usd(oneTime.p50)} one-time and ${money(recurring.p50)} recurring at the median. Nothing here is a recommendation.`,
+  headline: `Demo statement, written by a script (post-demo-statement.ts), not by Fern's agent. The cost check puts the net cost of the first 12 months at ${money(net.p50)} (P10 ${money(net.p10)}, P90 ${money(net.p90)}), with ${usd(oneTime.p50)} one-time and ${money(recurring.p50)} recurring at the median. Nothing here is a recommendation.`,
   numbers,
   drivers: drivers.map((d: any) => ({ text: `${d.label} moves the net cost by about ${usd(d.swing)} between its low and high case.`, evidence: 'computation' })),
   assumptions: [],

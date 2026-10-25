@@ -295,7 +295,7 @@ export function readSupply(rows: StageRow[], traces: Record<string, Trace>, src:
   if (single.length) bits.push(`${plural(single.length, 'part')} with one qualified source`);
   const note = bits.join('; ');
 
-  T.add('supply', 'Supply risk', `${cap(level)}: the worst chance of missing the stated effectivity${I?.late ? ' (alone or with the other open ECRs)' : ''} is ${pct(worst)}; below 10% is low, below 30% moderate, above that high. A part with one qualified source is at least moderate, and a cut-in that cannot be placed is high. The level is Norn’s reading of the checks’ numbers.`, undefined, { text: cap(level), range: note });
+  T.add('supply', 'Supply risk', `${cap(level)}: the worst chance of missing the stated effectivity${I?.late ? ' (alone or with the other open ECRs)' : ''} is ${pct(worst)}; below 10% is low, below 30% moderate, above that high. A part with one qualified source is at least moderate, and a cut-in that cannot be placed is high. The level is Fern’s reading of the checks’ numbers.`, undefined, { text: cap(level), range: note });
 
   const view: Supply = {
     id: 'supply', level, evidence: 'computation', note,
@@ -309,7 +309,7 @@ const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 // ---------------------------------------------------------------- the mock stages
 
-const mockProducedBy = (check: string, at: string) => ({ check, actor: 'Norn worker', at });
+const mockProducedBy = (check: string, at: string) => ({ check, actor: 'Fern worker', at });
 
 /** The mock timeline stage's one row: weeks until the change reaches the line. Made-up numbers, labelled so. */
 export function readMockTimeline(r: StageRow, traces: Record<string, Trace>, at: string): NonNullable<CutIn['estimate']> {

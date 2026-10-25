@@ -90,7 +90,7 @@ function fakeErp() {
     const url = new URL(String(input));
     calls.push({ method: String(init?.method), path: decodeURIComponent(url.pathname), hasBody: init?.body !== undefined });
     // Norn never writes to the ERP: anything but an explicit GET without a body fails the test that triggered it.
-    if (init?.method !== 'GET' || init.body !== undefined) throw new Error(`the connector sent ${init?.method} ${url.pathname}: Norn never writes to the ERP`);
+    if (init?.method !== 'GET' || init.body !== undefined) throw new Error(`the connector sent ${init?.method} ${url.pathname}: Fern never writes to the ERP`);
     const [, , , rawDoctype] = url.pathname.split('/');
     const doctype = decodeURIComponent(rawDoctype);
     const defaultStatus = doctype === 'Journal Entry' ? 0 : 1;
@@ -165,7 +165,7 @@ test('the package lists every line a person enters, in the verified order, with 
   assert.deepEqual([price.doctype, price.mode, price.document, price.path], ['Item Price', 'new', undefined, '/app/item-price/new']);
   assert.deepEqual(values(price), {
     item_code: 'P', price_list: 'Cost', price_list_rate: 12, valid_from: '2026-01-01', uom: 'Nos', currency: 'USD',
-    note: 'ECO-9 (ECR-9); Norn decision DEC-9: https://norn.test/decisions/DEC-9. P Rev C standard cost 12.00 from 2026-01-01, was 10.00.',
+    note: 'ECO-9 (ECR-9); Fern decision DEC-9: https://norn.test/decisions/DEC-9. P Rev C standard cost 12.00 from 2026-01-01, was 10.00.',
     eco: 'ECO-9', decision: DECISION,
   });
   assert.deepEqual(price.amounts, { to: 12, from: 10, change: 2 });
@@ -405,7 +405,7 @@ test('a malformed release or settings is refused outright', async () => {
 test('the markdown reads as a to-do list for a person, in business words', async () => {
   const text = formatErpChangePackage(await build());
   assert.match(text, /^# ERP change package for ECO-9\n/);
-  assert.match(text, /ECO-9 came from ECR-9 and Norn decision DEC-9 \(https:\/\/norn\.test\/decisions\/DEC-9\)\. New standard costs apply from 2026-01-01/);
+  assert.match(text, /ECO-9 came from ECR-9 and Fern decision DEC-9 \(https:\/\/norn\.test\/decisions\/DEC-9\)\. New standard costs apply from 2026-01-01/);
   assert.match(text, /0 of 7 lines entered, 7 to enter, 0 in conflict\./);
   assert.match(text, /## 1\. Close P's current standard cost\n\nTo enter\. Cost accountant\. Open Item Price ip-p: http:\/\/erp\.test\/app\/item-price\/ip-p/);
   assert.match(text, /\| Rate \(price_list_rate\) \| 12\.00 \|/);
@@ -413,7 +413,7 @@ test('the markdown reads as a to-do list for a person, in business words', async
   assert.match(text, /## 4\. Replace BOM-A in its parent BOMs[\s\S]*\| New BOM \(new_bom\) \| the new BOM from step 3 \|/);
   assert.match(text, /Accounting Entries \(accounts\):\n\n\| Account \| Debit \| Credit \| Remark \|\n\|---\|---\|---\|---\|\n\| 51900 - Shrink - CO \| 100\.50 \|  \| Stores 5 \|/);
   assert.match(text, /Amounts: raw before 35\.00, total before 75\.00, raw after 41\.00, total after 81\.00\./);
-  assert.match(text, /Trace: ECO-9, ECR-9, Norn decision DEC-9 \(https:\/\/norn\.test\/decisions\/DEC-9\)\./);
+  assert.match(text, /Trace: ECO-9, ECR-9, Fern decision DEC-9 \(https:\/\/norn\.test\/decisions\/DEC-9\)\./);
   assert.match(text, /## Estimated change in unit cost\n\n- T-1 \(T-1\): \+6\.00, from 3 x 2\.00 \(P\)/);
   assert.doesNotMatch(text, new RegExp(String.fromCharCode(0x2014)), 'no em dashes');
   enterAll();
@@ -709,7 +709,7 @@ test('a BOM entered with other costing settings than the package asks is a confl
   db.BOM.find((b) => b.name === 'BOM-A2')!.rm_cost_as_per = 'Price List';
   db.BOM.find((b) => b.name === 'BOM-A2')!.buying_price_list = 'Cost';
   db.BOM.find((b) => b.name === 'BOM-A2')!.decision = '';
-  assert.match(line(await build(bomChange), 'bom:A').note!, /has Norn decision empty where the release says/);
+  assert.match(line(await build(bomChange), 'bom:A').note!, /has Fern decision empty where the release says/);
 });
 
 test('a later BOM that is not active and default has not taken over, so it does not excuse a bad flag', async () => {

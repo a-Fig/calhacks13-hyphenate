@@ -12,7 +12,7 @@ const q = (r: { p10: number; p50: number; p90: number }) => `p10 ${r.p10}, p50 $
 export function renderReport(r: ResearchReport): string {
   const out: string[] = [];
   const tag = r.mode;
-  out.push(`Norn research agent: ${r.ecr}, seed ${r.seed}  [${tag}]`);
+  out.push(`Fern research agent: ${r.ecr}, seed ${r.seed}  [${tag}]`);
   for (const p of r.provenance) out.push(`  ${p}`);
   out.push('', 'Research targets (ranked by swing of the year-one total)');
   for (const t of r.targets) {

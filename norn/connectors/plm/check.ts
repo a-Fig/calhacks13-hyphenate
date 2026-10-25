@@ -337,31 +337,31 @@ const latencies: { what: string; ms: number }[] = [];
 
     // Norn's own writes are not reported
     const before = events.length;
-    const w = await writeImpact(opts, name, { impact_report_level: '1', impact_recommendation: 'Approve', impact_change_class: 'Class II', impact_approval_route: 'Fast track', impact_statement: '<p>Probe; not a Norn result.</p>' });
-    const c = await postComment(opts, name, '<p>Probe comment from the connector check; not a Norn result.</p>');
+    const w = await writeImpact(opts, name, { impact_report_level: '1', impact_recommendation: 'Approve', impact_change_class: 'Class II', impact_approval_route: 'Fast track', impact_statement: '<p>Probe; not a Fern result.</p>' });
+    const c = await postComment(opts, name, '<p>Probe comment from the connector check; not a Fern result.</p>');
     await sleep(INTERVAL * 2 + 1500);
     const mine = events.slice(before).filter((e) => e.name === name);
-    check(w.impact.impact_report_level === '1' && !!c.name && mine.length === 0, `Norn's own writes (impact fields, then a comment) were not reported`, `${mine.length} events after them`);
+    check(w.impact.impact_report_level === '1' && !!c.name && mine.length === 0, `Fern's own writes (impact fields, then a comment) were not reported`, `${mine.length} events after them`);
     const comment = (await admin.req('GET', '/api/resource/Comment', undefined, { fields: ['name', 'comment_email'], filters: [['reference_name', '=', name], ['comment_type', '=', 'Comment']] })).data;
-    check(comment.length === 1 && comment[0].comment_email === settings.nornUser, 'the comment is on the ECR and is Norn\'s');
+    check(comment.length === 1 && comment[0].comment_email === settings.nornUser, 'the comment is on the ECR and is Fern\'s');
 
     // a person's edit right after Norn's write is reported
     const put = (await admin.req('PUT', `/api/resource/ECR/${enc(name)}`, { title: 'Connector latency probe 7 (deleted after the test)' })).data;
     const t = performance.now();
-    sample('edit after Norn\'s write', t, await waitFor((e) => e.name === name && e.modified === put.modified, 'the edit after Norn\'s write'));
+    sample('edit after Fern\'s write', t, await waitFor((e) => e.name === name && e.modified === put.modified, 'the edit after Fern\'s write'));
     } catch (e) {
       check(false, 'the throwaway ECR test stopped', e instanceof Error ? e.message : String(e));
     }
 
     // ---- 4. the demo ECR: write the impact fields, read them back, clear them
-    console.log(`4. ${spec.demoEcr}: write the impact fields as Norn, read them back, clear them`);
+    console.log(`4. ${spec.demoEcr}: write the impact fields as Fern, read them back, clear them`);
     const demoBefore = events.filter((e) => e.name === spec.demoEcr).length;
     const baseline = await readChangeRequest(opts, spec.demoEcr);
     check(Object.keys(baseline.record.impact).length === 0, `${spec.demoEcr} starts with no impact assessment`);
     const wrote = {
       impact_report_level: '1', impact_recommendation: 'Approve with conditions', impact_change_class: 'Class I', impact_approval_route: 'CCB, 2026-11-12',
       impact_norn_url: 'https://example.com/norn/connector-check',
-      impact_statement: '<p><b>Connector check: not a Norn assessment.</b></p><table class="table"><tr><td>x</td></tr></table>',
+      impact_statement: '<p><b>Connector check: not a Fern assessment.</b></p><table class="table"><tr><td>x</td></tr></table>',
     };
     let cleared = false;
     let afterWrite = demoBefore;
@@ -370,7 +370,7 @@ const latencies: { what: string; ms: number }[] = [];
         let calls = 0;
         const real = globalThis.fetch;
         globalThis.fetch = ((...a: Parameters<typeof fetch>) => { calls++; return real(...a); }) as typeof fetch;
-        try { await writeImpact(opts, spec.demoEcr, { ...wrote, description: 'edited by Norn' } as any); return { threw: false, calls }; } catch { return { threw: true, calls }; } finally { globalThis.fetch = real; }
+        try { await writeImpact(opts, spec.demoEcr, { ...wrote, description: 'edited by Fern' } as any); return { threw: false, calls }; } catch { return { threw: true, calls }; } finally { globalThis.fetch = real; }
       })();
       check(rej.threw && rej.calls === 0, 'a write that names a field outside the seven is refused before any request');
       const res = await writeImpact(opts, spec.demoEcr, wrote);
@@ -381,7 +381,7 @@ const latencies: { what: string; ms: number }[] = [];
       check(res.impact.impact_report_level === '1' && JSON.stringify(res.impact) === JSON.stringify(back.record.impact), 'writeImpact returns what was stored');
       check(JSON.stringify(back.change) === JSON.stringify(baseline.change), `nothing else on ${spec.demoEcr} changed (the whole ChangeRequest is identical)`);
       check(JSON.stringify({ ...back.record, impact: 0, dates: 0, modifiedBy: 0 }) === JSON.stringify({ ...baseline.record, impact: 0, dates: 0, modifiedBy: 0 }), `the record is identical apart from the impact fields and the modified stamp`);
-      check(inputsHash(back) === inputsHash(baseline), `the assessment inputs fingerprint is the same with and without Norn's impact fields`);
+      check(inputsHash(back) === inputsHash(baseline), `the assessment inputs fingerprint is the same with and without Fern's impact fields`);
       await sleep(INTERVAL * 2 + 500);
       afterWrite = events.filter((e) => e.name === spec.demoEcr).length;
     } finally {
@@ -395,7 +395,7 @@ const latencies: { what: string; ms: number }[] = [];
     // The poller had not seen this ECR in this run, so it has no fingerprint to compare Norn's first write with and reports that once;
     // clearing the fields changes nothing an assessment is made from, and must not be reported.
     const demoNow = events.filter((e) => e.name === spec.demoEcr).length;
-    check(afterWrite - demoBefore <= 1 && demoNow === afterWrite, `Norn's writes on ${spec.demoEcr}: the first sighting is reported at most once (${afterWrite - demoBefore}), clearing the fields is not`);
+    check(afterWrite - demoBefore <= 1 && demoNow === afterWrite, `Fern's writes on ${spec.demoEcr}: the first sighting is reported at most once (${afterWrite - demoBefore}), clearing the fields is not`);
   } finally {
     await watcher.stop();
     // clean up the throwaway

@@ -91,14 +91,14 @@ test('a decision the module refuses for good is logged and not sent again on eve
   const logs: string[] = [];
   const sent = new Map<string, string>();
   let n = 0;
-  const refused = { recordPlmDecision: async () => { n++; throw new SenderError('Norn has no ECR ECR-1'); }, recordEcoRelease: async () => {} } as any;
+  const refused = { recordPlmDecision: async () => { n++; throw new SenderError('Fern has no ECR ECR-1'); }, recordEcoRelease: async () => {} } as any;
   await recordDecided(refused, item, sent, (m) => logs.push(m)).catch(() => {});
   await recordDecided(refused, item, sent, (m) => logs.push(m)).catch(() => {});
   assert.ok(logs.some((l) => l.includes('could not record ECR-1') && l.includes('approved')), logs.join(' | '));
   assert.equal(n, 1, 'remembered, not sent every poll');
 });
 
-test('a decided ECR is never reported to ingest_ecr, even when it is the first Norn sees of it or its text changed', async () => {
+test('a decided ECR is never reported to ingest_ecr, even when it is the first Fern sees of it or its text changed', async () => {
   const p = plm({ ...ecrDoc(), workflow_state: 'Approved', released_eco: 'ECO-0001', title: 'Edited after the approval' });
   p.ecos = [{ name: 'ECO-0001', released_on: '2026-10-02' }];
   const h = harness();
@@ -152,7 +152,7 @@ test('at start-up, a decision or an ECO from while the process was down is recor
 
 const decidedItem = (extra: Record<string, any> = {}) => ({ plmEcrNumber: 'ECR-1', title: 't', description: '', changeRequest: { id: 'ECR-1', qty: 2 }, sourceRef: 'x', decision: { decision: 'approved', decidedBy: 'a@b', decidedOn: 'now' }, ...extra }) as any;
 
-test('an approval Norn has not followed is not remembered as delivered: it is sent again, and remembered once it is followed', async () => {
+test('an approval Fern has not followed is not remembered as delivered: it is sent again, and remembered once it is followed', async () => {
   const sent = new Map<string, string>();
   const calls: string[] = [];
   const R = { recordPlmDecision: async () => { calls.push('decision'); }, recordEcoRelease: async () => { calls.push('eco'); } } as any;
@@ -170,7 +170,7 @@ test('an approval Norn has not followed is not remembered as delivered: it is se
   assert.deepEqual(calls, ['decision', 'eco', 'decision', 'decision'], 'sent on every try until followed, then not again; the ECO once');
 });
 
-test('the watcher queues an unfollowed approval for retry instead of failing, and the retry delivers it once Norn follows', async () => {
+test('the watcher queues an unfollowed approval for retry instead of failing, and the retry delivers it once Fern follows', async () => {
   plm({ ...ecrDoc(), workflow_state: 'Approved', modified_by: 'rafael@acme.test' });
   let merged = false;
   const h = harness(async () => merged);
@@ -200,7 +200,7 @@ test('followedFrom: an approval is followed when the ECR is merged, a rejection 
   assert.equal(await followed('ECR-1', 'rejected'), true);
 });
 
-test('the decision carries the change request Norn would have stored for the PLM content, so an unseen edit cannot ride on an approval', async () => {
+test('the decision carries the change request Fern would have stored for the PLM content, so an unseen edit cannot ride on an approval', async () => {
   const h = harness();
   const seen = plm(ecrDoc());
   const submitted = await readItem(opts, 'ECR-0001', itemOf);
@@ -280,7 +280,7 @@ test('a transient failure delivering a decision from the watcher is queued for r
   plm({ ...ecrDoc(), workflow_state: 'Approved', modified_by: 'rafael@acme.test' });
   const calls: string[] = [];
   let failing = 3;
-  const R = { recordPlmDecision: async () => { calls.push('decision'); if (failing-- > 0) throw new Error('Norn unreachable'); }, recordEcoRelease: async () => {} } as any;
+  const R = { recordPlmDecision: async () => { calls.push('decision'); if (failing-- > 0) throw new Error('Fern unreachable'); }, recordEcoRelease: async () => {} } as any;
   const sent = new Map<string, string>();
   const retry = new RetryQueue(1);
   const lock = ecrLock();
@@ -292,7 +292,7 @@ test('a transient failure delivering a decision from the watcher is queued for r
   for (let i = 0; i < 4; i++) await w.tick();
   assert.equal(errors.some((e) => e.includes('giving up')), false, errors.join(' | '));
   assert.equal(retry.has('ECR-0001'), true, 'in the retry queue');
-  assert.ok(logs.some((l) => l.includes('ECR-0001') && l.includes('will retry') && l.includes('Norn unreachable')), logs.join(' | '));
+  assert.ok(logs.some((l) => l.includes('ECR-0001') && l.includes('will retry') && l.includes('Fern unreachable')), logs.join(' | '));
   assert.equal(sent.has('decision:ECR-0001'), false, 'not remembered as delivered');
   // Norn comes back: the queue sends it again, with a fresh read, and the decision goes through.
   const read = (name: string) => readItem(opts, name, itemOf);

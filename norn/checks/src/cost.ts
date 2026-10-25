@@ -29,11 +29,11 @@ import { addMonths, firstSerialFrom, lastBuiltSerial, monthOfSerial, serialsByMo
 export { COST_DEFAULTS, type CostDefaults };
 
 const DEFAULT_WHY: Record<string, string> = {
-  'spread:supplier_quote': 'A firm supplier quote moves little: change orders only. Log-space spread 0.05 (Norn default).',
-  'spread:budgetary_quote': 'A budgetary quote ("plus or minus 20%"): log-space spread 0.15, so p10 and p90 sit about 18% either side (Norn default).',
+  'spread:supplier_quote': 'A firm supplier quote moves little: change orders only. Log-space spread 0.05 (Fern default).',
+  'spread:budgetary_quote': 'A budgetary quote ("plus or minus 20%"): log-space spread 0.15, so p10 and p90 sit about 18% either side (Fern default).',
   'spread:engineer_estimate': 'An engineer\'s estimate: log-space spread 0.15, "low" in Joint Agency handbook Table 2-9 (docs/IN-PRACTICE.md §5).',
   'spread:agent_estimated': 'An agent\'s estimate: log-space spread 0.25, wider than a person\'s (docs/IN-PRACTICE.md §8, recommendation 6).',
-  newItemPrice: 'An item with no sourcing record: forward price p10 0.95 and p90 1.08 times its quoted price (Norn default).',
+  newItemPrice: 'An item with no sourcing record: forward price p10 0.95 and p90 1.08 times its quoted price (Fern default).',
   scrapRecovery:
     'Share of a scrapped unit\'s value recovered. Default PERT(0, 1.53%, 5%): metal value only, as in the worked example ' +
     '($718 salvage on 252 brackets of $186.40, docs/IN-PRACTICE.md §1). An agent\'s estimate of resale or reuse replaces it (#32).',
@@ -754,7 +754,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
       kind: 'cross_check', severity: ok ? 'info' : 'warn', ref: engineerRecurringRefs.join(', '),
       message: ok
         ? `The cost page's per-unit change (${r2(engineerRecurring)}) matches the BOM delta (${r2(computed)}).`
-        : `The cost page says ${r2(engineerRecurring)} per unit; the BOM delta gives ${r2(computed)}. Norn uses the BOM delta.`,
+        : `The cost page says ${r2(engineerRecurring)} per unit; the BOM delta gives ${r2(computed)}. Fern uses the BOM delta.`,
     });
   }
   const retro = ecr.effectivity.retrofit;

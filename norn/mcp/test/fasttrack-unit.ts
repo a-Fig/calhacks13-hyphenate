@@ -51,10 +51,10 @@ test('Bowman: ECR-0423 is a fast-track candidate, and the signal says which test
   assert.doesNotMatch(signal('ECR-0423', { reportLevel: 1 }).why, /Post your Level/);
   const withStatement = signal('ECR-0423', { reportLevel: 1, statementCompany: 'II' });
   assert.equal(withStatement.candidate, true, withStatement.why);
-  assert.match(withStatement.why, /Norn takes the company class from your statement/);
+  assert.match(withStatement.why, /Fern takes the company class from your statement/);
 });
 
-test("a Class I statement makes the ECR no candidate: Norn's class decides, not the agent's", () => {
+test("a Class I statement makes the ECR no candidate: Fern's class decides, not the agent's", () => {
   const s = signal('ECR-0423', { reportLevel: 1, statementCompany: 'I' });
   assert.equal(s.candidate, false);
   assert.match(s.why, /current statement proposes Class I/);
@@ -119,7 +119,7 @@ test('the request is checked against the configuration before anything is sent',
     const r = prepareRequest(config, { answers: answers as never, regulatoryClass: 'minor', ...extra }, statement);
     return r.ok ? '' : r.message;
   };
-  assert.match(msg([{ testId: 'nope', holds: true, evidence: 'x' }]), /Nothing was sent to Norn: 'nope' is not one of the configuration's fast-track tests \(.*safety_part/);
+  assert.match(msg([{ testId: 'nope', holds: true, evidence: 'x' }]), /Nothing was sent to Fern: 'nope' is not one of the configuration's fast-track tests \(.*safety_part/);
   assert.match(msg([...ok, ...ok]), /'safety_part' is answered twice/);
   assert.match(msg([{ testId: 'safety_part', holds: false, evidence: '   ' }]), /has no evidence/);
   assert.match(msg([{ testId: 'faa_minor', holds: true, evidence: 'x' }]), /settled by the ECR's class, not by an answer/);
@@ -132,7 +132,7 @@ test('the request is checked against the configuration before anything is sent',
   assert.deepEqual(good.request.classes, { company: 'II', regulatory: 'minor' });
   assert.deepEqual(good.request.classSources, { company: 'statement', regulatory: 'agent' });
   const mine = prepareRequest(config, { answers: ok, companyClass: 'I', regulatoryClass: 'major' }, 'II');
-  assert.ok(mine.ok, "a class stricter than Norn's is the agent's to send");
+  assert.ok(mine.ok, "a class stricter than Fern's is the agent's to send");
   assert.deepEqual([mine.request.classes, mine.request.classSources], [{ company: 'I', regulatory: 'major' }, { company: 'agent_stricter', regulatory: 'agent' }]);
 });
 
@@ -141,7 +141,7 @@ test('classes are never filled in with the permissive value, and never more perm
   // no statement class at all: nothing to take, so the request is refused in words
   const none = prepareRequest(config, { answers: ok, regulatoryClass: 'minor' }, undefined);
   assert.ok(!none.ok);
-  assert.match(none.message, /Nothing was sent to Norn: Norn has no change class for this revision/);
+  assert.match(none.message, /Nothing was sent to Fern: Fern has no change class for this revision/);
   assert.match(none.message, /State the change class and the regulatory class, with evidence/);
   // a regulatory class left out: Norn has none of its own to use
   const noReg = prepareRequest(config, { answers: ok }, 'II');
@@ -165,13 +165,13 @@ test('classes are never filled in with the permissive value, and never more perm
   assert.notEqual(v.effect, 'allow');
 });
 
-test("Norn's company class is read from the current revision's newest statement at the highest level", () => {
+test("Fern's company class is read from the current revision's newest statement at the highest level", () => {
   const st = (id: number, level: number, prRevision: number, changeClass: string) => ({ id: BigInt(id), level, prRevision, changeClass });
   assert.equal(statementCompanyClass(config, [st(1, 1, 1, 'Class II')], 1), 'II');
   assert.equal(statementCompanyClass(config, [st(1, 1, 1, 'II')], 1), 'II');
   assert.equal(statementCompanyClass(config, [st(1, 1, 1, ' class i ')], 1), 'I');
   assert.equal(statementCompanyClass(config, [st(1, 1, 1, 'Unclassified')], 1), undefined);
-  assert.equal(statementCompanyClass(config, [st(1, 1, 1, 'Class II')], 2), undefined, "a statement of an earlier revision is not Norn's class now");
+  assert.equal(statementCompanyClass(config, [st(1, 1, 1, 'Class II')], 2), undefined, "a statement of an earlier revision is not Fern's class now");
   assert.equal(statementCompanyClass(config, [st(1, 1, 1, 'Class II'), st(2, 1, 1, 'Class I')], 1), 'I', 'the newest statement at that level');
   assert.equal(statementCompanyClass(config, [st(1, 2, 1, 'Class I'), st(2, 1, 1, 'Class II')], 1), 'I', 'the highest level wins');
   assert.deepEqual(resolveClasses(config, { company: '', regulatory: '' }, undefined), { ok: true, classes: { company: '', regulatory: '' }, sources: { company: 'none', regulatory: 'none' } });
@@ -189,7 +189,7 @@ test("the reducer's refusals are put in words an agent can act on", () => {
 test('no company configuration: the signal is false and says so; an unreadable one too', () => {
   const none = { db: { nornConfig: { key: { find: () => undefined } } } };
   const f = fastTrackField(none as never, { plmEcrNumber: 'BWM-ECR-0423' } as never, { kind: 'job', role: 'level1-writeup', actor: 'a', onBehalfOf: null });
-  assert.deepEqual(f, { candidate: false, why: 'No company configuration is stored in Norn, so there is no fast track to ask for.', tests: [] });
+  assert.deepEqual(f, { candidate: false, why: 'No company configuration is stored in Fern, so there is no fast track to ask for.', tests: [] });
   const bad = { db: { nornConfig: { key: { find: () => ({ value: '{' }) } } } };
   const g = fastTrackField(bad as never, { plmEcrNumber: 'BWM-ECR-0423' } as never, { kind: 'job', role: 'level1-writeup', actor: 'a', onBehalfOf: null });
   assert.equal(g.candidate, false);
@@ -208,7 +208,7 @@ test('the outcome is put in words: approved, held for a second check, recommende
   assert.match(approved.summary, /BWM-ECR-0423 is approved on the fast track/);
   const said = approved as unknown as { classes: { company: { id: string; source: string }; regulatory: { source: string } }; classesNote: string };
   assert.deepEqual([said.classes.company.id, said.classes.company.source, said.classes.regulatory.source], ['II', 'statement', 'agent']);
-  assert.match(said.classesNote, /Class II \(Norn's own, from the ECR's current statement\) and Minor \(yours/);
+  assert.match(said.classesNote, /Class II \(Fern's own, from the ECR's current statement\) and Minor \(yours/);
   const rec = (over: object) => ({ recommendation: { at, action: 'approve_fast_track_ecr', outcome: 'recommend', recipients: ['cm_analyst'], reasons: [{ rule: 'r', text: 'past a limit' }], decisionJson: detail({}), awaitingSecondCheck: false, ...over } as never });
   const held = outcomeOf(config, 'BWM-ECR-0423', row, rec({ outcome: 'sampled', awaitingSecondCheck: true }), undefined);
   assert.equal(held.decision, 'held_for_second_check');

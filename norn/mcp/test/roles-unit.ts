@@ -122,6 +122,6 @@ test('a level1-writeup credential still reads any ECR and any part, with every E
   const shared = JSON.parse(text(await t.get('get_part')!({ part: 'BW-5120-210' })));
   assert.deepEqual(shared.namedInEcrs, ['BWM-ECR-0417', 'BWM-ECR-0409']);
   const missing = await t.get('get_part')!({ part: 'nope' });
-  assert.match(text(missing), /^No part 'nope' in Norn\. Part numbers: /);
+  assert.match(text(missing), /^No part 'nope' in Fern\. Part numbers: /);
   assert.match(text(await t.get('get_ecr_history')!({ ecr: 'nope' })), /^No single ECR matches 'nope'\. ECRs: BWM-ECR-0409, BWM-ECR-0417\./);
 });

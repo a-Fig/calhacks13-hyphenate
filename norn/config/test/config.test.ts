@@ -180,7 +180,7 @@ describe("what Bowman's file takes from the dataset and how it says so", () => {
   it('says one thing about who decides the company class', () => {
     assert.equal(good.changeClasses.company.decidedBy, 'cm_analyst');
     const help = good.ecrForm.sections.flatMap((s) => s.fields).find((f) => f.kind === 'companyClass')!.help!;
-    assert.equal(help, 'Norn proposes a class; the CM analyst has the final say.');
+    assert.equal(help, 'Fern proposes a class; the CM analyst has the final say.');
   });
 
   it('avoids the git words that are never business words, and not "commit"', () => {
@@ -427,7 +427,7 @@ describe('a malformed file is rejected with the path of the bad field', () => {
 
   describe('the actions that would change the ERP can only be recommended (#71)', () => {
     const ERP = ['write_bom', 'update_standard_cost', 'draft_journal_entry', 'post_journal_entry'];
-    const cite = 'because Norn never writes to the ERP (#71)';
+    const cite = 'because Fern never writes to the ERP (#71)';
 
     it('refuses any level but recommend', () => {
       for (const action of ERP) {
@@ -465,7 +465,7 @@ describe('a malformed file is rejected with the path of the bad field', () => {
       }
     });
 
-    it('refuses the rule Bowman had before the decision, at every field that gives Norn the ERP', () => {
+    it('refuses the rule Bowman had before the decision, at every field that gives Fern the ERP', () => {
       const at = ruleIndex('update_standard_cost');
       const found = problems((c) => {
         c.autonomy.actions[at] = { action: 'update_standard_cost', level: 'approve_sampled', sampleRate: 0.5, limits: { maxCost: 150_000 }, otherwise: 'recommend', carriesOutApproval: true, why: 'x' };
@@ -530,11 +530,11 @@ describe('a malformed file is rejected with the path of the bad field', () => {
     assert.ok(found[0]!.includes('.sampleRate: expected a number above 0 and up to 1, got 1.5'));
   });
 
-  it('an ECR form without a field Norn reads', () => {
+  it('an ECR form without a field Fern reads', () => {
     const found = problems((c) => {
       c.ecrForm.sections[3].fields = [{ id: 'when', label: 'When', kind: 'date', required: 'submit' }];
     });
-    assert.deepEqual(found, ['ecrForm.sections: expected a field of kind "effectivity", because Norn\'s checks read it, got none']);
+    assert.deepEqual(found, ['ecrForm.sections: expected a field of kind "effectivity", because Fern\'s checks read it, got none']);
   });
 
   it('a choice field with no options', () => {
@@ -624,7 +624,7 @@ describe('a malformed file is rejected with the path of the bad field', () => {
     );
   });
 
-  it('a kind Norn reads that appears twice on the ECR form', () => {
+  it('a kind Fern reads that appears twice on the ECR form', () => {
     const next = good.ecrForm.sections[0]!.fields.length;
     assertOne(
       (c) => c.ecrForm.sections[0].fields.push({ id: 'priority_again', label: 'Priority again', kind: 'priority', required: 'submit' }),
@@ -933,7 +933,7 @@ describe("when the dataset's wording changes", () => {
   });
 });
 
-describe('Norn stays general', () => {
+describe('Fern stays general', () => {
   it('names no company in its source', () => {
     for (const name of readdirSync(SRC)) {
       assert.ok(!/bowman/i.test(readFileSync(join(SRC, name), 'utf8')), `${name} names a company`);

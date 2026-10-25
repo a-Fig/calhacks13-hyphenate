@@ -178,7 +178,7 @@ export function supplyCheck(baseline: Baseline, ecr: ChangeRequest, options: Sup
         id: 'plan:rawMaterialShare', label: 'Share of a part\'s price that a raw-material price break applies to', source: 'default', needsEstimate: true,
         dist: pert(D.rawMaterialShare.min, D.rawMaterialShare.mode, D.rawMaterialShare.max),
         ref: book.defaultInput('rawMaterialShare', 'Raw-material share of price', `${D.rawMaterialShare.min} to ${D.rawMaterialShare.max}, most likely ${D.rawMaterialShare.mode}`),
-        rationale: 'The share of a part\'s price that a raw-material price break applies to, PERT(40%, 60%, 80%). Nobody has stated it, so it needs an estimate (Norn default).',
+        rationale: 'The share of a part\'s price that a raw-material price break applies to, PERT(40%, 60%, 80%). Nobody has stated it, so it needs an estimate (Fern default).',
       })
     : null;
   if (rawVar) book.flags.push({ kind: 'needs_estimate', severity: 'warn', ref: rawVar, message: 'The raw-material share of a part\'s price is a default; a buyer should estimate it. It scales the price break the bundle earns.' });

@@ -11,8 +11,8 @@ export function askBaseUrl(): string {
   return (v || DEFAULT_URL).replace(/\/$/, '');
 }
 
-const SERVER_DOWN: AskRefusal = { ok: false, kind: 'unavailable', message: 'Ask Norn is unavailable: its server is not running here.' };
-const UNREADABLE: AskRefusal = { ok: false, kind: 'unavailable', message: 'Ask Norn is unavailable: its server sent a reply the page cannot read.' };
+const SERVER_DOWN: AskRefusal = { ok: false, kind: 'unavailable', message: 'Ask Fern is unavailable: its server is not running here.' };
+const UNREADABLE: AskRefusal = { ok: false, kind: 'unavailable', message: 'Ask Fern is unavailable: its server sent a reply the page cannot read.' };
 
 const isObject = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 const isStrings = (x: unknown): x is string[] => Array.isArray(x) && x.every(s => typeof s === 'string');
@@ -56,7 +56,7 @@ export async function askNorn(ecr: string, question: string, f: typeof fetch = f
     });
     return readAskResponse(await r.json()) ?? UNREADABLE;
   } catch (e) {
-    if (e instanceof DOMException && e.name === 'TimeoutError') return { ok: false, kind: 'failed', message: 'Norn took too long to answer. Try a narrower question.' };
+    if (e instanceof DOMException && e.name === 'TimeoutError') return { ok: false, kind: 'failed', message: 'Fern took too long to answer. Try a narrower question.' };
     return SERVER_DOWN;
   }
 }
