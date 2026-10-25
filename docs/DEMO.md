@@ -1,6 +1,6 @@
 # The demo: runbook
 
-How to bring up Norn's live stack for Bowman and walk the demo. Written 2026-10-24 (Sat evening).
+How to bring up Norn's live stack for Bowman and walk the demo. Written 2026-10-24 (Sat evening), updated 2026-10-25 03:30 PT.
 What is not yet on `main` is marked, with its PR.
 
 ## Before you start
@@ -43,10 +43,12 @@ in. It never writes to the ERP.
    40 s of Norn taking it in, its Impact assessment tab fills: unit cost, one-time cost, 12-month
    total as ranges, the drivers, the route ("Change Control Board, with Technical Review Committee
    review (p90 cost about 164,556 USD, above 150,000 USD)", seen 2026-10-24 on the live ERP) and a
-   recommendation. The same numbers are on its page in Norn's screens, each traceable.
+   recommendation that follows a stated rule (#112): send back on a blocker, approve with conditions
+   that name the gaps, otherwise approve. ECR-0417 gave "approve with conditions" on three live runs.
+   The same numbers are on its page in Norn's screens, each traceable.
 2. **ECR-0423, the closeout panel (fast track).** About $622 and no stated deadline, so Bowman's
    configuration lets Norn approve it on the fast track (one in five gets a blind second read). Norn's
-   ECR page shows it approved, with the reasons. *Needs the fast-track tool (`claude/fast-track-tool`)
+   ECR page shows "Approved on the fast track", with the reasons (#114). *Needs the fast-track tool (`claude/fast-track-tool`)
    and the Level 1 prompt calling it (`claude/level1-recommendation`); neither is on `main` yet.*
    The approval is Norn's; the PLM still shows the ECR as Submitted.
 3. **ECR-0419 and ECR-0421, the shared supplier.** Both need Orrin magnets, and Orrin has one
@@ -54,14 +56,16 @@ in. It never writes to the ERP.
    other, and the saving if both are qualified in one lot.
 4. **A released ECO and its ERP change package.** Approve an ECR in the PLM as the CCB chair. The PLM
    releases the ECO and links it back. Norn marks the ECR released and puts the ERP change package on
-   it: every line a person enters in the ERP, with exact values, and which are already entered.
+   it: every line a person enters in the ERP, with exact values, and which are already entered. The
+   ECR page shows the package, its counts and its problems (#114).
    *Needs `record_plm_decision` (`claude/plm-decision`); on `main` today a PLM approval records only
    the ECO number, so no package is built.*
 
 ## Known gaps (2026-10-24)
 
-- The Level 1 recommendation varied between two runs on the same inputs ("approve with conditions",
-  then "send back"). The lead session is making it follow a stated rule.
+- The ERP account Norn's key uses may still hold write grants: `bowman/erp/bootstrap.mjs` narrows its
+  role to read-only and has not been re-run since. Norn's code has no ERP write path either way.
+  Running it needs Tyler (it uses the ERP admin password).
 - The live `norn` database needs a worker started from `main` once, to store Bowman's company config.
   Until then the gate has no rules ("no config stored").
 - Nothing here has had a full dry run on `norn` yet.
