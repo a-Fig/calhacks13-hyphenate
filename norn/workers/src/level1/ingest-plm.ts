@@ -78,34 +78,79 @@ export async function readItem(opts: PlmOptions, name: string, itemOf: typeof It
   return { ...itemOf(r.change as Record<string, any>, r.modified), title: r.record.title || name, description: r.record.text.description, ...(decision ? { decision } : {}) };
 }
 
+/** The module took the decision but did not act on it (checks not done, baseline moved, the ECR edited in the PLM, ...): it is tried again until it does. */
+export class DecisionNotFollowed extends Error {}
+
+/** Whether Norn acted on the decision the PLM took: an approval releases the ECR (merged), a rejection closes it. */
+export type Followed = (plmEcrNumber: string, decision: PlmDecisionItem['decision']) => Promise<boolean>;
+
 /**
- * The PLM has decided the ECR: tell Norn who decided what, once per decision (and again when the ECO is linked, which is the
- * retry for a decision Norn could not follow at the time: the module logs why and moves nothing, and repeats nothing it
- * already did). Like `recordEcoOnly`, this is deliberately not `ingestOnce`: a decided ECR gets no new revision, re-check or agent.
+ * `Followed` from what Norn's ECR table says: an approval is followed once the ECR is merged (released), a rejection once it is
+ * closed. The table is a subscription, so the new status can land a moment after the reducer returns; wait briefly for it.
  */
-export async function recordDecision(R: Pick<Client['R'], 'recordPlmDecision'>, item: IngestItem, sent: Map<string, string>, log: (m: string) => void): Promise<void> {
+export const followedFrom = (statusOf: (plmEcrNumber: string) => string | undefined, waitMs = 1000, stepMs = 50): Followed => async (plm, decision) => {
+  const want = decision === 'approved' ? 'merged' : 'closed';
+  for (let waited = 0; ; waited += stepMs) {
+    if (statusOf(plm) === want) return true;
+    if (waited >= waitMs) return false;
+    await new Promise(r => setTimeout(r, stepMs));
+  }
+};
+
+/**
+ * The PLM has decided the ECR: tell Norn who decided what. The module follows the decision only when it can (and says why when
+ * it cannot, in the ECR's log), so a call that returns is not proof: `followed` reads what Norn did. The decision is remembered as
+ * delivered only once it is followed. Until then this throws `DecisionNotFollowed`, so the caller's retry sends it again with
+ * a fresh read of the ECR (the checks may have finished, or the baseline been re-checked, since). Like `recordEcoOnly`, this is
+ * deliberately not `ingestOnce`: a decided ECR gets no new revision, re-check or agent.
+ */
+export async function recordDecision(R: Pick<Client['R'], 'recordPlmDecision'>, item: IngestItem, sent: Map<string, string>, log: (m: string) => void, followed?: Followed): Promise<void> {
   const d = item.decision;
   if (!d) return;
   const key = `decision:${item.plmEcrNumber}`;
-  const value = `${d.decision}:${item.eco ?? ''}`;
-  if (sent.get(key) === value) return;
+  if (sent.get(key) === d.decision) return;
   try {
-    await withRetry(() => R.recordPlmDecision({ plmEcrNumber: item.plmEcrNumber, decision: d.decision, decidedBy: d.decidedBy, decidedOn: d.decidedOn, source: 'plm', sourceRef: item.sourceRef }), { idempotent: true, label: `record_plm_decision ${item.plmEcrNumber}` });
-    sent.set(key, value);
-    log(`${item.plmEcrNumber} ${d.decision} in the PLM by ${d.decidedBy}, reported to Norn`);
+    await withRetry(
+      () => R.recordPlmDecision({ plmEcrNumber: item.plmEcrNumber, decision: d.decision, decidedBy: d.decidedBy, decidedOn: d.decidedOn, changeRequestJson: JSON.stringify(item.changeRequest), source: 'plm', sourceRef: item.sourceRef }),
+      { idempotent: true, label: `record_plm_decision ${item.plmEcrNumber}` }
+    );
   } catch (e) {
     const c = classify(e);
-    if (c.name === 'SenderError') sent.set(key, value); // refused for good (an ECR Norn never opened): not retried every poll
+    if (c.name === 'SenderError') sent.set(key, d.decision); // refused for good (an ECR Norn never opened): not retried every poll
     log(`could not record ${item.plmEcrNumber}'s ${d.decision} decision: ${c.name}: ${c.message}`);
-    if (c.name !== 'SenderError') throw e; // transient: the watcher offers it again
+    if (c.name !== 'SenderError') throw e; // transient: the retry offers it again
+    return;
   }
+  if (followed && !(await followed(item.plmEcrNumber, d.decision))) {
+    const note = `${item.plmEcrNumber} ${d.decision} in the PLM by ${d.decidedBy}, but Norn has not followed it (the reason is in the ECR's log)`;
+    if (!unfollowedLogged.has(key)) log(note);
+    unfollowedLogged.add(key);
+    throw new DecisionNotFollowed(note);
+  }
+  unfollowedLogged.delete(key);
+  sent.set(key, d.decision);
+  log(`${item.plmEcrNumber} ${d.decision} in the PLM by ${d.decidedBy}, reported to Norn and followed`);
+}
+const unfollowedLogged = new Set<string>();
+
+/** A decided ECR: its decision, then the ECO it released (an ECR the PLM rejected has none). The ECO is recorded even while the decision is not followed yet. */
+export async function recordDecided(R: Pick<Client['R'], 'recordPlmDecision' | 'recordEcoRelease'>, item: IngestItem, sent: Map<string, string>, log: (m: string) => void, followed?: Followed): Promise<void> {
+  let pending: unknown;
+  try {
+    await recordDecision(R, item, sent, log, followed);
+  } catch (e) {
+    if (!(e instanceof DecisionNotFollowed)) throw e;
+    pending = e;
+  }
+  await recordEcoOnly(R, item, sent, log);
+  if (pending) throw pending;
 }
 
-/** A decided ECR: its decision, then the ECO it released (an ECR the PLM rejected has none). */
-export async function recordDecided(R: Pick<Client['R'], 'recordPlmDecision' | 'recordEcoRelease'>, item: IngestItem, sent: Map<string, string>, log: (m: string) => void): Promise<void> {
-  await recordDecision(R, item, sent, log);
-  await recordEcoOnly(R, item, sent, log);
-}
+/**
+ * Where a freshly read ECR goes, whichever path read it (start-up, retry, watcher): by the state of that read, never the state it
+ * was listed in. A decided ECR is only recorded, so it can never get a revision, a re-check or an agent; any other is reported.
+ */
+export const routed = (d: { report: (item: IngestItem) => Promise<void>; recordEco: (item: IngestItem) => Promise<void> }) => (item: IngestItem) => (item.decision ? d.recordEco(item) : d.report(item));
 
 /**
  * The PLM has decided the ECR: record the ECO it released, once, and nothing else. This is deliberately not `ingestOnce`:
@@ -247,19 +292,27 @@ export async function recoverEcos(names: string[], read: (name: string) => Promi
 export async function onChange(
   o: PlmIngestOptions,
   change: Pick<EcrListing, 'name' | 'workflowState'>,
-  d: { read: (name: string) => Promise<IngestItem>; report: (item: IngestItem) => Promise<void>; recordEco: (item: IngestItem) => Promise<void>; lock: EcrLock; retry: RetryQueue }
+  d: { read: (name: string) => Promise<IngestItem>; report: (item: IngestItem) => Promise<void>; recordEco: (item: IngestItem) => Promise<void>; lock: EcrLock; retry: RetryQueue; now?: () => number }
 ): Promise<void> {
   if (!wanted(o, change)) return;
   await d.lock(change.name, async () => {
     const item = await d.read(change.name);
-    if (DECIDED_STATES.includes(change.workflowState)) await d.recordEco(item);
-    else await d.report(item);
+    // Routed by what was just read: the listing's state may be older (an ECR approved between the listing and the read).
+    try {
+      await routed(d)(item);
+    } catch (e) {
+      if (e instanceof DecisionNotFollowed) {
+        d.retry.fail(change.name, (d.now ?? Date.now)()); // not an error to the watcher: the retry queue sends it again
+        return;
+      }
+      throw e;
+    }
     d.retry.done(change.name); // delivered fresh by the watcher: nothing left to retry
   });
 }
 
 /** Run until the process ends. */
-export async function runPlmIngest(R: Client['R'], log: (m: string) => void, deps: { ingestOnce: typeof IngestOnce; itemOf: typeof ItemOf }, o = plmIngestOptionsFromEnv()): Promise<void> {
+export async function runPlmIngest(R: Client['R'], log: (m: string) => void, deps: { ingestOnce: typeof IngestOnce; itemOf: typeof ItemOf; followed?: Followed }, o = plmIngestOptionsFromEnv()): Promise<void> {
   const opts = await plmOptionsFromEnv();
   mkdirSync(dirname(o.stateFile), { recursive: true });
   const sent = new Map<string, string>();
@@ -277,22 +330,19 @@ export async function runPlmIngest(R: Client['R'], log: (m: string) => void, dep
   const read = (name: string) => readItem(opts, name, deps.itemOf);
   const retry = new RetryQueue(o.intervalMs);
   const lock = ecrLock();
-  await takeIn(take.map(e => e.name), read, report, log, retry, Date.now, lock);
-  const recordEco = (item: IngestItem) => recordDecided(R, item, sent, log);
+  const recordEco = (item: IngestItem) => recordDecided(R, item, sent, log, deps.followed);
+  const deliver = routed({ report, recordEco });
+  await takeIn(take.map(e => e.name), read, deliver, log, retry, Date.now, lock);
+  // The decided ECRs: a decision the PLM took, or an ECO it linked, while this process was down is never delivered by the
+  // watcher, which starts from the newest stamp. Those that fail, or that Norn has not followed yet, join the retry queue,
+  // which sends them again with a fresh read and a growing wait.
   const decided = all.filter(e => wanted(o, e) && !startupWanted(o, e)).map(e => e.name);
-  let unrecovered = await recoverEcos(decided, read, recordEco, lock, log);
-  let recovering = false;
-  const recovery = setInterval(() => {
-    if (recovering) return;
-    if (!unrecovered.length) return clearInterval(recovery);
-    recovering = true;
-    recoverEcos(unrecovered, read, recordEco, lock, log).then(left => (unrecovered = left)).finally(() => (recovering = false));
-  }, o.intervalMs);
+  for (const name of await recoverEcos(decided, read, recordEco, lock, log)) retry.fail(name, Date.now());
   let retrying = false;
   setInterval(() => {
     if (retrying || retry.names.length === 0) return;
     retrying = true;
-    retryDue(retry, read, report, log, Date.now, lock).catch(e => log(`PLM retry: ${(e as Error).message}`)).finally(() => (retrying = false));
+    retryDue(retry, read, deliver, log, Date.now, lock).catch(e => log(`PLM retry: ${(e as Error).message}`)).finally(() => (retrying = false));
   }, o.intervalMs);
 
   const watcher = watchEcrs(

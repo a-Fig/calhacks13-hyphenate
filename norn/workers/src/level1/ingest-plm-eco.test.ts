@@ -9,7 +9,7 @@ import { SenderError } from 'spacetimedb';
 import { EcrWatcher } from '../../../connectors/plm/src/index.ts';
 import { ecrDoc, opts } from '../../../connectors/plm/test/fixture.ts';
 import { ingestOnce, itemOf } from '../ingest.ts';
-import { DECIDED_STATES, RetryQueue, ecrLock, onChange, plmIngestOptionsFromEnv, readItem, recordDecided, recoverEcos, startupWanted, wanted } from './ingest-plm.ts';
+import { DECIDED_STATES, DecisionNotFollowed, RetryQueue, ecrLock, followedFrom, onChange, plmIngestOptionsFromEnv, readItem, recordDecided, recoverEcos, retryDue, routed, startupWanted, takeIn, wanted, type Followed } from './ingest-plm.ts';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -29,8 +29,8 @@ function plm(first: Record<string, any>) {
 }
 
 /** What the real runPlmIngest wires: the real `onChange`, `ingestOnce` for undecided ECRs, `recordEcoOnly` for decided ones. */
-function harness() {
-  const calls: { method: string; plmEcrNumber: string; ecoNumber?: string; decision?: string; decidedBy?: string; decidedOn?: string; source?: string }[] = [];
+function harness(followed?: Followed) {
+  const calls: { method: string; plmEcrNumber: string; ecoNumber?: string; decision?: string; decidedBy?: string; decidedOn?: string; source?: string; changeRequestJson?: string }[] = [];
   // Anything but these two would be a dispatch or a re-check the decided ECR must not cause.
   const R = new Proxy({} as any, {
     get: (_t, method: string) => async (a: any) => { assert.ok(['ingestEcr', 'recordEcoRelease', 'recordPlmDecision'].includes(method), `unexpected call ${method}`); calls.push({ method, ...a }); },
@@ -39,8 +39,8 @@ function harness() {
   const sent = new Map<string, string>();
   const read = (name: string) => readItem(opts, name, itemOf);
   const report = async (item: any) => { await ingestOnce(R, { name: 'plm', list: async () => [item] }, sent, () => {}); };
-  const d = { read, report, recordEco: (item: any) => recordDecided(R, item, sent, () => {}), lock: ecrLock(), retry: new RetryQueue() };
-  return { calls, watcher: () => new EcrWatcher(opts, change => onChange(o, change, d), { since: '2026-01-01 00:00:00' }) };
+  const d = { read, report, recordEco: (item: any) => recordDecided(R, item, sent, () => {}, followed), lock: ecrLock(), retry: new RetryQueue() };
+  return { calls, R, sent, d, watcher: () => new EcrWatcher(opts, change => onChange(o, change, d), { since: '2026-01-01 00:00:00' }) };
 }
 
 test('an approved ECR records the PLM decision, and the later link to its ECO the ECO release, and nothing else', async () => {
@@ -58,9 +58,8 @@ test('an approved ECR records the PLM decision, and the later link to its ECO th
   assert.deepEqual(h.calls.map((c) => [c.method, c.plmEcrNumber, c.ecoNumber, c.decision, c.decidedBy]), [
     ['ingestEcr', 'ECR-0001', undefined, undefined, undefined],
     ['recordPlmDecision', 'ECR-0001', undefined, 'approved', 'rafael@acme.test'],
-    ['recordPlmDecision', 'ECR-0001', undefined, 'approved', 'rafael@acme.test'],
     ['recordEcoRelease', 'ECR-0001', 'ECO-0001', undefined, undefined],
-  ], 'ingest_ecr once, for the Submitted ECR; the approval records the decision; the ECO link repeats it (a no-op for the module, and the retry for a decision Norn could not follow) and adds the release');
+  ], 'ingest_ecr once, for the Submitted ECR; the approval records the decision (once it is followed, it is not sent again); the ECO link adds the release');
   assert.equal(h.calls[1]!.decidedOn, '2026-10-02 10:30:16.000000');
   assert.equal(h.calls[1]!.source, 'plm');
 });
@@ -144,4 +143,114 @@ test('at start-up, a decision or an ECO from while the process was down is recor
   assert.deepEqual(calls, ['ECR-1:ECO-1', 'ECR-4:ECO-4', 'ECR-5:undefined'], 'only ECRs with an ECO or a decision, and past the one that failed');
   assert.ok(logs.some((l) => l.includes('ECR-2') && l.includes('PLM 500')), logs.join(' | '));
   assert.deepEqual(failed, ['ECR-2'], 'the failed one is handed back to be tried again');
+});
+
+// ---- what the review of #129 found ------------------------------------------------------------------------------
+
+const decidedItem = (extra: Record<string, any> = {}) => ({ plmEcrNumber: 'ECR-1', title: 't', description: '', changeRequest: { id: 'ECR-1', qty: 2 }, sourceRef: 'x', decision: { decision: 'approved', decidedBy: 'a@b', decidedOn: 'now' }, ...extra }) as any;
+
+test('an approval Norn has not followed is not remembered as delivered: it is sent again, and remembered once it is followed', async () => {
+  const sent = new Map<string, string>();
+  const calls: string[] = [];
+  const R = { recordPlmDecision: async () => { calls.push('decision'); }, recordEcoRelease: async () => { calls.push('eco'); } } as any;
+  let merged = false; // the checks finish between the tries
+  const followed: Followed = async () => merged;
+  const item = decidedItem({ eco: 'ECO-1' });
+  await assert.rejects(recordDecided(R, item, sent, () => {}, followed), DecisionNotFollowed);
+  assert.equal(sent.has('decision:ECR-1'), false, 'not cached');
+  assert.equal(sent.get('eco:ECR-1'), 'ECO-1', 'the ECO number the PLM issued is still recorded');
+  await assert.rejects(recordDecided(R, item, sent, () => {}, followed), DecisionNotFollowed);
+  merged = true;
+  await recordDecided(R, item, sent, () => {}, followed);
+  assert.equal(sent.get('decision:ECR-1'), 'approved');
+  await recordDecided(R, item, sent, () => {}, followed);
+  assert.deepEqual(calls, ['decision', 'eco', 'decision', 'decision'], 'sent on every try until followed, then not again; the ECO once');
+});
+
+test('the watcher queues an unfollowed approval for retry instead of failing, and the retry delivers it once Norn follows', async () => {
+  plm({ ...ecrDoc(), workflow_state: 'Approved', modified_by: 'rafael@acme.test' });
+  let merged = false;
+  const h = harness(async () => merged);
+  await onChange(plmIngestOptionsFromEnv({}), { name: 'ECR-0001', workflowState: 'Approved' }, { ...h.d, now: () => 0 });
+  assert.equal(h.d.retry.has('ECR-0001'), true, 'queued');
+  assert.deepEqual(h.calls.map((c) => c.method), ['recordPlmDecision']);
+  const read = (name: string) => readItem(opts, name, itemOf);
+  const deliver = routed({ report: h.d.report, recordEco: h.d.recordEco });
+  const early = await retryDue(h.d.retry, read, deliver, () => {}, () => 10_000, h.d.lock);
+  assert.deepEqual(early.retrying, ['ECR-0001'], 'still not followed: stays queued');
+  merged = true;
+  const late = await retryDue(h.d.retry, read, deliver, () => {}, () => 100_000, h.d.lock);
+  assert.deepEqual(late.taken, ['ECR-0001']);
+  assert.equal(h.d.retry.has('ECR-0001'), false);
+  assert.deepEqual(h.calls.map((c) => c.method), ['recordPlmDecision', 'recordPlmDecision', 'recordPlmDecision'], 'sent on every try until followed; never ingest_ecr');
+});
+
+test('followedFrom: an approval is followed when the ECR is merged, a rejection when it is closed, and it waits for the table to catch up', async () => {
+  let status: string | undefined = 'draft';
+  const followed = followedFrom(() => status, 200, 10);
+  assert.equal(await followed('ECR-1', 'approved'), false);
+  assert.equal(await followed('ECR-1', 'rejected'), false);
+  setTimeout(() => (status = 'merged'), 40);
+  assert.equal(await followed('ECR-1', 'approved'), true, 'a status that lands a moment after the reducer returns');
+  assert.equal(await followed('ECR-1', 'rejected'), false);
+  status = 'closed';
+  assert.equal(await followed('ECR-1', 'rejected'), true);
+});
+
+test('the decision carries the change request Norn would have stored for the PLM content, so an unseen edit cannot ride on an approval', async () => {
+  const h = harness();
+  const seen = plm(ecrDoc());
+  const submitted = await readItem(opts, 'ECR-0001', itemOf);
+  const approvedSame: Record<string, any> = { ...seen.doc, workflow_state: 'Approved', modified: '2026-10-24 21:01:00.000000', modified_by: 'rafael@acme.test' };
+  seen.doc = approvedSame;
+  const same = await readItem(opts, 'ECR-0001', itemOf);
+  assert.equal(JSON.stringify(same.changeRequest), JSON.stringify(submitted.changeRequest), 'approving changes nothing the checks read, so the digest matches the one ingest_ecr stored');
+  const edited = structuredClone(approvedSame);
+  edited.bom_changes[0].qty_to = 200;
+  seen.doc = edited;
+  const changed = await readItem(opts, 'ECR-0001', itemOf);
+  await recordDecided(h.R, same, new Map(), () => {});
+  await recordDecided(h.R, changed, new Map(), () => {});
+  const sentJson = h.calls.filter((c) => c.method === 'recordPlmDecision').map((c) => c.changeRequestJson);
+  assert.equal(sentJson[0], JSON.stringify(submitted.changeRequest));
+  assert.notEqual(sentJson[1], sentJson[0], 'the edit shows in what the module compares');
+});
+
+// A decided ECR is routed by the state of the read that delivers it, whichever path read it.
+function racing() {
+  const calls: string[] = [];
+  const decided = decidedItem({ decision: { decision: 'rejected', decidedBy: 'a@b', decidedOn: 'now' } });
+  const report = async () => void calls.push('ingestEcr');
+  const recordEco = async () => void calls.push('recordDecided');
+  return { calls, decided, report, recordEco, deliver: routed({ report, recordEco }) };
+}
+
+test('start-up take-in: an ECR listed as undecided but read as decided is only recorded', async () => {
+  const r = racing();
+  await takeIn(['ECR-1'], async () => r.decided, r.deliver, () => {});
+  assert.deepEqual(r.calls, ['recordDecided']);
+});
+
+test('a queued retry whose fresh read says decided is only recorded', async () => {
+  const r = racing();
+  const retry = new RetryQueue(1);
+  retry.fail('ECR-1', 0);
+  await retryDue(retry, async () => r.decided, r.deliver, () => {}, () => 5, ecrLock());
+  assert.deepEqual(r.calls, ['recordDecided']);
+});
+
+test('the watcher: a Submitted listing whose read says Rejected is only recorded', async () => {
+  const r = racing();
+  await onChange(plmIngestOptionsFromEnv({}), { name: 'ECR-1', workflowState: 'Submitted' }, { read: async () => r.decided, report: r.report, recordEco: r.recordEco, lock: ecrLock(), retry: new RetryQueue() });
+  assert.deepEqual(r.calls, ['recordDecided']);
+});
+
+test('an undecided read is still reported, by every path', async () => {
+  const calls: string[] = [];
+  const open = decidedItem({ decision: undefined });
+  const report = async () => void calls.push('ingestEcr');
+  const recordEco = async () => void calls.push('recordDecided');
+  await takeIn(['ECR-1'], async () => open, routed({ report, recordEco }), () => {});
+  await onChange(plmIngestOptionsFromEnv({}), { name: 'ECR-1', workflowState: 'Submitted' }, { read: async () => open, report, recordEco, lock: ecrLock(), retry: new RetryQueue() });
+  assert.deepEqual(calls, ['ingestEcr', 'ingestEcr']);
 });

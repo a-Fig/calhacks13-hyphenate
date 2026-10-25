@@ -131,10 +131,15 @@ the entry module and importing it back would deadlock on its top-level await.
 **A decision in the PLM is mirrored, never re-assessed.** An ECR in state Approved or Rejected is not taken in
 through `ingest_ecr`, and no check or Level 1 run starts for it. The ingest reports it once with
 `record_plm_decision` (approver: the ECO's `released_by`, else the ECR's `modified_by`; date: `decided_on`),
-and then, for an Approved ECR with an ECO, `record_eco_release` as before. Norn follows the decision only
-where it can: an approval on an ECR whose checks are not done, whose baseline moved, or that is closed is
-logged as "not followed" and changes nothing. A restart or a repeat sends nothing new, and `recoverEcos` also
-recovers decisions the first attempt missed. `npm run check:decision` (scratch database) covers the module side.
+and then, for an Approved ECR with an ECO, `record_eco_release` as before. The decision carries the change
+request as the PLM holds it now, and the module compares it with the revision it assessed. Norn follows the
+decision only where it can: an approval on an ECR whose checks are not done, whose baseline moved, that is
+closed, or that was edited in the PLM after Norn assessed it, is logged as "not followed" and changes nothing.
+The ingest then reads the ECR's status (a subscription to the ECR table) and counts the decision as delivered
+only once the ECR is merged (approval) or closed (rejection); until then it stays in the retry queue and is
+sent again, with a fresh read, on the usual doubling wait. Every delivery path (start-up, retry, watcher,
+recovery) routes by the state of the fresh read, so a decided ECR never reaches `ingest_ecr`. `recoverEcos`
+also recovers decisions the first attempt missed. `npm run check:decision` (scratch database) covers the module side.
 
 ## Helpers
 

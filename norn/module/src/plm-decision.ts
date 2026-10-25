@@ -9,8 +9,16 @@
 // company's approval matrix (gate.ts) governs what Norn and its agents may decide, not what the board
 // decided elsewhere. An agent that works under a job scope is held out by the job-scope rule (scope.ts)
 // before this one is asked; an outside agent (origin 'external') and a connection that has not said who
-// it is are refused here. So no agent can use this reducer to approve: the approver it records is always
+// it is are refused here. An agent never approves in its own name: the approver it records is always
 // the person the PLM names, never the caller.
+//
+// What this does not do is prove who is calling. Every principal is self-declared through register_actor until real
+// authentication lands (#34, schema.ts), so a connection that registers as an agent with origin 'norn', or as a person, passes
+// this rule. That is the same weakness the ordinary path already has: a connection that registers as the person the company's
+// approval matrix names (Bowman's CFO, say) can approve through set_pr_status, and one registered as the CM analyst can then
+// release it (check:gate does exactly that). This reducer adds no new kind of hole, but it does not close that one either. The
+// two differences: it needs no matching name (any registered person, or a 'norn' agent, may report), and it has no tier or cost
+// measure to meet. It does check that the ECR is the one Norn assessed (its content digest) and that Norn's checks are done.
 import { POLICY_RULES, type PolicyRule } from './core';
 import type { CompanyConfig } from '../../config/src/schema';
 

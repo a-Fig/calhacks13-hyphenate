@@ -25,7 +25,7 @@ import { hashOf, type EcoRelease } from '../../connectors/erpnext/src/index.ts';
 import { BaselineStore, type BaselineSource } from './baseline.ts';
 import { DB, connect, subscribe, withRetry, type Who } from './connect.ts';
 import { ingestOnce, stubSource, type IngestItem } from './ingest.ts';
-import { recordDecided } from './level1/ingest-plm.ts';
+import { DecisionNotFollowed, followedFrom, recordDecided } from './level1/ingest-plm.ts';
 import { packageOnce, type Planner } from './package.ts';
 import { TABLES, kit, recorder, rejects } from './testkit.ts';
 
@@ -66,13 +66,23 @@ const dana = await as('person', 'Dana Okafor', 'human');
 const outsider = await as('agent', 'check-decision-outsider', 'external', 'Dana Okafor'); // a person's own agent
 const scoped = await as('agent', 'check-decision-job', 'norn'); // one of Norn's agents, held to a job's scope
 await subscribe(A.conn, [...TABLES, 'SELECT * FROM ecr_revision', 'SELECT * FROM baseline_snapshot', 'SELECT * FROM approval', 'SELECT * FROM eco_release', 'SELECT * FROM erp_package']);
-const { R, db, until, holds, pr, runs, current, logs, mainNow, newPr, allCodeDone } = kit(A);
+const { R, db, until, holds, pr, runs, current, logs, mainNow, allCodeDone } = kit(A);
+// An ECR as the ingest files it: with the change request Norn assesses (the decision is checked against it).
+const newPr = async (title: string, number: string) => {
+  await R.ingestEcr({ plmEcrNumber: number, title, description: 'check', changeRequestJson: JSON.stringify({ id: number }), source: 'check', sourceRef: 'check' });
+  return until(() => [...db.pullRequest.iter()].find(p => p.plmEcrNumber === number), 5000, `ECR ${number} to be filed`);
+};
 console.log(`checking database '${DB}'`);
 
 const approvals = (prId: bigint) => [...db.approval.iter()].filter(a => a.prId === prId).sort((a, b) => Number(a.id - b.id));
 const decisionLogs = (prId: bigint) => logs(l => l.prId === prId && l.reducer === 'record_plm_decision' && /^(approved|rejected) in /.test(l.summary)); // not the re-check rows the release logs on other ECRs
-const report = (who: typeof A, number: string, decision: string, decidedBy = RAFAEL) =>
-  who.R.recordPlmDecision({ plmEcrNumber: number, decision, decidedBy, decidedOn: DECIDED_ON, source: 'plm', sourceRef: `check@${DECIDED_ON}` });
+// The change request as Norn last stored it: what the PLM holds when nobody has edited the ECR since Norn read it.
+const storedJson = (number: string) => {
+  const found = [...db.pullRequest.iter()].find(p => p.plmEcrNumber === number);
+  return [...db.ecrRevision.iter()].find(r => r.prId === found?.id && r.current)?.changeRequestJson ?? '{}';
+};
+const report = (who: typeof A, number: string, decision: string, decidedBy = RAFAEL, changeRequestJson = storedJson(number)) =>
+  who.R.recordPlmDecision({ plmEcrNumber: number, decision, decidedBy, decidedOn: DECIDED_ON, changeRequestJson, source: 'plm', sourceRef: `check@${DECIDED_ON}` });
 // A refusal is logged without an ECR (the call names it by its PLM number, not by id), so it is found by who was refused.
 const denied = (name: string) => logs(l => l.reducer === 'record_plm_decision' && l.outcome === 'denied' && l.actorName === name);
 const statusIs = (id: bigint, s: string) => until(() => pr(id).status === s || undefined, 5000, `ECR ${id} to be ${s}`);
@@ -164,6 +174,39 @@ try {
   await statusIs(stranger.id, 'merged');
   check("an approver the company's people do not include is recorded under the PLM login, not as someone else", approvals(stranger.id).at(-1)?.approverName === 'visitor@plm.example' && JSON.parse(approvals(stranger.id).at(-1)!.decisionJson).person === null, approvals(stranger.id).at(-1)?.approverName);
 
+  // ---- an ECR a person edited in the PLM after Norn read it -----------------------------------------------
+  const p7 = await newPr('check: edited in the PLM, then approved before Norn read the edit', 'ECR-D7');
+  await allCodeDone(p7.id);
+  const edited = JSON.stringify({ ...JSON.parse(storedJson('ECR-D7')), justification: 'edited in the PLM after Norn assessed it' });
+  await report(A, 'ECR-D7', 'approved', RAFAEL, edited);
+  await until(() => decisionLogs(p7.id).length === 1 || undefined, 5000, 'the log row for the stale approval');
+  const l7 = decisionLogs(p7.id)[0]!;
+  check('an approval of content Norn did not assess is not followed: logged with why, the ECR stays unreleased', pr(p7.id).status === 'draft' && approvals(p7.id).length === 0 && l7.outcome === 'downgraded' && /did not follow it: the ECR changed in the PLM after Norn assessed it/.test(l7.summary), `${pr(p7.id).status}; ${l7.summary}`);
+  await report(A, 'ECR-D7', 'approved', RAFAEL, edited);
+  await holds(() => false, 300);
+  check('the same stale approval again adds no log row', decisionLogs(p7.id).length === 1, `${decisionLogs(p7.id).length} row(s)`);
+  await report(A, 'ECR-D7', 'rejected', RAFAEL, edited);
+  await statusIs(p7.id, 'closed');
+  check('a rejection needs no such match: it only closes', pr(p7.id).status === 'closed', pr(p7.id).status);
+  const p8 = await newPr('check: approved with the content Norn assessed, after an earlier stale approval', 'ECR-D8');
+  await allCodeDone(p8.id);
+  await report(A, 'ECR-D8', 'approved', RAFAEL, edited.replace('ECR-D7', 'ECR-D8'));
+  await until(() => decisionLogs(p8.id).length === 1 || undefined, 5000, 'the log row for the stale approval on ECR-D8');
+  await report(A, 'ECR-D8', 'approved');
+  await statusIs(p8.id, 'merged');
+  check('the same ECR, approved with the content Norn assessed, is released', approvals(p8.id).at(-1)?.status === 'released', pr(p8.id).status);
+
+  // ---- the ingest does not remember an approval Norn did not follow ----------------------------------------------
+  const p9 = await newPr('check: approved before its checks finished, then they finish', 'ECR-D9');
+  const sentD9 = new Map<string, string>();
+  const followed = followedFrom(plm => [...db.pullRequest.iter()].find(p => p.plmEcrNumber === plm)?.status, 2000);
+  const d9: IngestItem = { plmEcrNumber: 'ECR-D9', title: p9.title, description: '', changeRequest: JSON.parse(storedJson('ECR-D9')), sourceRef: 'check', eco: 'ECO-D9', decision: { decision: 'approved', decidedBy: RAFAEL, decidedOn: DECIDED_ON } };
+  const firstTry = await recordDecided(R, d9, sentD9, () => {}, followed).then(() => undefined, e => e);
+  check('the ingest sees that Norn did not follow the approval, does not remember it as delivered, and still records the ECO number', firstTry instanceof DecisionNotFollowed && !sentD9.has('decision:ECR-D9') && sentD9.get('eco:ECR-D9') === 'ECO-D9' && pr(p9.id).status === 'draft', `${firstTry?.message}; ${pr(p9.id).status}`);
+  await allCodeDone(p9.id);
+  await recordDecided(R, d9, sentD9, () => {}, followed);
+  check('sent again once the checks have finished, the approval is followed and then remembered', pr(p9.id).status === 'merged' && sentD9.get('decision:ECR-D9') === 'approved', pr(p9.id).status);
+
   // ---- phase 2: a real ECR, assessed by a worker, decided in the PLM, packaged ---------------------------------
   worker = spawn(process.execPath, ['--import', 'tsx', 'src/worker.ts'], {
     cwd: WORKERS,
@@ -185,8 +228,8 @@ try {
   const item: IngestItem = { plmEcrNumber: e417.id, title: e417.title, description: '', changeRequest: e417, sourceRef: 'check', eco: ECO, decision: { decision: 'approved', decidedBy: RAFAEL, decidedOn: DECIDED_ON } };
   const calls: string[] = [];
   const counted = new Proxy(R, { get: (t, m: string) => (m === 'ingestEcr' ? () => { throw new Error('a decided ECR must not be ingested'); } : (a: any) => (calls.push(m), (t as any)[m](a))) }) as typeof R;
-  await recordDecided(counted, item, sent, quiet);
-  await recordDecided(counted, item, sent, quiet);
+  await recordDecided(counted, item, sent, quiet, followed);
+  await recordDecided(counted, item, sent, quiet, followed);
   await statusIs(real.id, 'merged');
   const eco = await until(() => db.ecoRelease.prId.find(real.id) ?? undefined, 5000, 'the ECO number');
   check('the ingest reports an approved ECR once, then its ECO once, with no new revision of the ECR', calls.join(',') === 'recordPlmDecision,recordEcoRelease' && eco.ecoNumber === ECO && [...db.ecrRevision.iter()].filter(r => r.prId === real.id).length === revs, calls.join(','));
