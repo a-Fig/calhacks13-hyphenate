@@ -10,7 +10,17 @@ const { check, finish } = recorder();
 const open = (name: string, kind: 'agent' | 'person', origin: 'norn' | 'external' | 'human', onBehalfOf?: string) =>
   connect<TestConn>({ kind, name, origin, onBehalfOf, spawnedBy: 'Norn' }, { persistToken: false, quiet: true, bindings: TestBindings, database: process.env.NORN_DB ?? 'norn-test' });
 
+const DB = process.env.NORN_DB ?? 'norn-test';
 const A = await open('policy-a', 'agent', 'norn');
+// The rules these checks exercise live only in the test module. On a database published from the real module the calls
+// still succeed, so the checks would fail on the company gate's "allow" (#159); say what is wrong instead.
+try {
+  await (A.R as unknown as { failAfterWrite: (a: { mode: string }) => Promise<void> }).failAfterWrite({ mode: 'ok' });
+} catch (e) {
+  console.error(`'${DB}' does not run the test module (${(e as Error).message}). check:policy needs its test rules: publish it with\n  spacetime publish ${DB} --no-config --module-path module-test --server local --delete-data=always --yes   (from norn/; npm run test-db:publish does this for norn-test)`);
+  A.close();
+  process.exit(1);
+}
 const X = await open('policy-external', 'agent', 'external', 'Tyler');
 const D = await open('test-downgrader', 'agent', 'norn');
 await subscribe(A.conn, TABLES);

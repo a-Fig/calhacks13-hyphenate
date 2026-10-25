@@ -20,4 +20,13 @@ export const SEATS: Record<string, { role: string; person: string }> = {
   manufacturing_engineer: { role: 'Manufacturing', person: 'Owen Tillery' },
 };
 
-export const personOf = (emp: string | undefined) => (emp ? PEOPLE[emp] ?? emp : '');
+// A PLM login is the person's address (first.last@...); its local part, letters only, matches their name the same way.
+const squash = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
+const BY_LOGIN = new Map(Object.values(PEOPLE).map(name => [squash(name), name]));
+
+/** The person behind an employee id or a PLM login; a login that matches nobody is shown as it is. */
+export const personOf = (emp: string | undefined) => {
+  if (!emp) return '';
+  if (PEOPLE[emp]) return PEOPLE[emp];
+  return emp.includes('@') ? BY_LOGIN.get(squash(emp.split('@')[0]!)) ?? emp : emp;
+};

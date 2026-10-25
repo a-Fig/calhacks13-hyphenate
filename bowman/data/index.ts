@@ -7,6 +7,7 @@ import { mbom } from './mbom.ts';
 import { history } from './history.ts';
 import { ecrs, ncrs } from './changes.ts';
 import { demoScenarios, scenarioProv } from './scenarios.ts';
+import { finance } from './finance.ts';
 import { INV, inv, src } from './prov.ts';
 
 // The Bowman dataset: single source of truth for the PLM and ERPNext seeds.
@@ -25,6 +26,7 @@ export const bowman: Dataset = {
     mbom: inv('Derived in code (mbom.ts) from the engineering BOM: the top level regrouped into build stations; everything below is shared. The station split and hours are invented.'),
     ecrs: src('docs/IN-PRACTICE.md §1; docs/research/practice-impact-assessment.md §1a', 'ECP fields follow DD Form 1692 / MIL-HDBK-61A Table 6-6; per-record provenance says what else is sourced.'),
     history: INV,
+    finance: inv('Invented books for the fictional company; each record carries its own rationale. Not in the ERP seed.'),
   },
   company,
   sites,
@@ -48,4 +50,5 @@ export const bowman: Dataset = {
   ncrs,
   ecrs,
   demoScenarios,
+  finance,
 };
