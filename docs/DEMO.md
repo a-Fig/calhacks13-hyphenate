@@ -109,6 +109,11 @@ The suggestion: rehearse on **ECR-0412** (urgent, already In CM Review, so one s
 and approve **ECR-0417** live at the end of the demo, so the one ECR goes end to end. The rest of the rehearsal
 changes nothing that cannot be repeated: a rerun is the command list above again.
 
+**Placeholder, a live filing (#161's beat 4, #171).** If Tyler keeps the beat where a judge files a new ECR and Norn
+assesses or fast-tracks it in about 35 s **[confirm]**, the rerun also needs: a ready-to-file ECR in the PLM (the
+template, its fields, and whose login files it), the time from Submit to the statement in the PLM, measured on the
+rerun, and a note that each live filing takes the next ECR number, for good. Not written yet (2026-10-25).
+
 ## Known gaps (2026-10-25)
 
 - **#123** (Level 1 timeline and supply in the statement) is not on `main` yet: until it is, PLM statements carry
