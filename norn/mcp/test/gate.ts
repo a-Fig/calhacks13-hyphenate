@@ -99,6 +99,54 @@ const asm = await call(A, 'list_assumptions', { ecr: 'BWM-ECR-0417' });
 const bySource = Object.fromEntries((asm.json?.assumptions ?? []).map((a: any) => [a.key, a.source]));
 check('list_assumptions: baseline plus the ECR\'s own, each with its source', bySource.tooling_cost_usd === 'given' && bySource.scrap_rate === 'default' && bySource.requalification_weeks === 'agent_estimated' && bySource.titanium_price_usd_per_kg === 'given', JSON.stringify(bySource));
 
+// ---- an ask-norn credential: five read tools, this ECR only -----------------------------------------
+{
+  const Q = await connect(entryFor(`agent:norn/ask/${stamp}`, ['BWM-ECR-0417'], { role: 'ask-norn', jobId: `ask-${stamp}` }));
+  const offered = (await Q.listTools()).tools.map(t => t.name).sort();
+  check('ask-norn: offered exactly get_ecr, get_ecr_history, get_impact, get_part and list_assumptions', offered.join(',') === 'get_ecr,get_ecr_history,get_impact,get_part,list_assumptions', offered.join(', '));
+  const own = await call(Q, 'get_ecr', { ecr: 'BWM-ECR-0417' });
+  const ownImpact = await call(Q, 'get_impact', { ecr: 'ECR-0417' });
+  const ownAsm = await call(Q, 'list_assumptions', { ecr: 'BWM-ECR-0417' });
+  const ownHistory = await call(Q, 'get_ecr_history', { ecr: 'BWM-ECR-0417' });
+  check('ask-norn: reads its own ECR (get_ecr, get_impact, list_assumptions, get_ecr_history)', own.json?.ecr === 'BWM-ECR-0417' && ownImpact.json?.state === 'current' && ownAsm.json?.assumptions?.length > 0 && ownHistory.json?.ecr === 'BWM-ECR-0417');
+  const others = [
+    await call(Q, 'get_ecr', { ecr: 'BWM-ECR-0418' }),
+    await call(Q, 'get_impact', { ecr: 'BWM-ECR-0418' }),
+    await call(Q, 'list_assumptions', { ecr: 'BWM-ECR-0418' }),
+    await call(Q, 'get_ecr_history', { ecr: 'ECR-0418' }),
+  ];
+  check('ask-norn: every read of another ECR is refused, and the refusal does not name the others', others.every(r => r.isError && /can read only BWM-ECR-0417/.test(r.text) && !r.text.includes('0419')), others.map(r => r.text.slice(0, 50)).join(' | '));
+  // The seeded ECRs name no part number, so on the seed every part is outside the scoped ECR; the path for a part that is on it is in test/roles-unit.ts.
+  const ownParts: string[] = own.json?.affectedParts?.map((p: any) => p.partNumber) ?? [];
+  const everyPart = [...norn.db.part.iter()].map(p => p.partNumber);
+  const seen = await Promise.all(everyPart.map(async n => ({ n, r: await call(Q, 'get_part', { part: n }), viaLevel1: await call(A, 'get_part', { part: n }) })));
+  check(
+    'ask-norn: get_part answers for a part on its ECR and refuses every other, while a level1-writeup credential still reads all of them',
+    seen.length > 0 && seen.every(s => !s.viaLevel1.isError && (ownParts.includes(s.n) ? !s.r.isError && s.r.json?.namedInEcrs?.every((e: string) => e === 'BWM-ECR-0417') : s.r.isError && /can read only parts on the change request or BOM delta of BWM-ECR-0417/.test(s.r.text))),
+    `${seen.length} parts, ${ownParts.length} on the ECR`
+  );
+  const commentsBefore = [...norn.db.comment.iter()].length;
+  const assumptionsBefore = [...norn.db.assumption.iter()].length;
+  const attempts = await Promise.all(
+    [
+      ['list_ecrs', {}],
+      ['add_comment', { ecr: 'BWM-ECR-0417', body: `ask-norn must not write ${stamp}` }],
+      ['propose_assumption', { ecr: 'BWM-ECR-0417', key: 'scrap_rate', value: 0.5, rationale: 'x', sources: ['x'] }],
+      ['request_fast_track_approval', { ecr: 'BWM-ECR-0417', answers: [{ testId: 't', holds: true, evidence: 'x' }] }],
+    ].map(async ([name, args]) => {
+      try {
+        const r = (await Q.callTool({ name: name as string, arguments: args as Record<string, unknown> })) as { isError?: boolean };
+        return !!r.isError;
+      } catch {
+        return true; // the server answered with an error: the tool is not there
+      }
+    })
+  );
+  await sleep(300);
+  check('ask-norn: list_ecrs and the write tools are refused, and nothing was written', attempts.every(Boolean) && [...norn.db.comment.iter()].length === commentsBefore && [...norn.db.assumption.iter()].length === assumptionsBefore, attempts.join(','));
+  await Q.close();
+}
+
 // a comment inside the scope
 const c1 = await call(A, 'add_comment', { ecr: 'BWM-ECR-0417', body: `gate check ${stamp}: reading the impact numbers` });
 const row1 = c1.json ? logRow(c1.json.actionLogEntry) : undefined;

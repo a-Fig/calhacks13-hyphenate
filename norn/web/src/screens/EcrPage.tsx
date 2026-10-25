@@ -9,6 +9,7 @@ import { WhyContext } from '../ui/Evidence.tsx';
 import { WhyPanel } from '../ui/WhyPanel.tsx';
 import { dayLabel } from '../ui/fmt.ts';
 import { Link, navigate } from '../router.tsx';
+import { AskNorn } from './AskNorn.tsx';
 import { Changes } from './Changes.tsx';
 import { Conversation } from './Conversation.tsx';
 import { Impact } from './Impact.tsx';
@@ -110,6 +111,7 @@ function AssessmentView({ a, tab, check }: { a: ImpactAssessment; tab: Tab; chec
         {tab === 'impact' && <Impact a={a} check={check} />}
         {tab === 'changes' && <Changes a={a} />}
         {tab === 'revisions' && <Revisions a={a} />}
+        {(tab === 'conversation' || tab === 'impact') && <AskNorn a={a} />}
       </main>
 
       {stack.length > 0 && (
