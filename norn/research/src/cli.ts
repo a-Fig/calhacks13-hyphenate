@@ -20,6 +20,7 @@ import { AgentOutputError, buildResearchJob, DEFAULT_TOKEN_ENV, MissingTokenErro
 import { brightDataFetcher, recordedFetcher, type RecordedPage } from './pages.ts';
 import { loadRecording, type Recording } from './recording.ts';
 import { finish, prepare, type Company } from './run.ts';
+import bowmanConfig from '../../../bowman/norn-config/bowman.config.ts';
 import type { PageFetcher } from './types.ts';
 
 const company = bowman as unknown as Company;
@@ -40,7 +41,7 @@ function die(msg: string, code = 64): never {
 
 async function replay(path: string, o: { json?: string; timeline: boolean }): Promise<number> {
   const rec: Recording = await loadRecording(path);
-  const prep = prepare(company, { ecrId: rec.ecr, seed: rec.seed, n: rec.n, timeline: o.timeline, ...(rec.context ? { context: rec.context } : {}) });
+  const prep = prepare(company, { config: bowmanConfig, ecrId: rec.ecr, seed: rec.seed, n: rec.n, timeline: o.timeline, ...(rec.context ? { context: rec.context } : {}) });
   const planted = Object.entries(rec.planted).map(([i, what]) => `RECORDED: proposal #${Number(i) + 1} is planted to test the guardrails: ${what}`);
   const { report } = await finish(prep, {
     mode: 'RECORDED',
@@ -66,7 +67,7 @@ async function replay(path: string, o: { json?: string; timeline: boolean }): Pr
 
 async function live(ecrId: string, o: { seed: string; n: number; printJob: boolean; save?: string; json?: string }): Promise<number> {
   console.error(LIVE_NOTICE);
-  const prep = prepare(company, { ecrId, seed: o.seed, n: o.n });
+  const prep = prepare(company, { config: bowmanConfig, ecrId, seed: o.seed, n: o.n });
   const calls: ToolCallRecord[] = [];
   let job;
   try {

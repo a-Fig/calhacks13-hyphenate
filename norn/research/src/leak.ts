@@ -14,7 +14,7 @@
 // look-alike letters from another script (a Cyrillic "a" in "Halden").
 
 import { domainToUnicode } from 'node:url';
-import { compactForm, stripInvisible, wordForm } from './text.ts';
+import { compactForm, stripInvisible, wordForm, stemForm } from './text.ts';
 
 /** The parts of a company dataset the leak check reads. Bowman's dataset satisfies it as is. */
 export interface IdentifierSource {
@@ -131,6 +131,7 @@ function compactHit(hay: ReturnType<typeof compactWithEdges>, needle: string): b
 
 function scanLeaks(text: string, ids: Identifier[], allow: readonly string[]): Leak[] {
   const hay = wordForm(text);
+  const hayStem = stemForm(text);
   const compactHay = compactWithEdges(text);
   const allowed = new Set(allow.map((w) => wordForm(w)));
   const leaks: Leak[] = [];
@@ -142,7 +143,7 @@ function scanLeaks(text: string, ids: Identifier[], allow: readonly string[]): L
     const compact = compactForm(id.text);
     const multi = needle.trim().includes(' ');
     const byCompact = (id.kind === 'item' || id.kind === 'record' || multi) && compact.length >= 7 && compactHit(compactHay, compact);
-    if (hay.includes(needle) || byCompact) leaks.push({ identifier: id.text, kind: id.kind, query: text });
+    if (hay.includes(needle) || byCompact || (needle.trim().length >= 4 && hayStem.includes(stemForm(id.text)))) leaks.push({ identifier: id.text, kind: id.kind, query: text });
   }
   const m = RECORD_ID.exec(stripInvisible(text));
   if (m && !leaks.some((l) => wordForm(l.identifier) === wordForm(m[0]))) leaks.push({ identifier: m[0], kind: 'record', query: text });

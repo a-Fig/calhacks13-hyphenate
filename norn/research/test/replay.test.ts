@@ -9,7 +9,9 @@ import { loadRecording } from '../src/recording.ts';
 import { finish, prepare, type Company } from '../src/run.ts';
 import { applyAndReport } from '../src/apply.ts';
 import { reviewProposals } from '../src/guardrails.ts';
-import type { AgentOutput } from '../src/types.ts';
+import type { AgentOutput, Verdict } from '../src/types.ts';
+import { guardTier } from '../src/run.ts';
+import bowmanConfig from '../../../bowman/norn-config/bowman.config.ts';
 
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 const REC = here('../recordings/ecr-0417.recording.json');
@@ -23,7 +25,7 @@ const RECOVERY_PAGE: RecordedPage = {
 
 async function replay(agentOutput?: (rec: Awaited<ReturnType<typeof loadRecording>>) => AgentOutput) {
   const rec = await loadRecording(REC);
-  const prep = prepare(company, { ecrId: rec.ecr, seed: rec.seed, n: rec.n, ...(rec.context ? { context: rec.context } : {}) });
+  const prep = prepare(company, { config: bowmanConfig, ecrId: rec.ecr, seed: rec.seed, n: rec.n, ...(rec.context ? { context: rec.context } : {}) });
   const out = await finish(prep, { mode: 'RECORDED', provenance: [rec.label], agentOutput: agentOutput ? agentOutput(rec) : rec.agentOutput, fetcher: recordedFetcher([...rec.pages, RECOVERY_PAGE]), guardrails: { today: rec.recordedOn } });
   return { rec, prep, ...out };
 }
@@ -71,6 +73,63 @@ describe('replay of the ECR-0417 recording', () => {
     }
     assert.equal(report.unchangedHeadlines, 3);
     assert.deepEqual(report.notApplied, []);
+  });
+
+  it('shows, apart and labelled, what approving the held proposals would do, and applies none of it', async () => {
+    const { report } = await replay();
+    assert.deepEqual(report.ifApproved!.targets, ['T1', 'T2']);
+    assert.deepEqual(report.ifApproved!.changes.map((c) => c.key), ['oneTimeTotal', 'windowTotal', 'planTotal']);
+    assert.equal(report.ifApproved!.tier!.tierId, report.tier!.after.tierId);
+    assert.deepEqual(report.changes, []);
+    assert.match(renderReport(report), /WHAT IF a person approved the held proposals T1, T2 \[RECORDED\]\. Not applied/);
+  });
+
+  it('a clean accepted proposal leaves the approval tier alone', async () => {
+    const { report } = await replay(modestFirst);
+    assert.equal(report.tier!.before.tierId, report.tier!.after.tierId);
+  });
+
+  it('probe 1: a proposal that moves the approval tier is held even when every other check passes', async () => {
+    const page: RecordedPage = { ...RECOVERY_PAGE, url: 'https://example.test/rate95', text: 'Scrap recovery on aerospace parts: 95% of the purchase price. Updated 2026-10-01.' };
+    const mk = (rec: Awaited<ReturnType<typeof loadRecording>>): AgentOutput => ({
+      proposals: [{ ...(rec.agentOutput.proposals[0] as object), sourceUrl: page.url, quote: 'Scrap recovery on aerospace parts: 95% of the purchase price', sourceDate: '2026-10-01', dist: { kind: 'pert', min: 0.9, mode: 0.95, max: 1 }, confidence: 'high' }],
+      unresolved: [],
+    });
+    const rec = await loadRecording(REC);
+    const prep = prepare(company, { config: bowmanConfig, ecrId: rec.ecr, seed: rec.seed, n: rec.n, ...(rec.context ? { context: rec.context } : {}) });
+    const run = (p: typeof prep) => finish(p, { mode: 'RECORDED', provenance: ['probe'], agentOutput: mk(rec), fetcher: recordedFetcher([page]), guardrails: { today: rec.recordedOn, disagreementFactor: { share: 1e9, usd: 1e9, weeks: 1e9 } } });
+    // Without the guard it is accepted, and the tier really changes: that is the probe.
+    const { tierOf: _t, ...noTier } = prep;
+    void _t;
+    const unguarded = await run(noTier as typeof prep);
+    assert.equal(unguarded.verdicts[0]!.status, 'accepted');
+    const before = prep.tierOf!([]);
+    const after = prep.tierOf!([unguarded.verdicts[0]!.override!]);
+    assert.notEqual(after.tierId, before.tierId);
+    assert.ok(before.size! > 150000 && after.size! < 150000);
+    // With it, a person decides, nothing is applied, and the what-if says the tier would change.
+    const guarded = await run(prep);
+    assert.equal(guarded.verdicts[0]!.status, 'needs_person');
+    assert.deepEqual(guarded.verdicts[0]!.reasons.map((r) => r.code), ['changes_tier']);
+    assert.equal(guarded.verdicts[0]!.override, undefined);
+    assert.deepEqual(guarded.report.changes, []);
+    assert.equal(guarded.report.tier!.after.tierId, before.tierId);
+    assert.equal(guarded.report.ifApproved!.tier!.tierId, after.tierId);
+    assert.match(renderReport(guarded.report), /\(CHANGED\)/);
+  });
+
+  it('guardTier holds each tier-changing proposal alone, and a set that changes the tier together', () => {
+    const mk = (id: string): Verdict => ({ index: 0, targetId: id, status: 'accepted', reasons: [], flags: [], override: { id, source: 'agent_estimated', rationale: 'r' } });
+    const alone = [mk('a'), mk('b')];
+    guardTier(alone, (a) => ({ tierId: a.some((x) => x.id === 'a') ? 'top' : 'low', body: 'B', size: 1 }));
+    assert.deepEqual(alone.map((v) => v.status), ['needs_person', 'accepted']);
+    const together = [mk('a'), mk('b')];
+    guardTier(together, (a) => ({ tierId: a.length >= 2 ? 'top' : 'low', body: 'B', size: 1 }));
+    assert.deepEqual(together.map((v) => v.status), ['needs_person', 'needs_person']);
+    assert.ok(together.every((v) => v.reasons[0]!.code === 'changes_tier' && v.override === undefined && v.heldOverride));
+    const fine = [mk('a')];
+    guardTier(fine, () => ({ tierId: 'same', body: 'S', size: 1 }));
+    assert.equal(fine[0]!.status, 'accepted');
   });
 
   it('is deterministic: two replays give identical reports', async () => {

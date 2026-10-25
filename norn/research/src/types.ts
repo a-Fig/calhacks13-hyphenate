@@ -60,7 +60,7 @@ export interface Reason {
   code:
     | 'schema' | 'unknown_target' | 'duplicate_target' | 'unit_mismatch' | 'leak' | 'quote_missing'
     | 'quote_not_found' | 'page_unavailable' | 'out_of_bounds' | 'low_confidence' | 'bad_distribution'
-    | 'stale_source' | 'flagged' | 'review_error' | 'quote_value';
+    | 'stale_source' | 'flagged' | 'review_error' | 'quote_value' | 'changes_tier';
   message: string;
 }
 
@@ -79,6 +79,8 @@ export interface Verdict {
   flags: Flag[];
   /** Set on accepted proposals only. */
   override?: AssumptionOverride;
+  /** What would apply if a person approved this held proposal. Set when the quote verified and the hold is one a person can settle (not out of bounds, not an unfetched page). Never applied by code. */
+  heldOverride?: AssumptionOverride;
   /** The distribution the check will use, set whenever the proposal was well-formed. */
   dist?: Dist;
   /** The page the quote was checked against. */

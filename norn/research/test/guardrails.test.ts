@@ -272,10 +272,10 @@ describe('bounds', () => {
     assert.equal((await one(q(91, 1000, 1100))).status, 'needs_person'); // wide_range (1100/91 > 4)
     assert.equal((await one(q(900, 1000, 1100))).status, 'accepted');
   });
-  it('holds a blank-row estimate above the ceiling, and a non-positive cost', async () => {
+  it('holds a blank-row estimate above the ceiling, and rejects a non-positive cost', async () => {
     assert.equal((await one(good({ targetId: 'T2', unit: 'usd', dist: undefined, value: 5_000_000, quote: RATE }))).status, 'needs_person');
-    assert.equal((await one(good({ targetId: 'T2', unit: 'usd', dist: undefined, value: 0, quote: RATE }))).status, 'needs_person');
-    assert.equal((await one(good({ targetId: 'T2', unit: 'usd', dist: undefined, value: -5, quote: RATE }))).status, 'needs_person');
+    assert.equal((await one(good({ targetId: 'T2', unit: 'usd', dist: undefined, value: 0, quote: RATE }))).status, 'rejected');
+    assert.equal((await one(good({ targetId: 'T2', unit: 'usd', dist: undefined, value: -5, quote: RATE }))).status, 'rejected');
   });
   it('holds a lead time outside 0 to 104 weeks', async () => {
     const w = (value: number) => good({ targetId: 'T4', unit: 'weeks', dist: undefined, value, quote: RATE });
@@ -488,5 +488,21 @@ describe('the quote must state the proposed value (review round 2)', () => {
     assert.deepEqual(v.flags.map((f) => f.code), ['replaces_blank_row']);
     assert.deepEqual(codes(v), ['flagged']);
     assert.equal(v.override, undefined);
+  });
+});
+
+describe('non-positive lead times and costs are rejected', () => {
+  const T = (kind: 'weeks' | 'usd') => [{ key: 'T1', inputId: 'x', kind, unit: kind, label: 'l', question: 'q', current: { p10: 6, p50: 9, p90: 14 }, currentNote: '', swing: null, swingBasis: 'unmeasured' }] as never;
+  const run = (kind: 'weeks' | 'usd', over: object, quote: string) =>
+    reviewProposals([{ targetId: 'T1', unit: kind, sourceUrl: 'https://e.test/a', quote, retrievedAt: '2026-10-25', sourceDate: '2026-10', confidence: 'high', rationale: 'r', queries: ['aluminum lead time'], ...over }], T(kind), async () => ({ ok: true, text: quote, retrievedAt: '2026-10-25' }), { today: '2026-10-25', identifiers: [] });
+  it('rejects a lead time of 0 or below, and zero or negative quantiles', async () => {
+    for (const [over, quote] of [[{ value: 0 }, 'Lead time: 0 weeks after order'], [{ value: -3 }, 'Lead time: -3 weeks after order'], [{ dist: { kind: 'quantiles', p10: 0, p50: 10, p90: 20 } }, 'Lead time: 10 weeks after order'], [{ dist: { kind: 'quantiles', p10: 0, p50: 0, p90: 0 } }, 'Lead time: 0 weeks after order']] as const) {
+      const [v] = await run('weeks', over, quote);
+      assert.equal(v!.status, 'rejected', JSON.stringify(over));
+      assert.equal(v!.reasons.some((r) => r.code === 'bad_distribution'), true);
+    }
+  });
+  it('rejects a cost of 0', async () => {
+    assert.equal((await run('usd', { value: 0 }, 'Fee: $0 flat'))[0]!.status, 'rejected');
   });
 });

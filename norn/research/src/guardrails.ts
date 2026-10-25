@@ -153,10 +153,12 @@ export function toDist(p: Proposal, target: Target, pointSpread = DEFAULTS.point
       return pert(d.min, d.mode, d.max);
     }
     if (target.kind === 'share') throw new Error('a share needs a pert {min, mode, max}: quantiles of a bounded share are not accepted');
+    if (!(d.p10 > 0 && d.p50 > 0 && d.p90 > 0)) throw new Error(`a ${target.kind === 'weeks' ? 'lead time' : 'cost'} must be above zero at p10, p50 and p90; the proposal has ${d.p10}, ${d.p50}, ${d.p90}`);
     return lognormalFromQuantiles(d.p10, d.p50, d.p90);
   }
   const v = p.value!;
   if (target.kind === 'share') return v === 0 ? point(0) : pert(v / 2, v, Math.max(v, Math.min(1, v * 2)));
+  if (!(v > 0)) throw new Error(`a ${target.kind === 'weeks' ? 'lead time' : 'cost'} must be above zero; the proposal is ${v}`);
   return lognormal(v, pointSpread);
 }
 
@@ -379,6 +381,17 @@ export async function reviewProposals(raw: unknown[], targets: Target[], fetchPa
         dist,
         by: AGENT_NAME,
       } satisfies AssumptionOverride;
+    }
+    const HELD_OK = new Set(['quote_value', 'low_confidence', 'flagged', 'stale_source']);
+    if (st.status === 'needs_person' && dist && verifiedAgainst && reasons.every((r) => HELD_OK.has(r.code))) {
+      const date = verifiedAgainst.retrievedAt.slice(0, 10);
+      verdict.heldOverride = {
+        id: target.inputId,
+        source: 'agent_estimated',
+        rationale: `${p.rationale.trim()} Source: ${p.sourceUrl}${p.sourceDate ? ` (dated ${p.sourceDate})` : ''}. Quote: "${qn}". Retrieved ${date}. Proposed ${describeDist(dist)}; confidence ${p.confidence}.`,
+        dist,
+        by: AGENT_NAME,
+      };
     }
     return verdict;
   }

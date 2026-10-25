@@ -40,8 +40,15 @@ export function renderReport(r: ResearchReport): string {
     out.push(`      after  ${fmt(c, c.after)}`);
     for (const m of c.movedBy) out.push(`      moved by ${m.targetKey} (${m.label}): p50 ${m.deltaP50 >= 0 ? '+' : ''}${c.unit === 'USD' ? usd(m.deltaP50) : m.deltaP50}`);
   }
+  if (r.tier) out.push(`  Approval tier: ${r.tier.before.body} before, ${r.tier.after.body} after (${r.tier.after.tierId === r.tier.before.tierId ? 'unchanged' : 'CHANGED'}).`);
   out.push(`  ${r.unchangedHeadlines} headline number${r.unchangedHeadlines === 1 ? '' : 's'} unchanged.`);
   for (const n of r.notApplied) out.push(`  NOT APPLIED by the check, ${n.targetKey}: ${n.message}`);
+  if (r.ifApproved) {
+    out.push('', `WHAT IF a person approved the held proposals ${r.ifApproved.targets.join(', ')} [${tag}]. Not applied: shown so a reader can see what the decision is worth.`);
+    if (r.ifApproved.changes.length === 0) out.push('  No headline number would change.');
+    for (const c of r.ifApproved.changes) out.push(`  ${c.label}: ${fmt(c, c.before)} -> ${fmt(c, c.after)}`);
+    if (r.ifApproved.tier) out.push(`  Approval tier would be ${r.ifApproved.tier.body}${r.tier && r.ifApproved.tier.tierId !== r.tier.after.tierId ? ' (CHANGED)' : ''}.`);
+  }
   out.push('', `Converged: before ${r.convergence.before}, after ${r.convergence.after}. The agent proposed inputs; code computed every number above.`);
   return out.join('\n');
 }

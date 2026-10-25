@@ -74,6 +74,10 @@ export interface ResearchReport {
   changes: Change[];
   unchangedHeadlines: number;
   notApplied: { targetKey: string; message: string }[];
+  /** The approval tier before and after the accepted assumptions. */
+  tier?: { before: TierInfo; after: TierInfo };
+  /** Held proposals a person could approve, and the numbers then. Not applied. */
+  ifApproved?: { targets: string[]; changes: Change[]; tier?: TierInfo };
   convergence: { before: boolean; after: boolean };
 }
 
@@ -112,7 +116,11 @@ export interface ApplyInput {
   /** What the agent said it could not answer. */
   unresolved?: { targetId: string; reason: string }[];
   run: RunChecks;
+  /** The approval tier the company's routing gives with these assumptions applied. */
+  tierOf?: (assumptions: AssumptionOverride[]) => TierInfo;
 }
+
+export interface TierInfo { tierId: string; body: string; size: number | null }
 
 export function applyAndReport(input: ApplyInput): ResearchReport {
   const byKey = new Map(input.targets.map((t) => [t.key, t]));
@@ -145,6 +153,21 @@ export function applyAndReport(input: ApplyInput): ResearchReport {
     }
     changes.push({ key: b.key, label: b.label, unit: b.unit, before: b.value, after: a.value, movedBy });
   }
+
+  // What a person's approval of the held proposals would do. Shown apart, labelled, never applied.
+  const held = input.verdicts.filter((v) => v.status === 'needs_person' && v.heldOverride && v.targetId);
+  let ifApproved: ResearchReport['ifApproved'];
+  if (held.length > 0) {
+    const all = [...overrides, ...held.map((v) => v.heldOverride!)];
+    const hw = new Map(headlines(input.run(all)).map((h) => [h.key, h]));
+    const wchanges: Change[] = [];
+    for (const b of headlines(after)) {
+      const a = hw.get(b.key);
+      if (a && !same(b.value, a.value)) wchanges.push({ key: b.key, label: b.label, unit: b.unit, before: b.value, after: a.value, movedBy: [] });
+    }
+    ifApproved = { targets: held.map((v) => v.targetId!), changes: wchanges, ...(input.tierOf ? { tier: input.tierOf(all) } : {}) };
+  }
+  const tier = input.tierOf ? { before: input.tierOf([]), after: input.tierOf(overrides) } : undefined;
 
   // An accepted assumption that no check applied (no input of that id, or a shape it cannot take).
   // The timeline check reports every cost-only assumption as unused, so one counts as not applied
@@ -182,6 +205,8 @@ export function applyAndReport(input: ApplyInput): ResearchReport {
     changes,
     unchangedHeadlines: unchanged,
     notApplied,
+    ...(tier ? { tier } : {}),
+    ...(ifApproved ? { ifApproved } : {}),
     convergence: { before: before.cost.convergence.converged, after: after.cost.convergence.converged },
   };
 }

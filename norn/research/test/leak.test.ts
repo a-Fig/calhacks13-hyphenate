@@ -71,4 +71,7 @@ describe('leak check on Bowman\'s dataset', () => {
     assert.ok(hits('halden bracket').length > 0);
     assert.deepEqual(hits('shaldenx bracket'), []);
   });
+  it('catches plurals: "Tarns bracket quote", "vespers", "Quinteros", "hargroves", "Bowmans"', () => {
+    for (const q of ['Tarns bracket quote', 'vespers', 'Quinteros', 'hargroves', 'Bowmans']) assert.ok(hits(q).length > 0, q);
+  });
 });

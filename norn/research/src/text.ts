@@ -96,3 +96,9 @@ export function wordForm(s: string): string {
 export function compactForm(s: string): string {
   return wordForm(s).replace(/ /g, '');
 }
+
+/** wordForm with a plural 's' dropped from each word of four letters or more, so 'Tarns' meets 'Tarn' and 'vespers' meets 'Vesper'. */
+export function stemForm(s: string): string {
+  const words = wordForm(s).trim().split(' ').filter(Boolean).map((w) => (w.length >= 4 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w));
+  return ` ${words.join(' ')} `;
+}
