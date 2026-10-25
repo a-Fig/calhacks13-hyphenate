@@ -41,6 +41,8 @@ export interface Proposal {
   unit: Unit;
   sourceUrl: string;
   quote: string;
+  /** The date the source states for itself: its publication, last-updated or "prices as of" date (YYYY-MM-DD, YYYY-MM or YYYY). Omitted when the page states none. */
+  sourceDate?: string;
   retrievedAt: string;
   confidence: 'low' | 'medium' | 'high';
   rationale: string;
@@ -57,12 +59,13 @@ export type Status = 'accepted' | 'rejected' | 'needs_person';
 export interface Reason {
   code:
     | 'schema' | 'unknown_target' | 'duplicate_target' | 'unit_mismatch' | 'leak' | 'quote_missing'
-    | 'quote_not_found' | 'page_unavailable' | 'out_of_bounds' | 'low_confidence' | 'bad_distribution';
+    | 'quote_not_found' | 'page_unavailable' | 'out_of_bounds' | 'low_confidence' | 'bad_distribution'
+    | 'stale_source' | 'flagged' | 'review_error';
   message: string;
 }
 
 export interface Flag {
-  code: 'disagrees_with_current' | 'disagrees_with_history' | 'replaces_blank_row' | 'wide_range';
+  code: 'disagrees_with_current' | 'disagrees_with_history' | 'replaces_blank_row' | 'wide_range' | 'no_source_date';
   message: string;
 }
 
@@ -72,7 +75,7 @@ export interface Verdict {
   targetId: string | null;
   status: Status;
   reasons: Reason[];
-  /** Accepted proposals the reader should still look at. */
+  /** What a person should look at. A proposal with any flag is held (needs_person), never applied. */
   flags: Flag[];
   /** Set on accepted proposals only. */
   override?: AssumptionOverride;

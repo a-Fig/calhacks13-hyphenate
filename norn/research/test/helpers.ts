@@ -44,13 +44,14 @@ export const ids = collectIdentifiers({
 
 export const config: GuardrailConfig = { today: '2026-10-25', identifiers: ids };
 
-/** A proposal that passes every check against PAGE_A, to be altered by a test. */
+/** A proposal that passes every check against PAGE_A, to be altered by a test: dated, close to the current value, medium confidence. */
 export const good = (over: Partial<Proposal> = {}): Proposal => ({
   targetId: 'T1',
-  dist: { kind: 'pert', min: 0.002, mode: 0.0036, max: 0.006 },
+  dist: { kind: 'pert', min: 0.008, mode: 0.015, max: 0.03 },
   unit: 'fraction',
   sourceUrl: URL_A,
   quote: 'CURRENT PRICE $0.75/lb',
+  sourceDate: '2026-10-20',
   retrievedAt: '2026-10-25',
   confidence: 'medium',
   rationale: 'Scrap price per pound times the part weight.',

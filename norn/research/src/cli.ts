@@ -16,13 +16,18 @@ import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { bowman } from '../../../bowman/data/index.ts';
 import { renderReport } from './report.ts';
-import { AgentOutputError, buildResearchJob, DEFAULT_TOKEN_ENV, MissingTokenError, parseAgentOutput, redactJob } from './job.ts';
+import { AgentOutputError, buildResearchJob, DEFAULT_TOKEN_ENV, MissingTokenError, parseAgentOutput, redactJob, type ToolCallRecord } from './job.ts';
 import { brightDataFetcher, recordedFetcher, type RecordedPage } from './pages.ts';
 import { loadRecording, type Recording } from './recording.ts';
 import { finish, prepare, type Company } from './run.ts';
 import type { PageFetcher } from './types.ts';
 
 const company = bowman as unknown as Company;
+
+/** Printed first on every run, recorded or live: the company in the dataset is made up. */
+const FICTIONAL_NOTICE =
+  'Bowman Aviation and everything about it (its parts, suppliers, people, programs and figures) is FICTIONAL: a demonstration dataset, not a real company.';
+const LIVE_NOTICE = `${FICTIONAL_NOTICE} The web research in this run is real; the change it prices is made up.`;
 
 const USAGE = `Usage:
   node src/cli.ts --replay <recording.json> [--json <out.json>] [--timeline]
@@ -40,6 +45,7 @@ async function replay(path: string, o: { json?: string; timeline: boolean }): Pr
   const { report } = await finish(prep, {
     mode: 'RECORDED',
     provenance: [
+      FICTIONAL_NOTICE,
       rec.label,
       ...rec.provenance,
       ...[...new Set(rec.pages.map((p) => p.fetchedBy))].map((f) => `Pages fetched by: ${f}`),
@@ -59,10 +65,12 @@ async function replay(path: string, o: { json?: string; timeline: boolean }): Pr
 }
 
 async function live(ecrId: string, o: { seed: string; n: number; printJob: boolean; save?: string; json?: string }): Promise<number> {
+  console.error(LIVE_NOTICE);
   const prep = prepare(company, { ecrId, seed: o.seed, n: o.n });
+  const calls: ToolCallRecord[] = [];
   let job;
   try {
-    job = buildResearchJob(prep.targets, { jobId: `research-${ecrId}-${Date.now()}`, ecr: ecrId, identifiers: prep.identifiers });
+    job = buildResearchJob(prep.targets, { jobId: `research-${ecrId}-${Date.now()}`, ecr: ecrId, identifiers: prep.identifiers, onToolCall: (c) => calls.push(c) });
   } catch (e) {
     if (e instanceof MissingTokenError) die(e.message);
     throw e;
@@ -96,9 +104,14 @@ async function live(ecrId: string, o: { seed: string; n: number; printJob: boole
     if (r.ok && r.text !== undefined) seen.push({ url, retrievedAt: today, fetchedBy: 'Bright Data Web Unlocker (markdown), fetched by the guardrails', excerpt: false, text: r.text });
     return r;
   };
+  const refused = calls.filter((c) => !c.allowed);
   const { report } = await finish(prep, {
     mode: 'LIVE',
-    provenance: [`agent: Claude Code session ${result.sessionId ?? '?'} (${result.model}) with Bright Data MCP (${DEFAULT_TOKEN_ENV} from the environment); pages re-fetched by the guardrails through Bright Data`],
+    provenance: [
+      LIVE_NOTICE,
+      `web calls checked for company identifiers before they were sent: ${calls.length}; refused: ${refused.length}${refused.length ? ` (${refused.map((c) => `${c.tool.replace('mcp__brightdata__', '')}: ${c.kinds.join(', ') || 'malformed'}`).join('; ')})` : ''}`,
+      `agent: Claude Code session ${result.sessionId ?? '?'} (${result.model}) with Bright Data MCP (${DEFAULT_TOKEN_ENV} from the environment); pages re-fetched by the guardrails through Bright Data`,
+    ],
     agentOutput,
     fetcher,
     guardrails: { today },

@@ -50,6 +50,15 @@ export interface ProposalLine {
   rationale?: string;
 }
 
+/** What the agent said about a target it could not answer, as it said it (control characters removed, clipped). */
+export interface UnresolvedLine {
+  /** The target key the agent named. */
+  targetKey: string;
+  /** The target's generic label; null when the agent named a key that is not one of the targets. */
+  label: string | null;
+  reason: string;
+}
+
 export interface ResearchReport {
   mode: Mode;
   ecr: string;
@@ -58,11 +67,18 @@ export interface ResearchReport {
   provenance: string[];
   targets: { key: string; label: string; inputId: string; swing: number | null; swingBasis: Target['swingBasis'] }[];
   proposals: ProposalLine[];
+  /** Targets the agent declared unresolved, with its reason. */
+  unresolved: UnresolvedLine[];
+  /** Targets that got no answer at all: no proposal (accepted, held or rejected) and no unresolved entry. */
+  unanswered: { key: string; label: string }[];
   changes: Change[];
   unchangedHeadlines: number;
   notApplied: { targetKey: string; message: string }[];
   convergence: { before: boolean; after: boolean };
 }
+
+/** Text from the agent, safe to print: control characters (terminal escapes) become spaces, length clipped. */
+const cleanText = (s: unknown) => String(s ?? '').replace(/[\p{Cc}\p{Cf}]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 500);
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const r4 = (x: number) => Math.round(x * 10_000) / 10_000;
@@ -93,12 +109,15 @@ export interface ApplyInput {
   targets: Target[];
   /** Total proposals the agent made, with their verdicts (same order). */
   verdicts: Verdict[];
+  /** What the agent said it could not answer. */
+  unresolved?: { targetId: string; reason: string }[];
   run: RunChecks;
 }
 
 export function applyAndReport(input: ApplyInput): ResearchReport {
   const byKey = new Map(input.targets.map((t) => [t.key, t]));
-  const accepted = input.verdicts.filter((v) => v.status === 'accepted' && v.override && v.targetId);
+  // Only an accepted, unflagged proposal is applied (the guardrails hold a flagged one; this is the second lock).
+  const accepted = input.verdicts.filter((v) => v.status === 'accepted' && v.flags.length === 0 && v.override && v.targetId);
   const overrides = accepted.map((v) => v.override!);
 
   const before = input.run([]);
@@ -147,6 +166,10 @@ export function applyAndReport(input: ApplyInput): ResearchReport {
     return line;
   });
 
+  const unresolved: UnresolvedLine[] = (input.unresolved ?? []).map((u) => ({ targetKey: cleanText(u.targetId), label: byKey.get(u.targetId)?.label ?? null, reason: cleanText(u.reason) }));
+  const answered = new Set<string>([...input.verdicts.map((v) => v.targetId), ...(input.unresolved ?? []).map((u) => u.targetId)].filter((k): k is string => k !== null));
+  const unanswered = input.targets.filter((t) => !answered.has(t.key)).map((t) => ({ key: t.key, label: t.label }));
+
   return {
     mode: input.mode,
     ecr: input.ecr,
@@ -154,6 +177,8 @@ export function applyAndReport(input: ApplyInput): ResearchReport {
     provenance: input.provenance,
     targets: input.targets.map((t) => ({ key: t.key, label: t.label, inputId: t.inputId, swing: t.swing, swingBasis: t.swingBasis })),
     proposals,
+    unresolved,
+    unanswered,
     changes,
     unchangedHeadlines: unchanged,
     notApplied,
