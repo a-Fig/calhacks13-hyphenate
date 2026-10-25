@@ -5,6 +5,7 @@
 // checks' rows on Bowman's data.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { bowman } from '../../../../bowman/data/index.ts';
 import { parseSessionSpawn } from '../../../module/src/gate-logic.ts';
 import { factsOf, jobFactsOf } from './dispatcher.ts';
 import { statementGuardFor } from './guard.ts';
@@ -150,9 +151,12 @@ test('the same binding at dispatch, in the post guard and in the publisher, howe
   assert.deepEqual(afterwards.guard, atStart.guard, 'nor the guard\'s');
   assert.equal(afterwards.guardText, atStart.guardText);
   assert.deepEqual(afterwards.published, atStart.guard);
-  // without the snapshot (a statement posted outside a session) the three still agree with each other: they read the same rule
-  const noSnap = siblingsForRun(later, 5n, 41n)!;
-  assert.equal(noSnap.supply.runId, 83, 'a re-run made after the cutoff is not the snapshotless statement\'s either');
+  // Without a snapshot (an older credential) the statement binds at the 30 s cutoff after the cost run finished (#123): run 91
+  // was made at 22 s, inside the window, so that fallback reads it; a re-run made after the window is never read.
+  assert.equal(siblingsForRun(later, 5n, 41n)!.supply.runId, 91);
+  const muchLater = cacheOf(ecr, batch(41, 42, [43, 60, 71], 83, { extra: [{ id: 95, stage: 's4_supply', status: 'done', created: 50_000, doneAt: 50_400, finished: 50_400 }] }));
+  assert.equal(siblingsForRun(muchLater, 5n, 41n)!.supply.runId, 83, "a re-run made after the cutoff is not the snapshotless statement's");
+  assert.equal(siblingsForRun(muchLater, 5n, 41n, snap)!.supply.runId, 83, "nor the snapshot's");
 });
 
 test('a snapshot is only read in the one form the dispatcher signs', () => {
@@ -222,20 +226,8 @@ test('the hold ends at the cap: 3 minutes after the cost run finished by default
   assert.equal(settingsFromEnv({ NORN_L1_SETTLE_MS: 'soon' }).settleMs, 180_000, 'an unreadable value falls back');
 });
 
-test('another ECR\'s hold does not depend on this ECR having re-runs on an earlier change-request revision', () => {
-  // a run on revision 0 (before the change request moved) that is still running does not hold the current revision
-  const old: Spec = { id: 30, stage: 's4_supply', status: 'running', created: 0 };
-  const db = cacheOf('ECR-0417', batch(41, 42, [43, 60, 71], 83));
-  const runs = [...[old].map(toRun).map(r => ({ ...r, revision: 0 }))];
-  const rows = [...(function* () { yield* (db.checkRun.prId.filter(5n) as any[]).map(r => ({ id: r.id })); })()];
-  assert.ok(rows.length > 0);
-  const s2 = toRun(batch(41, 42, [43, 60, 71], 83).find(x => x.id === 41)!);
-  const all = batch(41, 42, [43, 60, 71], 83).map(toRun);
-  assert.equal(siblingsUnsettled([...all, ...runs], s2), false);
-  assert.equal(waitingForSiblings([...all, ...runs], s2, us(T0 + 9_000)), false);
-  assert.equal(settleCapUs(s2), us(T0 + 800 + SETTLE_WAIT_MS));
-  assert.equal(siblingOf(all, s2, 's4_supply', siblingSnapshotUs(all, s2)).run?.id, 83n);
-});test('a run still running on an earlier change-request revision does not hold the current one', () => {
+
+test('a run still running on an earlier change-request revision does not hold the current one', () => {
   const all = batch(41, 42, [43, 60, 71], 83).map(toRun);
   const s2 = all.find(r => r.id === 41n)!;
   const old = { ...toRun({ id: 30, stage: 's4_supply', status: 'running', created: 0 }), revision: 0 };
@@ -243,4 +235,66 @@ test('another ECR\'s hold does not depend on this ECR having re-runs on an earli
   assert.equal(waitingForSiblings([...all, old], s2, us(T0 + 9_000)), false);
   assert.equal(settleCapUs(s2), us(T0 + 800 + SETTLE_WAIT_MS));
   assert.equal(siblingOf(all, s2, 's4_supply', siblingSnapshotUs(all, s2)).run?.id, 83n);
+});
+
+// ---- the whole batch -------------------------------------------------------------------------------------------
+
+/**
+ * All ten of Bowman's ECRs filed 1.5 s apart. Each one filed re-runs the supply check of every ECR filed before it
+ * (they share suppliers), so ECR j has one s4 run per ECR filed from j on, each stale when the next is queued; the supply
+ * worker is behind, so only the last of them has completed, a few seconds after the last ECR was filed.
+ */
+function wholeBatch(finalS4: 'done' | 'running') {
+  const ids = bowman.ecrs.map(e => e.id);
+  const n = ids.length;
+  const step = 1_500;
+  return ids.map((ecr, j) => {
+    const t = j * step;
+    const base = (j + 1) * 100;
+    const specs: Spec[] = [
+      { id: base, stage: 's1_bom_delta', status: 'done', created: t, doneAt: t + 100, finished: t + 100 },
+      { id: base + 1, stage: 's2_cost', status: 'done', created: t, doneAt: t + 800, finished: t + 800 },
+      { id: base + 2, stage: 's3_timeline', status: 'done', created: t, doneAt: t + 200, finished: t + 200 },
+    ];
+    for (let k = j; k < n; k++) {
+      const last = k === n - 1;
+      const created = k * step;
+      if (!last) specs.push({ id: base + 10 + k, stage: 's4_supply', status: 'stale', created, finished: (k + 1) * step });
+      else specs.push({ id: base + 10 + k, stage: 's4_supply', status: finalS4, created, ...(finalS4 === 'done' ? { doneAt: created + 3_000 + j * 300, finished: created + 3_000 + j * 300 } : {}) });
+    }
+    return { ecr, s2: base + 1, s3: base + 2, liveS4: base + 10 + n - 1, specs };
+  });
+}
+
+test('ten ECRs ingested together, peers re-running s4: every one binds its settled s4 and has its supply section (the old rule lost nine)', () => {
+  let lostByOldRule = 0;
+  for (const b of wholeBatch('done')) {
+    const db = cacheOf(b.ecr, b.specs);
+    const pr = prOf(b.ecr);
+    const f = factsOf(db, pr, 'level1-statement').s2Done[0]!;
+    assert.equal(f.siblings?.pending, false, `${b.ecr}: settled, so the dispatcher does not hold`);
+    const snap = snapshotForRun(db, 5n, BigInt(b.s2))!;
+    const sib = siblingsForRun(db, 5n, BigInt(b.s2), snap)!;
+    assert.equal(sib.supply.state, 'ready', b.ecr);
+    assert.equal(sib.supply.runId, b.liveS4, `${b.ecr}: the newest settled s4`);
+    assert.equal(sib.timeline.runId, b.s3);
+    const facts = jobFactsOf(db, pr, 1, b.s2, snap);
+    assert.deepEqual(facts.timelineSupply?.unavailable ?? [], [], `${b.ecr}: nothing unavailable`);
+    assert.ok(!jobPrompt(facts).includes('had not finished'), b.ecr);
+    assert.ok(!facts.recommendation?.conditions.some(x => /supply check/.test(x) && /not (finished|assessed)|had not finished/.test(x)), `${b.ecr}: no "supply check unfinished" condition`);
+    // The rule before the fix: only runs created no later than the s2 run. That is the first, stale s4 for every ECR but the last filed.
+    const runs = b.specs.map(toRun);
+    const s2 = runs.find(r => r.id === BigInt(b.s2))!;
+    const old = runs.filter(r => r.stage === 's4_supply' && r.createdUs <= s2.createdUs).at(-1);
+    if (old?.status === 'stale' && old.completedUs === undefined) lostByOldRule++;
+  }
+  assert.equal(lostByOldRule, 9, 'the same batch under the old rule: nine of ten without a supply section');
+});
+
+test('ten ECRs ingested together: the dispatcher holds every session until the supply worker has caught up', () => {
+  for (const b of wholeBatch('running')) {
+    const db = cacheOf(b.ecr, b.specs);
+    const f = factsOf(db, prOf(b.ecr), 'level1-statement').s2Done[0]!;
+    assert.equal(f.siblings?.pending, true, `${b.ecr}: its last s4 is still running`);
+  }
 });
