@@ -539,11 +539,11 @@ export const setPrStatus = write(
 // record for the decision). Approved: the ECR goes to approved and then merged, on the module's own rules for those moves
 // (set_pr_status), with the approval row naming the person the PLM names, not the connection that reported it. Rejected:
 // closed. When Norn cannot follow (the checks have not finished on current inputs, the baseline has moved, the ECR is
-// closed or already released, or the ECR was edited in the PLM after Norn assessed it), it records that and why, and moves nothing: it never shows an ECR as released that it did
+// closed or already released, or the ECR's title, text or change request was edited in the PLM after Norn assessed it), it records that and why, and moves nothing: it never shows an ECR as released that it did
 // not release. The same decision again changes nothing. Who may report it is plm-decision.ts's rule.
 export const recordPlmDecision = write(
   'record_plm_decision',
-  { plmEcrNumber: t.string(), decision: t.string(), decidedBy: t.string(), decidedOn: t.string(), changeRequestJson: t.string(), source: t.string(), sourceRef: t.string() },
+  { plmEcrNumber: t.string(), decision: t.string(), decidedBy: t.string(), decidedOn: t.string(), title: t.string(), description: t.string(), changeRequestJson: t.string(), source: t.string(), sourceRef: t.string() },
   (ctx, a, call) => {
     const plm = nonEmpty(a.plmEcrNumber, 'plmEcrNumber', 64);
     if (!PLM_DECISIONS.includes(a.decision as PlmDecision)) throw new SenderError(`decision must be one of ${PLM_DECISIONS.join(', ')}`);
@@ -585,8 +585,14 @@ export const recordPlmDecision = write(
     // not what was approved, and releasing it would release the old assessment. Rejecting needs no such check: it only closes.
     const cur = currentRevision(ctx, pr.id);
     if (!cur) return noFollow('Norn holds no change request for it, so it has nothing assessed to release');
-    if (cur.digest !== checkedChangeRequest(a.changeRequestJson, plm))
-      return noFollow(`the ECR changed in the PLM after Norn assessed it (Norn holds revision ${cur.seq}), so what was approved is not what Norn checked`);
+    // The same comparison ingest_ecr makes to see an ECR as changed: its title and text as well as its change request.
+    const edited = [
+      ...(nonEmpty(a.title, 'title', 200) !== pr.title ? ['title'] : []),
+      ...(a.description !== pr.description ? ['description'] : []),
+      ...(cur.digest !== checkedChangeRequest(a.changeRequestJson, plm) ? ['change request'] : []),
+    ];
+    if (edited.length)
+      return noFollow(`the ECR changed in the PLM after Norn assessed it (${edited.join(', ')}; Norn holds revision ${cur.seq}), so what was approved is not what Norn checked`);
     const notReady = codeStagesNotDone(ctx, pr);
     if (notReady.length) return noFollow(`its checks have not finished on current inputs (${notReady.join(', ')}), so Norn cannot release it`);
     const main = currentMain(ctx);

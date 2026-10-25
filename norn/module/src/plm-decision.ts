@@ -30,13 +30,12 @@ export const plmDecisionRule: PolicyRule = (ctx, actor, reducer, args) => {
   if (reducer !== 'record_plm_decision') return null;
   const by = String(args.decidedBy ?? '').trim() || 'someone';
   if (actor.kind === 'person') {
-    // A person must be one the company lists, so that a made-up name cannot report. With no configuration stored there is no list.
+    // A person must be one the company lists, so that a made-up name cannot report. With no readable list, no person may (fail closed).
     const loaded = companyConfig(ctx);
+    if (loaded.state === 'none') return { effect: 'deny', reason: 'no company configuration is stored, so Norn cannot tell who may report a PLM decision' };
     if (loaded.state === 'unreadable') return { effect: 'deny', reason: `${loaded.why}; Norn takes no PLM decision on a configuration it cannot read` };
-    if (loaded.state === 'ok') {
-      const ref = personRef(loaded.config, actor.name);
-      if (!loaded.config.people.some(p => p.id === ref)) return { effect: 'deny', reason: `${actor.name} is not a person in this configuration, so may not report a PLM decision` };
-    }
+    const ref = personRef(loaded.config, actor.name);
+    if (!loaded.config.people.some(p => p.id === ref)) return { effect: 'deny', reason: `${actor.name} is not a person in this configuration, so may not report a PLM decision` };
     return { effect: 'allow', reason: `${actor.name} reports a decision taken in the PLM by ${by}; Norn applies no limit of its own to it` };
   }
   if (actor.kind === 'agent' && actor.origin === 'norn') return { effect: 'allow', reason: `Norn's ingest reports a decision a person took in the PLM (${by}); the agent decides nothing` };

@@ -254,3 +254,59 @@ test('an undecided read is still reported, by every path', async () => {
   await onChange(plmIngestOptionsFromEnv({}), { name: 'ECR-1', workflowState: 'Submitted' }, { read: async () => open, report, recordEco, lock: ecrLock(), retry: new RetryQueue() });
   assert.deepEqual(calls, ['ingestEcr', 'ingestEcr']);
 });
+
+// ---- round 3 of the review of #129 -------------------------------------------------------------------------------
+
+test('the decision carries the ECR title and description as read, so a text edit in the PLM is visible to the module', async () => {
+  const h = harness();
+  const seen = plm({ ...ecrDoc(), workflow_state: 'Approved', modified_by: 'rafael@acme.test' });
+  const before = await readItem(opts, 'ECR-0001', itemOf);
+  seen.doc = { ...seen.doc, title: 'NEW: mandatory fleet grounding until replaced', description: 'cancel the old proposal' } as any;
+  const after = await readItem(opts, 'ECR-0001', itemOf);
+  await recordDecided(h.R, before, new Map(), () => {});
+  await recordDecided(h.R, after, new Map(), () => {});
+  const sent = h.calls.filter((c) => c.method === 'recordPlmDecision') as any[];
+  assert.equal(sent[0].title, before.title);
+  assert.equal(sent[0].description, before.description);
+  assert.equal(sent[1].title, 'NEW: mandatory fleet grounding until replaced');
+  assert.equal(sent[1].description, 'cancel the old proposal');
+  assert.equal(sent[0].changeRequestJson, sent[1].changeRequestJson, 'only the narrative differs: the change request digest alone would not see it');
+});
+
+test('a transient failure delivering a decision from the watcher is queued for retry, not lost to the watcher giving up', async () => {
+  plm({ ...ecrDoc(), workflow_state: 'Approved', modified_by: 'rafael@acme.test' });
+  const calls: string[] = [];
+  let failing = 3;
+  const R = { recordPlmDecision: async () => { calls.push('decision'); if (failing-- > 0) throw new Error('Norn unreachable'); }, recordEcoRelease: async () => {} } as any;
+  const sent = new Map<string, string>();
+  const retry = new RetryQueue(1);
+  const lock = ecrLock();
+  const logs: string[] = [];
+  const errors: string[] = [];
+  const o = plmIngestOptionsFromEnv({});
+  const d = { read: (name: string) => readItem(opts, name, itemOf), report: async () => { calls.push('ingestEcr'); }, recordEco: (item: any) => recordDecided(R, item, sent, () => {}, async () => true), lock, retry, now: () => 0, log: (m: string) => logs.push(m) };
+  const w = new EcrWatcher(opts, (change) => onChange(o, change, d), { since: '2026-01-01 00:00:00', onError: (e) => errors.push((e as Error).message) });
+  for (let i = 0; i < 4; i++) await w.tick();
+  assert.equal(errors.some((e) => e.includes('giving up')), false, errors.join(' | '));
+  assert.equal(retry.has('ECR-0001'), true, 'in the retry queue');
+  assert.ok(logs.some((l) => l.includes('ECR-0001') && l.includes('will retry') && l.includes('Norn unreachable')), logs.join(' | '));
+  assert.equal(sent.has('decision:ECR-0001'), false, 'not remembered as delivered');
+  // Norn comes back: the queue sends it again, with a fresh read, and the decision goes through.
+  const read = (name: string) => readItem(opts, name, itemOf);
+  let n = 0;
+  while (retry.has('ECR-0001') && n++ < 10) await retryDue(retry, read, routed({ report: d.report, recordEco: d.recordEco }), () => {}, () => 1_000_000 + n * 100_000, lock);
+  assert.equal(retry.has('ECR-0001'), false);
+  assert.equal(sent.get('decision:ECR-0001'), 'approved');
+  assert.equal(calls.includes('ingestEcr'), false);
+});
+
+test('a transient failure reading the ECR from the watcher is queued too, and a mapping error is still left to the watcher', async () => {
+  const retry = new RetryQueue(1);
+  const o = plmIngestOptionsFromEnv({});
+  const base = { report: async () => {}, recordEco: async () => {}, lock: ecrLock(), retry, now: () => 0, log: () => {} };
+  await onChange(o, { name: 'ECR-1', workflowState: 'Submitted' }, { ...base, read: async () => { throw new Error('PLM 503'); } });
+  assert.equal(retry.has('ECR-1'), true);
+  const { PlmMappingError } = await import('../../../connectors/plm/src/index.ts');
+  await assert.rejects(onChange(o, { name: 'ECR-2', workflowState: 'Submitted' }, { ...base, read: async () => { throw new PlmMappingError('bad field'); } }), /bad field/);
+  assert.equal(retry.has('ECR-2'), false, 'the ECR is at fault: the watcher offers it again once someone fixes it');
+});

@@ -82,8 +82,12 @@ const storedJson = (number: string) => {
   const found = [...db.pullRequest.iter()].find(p => p.plmEcrNumber === number);
   return [...db.ecrRevision.iter()].find(r => r.prId === found?.id && r.current)?.changeRequestJson ?? '{}';
 };
-const report = (who: typeof A, number: string, decision: string, decidedBy = RAFAEL, changeRequestJson = storedJson(number)) =>
-  who.R.recordPlmDecision({ plmEcrNumber: number, decision, decidedBy, decidedOn: DECIDED_ON, changeRequestJson, source: 'plm', sourceRef: `check@${DECIDED_ON}` });
+const storedText = (number: string) => {
+  const found = [...db.pullRequest.iter()].find(p => p.plmEcrNumber === number);
+  return { title: found?.title ?? 'x', description: found?.description ?? '' };
+};
+const report = (who: typeof A, number: string, decision: string, decidedBy = RAFAEL, changeRequestJson = storedJson(number), text = storedText(number)) =>
+  who.R.recordPlmDecision({ plmEcrNumber: number, decision, decidedBy, decidedOn: DECIDED_ON, ...text, changeRequestJson, source: 'plm', sourceRef: `check@${DECIDED_ON}` });
 // A refusal is logged without an ECR (the call names it by its PLM number, not by id), so it is found by who was refused.
 const denied = (name: string) => logs(l => l.reducer === 'record_plm_decision' && l.outcome === 'denied' && l.actorName === name);
 const statusIs = (id: bigint, s: string) => until(() => pr(id).status === s || undefined, 5000, `ECR ${id} to be ${s}`);
@@ -91,6 +95,15 @@ let workerLog: string[] = [];
 let worker: ReturnType<typeof spawn> | undefined;
 
 try {
+  // ---- with no company configuration stored, no person may report (it fails closed); Norn's own ingest is unchanged ------------
+  const p0 = await newPr('check: a person reports before any configuration is stored', 'ECR-D0');
+  await report(dana, 'ECR-D0', 'approved');
+  await until(() => denied('Dana Okafor').length === 1 || undefined, 5000, 'the refusal when no configuration is stored');
+  check('with no company configuration stored, a person may not report a PLM decision', /no company configuration is stored, so Norn cannot tell who may report a PLM decision/.test(denied('Dana Okafor')[0]!.summary) && pr(p0.id).status === 'draft', denied('Dana Okafor')[0]?.summary);
+  await report(A, 'ECR-D0', 'rejected');
+  await statusIs(p0.id, 'closed');
+  check("Norn's own ingest may still report one with none stored", pr(p0.id).status === 'closed', pr(p0.id).status);
+
   await R.setConfig({ key: COMPANY_CONFIG_KEY, value: bowmanText });
 
   // ---- an approval Norn cannot follow yet --------------------------------------------------------------
@@ -200,11 +213,23 @@ try {
   await statusIs(p8.id, 'merged');
   check('the same ECR, approved with the content Norn assessed, is released', approvals(p8.id).at(-1)?.status === 'released', pr(p8.id).status);
 
+  const p10 = await newPr('check: title edited in the PLM, then approved', 'ECR-D10');
+  await allCodeDone(p10.id);
+  await report(A, 'ECR-D10', 'approved', RAFAEL, storedJson('ECR-D10'), { ...storedText('ECR-D10'), title: 'NEW: mandatory fleet grounding until replaced' });
+  await until(() => decisionLogs(p10.id).length === 1 || undefined, 5000, 'the log row for the title edit');
+  check('an approval of a title Norn did not assess is not followed, and the log names the title', pr(p10.id).status === 'draft' && /changed in the PLM after Norn assessed it \(title;/.test(decisionLogs(p10.id)[0]!.summary), decisionLogs(p10.id)[0]?.summary);
+  await report(A, 'ECR-D10', 'approved', RAFAEL, storedJson('ECR-D10'), { ...storedText('ECR-D10'), description: 'a different text' });
+  await until(() => decisionLogs(p10.id).length === 2 || undefined, 5000, 'the log row for the description edit');
+  check('a description Norn did not assess is not followed either', pr(p10.id).status === 'draft' && /\(description;/.test(decisionLogs(p10.id)[1]!.summary), decisionLogs(p10.id)[1]?.summary);
+  await report(A, 'ECR-D10', 'approved');
+  await statusIs(p10.id, 'merged');
+  check('with the title and text Norn assessed, it is released', approvals(p10.id).at(-1)?.status === 'released', pr(p10.id).status);
+
   // ---- the ingest does not remember an approval Norn did not follow ----------------------------------------------
   const p9 = await newPr('check: approved before its checks finished, then they finish', 'ECR-D9');
   const sentD9 = new Map<string, string>();
   const followed = followedFrom(plm => [...db.pullRequest.iter()].find(p => p.plmEcrNumber === plm)?.status, 2000);
-  const d9: IngestItem = { plmEcrNumber: 'ECR-D9', title: p9.title, description: '', changeRequest: JSON.parse(storedJson('ECR-D9')), sourceRef: 'check', eco: 'ECO-D9', decision: { decision: 'approved', decidedBy: RAFAEL, decidedOn: DECIDED_ON } };
+  const d9: IngestItem = { plmEcrNumber: 'ECR-D9', title: p9.title, description: p9.description, changeRequest: JSON.parse(storedJson('ECR-D9')), sourceRef: 'check', eco: 'ECO-D9', decision: { decision: 'approved', decidedBy: RAFAEL, decidedOn: DECIDED_ON } };
   const firstTry = await recordDecided(R, d9, sentD9, () => {}, followed).then(() => undefined, e => e);
   check('the ingest sees that Norn did not follow the approval, does not remember it as delivered, and still records the ECO number', firstTry instanceof DecisionNotFollowed && !sentD9.has('decision:ECR-D9') && sentD9.get('eco:ECR-D9') === 'ECO-D9' && pr(p9.id).status === 'draft', `${firstTry?.message}; ${pr(p9.id).status}`);
   await allCodeDone(p9.id);
@@ -229,7 +254,7 @@ try {
   const revs = [...db.ecrRevision.iter()].filter(r => r.prId === real.id).length;
 
   // What the ingest does for a decided ECR: its decision, then its ECO number; never ingest_ecr.
-  const item: IngestItem = { plmEcrNumber: e417.id, title: e417.title, description: '', changeRequest: e417, sourceRef: 'check', eco: ECO, decision: { decision: 'approved', decidedBy: RAFAEL, decidedOn: DECIDED_ON } };
+  const item: IngestItem = { plmEcrNumber: e417.id, title: real.title, description: real.description, changeRequest: e417, sourceRef: 'check', eco: ECO, decision: { decision: 'approved', decidedBy: RAFAEL, decidedOn: DECIDED_ON } };
   const calls: string[] = [];
   const counted = new Proxy(R, { get: (t, m: string) => (m === 'ingestEcr' ? () => { throw new Error('a decided ECR must not be ingested'); } : (a: any) => (calls.push(m), (t as any)[m](a))) }) as typeof R;
   await recordDecided(counted, item, sent, quiet, followed);

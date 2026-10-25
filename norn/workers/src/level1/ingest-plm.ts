@@ -111,7 +111,7 @@ export async function recordDecision(R: Pick<Client['R'], 'recordPlmDecision'>, 
   if (sent.get(key) === d.decision) return;
   try {
     await withRetry(
-      () => R.recordPlmDecision({ plmEcrNumber: item.plmEcrNumber, decision: d.decision, decidedBy: d.decidedBy, decidedOn: d.decidedOn, changeRequestJson: JSON.stringify(item.changeRequest), source: 'plm', sourceRef: item.sourceRef }),
+      () => R.recordPlmDecision({ plmEcrNumber: item.plmEcrNumber, decision: d.decision, decidedBy: d.decidedBy, decidedOn: d.decidedOn, title: item.title, description: item.description, changeRequestJson: JSON.stringify(item.changeRequest), source: 'plm', sourceRef: item.sourceRef }),
       { idempotent: true, label: `record_plm_decision ${item.plmEcrNumber}` }
     );
   } catch (e) {
@@ -292,20 +292,23 @@ export async function recoverEcos(names: string[], read: (name: string) => Promi
 export async function onChange(
   o: PlmIngestOptions,
   change: Pick<EcrListing, 'name' | 'workflowState'>,
-  d: { read: (name: string) => Promise<IngestItem>; report: (item: IngestItem) => Promise<void>; recordEco: (item: IngestItem) => Promise<void>; lock: EcrLock; retry: RetryQueue; now?: () => number }
+  d: { read: (name: string) => Promise<IngestItem>; report: (item: IngestItem) => Promise<void>; recordEco: (item: IngestItem) => Promise<void>; lock: EcrLock; retry: RetryQueue; now?: () => number; log?: (m: string) => void }
 ): Promise<void> {
   if (!wanted(o, change)) return;
   await d.lock(change.name, async () => {
-    const item = await d.read(change.name);
-    // Routed by what was just read: the listing's state may be older (an ECR approved between the listing and the read).
     try {
+      const item = await d.read(change.name);
+      // Routed by what was just read: the listing's state may be older (an ECR approved between the listing and the read).
       await routed(d)(item);
     } catch (e) {
-      if (e instanceof DecisionNotFollowed) {
-        d.retry.fail(change.name, (d.now ?? Date.now)()); // not an error to the watcher: the retry queue sends it again
-        return;
-      }
-      throw e;
+      // A mapping error is the ECR's own fault: the watcher delivers it again when someone fixes it. Anything else (the PLM or Norn
+      // unreachable, a failed report, a decision Norn has not followed yet) goes to the retry queue, with a fresh read and a
+      // growing wait, rather than to the watcher: the watcher gives up on a delivery after a few failures and never offers
+      // an unchanged ECR again, which would lose the decision for good.
+      if (!isTransient(e)) throw e;
+      const n = d.retry.fail(change.name, (d.now ?? Date.now)());
+      d.log?.(`${change.name}: not taken in yet (attempt ${n}), will retry: ${(e as Error).message}`);
+      return;
     }
     d.retry.done(change.name); // delivered fresh by the watcher: nothing left to retry
   });
@@ -348,7 +351,7 @@ export async function runPlmIngest(R: Client['R'], log: (m: string) => void, dep
   const watcher = watchEcrs(
     opts,
     async change => {
-      await onChange(o, change, { read, report, recordEco, lock, retry });
+      await onChange(o, change, { read, report, recordEco, lock, retry, log });
     },
     { intervalMs: o.intervalMs, since: mark, stateFile: o.stateFile, onError: e => log(`PLM watch: ${(e as Error).message}`) }
   );

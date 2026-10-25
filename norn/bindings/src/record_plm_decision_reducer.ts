@@ -22,6 +22,8 @@ export default {
   decision: __t.string(),
   decidedBy: __t.string(),
   decidedOn: __t.string(),
+  title: __t.string(),
+  description: __t.string(),
   changeRequestJson: __t.string(),
   source: __t.string(),
   sourceRef: __t.string(),
