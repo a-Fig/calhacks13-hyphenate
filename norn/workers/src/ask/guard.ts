@@ -49,6 +49,8 @@ export interface Found {
   percent: boolean;
   /** -1 when the text says the number is negative (a minus, a saving, a reduction), +1 for an explicit plus or an increase, 0 when it doesn't say. */
   sign: -1 | 0 | 1;
+  /** A small count written as a plain word ("three"). Left unmarked unless a citation marker follows it. */
+  count?: boolean;
 }
 
 export interface FindOptions {
@@ -106,6 +108,9 @@ const DIRECTION_BEFORE = new RegExp(
 const QUALIFIER = '(?:(?:per|each|a|an|every)\\s+[\\w-]+\\s+)?';
 const NEGATIVE_AFTER = new RegExp(`^[\\s,]*${QUALIFIER}(?:less|lower|cheaper|saving|savings|saved|off|down|decrease|reduction|cut|credit|discount)\\b`, 'i');
 const POSITIVE_AFTER = new RegExp(`^[\\s,]*${QUALIFIER}(?:more|higher|extra|greater|increase|up|costlier|pricier|dearer)\\b`, 'i');
+
+// A number glued into a word with a hyphen ("12-month", "three-way") is part of that word, not a quantity. Magnitude, percent and currency words are not.
+const GLUED = /^-(?!(?:hundred|thousand|million|billion|trillion|mil|mio|mln|bln|lakh|lac|crore|bn|mn|mm|per|percent|pct|dollars?|usd|bucks|euros?|eur|gbp|pounds?|cents?|cad|aud|bps|bp|basis)(?![\p{L}\p{N}]))\p{L}{2,}/iu;
 
 const blank = (s: string) => s.replace(/[^\n]/g, ' ');
 const alnum = /[\p{L}\p{N}]/u;
@@ -369,6 +374,10 @@ export function findNumbers(text: string, opts: FindOptions = {}): Found[] {
       skipUntil = end;
       continue;
     }
+    if (GLUED.test(masked.slice(end)) && !prefixOf(text, start).money) {
+      skipUntil = end;
+      continue;
+    }
     const decimals = clean.includes('.') ? clean.length - clean.indexOf('.') - 1 : 0;
     push(start, end, { nominal: Number(clean), tolerance: 0.5 * 10 ** -decimals });
     skipUntil = end;
@@ -387,7 +396,11 @@ export function findNumbers(text: string, opts: FindOptions = {}): Found[] {
       const sfx = suffixOf(text, r.end);
       // "one" alone is a pronoun or part of a word (one of, one-time) unless an amount word follows it.
       if (r.lone === 'one' && (text[r.end] === '-' || (sfx.end === r.end && sfx.reach === r.end))) continue;
+      const money = prefixOf(text, m.index!).money;
+      if (!money && GLUED.test(text.slice(r.end))) continue;
       push(m.index!, r.end, { nominal: r.value, tolerance: r.tolerance });
+      // "three" or "two" on its own is a count of things, not a figure. It is checked only when a marker says it is one.
+      if (!money && r.lone !== null && r.lone !== 'one' && r.value >= 2 && r.value <= 10 && sfx.end === r.end && sfx.reach === r.end) out[out.length - 1]!.count = true;
     }
   }
   return out.sort((a, b) => a.start - b.start);
@@ -420,10 +433,31 @@ function sameId(a: unknown, ref: string): boolean {
   return typeof a === 'string' && (a === ref || bare(a) === bare(ref));
 }
 
+/** A driver of a statement has no id in the data; the answer names it by its statement and place: driver:12.2. */
+const DRIVER_REF = /^driver:(\d+)\.([1-9]\d*)$/i;
+
 /** The parts of the tool results that carry this id: the objects whose key or id field is it, and whether a result around one says mock. */
 function subtreesFor(roots: unknown[], ref: string): { parts: unknown[]; mockAround: boolean } {
   const parts: unknown[] = [];
   let mockAround = false;
+  const driver = DRIVER_REF.exec(ref.trim());
+  if (driver) {
+    // driver:<statement id>.<place in its drivers list, from 1>: exactly that one driver row, and no other.
+    const walkDrivers = (n: unknown, isRoot: boolean, mock: boolean) => {
+      if (Array.isArray(n)) return n.forEach(x => walkDrivers(x, false, mock));
+      if (!n || typeof n !== 'object') return;
+      const o = n as Record<string, unknown>;
+      const row = Array.isArray(o.drivers) && String(o.id) === driver[1] ? o.drivers[Number(driver[2]) - 1] : undefined;
+      if (row && typeof row === 'object') {
+        parts.push(row);
+        if (mock || o.mock === true) mockAround = true;
+      }
+      const m = mock || (!isRoot && o.mock === true);
+      for (const v of Object.values(o)) walkDrivers(v, false, m);
+    };
+    roots.forEach(r => walkDrivers(r, true, false));
+    return { parts, mockAround };
+  }
   // `mock` is true when an object above this one (not the tool result's own top level) says mock: true.
   const walk = (n: unknown, isRoot: boolean, mock: boolean) => {
     if (Array.isArray(n)) return n.forEach(x => walk(x, false, mock));
@@ -480,6 +514,11 @@ function storedLabel(parts: unknown[], refId: string): string {
       const v = (p as Record<string, unknown>)[f];
       if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 160);
     }
+  // A driver ("What moves the numbers") has no label or id of its own: its words are what is stored.
+  for (const p of parts) {
+    const v = (p as Record<string, unknown>).text;
+    if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 160);
+  }
   return bare(refId);
 }
 
@@ -562,6 +601,7 @@ export function guardAnswer(agent: AgentAnswer, results: ToolResultText[]): Guar
     // The markers that follow this number, with nothing but spaces between.
     const named = marks.filter(m => m.at >= f.reach && clean.slice(f.reach, m.at).trim() === '').flatMap(m => m.ids);
     const cited = [...new Set(named)].map(id => byId.get(id)).filter((c): c is NonNullable<typeof c> => c !== undefined);
+    if (f.count && named.length === 0) continue;
     const hay = cited.filter(c => c.usable).flatMap(c => c.hay);
     const ok = f.parsed && hay.length > 0 && found(f, hay);
     if (f.start > at) segments.push({ text: clean.slice(at, f.start) });
