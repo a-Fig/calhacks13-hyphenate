@@ -158,14 +158,16 @@ async function main() {
 
   // Steps 7 to 12 make throwaway records. Each step lists what it made, in creation order, as soon as it exists, and its
   // finally block removes them. Only records carrying this run's mark are removed, plus the release bot's ECO for a
-  // probe of this run's (made by the bot, after the probe, on that probe), and only comments carrying the mark are
-  // deleted. Anything else is left, and fails the step by name; so is a probe that carries a person's comment, since
-  // deleting the probe would take the comment with it. A failed delete is not ignored either. The naming series are
+  // probe of this run's (made by the bot, after the probe, on that probe), and only the comments this run posted, by the
+  // names their creates returned, are deleted. Anything else is left, and fails the step by name; so is a probe that
+  // carries a comment or File this run did not make, since deleting the probe would take it along. A person's comment
+  // can quote the mark, so it is never matched by text. A failed delete is not ignored either. The naming series are
   // never rewound here: Frappe winds a series back itself when the deleted record is the last in it, and a rewind of
   // ours could hand out a number someone filed meanwhile.
   type Made = [doctype: string, name: string][];
   const BOT = 'eco-release@bowman-aviation.example';
   const runUsers = new Set(['Administrator', 'norn@bowman-aviation.example', 'jeff.hargrove@bowman-aviation.example', 'dana.okafor@bowman-aviation.example', 'rafael.quintero@bowman-aviation.example', BOT]);
+  const ownComments = new Set<string>(); // names returned by this run's own comment creates on its probes
   const reason = (e: unknown) => (e instanceof PlmError ? `HTTP ${e.status}` : String(e)).slice(0, 80);
   const marked = (dt: string, doc: any) => String((dt === 'NCR' ? doc.description : dt === 'File' ? doc.file_name : doc.title) ?? '').includes(RUN);
   const ours = async (dt: string, nm: string) => {
@@ -197,12 +199,16 @@ async function main() {
             else foreign.push(`ECO ${x.name} by ${x.owner}`);
           }
         }
-        for (const c of await admin.list('Comment', { fields: ['name', 'owner', 'creation', 'comment_type', 'content'], filters: [['reference_doctype', '=', dt], ['reference_name', '=', nm]] })) {
-          if (String(c.content ?? '').includes(RUN)) comments.push(c.name);
-          // Frappe's own log lines (a workflow step, an edit) of this run's actions on its probe: deleted with the probe.
-          else if (c.comment_type !== 'Comment' && runUsers.has(c.owner) && c.creation >= since) system++;
-          else foreign.push(`Comment ${c.name} by ${c.owner}`);
+        for (const c of await admin.list('Comment', { fields: ['name', 'owner', 'creation', 'comment_type'], filters: [['reference_doctype', '=', dt], ['reference_name', '=', nm]] })) {
+          if (ownComments.has(c.name)) comments.push(c.name);
+          // Frappe's log line for a workflow step this run took on its probe (steps 7 and 9; the only type they write,
+          // read on the live PLM 2026-10-24). Frappe removes it in a job after the probe is deleted.
+          else if (c.comment_type === 'Workflow' && runUsers.has(c.owner) && c.creation >= since) system++;
+          else foreign.push(`Comment ${c.name} (${c.comment_type}) by ${c.owner}`);
         }
+        // Deleting a record deletes the Files attached to it, so a File this run did not make keeps the probe.
+        for (const f of await admin.list('File', { fields: ['name', 'owner'], filters: [['attached_to_doctype', '=', dt], ['attached_to_name', '=', nm]] }))
+          if (!made.some(([d, n]) => d === 'File' && n === f.name)) foreign.push(`File ${f.name} by ${f.owner}`);
         if (foreign.length) { keep.add(`${dt} ${nm}`); left.push(`${dt} ${nm}, kept because it carries records this run did not make: ${foreign.join(', ')}`); }
       } catch (e) { keep.add(`${dt} ${nm}`); left.push(`${dt} ${nm} (${reason(e)})`); }
     }
@@ -294,10 +300,12 @@ async function main() {
     check(as.status >= 400 && (await admin.list('ToDo', { fields: ['name'], filters: [['reference_name', '=', probe.name]] })).length === 0, 'assignment refused, no ToDo');
 
     const sp = await norn.post('/api/resource/Comment', { doctype: 'Comment', comment_type: 'Comment', reference_doctype: 'ECR', reference_name: probe.name, content: `Spoof probe (not a Norn result). ${MARK}`, comment_by: 'Rafael Quintero', comment_email: 'rafael.quintero@bowman-aviation.example' }, { allow: true });
+    if (sp.status === 200) ownComments.add(sp.body.data.name);
     const stored = sp.status === 200 ? (await admin.get(`/api/resource/Comment/${enc(sp.body.data.name)}`)).body.data : {};
     log(`  Comment sent as Rafael Quintero -> ${sp.status}; stored author "${stored.comment_by}" <${stored.comment_email}>`);
     check(sp.status === 200 && stored.comment_email === 'norn@bowman-aviation.example' && stored.comment_by !== 'Rafael Quintero', 'a spoofed comment author lands as Norn');
     const odd = await norn.post('/api/resource/Comment', { doctype: 'Comment', comment_type: 'Edit', reference_doctype: 'ECR', reference_name: probe.name, content: `x ${MARK}` }, { allow: true });
+    if (odd.status === 200) ownComments.add(odd.body.data.name);
     check(odd.status >= 400, 'a comment of another type (Edit) refused');
 
     const g = (await norn.get(`/api/resource/ECR/${probe.name}`)).body.data;
