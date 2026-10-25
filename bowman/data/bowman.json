@@ -23459,7 +23459,8 @@
           {
             "label": "Qualification: vibration re-test on the endurance rig",
             "basis": "engineer_estimate",
-            "oneTime": 18500
+            "oneTime": 18500,
+            "factor": "qualification"
           },
           {
             "label": "Scrap and write-off of Rev B inventory",
@@ -23477,11 +23478,13 @@
             "label": "Installation labor, 12 h per aircraft at $110",
             "basis": "engineer_estimate",
             "unitCost": 1320,
-            "quantity": 10
+            "quantity": 10,
+            "factor": "retrofit_installation"
           },
           {
             "label": "Re-inspection and test after retrofit",
-            "basis": "not_provided"
+            "basis": "not_provided",
+            "factor": "retrofit_test"
           }
         ],
         "logisticsSupport": [
@@ -23743,7 +23746,8 @@
           },
           {
             "label": "Whirl-tower, flutter and noise testing",
-            "basis": "not_provided"
+            "basis": "not_provided",
+            "factor": "qualification"
           },
           {
             "label": "Hover performance flight test",
@@ -23995,7 +23999,8 @@
           {
             "label": "Qualification and soak testing (Hollis)",
             "basis": "supplier_quote",
-            "oneTime": 36000
+            "oneTime": 36000,
+            "factor": "qualification"
           },
           {
             "label": "Engineering and data revision",
@@ -24133,7 +24138,8 @@
           {
             "label": "Qualification (Hollis)",
             "basis": "supplier_quote",
-            "oneTime": 22000
+            "oneTime": 22000,
+            "factor": "qualification"
           },
           {
             "label": "Engineering and data revision",
@@ -24268,7 +24274,8 @@
           {
             "label": "Orrin qualification lot",
             "basis": "supplier_quote",
-            "oneTime": 96000
+            "oneTime": 96000,
+            "factor": "qualification"
           },
           {
             "label": "Engineering and testing",
@@ -24387,7 +24394,8 @@
           {
             "label": "Orrin qualification lot",
             "basis": "supplier_quote",
-            "oneTime": 142000
+            "oneTime": 142000,
+            "factor": "qualification"
           },
           {
             "label": "Engineering and testing",
