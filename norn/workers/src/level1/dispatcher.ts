@@ -32,7 +32,7 @@ import { deriveRecommendation, ruleInputOf } from './recommendation.ts';
 import { jobPrompt, systemPromptFor, screenDetail, type Detail, type HeadlineKey } from './prompt.ts';
 import { costCheckOf, routeFor, storedCompanyConfig } from './routing.ts';
 import { settingsFromEnv, type Level1Settings } from './settings.ts';
-import { SIBLING_STAGES, siblingCutoffMs, siblingOf } from './siblings.ts';
+import { SIBLING_STAGES, siblingCutoffUs, siblingOf } from './siblings.ts';
 import { crSeqOfRun, failedChecksForRun, runRowsOf, siblingsForRun, toRunRow } from './source.ts';
 import { ruleCheckOf, timelineSupplyFacts } from './timeline-supply.ts';
 
@@ -66,7 +66,7 @@ export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
         inputsRevision: typeof jsonOr<Inputs>(r.inputsJson, {}).revision === 'number' ? jsonOr<Inputs>(r.inputsJson, {}).revision! : null,
         mock: results.some(x => x.checkRunId === r.id && x.mock),
         // Whether the timeline and supply checks of this run's snapshot have settled (siblings.ts).
-        siblings: { pending: SIBLING_STAGES.some(stage => siblingOf(runs, own, stage).state === 'pending'), cutoffMs: siblingCutoffMs(own) },
+        siblings: { pending: SIBLING_STAGES.some(stage => siblingOf(runs, own, stage).state === 'pending'), cutoffUs: siblingCutoffUs(own) },
       };
     });
   const events: EventRow[] = [...db.agentEvent.prId.filter(pr.id)].filter(e => e.role === role).map(e => ({ jobId: e.jobId, eventType: e.eventType, tsMs: ms(e.ts), payloadJson: e.payloadJson }));

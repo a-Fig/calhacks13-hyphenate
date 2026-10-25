@@ -49,8 +49,8 @@ export interface RuleLine {
 export interface SiblingCheck {
   state: 'ready' | 'failed' | 'blocked' | 'pending' | 'mock';
   flags?: { kind: string; severity: string; message: string; ref?: string }[];
-  /** Timeline: the median cut-in as an ISO date and first serial, the stated need, and how late at P90 (weeks), from the bound rows. */
-  cutIn?: { date?: string; serial?: number; stated?: string; lateWeeksP90?: number };
+  /** Timeline: the median and P90 cut-in as ISO dates and first serials, the stated need, and how late at P90 (weeks), from the bound rows. */
+  cutIn?: { date?: string; serial?: number; dateP90?: string; stated?: string; lateWeeksP90?: number };
   /** Supply: the other open ECRs that share a supplier with this one, from the interaction the check stored. */
   peers?: string[];
 }
@@ -147,8 +147,13 @@ function siblingConditions(name: string, c: SiblingCheck | undefined): string[] 
   // A missed need date: only the timeline check's own flag (the supply check's version of it is the same fact), and
   // only a slip over Bowman's 14-day bar.
   if (name === 'timeline' && flags.some(f => f.kind === 'likely_late') && (c.cutIn?.lateWeeksP90 === undefined || c.cutIn.lateWeeksP90 * 7 > MATERIALITY.cutInSlipDays)) {
-    const to = c.cutIn?.date ? ` to ${c.cutIn.date}${c.cutIn.serial !== undefined ? ` (S/N ${c.cutIn.serial})` : ''}` : '';
-    add(`CCB to accept the cut-in slip${to} against the stated need${c.cutIn?.stated ? ` (${c.cutIn.stated})` : ''}, or expedite`);
+    // The bar is read at P90, so the median can slip less than 14 days and still need a condition: quote both, and say which crosses.
+    const at = (date?: string, serial?: number) => (date ? `${date}${serial !== undefined ? ` (S/N ${serial})` : ''}` : '');
+    const median = at(c.cutIn?.date, c.cutIn?.serial);
+    const tail = c.cutIn?.dateP90;
+    const bar = `${MATERIALITY.cutInSlipDays} days`;
+    const how = median && tail ? ` to ${median} at the median, ${tail} at P90 (tail past ${bar}),` : median ? ` to ${median} at the median, with the P90 tail crossing ${bar},` : `, whose P90 tail crosses ${bar},`;
+    add(`CCB to accept the cut-in slip${how} against the stated need${c.cutIn?.stated ? ` (${c.cutIn.stated})` : ''}, or expedite`);
   }
   // An unresolved conflict with another open ECR over a supplier's slot or capacity. Capacity counts only when it
   // is the interaction with a named peer that exceeds it.
@@ -211,15 +216,20 @@ export function deriveRecommendation(input: RuleInput): Derived {
   return { recommendation: 'Approve', rule: 3, blockers, conditions, reasoning: 'Rule 3 (no flags and no gaps).' };
 }
 
-/** A check run, as far as the rule needs it. The times are null while they have not happened. */
+/**
+ * A check run, as far as the rule needs it. The times are SpacetimeDB timestamps at full precision: bigint microseconds
+ * since the epoch (`microsSinceUnixEpoch`), never milliseconds. Rows made in one transaction share a timestamp, and a
+ * run created a few hundred microseconds later is a different moment that a millisecond value would call the same.
+ * A time is null while it has not happened.
+ */
 export interface RunRow {
   id: bigint;
   stage: string;
   status: string;
   inputHash: string;
-  createdMs: number;
-  startedMs: number | null;
-  finishedMs: number | null;
+  createdUs: bigint;
+  startedUs: bigint | null;
+  finishedUs: bigint | null;
   /** The s1 run's input hash this run names as its upstream (`inputs.upstream.s1_bom_delta`), for the code stages that read s1. */
   upstreamS1?: string;
   /** The change-request revision the run's inputs name. */
@@ -228,7 +238,7 @@ export interface RunRow {
    * When the run completed, read from its results (written in the transaction that completes it, never edited). A run's
    * `finishedAt` is overwritten when it goes stale, so it cannot say when a stale run finished.
    */
-  completedMs?: number;
+  completedUs?: bigint;
 }
 
 /**
@@ -247,12 +257,12 @@ export function failedChecksOf(runs: readonly RunRow[], run: RunRow, upstreamS1:
   const live = runs.filter(r => r.status !== 'cancelled');
   const out: string[] = [];
   const s0 = live.filter(r => r.stage === 's0_extract' && r.id < run.id).at(-1);
-  if (s0 && bad(s0.status) && (s0.status === 'blocked' || (s0.finishedMs !== null && run.finishedMs !== null && s0.finishedMs <= run.finishedMs))) out.push('s0_extract');
-  const began = run.startedMs ?? run.createdMs;
+  if (s0 && bad(s0.status) && (s0.status === 'blocked' || (s0.finishedUs !== null && run.finishedUs !== null && s0.finishedUs <= run.finishedUs))) out.push('s0_extract');
+  const began = run.startedUs ?? run.createdUs;
   const s1 =
     upstreamS1 === undefined
       ? undefined
-      : live.filter(r => r.stage === 's1_bom_delta' && r.inputHash === upstreamS1 && r.createdMs <= began && r.finishedMs !== null && run.finishedMs !== null && r.finishedMs <= run.finishedMs).at(-1);
+      : live.filter(r => r.stage === 's1_bom_delta' && r.inputHash === upstreamS1 && r.createdUs <= began && r.finishedUs !== null && run.finishedUs !== null && r.finishedUs <= run.finishedUs).at(-1);
   if (s1 && bad(s1.status)) out.push('s1_bom_delta');
   if (bad(run.status)) out.push('s2_cost');
   return out;

@@ -80,13 +80,15 @@ export function ruleCheckOf(v: SiblingView): SiblingCheck {
   if (v.state !== 'ready') return { state: v.state };
   const out: SiblingCheck = { state: 'ready', flags: flagsOf(v) };
   const d = detailOf(v);
-  const date = jsonOr(row(v, 'cut_in_date')?.detailJson ?? '{}').date?.p50;
+  const dates = jsonOr(row(v, 'cut_in_date')?.detailJson ?? '{}').date;
+  const date = dates?.p50;
   const serial = row(v, 'cut_in_serial')?.p50;
   const late = row(v, 'late_weeks');
   if (date !== undefined || serial !== undefined || late || d.stated?.label)
     out.cutIn = {
       ...(typeof date === 'string' ? { date } : {}),
       ...(typeof serial === 'number' ? { serial: Math.round(serial) } : {}),
+      ...(typeof dates?.p90 === 'string' ? { dateP90: dates.p90 } : {}),
       ...(typeof d.stated?.label === 'string' ? { stated: d.stated.label } : {}),
       ...(late ? { lateWeeksP90: late.p90 } : {}),
     };

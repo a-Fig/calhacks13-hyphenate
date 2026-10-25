@@ -40,9 +40,9 @@ export interface EcrFacts {
     mock: boolean;
     /**
      * The timeline and supply checks of this run's snapshot (siblings.ts): `pending` while either has not settled,
-     * and the moment (`cutoffMs`) at which the dispatcher stops waiting for it. Absent: nothing to wait for.
+     * and the moment (`cutoffUs`, microseconds) after which the dispatcher stops waiting for it. Absent: nothing to wait for.
      */
-    siblings?: { pending: boolean; cutoffMs: number };
+    siblings?: { pending: boolean; cutoffUs: bigint };
   }[];
   /**
    * Impact statements of any level. `crSeq` is the change-request revision of the check run a
@@ -140,9 +140,9 @@ export function decide(e: EcrFacts, o: DecideOptions): Decision {
   if (!run) return skip(`no finished s2_cost run on change-request revision ${rev} yet`);
   if (run.mock) return skip('the s2_cost run is mock compute');
   // The timeline and supply checks (s3, s4) finish within seconds of the cost check, and the statement carries
-  // them, so wait for them, but only until the run's cutoff: a hung or failed check must not hold Level 1 back
+  // them, so wait for them, but only until the run's cutoff has strictly passed (siblings.ts says why): a hung or failed check must not hold Level 1 back
   // (the statement then says that check is unavailable).
-  if (run.siblings?.pending && o.nowMs < run.siblings.cutoffMs) return skip(`waiting for the timeline and supply checks until ${new Date(run.siblings.cutoffMs).toISOString()}`);
+  if (run.siblings?.pending && BigInt(o.nowMs) * 1000n <= run.siblings.cutoffUs) return skip(`waiting for the timeline and supply checks until ${new Date(Number(run.siblings.cutoffUs / 1000n)).toISOString()}`);
 
   // A statement written from this revision's check run is this revision's statement (any level: a
   // Level 2 or 3 supersedes Level 1). One written for an earlier revision, however late it was posted, is not.

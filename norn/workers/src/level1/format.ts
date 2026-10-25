@@ -16,6 +16,7 @@ import { createHash } from 'node:crypto';
 import type { CompanyConfig, CostCheckHeadline } from '../../../config/src/index.ts';
 import { routeFor, ROUTE_PENDING, type AssessmentRef, type EcrRef } from './routing.ts';
 import type { ImpactFields } from './plm.ts';
+import { cleanClaims, findingsOf } from './prose.ts';
 import { deriveRecommendation, type Derived, type RuleInput, type SiblingCheck } from './recommendation.ts';
 import { isTimelineSupplyKey } from './timeline-supply.ts';
 
@@ -234,6 +235,19 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
       : '';
     out.push(`<p style="margin:0 0 8px 0"><b>Recommendation: ${esc(rec.value)}</b> ${tag('judgment')}${rec.reasoning ? `<br>${esc(rec.reasoning)}` : ''}${note}</p>`);
   }
+  // What the rule found is shown by code, whatever the agent wrote (its reasoning may leave a condition out). When the
+  // reasoning is the rule's own it already names every one, so the lists are for the agent's reasoning.
+  if (derived && rec?.reasoning !== derived.reasoning) {
+    const list = (title: string, items: string[]) => {
+      if (!items.length) return;
+      out.push(`<p style="margin:0 0 4px 0"><b>${esc(title)}</b> ${tag('computation')}</p><ul style="margin:0 0 8px 0">${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>`);
+    };
+    list("Why it cannot be assessed as filed (Norn's rule)", derived.blockers);
+    list("Conditions for the CCB (Norn's rule)", derived.conditions);
+  }
+  // The agent's words are never rewritten; where they say nothing was found although the checks found something, the page says so.
+  if (derived && cleanClaims({ headline: s.headline, drivers: s.drivers, claims: s.claims }, findingsOf(prov.ruleInput, derived)).length)
+    out.push(`<p style="margin:0 0 8px 0;color:#555555"><i>Norn's checks found the items named under the recommendation. Wording elsewhere in this statement that says there are none is the agent's, and the checks stand.</i></p>`);
 
   // Headline numbers: the cost's. The timeline and supply checks' numbers have their own section below.
   const numberTable = (nums: StatementNumber[]) => {

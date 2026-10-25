@@ -48,8 +48,9 @@ of the main checkout, which a worktree does not have). Run ONE dispatcher per da
   at s2 alone. Measured on Bowman's data (norn-seed-1, 10,000 draws, one process): s2 takes 0.5 to 1.0 s,
   s3 0.06 to 0.13 s and s4 0.10 to 0.47 s, and the module queues all three at once once s1 is done, so
   the wait is normally a second or two. The wait is bounded: `SIBLING_WAIT_MS` (30 s) after s2 finished.
-  At that cutoff the session starts whatever their state, and the statement says that check is
-  unavailable (failed, blocked, or not finished in time), never holds Level 1 back, and is never the
+  Once the cutoff has strictly passed the session starts whatever their state (a finish exactly at the
+  cutoff still counts, so the dispatcher does not go ahead at the cutoff itself: see `siblings.ts`), and the
+  statement says that check is unavailable (failed, blocked, or not finished in time), never holds Level 1 back, and is never the
   reason for a Send back. The cutoff is a constant, not a setting: the dispatcher and the publisher both
   read it, because it decides which runs a statement counts as having had.
 - Which s3 and s4 run a statement rests on. s2, s3 and s4 all read the same s1 run, so a run of s3 or s4
@@ -58,6 +59,13 @@ of the main checkout, which a worktree does not have). Run ONE dispatcher per da
   newest that had settled by the cutoff (a stale run counts: it finished on those inputs and was made
   stale later). A later run, such as s4 re-run because another ECR was filed, is never read. The
   dispatcher and the publisher call the same `siblingsForRun` (`source.ts`).
+- Times are compared at full precision: `RunRow` carries SpacetimeDB timestamps as bigint microseconds, never
+  milliseconds, so a run created a few hundred microseconds after s2 is not mistaken for one of its siblings.
+- The agent's words against the rule (#123, `prose.ts`, `guard.ts`). The PLM text lists every derived
+  blocker and condition itself, whatever the agent wrote. The MCP server (`mcp/src/main.ts`) runs `guard.ts` on
+  every post: a statement that says the checks are clean, or that there are no issues, while the rule has a
+  condition or a check has a finding, or that quotes a dollar figure no check result contains, is refused with
+  the reason, and the agent posts again. The agent's prose is never rewritten.
 - Events also go to a JSONL file (`teeSink`) as a fallback if the database is unreachable.
 
 ## The agent (`prompt.ts`)

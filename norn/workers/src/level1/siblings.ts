@@ -12,11 +12,20 @@
 // Its state comes from facts that never change after the fact:
 //   - done or stale: when it completed. A stale run's `finishedAt` is overwritten when it goes stale (core.ts
 //     `reconcile`), so completion is read from its results, which are written in the same transaction as the
-//     completion and never edited (`completedMs`).
+//     completion and never edited (`completedUs`).
 //   - failed: its `finishedAt`; blocked: blocked.
 // A run that had not completed by the cutoff (the s2 run's completion plus a bounded wait) is unavailable, however
 // late it finishes afterwards. The cutoff doubles as the dispatcher's patience: it starts the session as soon as
-// both have settled, and at the cutoff at the latest, so a hung check cannot hold Level 1 back.
+// both have settled, and otherwise only once the cutoff has strictly passed, so a hung check cannot hold Level 1 back.
+//
+// Why strictly passed. A run that completes or fails exactly AT the cutoff counts as done (`<=`). If the dispatcher
+// went ahead at the cutoff while a sibling was still running, that sibling could then finish at the cutoff: pending
+// when the session was told, ready when the publisher looked. Waiting for `now > cutoff` makes the two agree: a
+// sibling still running when the dispatcher goes ahead completes after the cutoff, so it is pending at dispatch and
+// at publication alike. (The other way, remembering at dispatch what was pending, needs a record stored on the
+// statement; this needs none.)
+//
+// Every time here is a SpacetimeDB timestamp at full precision: bigint microseconds, never milliseconds (see `RunRow`).
 import type { RunRow } from './recommendation.ts';
 
 export const SIBLING_STAGES = ['s3_timeline', 's4_supply'] as const;
@@ -30,6 +39,7 @@ export type SiblingStage = (typeof SIBLING_STAGES)[number];
  * which runs a statement counts as having had.
  */
 export const SIBLING_WAIT_MS = 30_000;
+export const SIBLING_WAIT_US = BigInt(SIBLING_WAIT_MS) * 1000n;
 
 export type SiblingRunState = 'ready' | 'failed' | 'blocked' | 'pending';
 
@@ -40,34 +50,35 @@ export interface SiblingRun {
 }
 
 /** When a run completed, from facts that never change: the time its results were written, else (a run that is not stale) its `finishedAt`. */
-const completedAt = (r: RunRow): number | null => r.completedMs ?? (r.status === 'stale' ? null : r.finishedMs);
+const completedAt = (r: RunRow): bigint | null => r.completedUs ?? (r.status === 'stale' ? null : r.finishedUs);
 
 /** The moment after which a statement on this s2 run no longer counts a sibling as finished. */
-export const siblingCutoffMs = (s2: RunRow): number => (completedAt(s2) ?? s2.createdMs) + SIBLING_WAIT_MS;
+export const siblingCutoffUs = (s2: RunRow): bigint => (completedAt(s2) ?? s2.createdUs) + SIBLING_WAIT_US;
 
 /**
  * The s3 or s4 run the statement on `s2` rests on, and how it ended. `pending` means unavailable: it had not completed
  * by the cutoff (queued, running, completed late), or there is no eligible run at all.
  */
-export function siblingOf(runs: readonly RunRow[], s2: RunRow, stage: SiblingStage, cutoffMs: number = siblingCutoffMs(s2)): SiblingRun {
+export function siblingOf(runs: readonly RunRow[], s2: RunRow, stage: SiblingStage, cutoffUs: bigint = siblingCutoffUs(s2)): SiblingRun {
   if (s2.upstreamS1 === undefined || s2.revision === undefined) return { state: 'pending' };
-  const eligible = runs.filter(r => r.stage === stage && r.status !== 'cancelled' && r.upstreamS1 === s2.upstreamS1 && r.revision === s2.revision && r.createdMs <= s2.createdMs);
+  const eligible = runs.filter(r => r.stage === stage && r.status !== 'cancelled' && r.upstreamS1 === s2.upstreamS1 && r.revision === s2.revision && r.createdUs <= s2.createdUs);
   const run = eligible.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).at(-1);
   if (!run) return { state: 'pending' };
   if (run.status === 'blocked') return { state: 'blocked', run };
-  if (run.status === 'failed') return (run.finishedMs ?? run.createdMs) <= cutoffMs ? { state: 'failed', run } : { state: 'pending', run };
+  if (run.status === 'failed') return (run.finishedUs ?? run.createdUs) <= cutoffUs ? { state: 'failed', run } : { state: 'pending', run };
   if (run.status === 'done' || run.status === 'stale') {
     const at = completedAt(run);
-    return at !== null && at <= cutoffMs ? { state: 'ready', run } : { state: 'pending', run };
+    return at !== null && at <= cutoffUs ? { state: 'ready', run } : { state: 'pending', run };
   }
   return { state: 'pending', run }; // queued, running
 }
 
 /**
- * Whether the dispatcher should still wait: a sibling is not available yet and the cutoff has not come. At the
- * cutoff it goes ahead whatever the state, and the statement says what is missing.
+ * Whether the dispatcher should still wait: a sibling is not available yet and the cutoff has not strictly passed.
+ * After it, it goes ahead whatever the state, and the statement says what is missing. `nowUs` is the clock in
+ * microseconds; a clock read in whole milliseconds is never ahead of the true time, so it only errs towards waiting.
  */
-export function waitingForSiblings(runs: readonly RunRow[], s2: RunRow, nowMs: number): boolean {
-  if (nowMs >= siblingCutoffMs(s2)) return false;
+export function waitingForSiblings(runs: readonly RunRow[], s2: RunRow, nowUs: bigint): boolean {
+  if (nowUs > siblingCutoffUs(s2)) return false;
   return SIBLING_STAGES.some(stage => siblingOf(runs, s2, stage).state === 'pending');
 }

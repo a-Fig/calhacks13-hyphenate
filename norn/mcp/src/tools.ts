@@ -11,11 +11,19 @@ import type { ActorHandle, Norn } from './norn.ts';
 import type { Claims } from './token.ts';
 import { affectedParts, assumptionView, bareResultKey, currentResult, currentResultKeys, ecrSummary, ecrView, effectiveAssumptions, historyOf, impactOf, partView, provenanceIndex } from './views.ts';
 
+/**
+ * A check on a statement's own words before it is saved (post_impact_statement). It returns why the statement may not be
+ * posted, which goes back to the agent like any other refusal of the tool, or undefined. The server knows nothing of the
+ * rules behind it: whoever starts the server supplies it (main.ts).
+ */
+export type StatementGuard = (pr: PullRequest, spawnedBy: string, statement: { headline: string; drivers: { text: string }[]; claims: { text: string }[] }) => string | undefined;
+
 export interface ToolContext {
   norn: Norn;
   claims: Claims;
   actor: ActorHandle;
   log: (message: string) => void;
+  statementGuard?: StatementGuard;
 }
 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean };
@@ -256,6 +264,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     tool(ctx, 'post_impact_statement', async (a: any) => {
       const pr = ecrOf(ctx, a.ecr);
+      const refused = ctx.statementGuard?.(pr, ctx.claims.spawnedBy, { headline: a.headline, drivers: a.drivers, claims: a.claims });
+      if (refused) throw new ToolFailure(refused);
       const numbers = (a.numbers as any[]).map(n => {
         if (n.evidence === 'computation') {
           if (!n.resultKey) throw new ToolFailure(`Number '${n.key}' is a computation, so it needs resultKey (a key from get_impact).`);

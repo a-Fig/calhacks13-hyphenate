@@ -4,9 +4,9 @@
 // baseline of a statement are read from that run, never inferred from matching numbers.
 import type { DbConnection } from '@norn/bindings';
 import type { Inputs } from '../impact.ts';
-import { failedChecksOf, type RunRow } from './recommendation.ts';
+import { failedChecksOf, ruleInputOf, type RuleInput, type RunRow } from './recommendation.ts';
 import { SIBLING_STAGES, siblingOf, type SiblingStage } from './siblings.ts';
-import type { SiblingView } from './timeline-supply.ts';
+import { ruleCheckOf, type SiblingView } from './timeline-supply.ts';
 
 type Db = DbConnection['db'];
 
@@ -44,30 +44,31 @@ export function failedChecksForRun(db: Db, prId: bigint, checkRunId: bigint): st
 
 type RunRecord = ReturnType<Db['checkRun']['id']['find']> & object;
 
-/** A stored check run as the rules read it: times in milliseconds, and the s1 hash and revision its inputs name. */
-export function toRunRow(r: RunRecord, completedMs?: number): RunRow {
+/** A stored check run as the rules read it: times at full precision (bigint microseconds, see `RunRow`), and the s1 hash and revision its inputs name. */
+export function toRunRow(r: RunRecord, completedUs?: bigint): RunRow {
   const inputs = jsonOr<Inputs>(r.inputsJson, {});
   return {
     id: r.id,
     stage: r.stage,
     status: r.status,
     inputHash: r.inputHash,
-    createdMs: r.createdAt ? Number(r.createdAt.microsSinceUnixEpoch / 1000n) : 0,
-    startedMs: r.startedAt ? Number(r.startedAt.microsSinceUnixEpoch / 1000n) : null,
-    finishedMs: r.finishedAt ? Number(r.finishedAt.microsSinceUnixEpoch / 1000n) : null,
+    createdUs: r.createdAt ? r.createdAt.microsSinceUnixEpoch : 0n,
+    startedUs: r.startedAt ? r.startedAt.microsSinceUnixEpoch : null,
+    finishedUs: r.finishedAt ? r.finishedAt.microsSinceUnixEpoch : null,
     ...(typeof inputs.upstream?.s1_bom_delta === 'string' ? { upstreamS1: inputs.upstream.s1_bom_delta } : {}),
     ...(typeof inputs.revision === 'number' ? { revision: inputs.revision } : {}),
-    ...(completedMs !== undefined ? { completedMs } : {}),
+    ...(completedUs !== undefined ? { completedUs } : {}),
   };
 }
 
 /** All of an ECR's check runs, oldest first. */
 export function runRowsOf(db: Db, prId: bigint): RunRow[] {
   // When a run completed: its results are written in that transaction and never edited, unlike its `finishedAt` (reset when it goes stale).
-  const completed = new Map<bigint, number>();
+  const completed = new Map<bigint, bigint>();
   for (const x of db.checkResult.prId.filter(prId)) {
-    const at = x.createdAt ? Number(x.createdAt.microsSinceUnixEpoch / 1000n) : undefined;
-    if (at !== undefined && (completed.get(x.checkRunId) ?? Infinity) > at) completed.set(x.checkRunId, at);
+    const at = x.createdAt?.microsSinceUnixEpoch;
+    const seen = completed.get(x.checkRunId);
+    if (at !== undefined && (seen === undefined || seen > at)) completed.set(x.checkRunId, at);
   }
   return [...db.checkRun.prId.filter(prId)].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map(r => toRunRow(r, completed.get(r.id)));
 }
@@ -93,4 +94,18 @@ export function siblingsForRun(db: Db, prId: bigint, s2RunId: bigint): { timelin
   };
   const [timeline, supply] = SIBLING_STAGES.map(view) as [SiblingView, SiblingView];
   return { timeline, supply };
+}
+
+/**
+ * What the recommendation rule reads for a statement written from this s2 run: its own results, the checks that failed
+ * as of its snapshot, and the timeline and supply checks bound to it. The dispatcher and the publisher assemble the same
+ * input; the post tool's guard (guard.ts) uses this to check a statement's words against it before it is saved.
+ */
+export function ruleInputForRun(db: Db, prId: bigint, s2RunId: bigint): { input: RuleInput; results: { p10: number; p50: number; p90: number; detailJson: string }[] } | undefined {
+  const run = s2RunId === 0n ? undefined : db.checkRun.id.find(s2RunId);
+  if (!run || run.stage !== 's2_cost') return undefined;
+  const rows = [...db.checkResult.prId.filter(prId)].filter(r => r.checkRunId === run.id);
+  const siblings = siblingsForRun(db, prId, run.id);
+  const input = ruleInputOf(rows, failedChecksForRun(db, prId, run.id), siblings ? { timeline: ruleCheckOf(siblings.timeline), supply: ruleCheckOf(siblings.supply) } : {});
+  return { input, results: [...rows, ...(siblings ? [...siblings.timeline.rows, ...siblings.supply.rows] : [])] };
 }

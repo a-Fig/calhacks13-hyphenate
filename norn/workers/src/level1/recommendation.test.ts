@@ -49,7 +49,7 @@ test('a failed or blocked check, or no cost detail at all, is Send back', () => 
 
 // ---- the checks' state is read as of the statement's own run, never the ECR's latest runs -------------
 
-const run = (id: number, stage: string, status: string, inputHash = `h${id}`, finishedMs: number | null = id * 1000 + 100): RunRow => ({ id: BigInt(id), stage, status, inputHash, createdMs: id * 1000, startedMs: id * 1000, finishedMs });
+const run = (id: number, stage: string, status: string, inputHash = `h${id}`, finishedMs: number | null = id * 1000 + 100): RunRow => ({ id: BigInt(id), stage, status, inputHash, createdUs: BigInt(id) * 1_000_000n, startedUs: BigInt(id) * 1_000_000n, finishedUs: finishedMs === null ? null : BigInt(finishedMs) * 1000n });
 
 test("a failure after the statement's run does not change it: a later extraction failure leaves Approve as it was", () => {
   const s2 = run(3, 's2_cost', 'done');
@@ -83,7 +83,7 @@ test('inputs that change and revert: a later failed s1 run with the same hash is
   const d = (failed: string[]) => deriveRecommendation(ruleInputOf(storedRows('ECR-0423'), failed));
   assert.equal(d(failedChecksOf(reverted, s2, 'S1')).recommendation, 'Approve');
   // while the newest such run, if it had failed by then, still counts
-  assert.deepEqual(failedChecksOf([run(1, 's1_bom_delta', 'done', 'S1'), { ...run(2, 's1_bom_delta', 'failed', 'S1'), finishedMs: 2100 }, s2], s2, 'S1'), ['s1_bom_delta']);
+  assert.deepEqual(failedChecksOf([run(1, 's1_bom_delta', 'done', 'S1'), { ...run(2, 's1_bom_delta', 'failed', 'S1'), finishedUs: 2_100_000n }, s2], s2, 'S1'), ['s1_bom_delta']);
 });
 
 test("failedChecksForRun reads the cache the same way: a later s0 failure on the ECR is not this statement's", () => {
