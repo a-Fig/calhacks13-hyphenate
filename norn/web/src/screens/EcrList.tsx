@@ -89,7 +89,7 @@ export function EcrList() {
     });
   }, [all, state, who, program, cls, level, approvals, text, sort]);
 
-  const people = [...new Set(all.map(e => e.originator))].sort();
+  const people = [...new Set(all.map(e => e.originator).filter(Boolean))].sort();
 
   return (
     <>
@@ -153,7 +153,7 @@ export function EcrList() {
                     </span>
                   </div>
                   <div className="nx-row-sub">
-                    <RequestNumber id={e.id} /> <span className="nx-row-program"><AircraftIcon size={13} /> {e.program}</span> filed {ago(e.filedOn + 'T12:00:00-07:00')} by {e.originator} &middot; {reviewText(e)}
+                    <RequestNumber id={e.id} /> <span className="nx-row-program"><AircraftIcon size={13} /> {e.program}</span> filed {ago(e.filedOn + 'T12:00:00-07:00')}{e.originator && <> by {e.originator}</>} &middot; {reviewText(e)}
                     {e.flag && isOpen(e.status) && (
                       <span className="nx-flag"> &middot; <AlertFillIcon size={12} className="nx-fg-attention" /> {e.flag}</span>
                     )}
