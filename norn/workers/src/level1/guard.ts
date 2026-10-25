@@ -14,7 +14,7 @@
 // its wording first, and then for being out of date.
 import type { DbConnection } from '@norn/bindings';
 import { parseSessionSpawn } from '../../../module/src/gate-logic.ts';
-import { cleanClaims, findingsByCheck, findingsOf, numbersIn, QUOTABLE_BARS, unknownAmounts, type Prose } from './prose.ts';
+import { cleanClaims, findingsByCheck, findingsOf, judgedNumberProblems, NOT_MONEY_UNITS, numbersIn, QUOTABLE_BARS, unknownAmounts, type Prose } from './prose.ts';
 import { deriveRecommendation } from './recommendation.ts';
 import { ruleInputForRun } from './source.ts';
 
@@ -49,6 +49,12 @@ export function statementGuardFor(db: Db): StatementGuard {
     if (clean.length)
       problems.push(
         `Your ${clean.map(c => `${c.where} says "${c.phrase}"`).join(' and your ')}, but Norn's checks found ${findings.length === 1 ? 'one item' : `${findings.length} items`} for ${pr.plmEcrNumber}: ${findings.map((f, i) => `(${i + 1}) ${f}`).join('; ')}. Do not say the checks are clean or that there are no issues, flags, gaps or conditions. Norn lists these items in the PLM itself.`
+      );
+
+    const judged = judgedNumberProblems(statement);
+    if (judged.length)
+      problems.push(
+        `Your ${judged.map(j => `${j.where} ${j.why}`).join(' and your ')}. Money figures must be computation numbers copied from the checks' results; give ${judged.length === 1 ? 'this one' : 'each'} a unit that is not money (${NOT_MONEY_UNITS.join(', ')}) or leave it out.`
       );
 
     // The amounts the checks produced: every number in the run's results and its timeline and supply rows, and the bars the agent is given.

@@ -7,8 +7,10 @@
 //     a check has a finding (`cleanWording`). "The checks are not clean" is not that, and "the cost check is clean" is
 //     true when the cost check found nothing;
 //   - it quotes no dollar figure that no check produced (`unknownAmounts`), allowing for rounding, for $154k against
-//     $154,000, and for "154,000 USD" or "154,000 dollars"; and it posts no number in dollars that is not a computation
-//     unless each of its p10, p50 and p90 is an amount the checks produced.
+//     $154,000, and for "154,000 USD" or "154,000 dollars";
+//   - a number that is not a computation is never money (`judgedNumberProblems`): its unit and label carry no money
+//     marker, and its unit is one of a short list that are not money (weeks, %, count...). A computation takes its
+//     label, unit and values from its check result (the module copies them), so a money figure must be one.
 // Both checks read every piece of agent-written text the pages display (`piecesOf`), not only the prose fields.
 // The publisher (format.ts) does not refuse: it lists every derived condition itself, and notes a clean wording it finds.
 import { MATERIALITY } from './prompt.ts';
@@ -185,24 +187,42 @@ export function numbersIn(value: unknown, out: number[] = []): number[] {
 export function unknownAmounts(p: Prose, known: readonly number[]): { where: string; figure: string }[] {
   const abs = known.map(Math.abs);
   const out: { where: string; figure: string }[] = [];
-  const matches = (value: number, tolerance: number) => value === 0 || abs.some(k => Math.abs(k - Math.abs(value)) <= tolerance);
   for (const { where, text } of piecesOf(p))
     for (const f of figuresIn(text))
-      if (!matches(f.value, f.tolerance)) out.push({ where, figure: f.text });
-  // A number in dollars that is not a computation: the module copies nothing into it, so the pages show the agent's own
-  // p10, p50 and p90 as dollar amounts. Each must be an amount the checks produced, to the dollar.
-  (p.numbers ?? []).forEach((n, i) => {
-    if (n.evidence === 'computation' || !isDollarUnit(n.unit)) return;
-    for (const at of ['p10', 'p50', 'p90'] as const) {
-      const v = n[at];
-      if (typeof v === 'number' && Number.isFinite(v) && !matches(v, 1)) out.push({ where: `number ${i + 1} (${n.label ?? n.key ?? 'no label'}) ${at}`, figure: `$${Math.round(v).toLocaleString('en-US')}` });
-    }
-  });
+      if (f.value !== 0 && !abs.some(k => Math.abs(k - f.value) <= f.tolerance)) out.push({ where, figure: f.text });
   return out;
 }
 
-/** A unit that names dollars: "USD", "$", "USD/unit", "kUSD", "dollars". */
-export const isDollarUnit = (unit: string | undefined): boolean => !!unit && /\$|usd|dollar/i.test(unit);
+// ---- numbers that are not computations --------------------------------------------------------------
+
+/**
+ * A money marker in a unit or a label: a currency sign or code, scaled or not ("$", "$k", "k$", "USD", "kUSD", "MUSD",
+ * "€", "EUR", "kEUR", "£", "GBP", "dollars"). Matching a value against the checks' amounts cannot close this: "250 kUSD"
+ * is $250,000 on the page and matches the $250 bar, and "Annual cost (USD)" puts the currency in the label.
+ */
+const MONEY = /[$€£¥]|usd|dollar|gbp|\b[km]?eur(?:os?)?\b|\beuros?\b|\bpounds? sterling\b/i;
+export const hasMoneyMarker = (s: string | undefined): boolean => !!s && MONEY.test(s);
+
+/** The units a number that is not a computation may have: none of them is money. Anything else, and no unit, is refused. */
+export const NOT_MONEY_UNITS = ['weeks', 'days', 'hours', 'months', 'years', '%', 'percent', 'count', 'units', 'parts', 'aircraft', 'serials', 'ratio'] as const;
+const NOT_MONEY = new Set<string>([...NOT_MONEY_UNITS, 'week', 'wk', 'wks', 'day', 'hour', 'h', 'hr', 'hrs', 'month', 'year', 'unit', 'part', 'serial', 's/n', 'fraction']);
+const unitWord = (unit: string | undefined) => (unit ?? '').trim().toLowerCase().replace(/^\((.*)\)$/, '$1').trim();
+
+/**
+ * The numbers the agent posted that are not computations and could be read as money, each with what is wrong. The
+ * pages show such a number's label, unit and values as the agent wrote them, so a money figure must be a computation:
+ * its unit and label carry no money marker, and its unit is on `NOT_MONEY_UNITS`.
+ */
+export function judgedNumberProblems(p: Prose): { where: string; why: string }[] {
+  const out: { where: string; why: string }[] = [];
+  (p.numbers ?? []).forEach((n, i) => {
+    if (n.evidence === 'computation') return;
+    const where = `number ${i + 1} (${n.label ?? n.key ?? 'no label'})`;
+    if (hasMoneyMarker(n.unit) || hasMoneyMarker(n.label)) out.push({ where, why: `is money (${hasMoneyMarker(n.unit) ? `unit "${n.unit}"` : `label "${n.label}"`}) but is not a computation` });
+    else if (!NOT_MONEY.has(unitWord(n.unit))) out.push({ where, why: unitWord(n.unit) ? `has the unit "${n.unit}", which Norn cannot tell is not money` : 'has no unit, so Norn cannot tell it is not money' });
+  });
+  return out;
+}
 
 /** The bars in the system prompt, which the agent may quote. */
 export const QUOTABLE_BARS = [MATERIALITY.unitCostAbsoluteUsd, MATERIALITY.oneTimeCostUsd, MATERIALITY.dispositionSwingUsd];
