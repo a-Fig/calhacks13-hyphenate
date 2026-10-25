@@ -184,9 +184,9 @@ async function earlyStatement(prId: bigint, runId: bigint) {
 // -- the bug, as Sol reproduced it: research off (as before), the dispatcher starts at once, research lands later
 const C = await ingest(ecrNumber('C'));
 const c1 = await allDone(C.id);
-await until(() => factsFor(ecrNumber('C')).s2Done.length === 1, 5000, 'the dispatcher cache to see the cost run');
+await until(() => factsFor(ecrNumber('C')).s2Done.length === 1 && !factsFor(ecrNumber('C')).s2Done[0]!.siblings?.pending, 5000, 'the dispatcher cache to see the cost run and its timeline and supply checks settled');
 const c1done = finishedMs(ecrNumber('C'));
-check('research off: the dispatcher starts the session as soon as the cost run is done (unchanged)', dispatchOf(ecrNumber('C'), c1done + 1000, false).action === 'dispatch');
+check('research off: the dispatcher starts the session as soon as the cost run is done (unchanged)', dispatchOf(ecrNumber('C'), c1done + 1000, false).action === 'dispatch', JSON.stringify(dispatchOf(ecrNumber('C'), c1done + 1000, false)));
 await earlyStatement(C.id, c1.id);
 const earlyLog = await until(() => logFor(`fx1-stmt-${c1.id}-${stamp}`)[0], 3000, 'the early statement in the log');
 check('research off: the early session posts its statement from the first cost run', earlyLog.outcome === 'applied', `${earlyLog.outcome}: ${earlyLog.summary}`);
@@ -199,7 +199,7 @@ check("the bug: research landed after the early statement, the cost run was redo
 // -- the fix: research on, the dispatcher holds the first session until the research result of the revision is stored
 const B = await ingest(ecrNumber('B'));
 const b1 = await allDone(B.id);
-await until(() => factsFor(ecrNumber('B')).s2Done.length === 1, 5000, 'the dispatcher cache to see the cost run');
+await until(() => factsFor(ecrNumber('B')).s2Done.length === 1 && !factsFor(ecrNumber('B')).s2Done[0]!.siblings?.pending, 5000, 'the dispatcher cache to see the cost run and its timeline and supply checks settled');
 const b1done = finishedMs(ecrNumber('B'));
 const held = dispatchOf(ecrNumber('B'), b1done + T(1), true);
 check('research on: one minute after the cost run, the session is held for research', held.action === 'skip' && /waiting for the research on revision 1/.test(held.reason), held.action === 'skip' ? held.reason : held.action);
@@ -219,12 +219,14 @@ const digest = crRev(B.id).digest;
 const jobId = researchJobIdFor(ecrNumber('B'), 1, digest, 1);
 const input = toInput({ seq: RESULT_SEQ, ts: new Date().toISOString(), jobId, role: ROLE, identity: { actor: `agent:norn/research/${ecrNumber('B')}`, onBehalfOf: null, spawnedBy: 'norn' }, type: RESULT_EVENT } as never);
 await A.R.recordAgentEvents({ checkRunId: b1.id, events: [input] });
-await until(() => factsFor(ecrNumber('B')).researched?.includes(1), 5000, "the dispatcher cache to see the research result");
+await until(() => factsFor(ecrNumber('B')).researched?.includes(1) && !factsFor(ecrNumber('B')).s2Done.at(-1)!.siblings?.pending, 5000, "the dispatcher cache to see the research result");
 const released = decide(factsFor(ecrNumber('B')), opts(Number(b2.finishedAt!.toDate().getTime()) + T(1), true));
 check('the research result is stored: the session is released, on the NEW cost run (the researched numbers), not the first', released.action === 'dispatch' && released.s2RunId === Number(b2.id) && released.s2RunId !== Number(b1.id), JSON.stringify(released));
 
+// a stale run's finishedAt is overwritten when it goes stale; its results say when it completed
+const b1Completed = Number([...db.checkResult.iter()].find((x) => x.checkRunId === b1.id)!.createdAt.microsSinceUnixEpoch / 1000n);
 const bf = factsFor(ecrNumber('B'));
-check('the wait counts from the FIRST cost run on the revision (now stale), not the re-run: the dispatcher reads it from the real cache', Math.abs(bf.firstS2FinishedMs! - run(b1.id).finishedAt!.toDate().getTime()) < 5 && bf.firstS2FinishedMs! < bf.s2Done.at(-1)!.finishedMs!, `${bf.firstS2FinishedMs} vs run ${run(b1.id).finishedAt!.toDate().getTime()}, re-run ${bf.s2Done.at(-1)!.finishedMs}`);
+check('the wait counts from the FIRST cost run on the revision (now stale), not the re-run: the dispatcher reads it from the real cache', Math.abs(bf.firstS2FinishedMs! - b1Completed) < 5 && bf.firstS2FinishedMs! < bf.s2Done.at(-1)!.finishedMs!, `${bf.firstS2FinishedMs} vs completed ${b1Completed}, re-run ${bf.s2Done.at(-1)!.finishedMs}`);
 const afterRerun = decide({ ...bf, firstS2SeenMs: bf.firstS2FinishedMs! }, opts(bf.firstS2FinishedMs! + T(10), true));
 check('...so ten minutes after the first run it is released even though the re-run finished later', afterRerun.action === 'dispatch', afterRerun.action === 'skip' ? afterRerun.reason : afterRerun.action);
 
@@ -236,7 +238,7 @@ check('a Level 1 statement written from that run is accepted by the module', stm
 // -- the fallback: research never answers, the wait ends 10 minutes after the cost run finished
 const F = await ingest(ecrNumber('F'));
 await allDone(F.id);
-await until(() => factsFor(ecrNumber('F')).s2Done.length === 1, 5000, 'the dispatcher cache to see the cost run');
+await until(() => factsFor(ecrNumber('F')).s2Done.length === 1 && !factsFor(ecrNumber('F')).s2Done[0]!.siblings?.pending, 5000, 'the dispatcher cache to see the cost run and its timeline and supply checks settled');
 const f1 = finishedMs(ecrNumber('F'));
 check('no research result ever: held at 9m59s, released at 10m', dispatchOf(ecrNumber('F'), f1 + T(10) - 1000, true).action === 'skip' && dispatchOf(ecrNumber('F'), f1 + T(10), true).action === 'dispatch');
 

@@ -82,9 +82,10 @@ export interface Verdict {
   /** The distribution the check will use, set whenever the proposal was well-formed. */
   dist?: Dist;
   /** The page the quote was checked against. */
-  verifiedAgainst?: { url: string; retrievedAt: string };
+  verifiedAgainst?: { url: string; retrievedAt: string; /** How the page was read: a plain HTTPS fetch, Bright Data, or a recording. */ via?: PageVia };
 }
 
 /** Fetches a page's text for quote verification. Live: Bright Data. Tests and replay: recorded pages. */
-export interface PageResult { ok: boolean; text?: string; retrievedAt?: string; error?: string }
+export type PageVia = 'fetch' | 'brightdata' | 'recorded';
+export interface PageResult { ok: boolean; text?: string; retrievedAt?: string; error?: string; /** How it was read; absent in older fakes. */ via?: PageVia }
 export type PageFetcher = (url: string) => Promise<PageResult>;

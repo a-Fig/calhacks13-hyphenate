@@ -333,7 +333,7 @@ export async function reviewProposals(raw: unknown[], targets: Target[], fetchPa
       } else if (!quoteInPage(qn, page.text)) {
         worsen('rejected', { code: 'quote_not_found', message: 'the quote does not appear in the page text, or it starts or ends in the middle of a number on the page' });
       } else {
-        verifiedAgainst = { url: p.sourceUrl, retrievedAt: page.retrievedAt ?? p.retrievedAt };
+        verifiedAgainst = { url: p.sourceUrl, retrievedAt: page.retrievedAt ?? p.retrievedAt, ...(page.via ? { via: page.via } : {}) };
       }
     }
 
