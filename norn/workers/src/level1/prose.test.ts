@@ -116,3 +116,11 @@ test("each displayed field is held to the clean-wording and dollar-figure checks
   const comp: Prose = { ...base(), numbers: [{ key: 'k', evidence: 'computation', label: 'clean $999,999' }] };
   assert.deepEqual(cleanClaims(comp, findings), []);
 });
+
+test('(round 4) "999,999 dollars" is a dollar figure, and "no known issues" says nothing was found', () => {
+  assert.deepEqual(figuresIn('It costs 999,999 dollars.').map(f => f.value), [999_999]);
+  assert.deepEqual(figuresIn('about 154k dollars, or 1 dollar a unit').map(f => f.value), [154_000, 1]);
+  assert.equal(cleanWording('There are no known issues.'), 'no known issues');
+  const p: Prose = { headline: 'It costs 999,999 dollars.', drivers: [], claims: [] };
+  assert.deepEqual(unknownAmounts(p, [1_000]), [{ where: 'headline', figure: '999,999 dollars' }]);
+});

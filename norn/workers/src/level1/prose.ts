@@ -7,7 +7,8 @@
 //     a check has a finding (`cleanWording`). "The checks are not clean" is not that, and "the cost check is clean" is
 //     true when the cost check found nothing;
 //   - it quotes no dollar figure that no check produced (`unknownAmounts`), allowing for rounding, for $154k against
-//     $154,000, and for "154,000 USD".
+//     $154,000, and for "154,000 USD" or "154,000 dollars"; and it posts no number in dollars that is not a computation
+//     unless each of its p10, p50 and p90 is an amount the checks produced.
 // Both checks read every piece of agent-written text the pages display (`piecesOf`), not only the prose fields.
 // The publisher (format.ts) does not refuse: it lists every derived condition itself, and notes a clean wording it finds.
 import { MATERIALITY } from './prompt.ts';
@@ -19,7 +20,7 @@ import { deriveRecommendation, type Derived, type RuleInput } from './recommenda
 const CLEAN = [
   /\ball[- ]clear\b/i,
   /\bclean\b/i,
-  /\bno (?:open |outstanding |remaining |material |significant |further |other )?(?:issues?|problems?|concerns?|flags?|findings?|gaps?|conditions?|risks?|warnings?)\b/i,
+  /\bno (?:known |open |outstanding |remaining |material |significant |further |other )?(?:issues?|problems?|concerns?|flags?|findings?|gaps?|conditions?|risks?|warnings?)\b/i,
   /\bnothing (?:here |else )?(?:to (?:flag|raise|report|note)|of concern|worth (?:flagging|raising|noting)|needs? (?:attention|a second look)|stands out)\b/i,
   /\bwithout (?:any )?(?:issues?|problems?|concerns?|flags?|findings?|gaps?|conditions?)\b/i,
 ];
@@ -32,8 +33,11 @@ export const SCOPES = ['cost', 'timeline', 'supply'] as const;
 export type Scope = (typeof SCOPES)[number];
 export type CheckFindings = Record<Scope, readonly string[]>;
 
-/** "the cost check is clean", "cost and supply checks came back clean": a claim about named checks only. */
-const SCOPED = /\b((?:the |our )?(?:cost|timeline|supply)(?: checks?)?(?:(?:,|,? and|,? or) (?:the )?(?:cost|timeline|supply)(?: checks?)?)*)\s+(?:is|are|was|were|came back|come back|comes back|looks?|seems?)\s+(?:all\s+)?clean\b/gi;
+/**
+ * "the cost check is clean", "cost and supply checks came back clean", "the cost check has no issues": a claim about
+ * named checks only.
+ */
+const SCOPED = /\b((?:the |our )?(?:cost|timeline|supply)(?: checks?)?(?:(?:,|,? and|,? or) (?:the )?(?:cost|timeline|supply)(?: checks?)?)*)\s+(?:(?:is|are|was|were|came back|come back|comes back|looks?|seems?)\s+(?:all\s+)?clean\b|(?:has|have|had|shows?|showed|found|finds|raised|raises)\s+no (?:known |open |outstanding |remaining |material |significant |further |other )?(?:issues?|problems?|concerns?|flags?|findings?|gaps?|conditions?|risks?|warnings?)\b)/gi;
 
 /** The sentence the prompt tells the agent to use when no cost bar is cleared: it is about the cost bars, not about the checks. */
 const ALLOWED = MATERIALITY.whenNothingMaterial;
@@ -64,18 +68,19 @@ export function findingsOf(input: RuleInput | undefined, derived: Derived): stri
 }
 
 /**
- * The same findings by the check they belong to. The timeline and supply checks add their conditions after the cost
- * check's (recommendation.ts), so each one's are what the rule adds when it is given that check. Everything the cost
+ * The same findings by the check they belong to. Each of the timeline and supply checks is given to the rule on its
+ * own, and its findings are what the rule adds over the cost check alone: a finding both checks raise (each one's
+ * `implementation_unestimated`) is in both lists, although the rule's combined list names it once. Everything the cost
  * check and the checks before it found (a blocker, a failed BOM delta) counts against the cost check, so "the cost
  * check is clean" is never said over a blocker.
  */
 export function findingsByCheck(input: RuleInput | undefined, derived: Derived): CheckFindings {
   if (!input) return { cost: derived.conditions.length || derived.blockers.length ? [...derived.blockers, ...derived.conditions] : [], timeline: [], supply: [] };
   const costOnly = deriveRecommendation({ ...input, timeline: undefined, supply: undefined });
-  const noSupply = deriveRecommendation({ ...input, supply: undefined });
+  const added = (only: Derived) => only.conditions.filter(c => !costOnly.conditions.includes(c));
   const cost = [...costOnly.blockers, ...costOnly.conditions];
-  const timeline = noSupply.conditions.filter(c => !costOnly.conditions.includes(c));
-  const supply = [...derived.conditions.filter(c => !noSupply.conditions.includes(c))];
+  const timeline = added(deriveRecommendation({ ...input, supply: undefined }));
+  const supply = added(deriveRecommendation({ ...input, timeline: undefined }));
   for (const f of input.supply?.flags ?? []) if (f.kind === 'single_source' && f.severity === 'warn') supply.push(`${f.ref ?? 'A part'} has a single qualified source`);
   return { cost, timeline, supply };
 }
@@ -91,7 +96,7 @@ export interface Prose {
   claims: { text: string }[];
   changeClass?: string;
   route?: string;
-  numbers?: { key?: string; label?: string; unit?: string; evidence?: string }[];
+  numbers?: { key?: string; label?: string; unit?: string; evidence?: string; p10?: number; p50?: number; p90?: number }[];
   assumptions?: { key?: string; note?: string }[];
 }
 
@@ -144,8 +149,8 @@ const NUM = String.raw`(\d[\d,]*(?:\.\d+)?)`;
 const SCALES = String.raw`(thousand|million|billion|bn|mm|[kmb])`;
 /** "$154k", "$ 1,234.50", "$1.2 million". */
 const DOLLAR = new RegExp(String.raw`\$\s?${NUM}\s?${SCALES}?(?![a-z])`, 'gi');
-/** "999,999 USD", "154k USD", "154 kUSD": a number followed by USD, not already part of a $ figure. */
-const USD_AFTER = new RegExp(String.raw`(?<![$\d,.])${NUM}\s?${SCALES}?\s?USD\b`, 'gi');
+/** "999,999 USD", "154k USD", "154 kUSD", "999,999 dollars": a number followed by USD or dollars, not already part of a $ figure. */
+const USD_AFTER = new RegExp(String.raw`(?<![$\d,.])${NUM}\s?${SCALES}?\s?(?:USD|dollars?)\b`, 'gi');
 /** "USD 999,999". */
 const USD_BEFORE = new RegExp(String.raw`\bUSD\s?${NUM}\s?${SCALES}?(?![a-z])`, 'gi');
 
@@ -180,11 +185,24 @@ export function numbersIn(value: unknown, out: number[] = []): number[] {
 export function unknownAmounts(p: Prose, known: readonly number[]): { where: string; figure: string }[] {
   const abs = known.map(Math.abs);
   const out: { where: string; figure: string }[] = [];
+  const matches = (value: number, tolerance: number) => value === 0 || abs.some(k => Math.abs(k - Math.abs(value)) <= tolerance);
   for (const { where, text } of piecesOf(p))
     for (const f of figuresIn(text))
-      if (f.value !== 0 && !abs.some(k => Math.abs(k - f.value) <= f.tolerance)) out.push({ where, figure: f.text });
+      if (!matches(f.value, f.tolerance)) out.push({ where, figure: f.text });
+  // A number in dollars that is not a computation: the module copies nothing into it, so the pages show the agent's own
+  // p10, p50 and p90 as dollar amounts. Each must be an amount the checks produced, to the dollar.
+  (p.numbers ?? []).forEach((n, i) => {
+    if (n.evidence === 'computation' || !isDollarUnit(n.unit)) return;
+    for (const at of ['p10', 'p50', 'p90'] as const) {
+      const v = n[at];
+      if (typeof v === 'number' && Number.isFinite(v) && !matches(v, 1)) out.push({ where: `number ${i + 1} (${n.label ?? n.key ?? 'no label'}) ${at}`, figure: `$${Math.round(v).toLocaleString('en-US')}` });
+    }
+  });
   return out;
 }
+
+/** A unit that names dollars: "USD", "$", "USD/unit", "kUSD", "dollars". */
+export const isDollarUnit = (unit: string | undefined): boolean => !!unit && /\$|usd|dollar/i.test(unit);
 
 /** The bars in the system prompt, which the agent may quote. */
 export const QUOTABLE_BARS = [MATERIALITY.unitCostAbsoluteUsd, MATERIALITY.oneTimeCostUsd, MATERIALITY.dispositionSwingUsd];

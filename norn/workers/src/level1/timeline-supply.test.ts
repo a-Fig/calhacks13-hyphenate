@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { jobFactsOf, factsOf } from './dispatcher.ts';
 import { statementToPlmFields, type StatementDoc } from './format.ts';
 import { statementGuardFor } from './guard.ts';
-import { findingsOf } from './prose.ts';
+import { findingsByCheck, findingsOf } from './prose.ts';
 import { decide, type DecideOptions, type EcrFacts } from './plan.ts';
 import { CLAIM_FIT, SUPPLY_CLAIM, TIMELINE_CLAIM, jobPrompt, usd } from './prompt.ts';
 import { gather } from './publisher.ts';
@@ -966,4 +966,45 @@ test('(#128) the guard reads the run id from norn:check_run:N and from norn:chec
     assert.match(post(by) ?? '', /^Not posted\. Your headline says "clean"/, by);
   // a session not started by a check run is not checked here, as before; neither is a malformed suffix
   for (const by of ['norn:ecr_filed:3', 'norn:check_run:3:revision:', 'norn:check_run:3:revision:x', 'norn:check_run:3:other:1']) assert.equal(post(by), undefined, by);
+});
+
+// ---- Sol round 4 -------------------------------------------------------------------------------------------
+
+test("(round 4) Sol's case: a number in USD that is not a computation is refused unless its p10, p50 and p90 are amounts the checks produced", () => {
+  const guard = statementGuardFor(healthy('ECR-0421'));
+  const pr0421 = { ...pr5, plmEcrNumber: 'ECR-0421' };
+  const base = statementFor('ECR-0421');
+  const withNumber = (n: object) => proseOfDoc({ ...base, numbers: [...base.numbers, n as any] });
+  // Sol's exact repro
+  const sol = guard(pr0421, 'norn:check_run:3', withNumber({ key: 'annual', label: 'Annual cost', unit: 'USD', evidence: 'judgment', p10: 999999, p50: 999999, p90: 999999 }));
+  assert.match(sol ?? '', /^Not posted\./);
+  assert.match(sol ?? '', /\$999,999 in your number \d+ \(Annual cost\) p10/);
+  // any unit naming dollars, and one bad value of three is enough
+  const net = storedRows('ECR-0421').find(r => r.key === 'net_total_year_one')!;
+  for (const unit of ['$', 'USD/unit', 'kUSD', 'dollars'])
+    assert.match(guard(pr0421, 'norn:check_run:3', withNumber({ key: 'x', label: 'Spend', unit, evidence: 'assumption', p10: net.p10, p50: 123_457, p90: net.p90 })) ?? '', /p50/, unit);
+  // the checks' own amounts pass, and so does a number that is not in dollars
+  assert.equal(guard(pr0421, 'norn:check_run:3', withNumber({ key: 'x', label: 'Spend', unit: 'USD', evidence: 'judgment', p10: net.p10, p50: net.p50, p90: net.p90 })), undefined);
+  assert.equal(guard(pr0421, 'norn:check_run:3', withNumber({ key: 'w', label: 'Weeks', unit: 'weeks', evidence: 'judgment', p10: 999999, p50: 999999, p90: 999999 })), undefined);
+});
+
+test("(round 4) Sol's case: a finding both the timeline and the supply check raise is each one's, so \"the supply check is clean\" is refused", () => {
+  // ECR-0423 whose test and qualification is "Qualification required; duration not estimated.": both checks raise implementation_unestimated on its own plan
+  const own = { kind: 'implementation_unestimated', severity: 'warn', ref: 'implementation:ECR-0423', message: 'Qualification required; duration not estimated.' };
+  const withOwn = (rows: { key: string; detailJson: string }[]) => rows.map(r => (r.key === 'detail' ? { ...r, detailJson: JSON.stringify({ ...JSON.parse(r.detailJson), flags: [...(JSON.parse(r.detailJson).flags ?? []), own] }) } : r));
+  const db = cache({ runs: [s1, s2, done(4, 's3_timeline'), done(5, 's4_supply')], results: [...withRun(storedRows('ECR-0423'), 3, 1000), ...withRun(withOwn(storedTimelineRows('ECR-0423')), 4, 2000), ...withRun(withOwn(storedSupplyRows('ECR-0423')), 5, 3000)] });
+  const input = ruleInputForRun(db, 5n, 3n, 'ECR-0423')!.input;
+  const derived = deriveRecommendation(input);
+  assert.deepEqual(derived.conditions, ['Qualification and release not assessed'], 'the rule names it once');
+  const by = findingsByCheck(input, derived);
+  assert.deepEqual(by.timeline, ['Qualification and release not assessed']);
+  assert.deepEqual(by.supply, ['Qualification and release not assessed']);
+  assert.deepEqual(by.cost, []);
+  const post = (headline: string) => statementGuardFor(db)({ ...pr5, plmEcrNumber: 'ECR-0423' }, 'norn:check_run:3', { headline, drivers: [], claims: [{ text: 'Recommendation: Approve with conditions. Rule 2.' }] });
+  assert.match(post('The supply check is clean.') ?? '', /Your headline says "clean"/);
+  assert.match(post('The timeline check is clean.') ?? '', /Your headline says "clean"/);
+  assert.equal(post('The cost check is clean; qualification and release are not assessed.'), undefined);
+  assert.equal(post('The cost check has no issues; the timeline has a gap.'), undefined, "Sol's P2: honest scoped wording");
+  assert.match(post('The supply check has no issues.') ?? '', /Your headline says "no issues"/);
+  assert.match(post('There are no known issues.') ?? '', /Your headline says "no known issues"/);
 });

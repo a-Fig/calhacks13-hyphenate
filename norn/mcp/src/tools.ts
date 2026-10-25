@@ -21,7 +21,7 @@ export interface StatementProse {
   headline: string;
   changeClass?: string;
   route?: string;
-  numbers?: { key?: string; label?: string; unit?: string; evidence?: string }[];
+  numbers?: { key?: string; label?: string; unit?: string; evidence?: string; p10?: number; p50?: number; p90?: number }[];
   drivers: { text: string }[];
   assumptions?: { key?: string; note?: string }[];
   claims: { text: string }[];
