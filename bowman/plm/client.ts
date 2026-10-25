@@ -106,8 +106,13 @@ export class Plm {
   put = (path: string, body?: unknown, o: { allow?: boolean } = {}) => this.req('PUT', path, { body, ...o });
   del = (path: string, o: { allow?: boolean } = {}) => this.req('DELETE', path, o);
 
+  /** True on 200, false on 404. Any other status (403, 500, ...) throws: it says nothing about whether the record is there. */
   async exists(doctype: string, name: string): Promise<boolean> {
-    return (await this.get(`/api/resource/${enc(doctype)}/${enc(name)}`, undefined, { allow: true })).status === 200;
+    const path = `/api/resource/${enc(doctype)}/${enc(name)}`;
+    const r = await this.get(path, undefined, { allow: true });
+    if (r.status === 200) return true;
+    if (r.status === 404) return false;
+    throw new PlmError(r.status, 'GET', path, r.body);
   }
 
   /** Create the document if absent, otherwise update it with `doc` (idempotent). Returns 'created' | 'updated'. */
