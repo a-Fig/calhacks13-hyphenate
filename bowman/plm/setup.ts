@@ -217,9 +217,9 @@ async function backfillNcrTitles() {
 async function integrationUsers() {
   // Norn's user and its API key. A key is generated only once, so re-running setup never rotates it.
   await ensure('User', NORN_USER, {
-    email: NORN_USER, first_name: 'Norn', last_name: 'Integration', enabled: 1, send_welcome_email: 0,
+    email: NORN_USER, first_name: 'Fern', enabled: 1, send_welcome_email: 0,
     user_type: 'System User', roles: [{ role: ROLES.norn }],
-  });
+  }, true); // updated on re-run: the name is what people see as the author of Fern's comments
   const e = readEnv();
   if (!e.PLM_API_KEY || !e.PLM_API_SECRET) {
     const m = await plm.call('frappe.core.doctype.user.user.generate_keys', { user: NORN_USER });

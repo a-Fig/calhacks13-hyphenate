@@ -49,13 +49,13 @@ export function Conversation({ a }: { a: ImpactAssessment }) {
 
 // ---------------------------------------------------------------- comments
 
-export function CommentBox({ name, kind, label, time, edited, children, right }: {
-  name: string; kind: 'person' | 'norn' | 'agent'; label?: ReactNode; time: string; edited?: boolean; children: ReactNode; right?: ReactNode;
+export function CommentBox({ name, nameTitle, kind, label, time, edited, children, right }: {
+  name: string; nameTitle?: string; kind: 'person' | 'norn' | 'agent'; label?: ReactNode; time: string; edited?: boolean; children: ReactNode; right?: ReactNode;
 }) {
   return (
     <div className="nx-comment">
       <div className="nx-comment-head">
-        <b>{name}</b>
+        <b title={nameTitle}>{name}</b>
         {kind === 'norn' && <Label variant="secondary" size="small">Bot</Label>}
         <span className="nx-fg-muted" title={dateTime(time)}>commented {ago(time)}{edited ? ' · edited' : ''}</span>
         <span className="nx-sp" />
@@ -235,7 +235,7 @@ function EventItem({ e, mock }: { e: ActivityEvent; mock: boolean }) {
         <div className="nx-ev">
           <Person name={e.actor} kind={kindOf(e)} size={16} />
           <span>
-            <b>{e.actor}</b>
+            <b title={e.actorRaw}>{e.actor}</b>
             {forWho(e) && <span className="nx-fg-muted"> for {forWho(e)}</span>}
             {' '}{e.text}
             {mock && <> <MockTag title="Mock: a saved timeline entry, not an event in Fern" /></>}
@@ -479,7 +479,7 @@ function StatementComment({ a }: { a: ImpactAssessment }) {
     <Timeline.Item className="nx-t-comment">
       <div className="nx-av-col"><Person name="Fern" kind="norn" size={40} /></div>
       <Timeline.Body className="nx-t-body">
-        <CommentBox name={st.author} kind="norn" time={st.at} right={<LevelLabel level={st.level} long />}>
+        <CommentBox name={st.author} nameTitle={st.authorRaw} kind="norn" time={st.at} right={<LevelLabel level={st.level} long />}>
           <h3 className="nx-h3">
             Impact assessment <SavedRun source={a.source} />
             {st.outdated && <> <Label variant="attention" size="small">Out of date: the ECR has changed since</Label></>}
@@ -542,7 +542,7 @@ function StatementComment({ a }: { a: ImpactAssessment }) {
             </>
           )}
           <p className="nx-fg-muted nx-small">
-            Posted by {st.author}. <Link to={`/ecr/${a.ecr.id}/impact`}>See the impact checks</Link>
+            Posted by <span title={st.authorRaw}>{st.author}</span>. <Link to={`/ecr/${a.ecr.id}/impact`}>See the impact checks</Link>
           </p>
         </CommentBox>
       </Timeline.Body>

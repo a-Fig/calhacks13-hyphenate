@@ -52,7 +52,7 @@ export async function applyWorkspace(plm: Plm, log: Log) {
     card('ECRs awaiting CM review', 'ECR', [['ECR', 'workflow_state', 'in', ['Submitted', 'In CM Review']]], '#0e7490'),
     card('ECRs awaiting the CCB', 'ECR', [['ECR', 'workflow_state', '=', 'CCB Review']], '#d97706'),
     card('Open NCRs', 'NCR', [['NCR', 'status', '=', 'Open']], '#dc2626'),
-    card('Assessed by Norn', 'ECR', [['ECR', 'impact_report_level', 'is', 'set'], ['ECR', 'workflow_state', 'in', ECR_OPEN]], '#059669'),
+    card('Assessed by Fern', 'ECR', [['ECR', 'impact_report_level', 'is', 'set'], ['ECR', 'workflow_state', 'in', ECR_OPEN]], '#059669'),
     card('ECOs released', 'ECO', [['ECO', 'status', '=', 'Released']], '#475569'),
   ];
   for (const c of cards) await plm.upsert('Number Card', c.name, c);
@@ -82,6 +82,9 @@ export async function applyWorkspace(plm: Plm, log: Log) {
     number_cards: cards.map((c) => ({ label: c.label, number_card_name: c.name })),
     charts: [{ label: 'ECRs by status', chart_name: 'ECRs by status' }],
   });
+
+  // The card was called "Assessed by Norn" before the rename; the workspace no longer points at it.
+  if (await plm.exists('Number Card', 'Assessed by Norn')) await plm.del(`/api/resource/Number Card/${enc('Assessed by Norn')}`);
 
   // Keep the rail to this one app: the ERP-style module workspaces (Build, Users, Email...) are for administrators.
   const others = (await plm.list('Workspace', { fields: ['name'] })).map((w: any) => w.name).filter((n: string) => n !== 'Bowman PLM');

@@ -399,15 +399,15 @@ const ecr: DocTypeDef = {
 
     // ---- Impact assessment (Norn writes; permlevel 1)
     tab('Impact assessment'),
-    sec('Impact assessment', { description: 'Posted by Norn through the PLM API. Read-only for people: ask Norn to refresh it.' }),
-    f('HTML', 'impact_empty', '', { depends_on: 'eval:!doc.impact_report_level && !doc.impact_statement', options: '<div style="padding:28px 0;text-align:center;color:var(--text-muted)"><div style="font-size:15px;font-weight:600">No impact assessment yet</div><div>Norn reads the ECR when it is filed and posts its assessment here.</div></div>' }),
+    sec('Impact assessment', { description: 'Posted by Fern through the PLM API. Read-only for people: ask Fern to refresh it.' }),
+    f('HTML', 'impact_empty', '', { depends_on: 'eval:!doc.impact_report_level && !doc.impact_statement', options: '<div style="padding:28px 0;text-align:center;color:var(--text-muted)"><div style="font-size:15px;font-weight:600">No impact assessment yet</div><div>Fern reads the ECR when it is filed and posts its assessment here.</div></div>' }),
     f('Select', 'impact_report_level', 'Report level', { options: opts(['1', '2', '3'], true), permlevel: 1, in_list_view: 1, in_standard_filter: 1, description: '1 provisional, 2 reviewed, 3 final verdict' }),
     f('Select', 'impact_recommendation', 'Recommendation', { options: opts(RECOMMENDATIONS, true), permlevel: 1, in_list_view: 1 }),
     col(),
     f('Select', 'impact_change_class', 'Change class proposed', { options: opts(CLASSES, true), permlevel: 1 }),
     f('Data', 'impact_approval_route', 'Approval route proposed', { permlevel: 1 }),
     col(),
-    f('Data', 'impact_norn_url', 'Open in Norn', { options: 'URL', permlevel: 1 }),
+    f('Data', 'impact_norn_url', 'Open in Fern', { options: 'URL', permlevel: 1 }),
     f('Datetime', 'impact_updated_on', 'Last updated', { permlevel: 1 }),
     sec('Statement'),
     f('Text Editor', 'impact_statement', 'Impact statement', { permlevel: 1 }),

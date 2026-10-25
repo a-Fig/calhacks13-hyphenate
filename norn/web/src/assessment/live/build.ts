@@ -11,6 +11,7 @@ import type {
   ActivityEvent, ActorKind, AgentRun, ChangeClass, Check, CutIn, EcrSummary, Evidence, ImpactAssessment,
   MockSection, Origin, Revision, RouteStep, StatementView, Supply, Trace,
 } from '../types.ts';
+import { agentLabel, displayActor, rawActor } from './actors.ts';
 import { changedItems } from './changes.ts';
 import { dateTime, staleNote } from '../../ui/fmt.ts';
 import { personOf, SEATS } from './directory.ts';
@@ -238,7 +239,8 @@ const ACTION_WORD: Record<string, string> = {
   edit_pr_text: 'edit the ECR text',
 };
 
-const principalName = (s: Snapshot, id: Id) => s.principals.find(p => p.identity.toHexString() === id.toHexString())?.name ?? id.toHexString().slice(0, 8);
+const rawPrincipalName = (s: Snapshot, id: Id) => s.principals.find(p => p.identity.toHexString() === id.toHexString())?.name ?? id.toHexString().slice(0, 8);
+const principalName = (s: Snapshot, id: Id) => displayActor(rawPrincipalName(s, id));
 
 // ---------------------------------------------------------------- the list
 
@@ -335,6 +337,7 @@ function runForStatement(s: Snapshot, runs: RunRow[], st: StatementRow, shown: R
 }
 
 function statementView(s: Snapshot, st: StatementRow, pr: PrRow, src: StatementRun, traces: Record<string, Trace>): StatementView {
+  const authorRaw = rawActor(rawPrincipalName(s, st.author));
   const author = principalName(s, st.author);
   const log = s.actions.find(a => a.entity === `impact_statement:${st.id}`);
   const authorKind: ActorKind = log?.actorOrigin === 'external' ? 'person_agent' : 'norn';
@@ -359,7 +362,7 @@ function statementView(s: Snapshot, st: StatementRow, pr: PrRow, src: StatementR
   const fmt = (n: StatementRow['numbers'][number], x: number) =>
     n.unit === 'USD' ? (Math.abs(x) >= 1000 ? `$${Math.round(x).toLocaleString('en-US')}` : `$${x.toFixed(2)}`) : `${x}${n.unit ? ` ${n.unit}` : ''}`;
   return {
-    id: String(st.id), level: st.level as 1 | 2 | 3, at, author, authorKind, headline: st.headline, changeClass: st.changeClass, route: st.route,
+    id: String(st.id), level: st.level as 1 | 2 | 3, at, author, authorRaw, authorKind, headline: st.headline, changeClass: st.changeClass, route: st.route,
     numbers: st.numbers.map((n, i) => ({
       key: n.key, label: n.label, unit: n.unit, p10: n.p10, p50: n.p50, p90: n.p90, evidence: e(n.evidence),
       traceId: n.resultKey && src.kind !== 'same'
@@ -411,7 +414,7 @@ function agentRuns(s: Snapshot, pr: PrRow): ActivityEvent[] {
     }
     const first = evs[0];
     const role = first.role || 'agent';
-    const actor = `Fern ${role} agent`;
+    const actor = agentLabel(role);
     out.push({
       id: `run:${jobId}`, at: iso(first.ts), actor, actorKind: 'norn', onBehalfOf: first.onBehalfOf, kind: 'research',
       text: state === 'running' ? 'is working' : state === 'done' ? 'finished its work' : 'stopped with an error',
@@ -528,7 +531,7 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
     text: 'filed the ECR', detail: cr.originatingNcr ? `From ${cr.originatingNcr}.` : undefined,
   });
   for (const a of s.actions.filter(x => x.prId === pr.id)) {
-    const base = { id: `log:${a.id}`, at: iso(a.at), actor: a.actorName, actorKind: actorKind(a), onBehalfOf: a.onBehalfOf, spawnedBy: a.spawnedBy };
+    const base = { id: `log:${a.id}`, at: iso(a.at), actor: displayActor(a.actorName), actorRaw: rawActor(a.actorName), actorKind: actorKind(a), onBehalfOf: a.onBehalfOf, spawnedBy: a.spawnedBy };
     const why = plain(`${allowed(a.policy)} · ${ACTION_WORD[a.reducer] ?? a.reducer.replace(/_/g, ' ')}${a.outcome !== 'applied' ? `, ${a.outcome}` : ''}`);
     if (a.reducer === 'ingest_ecr') events.push({ ...base, kind: 'policy', text: 'opened the ECR in Fern from the feed', detail: `${sum(a.summary)}. ${why}` });
     else if (a.reducer === 'complete_check' && /^s[12]_/.test(a.summary)) {
@@ -547,7 +550,7 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
   }
   for (const c of s.comments.filter(x => x.prId === pr.id)) {
     const p = s.principals.find(x => x.identity.toHexString() === c.author.toHexString());
-    events.push({ id: `comment:${c.id}`, at: iso(c.createdAt), actor: p?.name ?? 'Someone', actorKind: p?.origin === 'norn' ? 'norn' : p?.origin === 'external' ? 'person_agent' : 'person', onBehalfOf: p?.onBehalfOf, kind: 'comment', text: 'commented', detail: c.body, ...(c.anchor ? { anchor: c.anchor } : {}) });
+    events.push({ id: `comment:${c.id}`, at: iso(c.createdAt), actor: p ? displayActor(p.name) : 'Someone', actorRaw: p ? rawActor(p.name) : undefined, actorKind: p?.origin === 'norn' ? 'norn' : p?.origin === 'external' ? 'person_agent' : 'person', onBehalfOf: p?.onBehalfOf, kind: 'comment', text: 'commented', detail: c.body, ...(c.anchor ? { anchor: c.anchor } : {}) });
   }
   // A queued or running check is an event too, so the page shows the run that is still going.
   for (const r of runs.filter(live).filter(x => x.status === 'queued' || x.status === 'running')) {

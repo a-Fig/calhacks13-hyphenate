@@ -76,7 +76,7 @@ Field shapes follow `bowman/data/types.ts`; enumerations keep the dataset's valu
   - *Review and decision*: `routed_to` (the functions the CM analyst asked for input), `ccb_meeting`, `decision_note`.
 - **ECO** `ECO-nnnn`: `ecr`, `title`, `status`, `released_on`, `released_by`, `decided_by` (CCB or Fast track), classes, `affected_items`, effectivity, forecast and actual.
 
-**Impact assessment** (ECR fields, permission level 1, so people see them read-only): `impact_report_level` (`1`, `2`, `3`), `impact_recommendation` (`Approve`, `Approve with conditions`, `Send back`, `Reject`), `impact_change_class` (`Class I`/`Class II`), `impact_approval_route` (free text), `impact_norn_url`, `impact_updated_on`, `impact_statement` (rich text; the sanitiser kept tables, headings, bold, lists, links and inline colour in the test). A one-line summary of these sits above the tabs on every ECR, with an "Open in Norn" button.
+**Impact assessment** (ECR fields, permission level 1, so people see them read-only): `impact_report_level` (`1`, `2`, `3`), `impact_recommendation` (`Approve`, `Approve with conditions`, `Send back`, `Reject`), `impact_change_class` (`Class I`/`Class II`), `impact_approval_route` (free text), `impact_norn_url`, `impact_updated_on`, `impact_statement` (rich text; the sanitiser kept tables, headings, bold, lists, links and inline colour in the test). A one-line summary of these sits above the tabs on every ECR, with an "Open in Fern" button (the label and the summary say Fern; the field keeps the name `impact_norn_url`).
 
 ## Workflow "ECR Approval"
 
