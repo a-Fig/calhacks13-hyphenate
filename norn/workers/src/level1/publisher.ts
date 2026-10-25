@@ -28,12 +28,12 @@ import { connect, subscribe } from '../connect.ts';
 import { randomUUID } from 'node:crypto';
 import { provenanceOf } from '../impact.ts';
 import { alreadyPublished, statementToPlmFields, type Formatted, type Provenance, type StatementDoc } from './format.ts';
-import { failedChecksOf, ruleInputOf } from './recommendation.ts';
+import { ruleInputOf } from './recommendation.ts';
 import { plmFromConnector, plmOptionsFromEnv, type PlmApi } from './plm.ts';
 import { costCheckOf, storedCompanyConfig, type EcrRef } from './routing.ts';
 import { statementIsFor } from './plan.ts';
 import { settingsFromEnv } from './settings.ts';
-import { crSeqOfRun, jsonOr, runInputs } from './source.ts';
+import { crSeqOfRun, failedChecksForRun, jsonOr, runInputs } from './source.ts';
 
 /** How long a claim stands if its holder dies before releasing it. Longer than one PLM write. */
 const LEASE_MS = 60_000;
@@ -106,6 +106,35 @@ export async function publishStatement(d: PublishDeps, ecrNumber: string, f: For
   } finally {
     await d.lease?.release().catch(() => {});
   }
+}
+
+// ---- recording an override in Norn ----------------------------------------------------------------
+
+/** What Norn's ECR page shows when the rule, not the agent, set the recommendation. Plain text: a comment. */
+export function overrideComment(statementId: number, o: NonNullable<Formatted['overridden']>): string {
+  const agent = o.agent ? `"${o.agent}"` : 'none';
+  return `Norn's rule set the recommendation to ${o.derived.recommendation}; the Level 1 agent wrote ${agent} (rule ${o.derived.rule}, statement ${statementId}). ${o.derived.reasoning}`;
+}
+
+export interface OverrideDeps {
+  /** The bodies of the comments already on the ECR. */
+  existing(): string[];
+  /** Comment on the ECR as the publisher (add_comment). */
+  add(body: string): Promise<void>;
+}
+
+/**
+ * Leave a comment on the ECR in Norn when the PLM got the rule's recommendation instead of the agent's, so Norn's
+ * page does not show the agent's "Send back" while the PLM says "Approve with conditions". A comment, because it
+ * needs no module change and the ECR page already lists comments. At most once per statement and outcome: the
+ * body is its own key, looked up among the ECR's comments, so a restart or a later sweep adds nothing.
+ */
+export async function recordOverride(d: OverrideDeps, statementId: number, f: Formatted): Promise<boolean> {
+  if (!f.overridden) return false;
+  const body = overrideComment(statementId, f.overridden);
+  if (d.existing().includes(body)) return false;
+  await d.add(body);
+  return true;
 }
 
 // ---- reading Norn's database ---------------------------------------------------------------
@@ -185,7 +214,7 @@ export function gather(db: DbConnection['db'], pr: Row<'pullRequest'>): { statem
     ecr: { number: pr.plmEcrNumber, title: pr.title, revision: crSeq },
     prov: { baseline: p.baseline, changeRequest: p.changeRequest, codeVersion: detail.codeVersion, draws: detail.draws, s2RunId: run ? Number(run.id) : undefined, formulas, mock: matched.some(r => r.mock), costCheck: run ? costCheckOf(results.filter(r => r.checkRunId === run.id)) : undefined,
       // The recommendation rule reads the statement's own run, so it is derived only for a statement that has one.
-      ruleInput: run ? ruleInputOf(results.filter(r => r.checkRunId === run.id), failedChecksOf([...db.checkRun.prId.filter(pr.id)].sort((a, b) => Number(a.id - b.id)))) : undefined },
+      ruleInput: run ? ruleInputOf(results.filter(r => r.checkRunId === run.id), failedChecksForRun(db, pr.id, run.id)) : undefined },
   };
 }
 
@@ -220,7 +249,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     'SELECT * FROM check_result',
     'SELECT * FROM ecr_revision',
     'SELECT * FROM norn_config',
+    'SELECT * FROM comment',
   ]);
+  const posted = new Set<string>(); // comments this process added, until the cache shows them
   const missingUntil = new Map<string, number>();
   let running = false;
   let again = false;
@@ -249,6 +280,20 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
             };
             const r = await publishStatement({ plm, lease: leaseFor(pr.id), comment: settings.publishComment, log }, pr.plmEcrNumber, f, g.prov, latest);
             if (r === 'written') log(`${pr.plmEcrNumber}: wrote Level ${g.statement.level} statement ${g.statement.id} to the PLM (ref ${f.ref}${f.recommendation ? `, ${f.recommendation}` : ''})`);
+            if ((r === 'written' || r === 'unchanged') && f.overridden) {
+              const overrideDeps: OverrideDeps = {
+                existing: () => [...posted, ...[...conn.db.comment.prId.filter(pr.id)].map(c => c.body)],
+                add: async body => {
+                  await R.addComment({ prId: pr.id, anchor: '', body });
+                  posted.add(body);
+                },
+              };
+              try {
+                if (await recordOverride(overrideDeps, g.statement.id, f)) log(`${pr.plmEcrNumber}: recorded in Norn that the rule's recommendation replaced the agent's`);
+              } catch (e) {
+                log(`${pr.plmEcrNumber}: could not record the override in Norn: ${(e as Error).message}`);
+              }
+            }
             if (r === 'written' && f.overridden) log(`${pr.plmEcrNumber}: the agent wrote ${f.overridden.agent ? `"${f.overridden.agent}"` : 'no recommendation'}; rule ${f.overridden.derived.rule} gives "${f.overridden.derived.recommendation}", which is what the PLM got`);
             if (r === 'busy') log(`${pr.plmEcrNumber}: another publisher is writing it; looking again later`);
             else if (r === 'missing') {

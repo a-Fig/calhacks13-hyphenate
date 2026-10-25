@@ -30,3 +30,16 @@ export function conflictRows() {
   const ecr = { ...base, itemChanges: base.itemChanges.map(c => (c.op === 'revise' ? { ...c, fromRev: 'Z' } : c)) };
   return costCheckRows(costCheck(bowman, ecr, { seed: 'norn-seed-1' }));
 }
+
+const rowsOf0423 = (change: (e: (typeof bowman.ecrs)[number]) => (typeof bowman.ecrs)[number]) => {
+  const base = bowman.ecrs.find(e => e.id === 'ECR-0423');
+  if (!base) throw new Error("no ECR-0423 in Bowman's data");
+  return costCheckRows(costCheck(bowman, change(base), { seed: 'norn-seed-1' }));
+};
+
+/** ECR-0423 with a cost-page line that rests on an engineer's estimate but states no amount: the check counts it as $0 and flags nothing. */
+export const blankAmountRows = () =>
+  rowsOf0423(e => ({ ...e, costPage: { ...e.costPage, other: [{ label: 'Expedite fee for the first lot', basis: 'engineer_estimate' as const }] } }));
+
+/** ECR-0423 with the proposal for its old stock taken out: the check says "no disposition proposed" as information only. */
+export const noDispositionRows = () => rowsOf0423(e => ({ ...e, inventoryProposal: [] }));

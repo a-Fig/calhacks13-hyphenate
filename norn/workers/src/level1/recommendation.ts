@@ -26,11 +26,23 @@ export interface RuleDetail {
   bomDelta?: { ok: boolean; conflicts: number };
 }
 
+/** One cost-page line as the cost check stored it (the `line:cost:...` rows). */
+export interface RuleLine {
+  id: string;
+  label: string;
+  basis?: string;
+  /** The line's one-time and per-unit amounts; null or absent when the line has none. */
+  oneTime?: unknown;
+  unitCost?: unknown;
+}
+
 export interface RuleInput {
   /** The statement's s2_cost `detail` row, parsed. Undefined when the run has none: nothing can be assessed. */
   detail: RuleDetail | undefined;
-  /** Checks whose latest run failed or is blocked, by stage (`s0_extract`, `s1_bom_delta`, `s2_cost`). */
+  /** Checks that failed or are blocked, by stage (`s0_extract`, `s1_bom_delta`, `s2_cost`), as of the statement's own input snapshot (`failedChecksOf`). */
   failedChecks?: string[];
+  /** The stored cost-page lines, so an amount missing on a line's own basis is seen whatever the check flagged. */
+  lines?: RuleLine[];
 }
 
 export interface Derived {
@@ -50,6 +62,13 @@ const CHECK_NAME: Record<string, string> = {
   s2_cost: 'the cost check (s2_cost)',
 };
 
+/** Gaps whatever severity the check gave them: the rule says an undecided disposition is one. */
+const GAP_KINDS = new Set(['no_disposition']);
+const STATED_BASES = new Set(['engineer_estimate', 'supplier_quote', 'budgetary_quote']);
+const isRange = (x: unknown): boolean => {
+  const r = x as { p10?: unknown; p50?: unknown; p90?: unknown } | null;
+  return typeof r === 'object' && r !== null && [r.p10, r.p50, r.p90].every(v => typeof v === 'number' && Number.isFinite(v));
+};
 const BLOCKING_KINDS = new Set(['conflict', 'not_converged']);
 const short = (s: string, n = 200) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
@@ -74,8 +93,15 @@ export function deriveRecommendation(input: RuleInput): Derived {
     named.add(i.id);
     conditions.push(`"${i.label ?? i.id}" is blank or unestimated and counts as $0`);
   }
+  // A line that says it rests on an engineer's estimate or a quote but states no amount counts as $0 and the
+  // check does not flag it, so look at the line itself rather than at the flags.
+  for (const l of input.lines ?? []) {
+    if (!l.basis || !STATED_BASES.has(l.basis) || isRange(l.oneTime) || isRange(l.unitCost)) continue;
+    named.add(l.id);
+    conditions.push(`"${l.label}" is marked as ${l.basis.replace('_', ' ')} but states no amount and counts as $0`);
+  }
   for (const f of flags) {
-    if (f.severity !== 'warn' || BLOCKING_KINDS.has(f.kind)) continue;
+    if (BLOCKING_KINDS.has(f.kind) || (f.severity !== 'warn' && !GAP_KINDS.has(f.kind))) continue;
     if (f.kind === 'needs_estimate' && f.ref && named.has(f.ref)) continue;
     conditions.push(short(f.message));
   }
@@ -95,25 +121,51 @@ export function deriveRecommendation(input: RuleInput): Derived {
   return { recommendation: 'Approve', rule: 3, blockers, conditions, reasoning: 'Rule 3 (no flags and no gaps).' };
 }
 
-/** Whether a stage's latest non-cancelled run failed or is blocked. `runs` are one ECR's check runs, oldest first. */
-export function failedChecksOf(runs: readonly { stage: string; status: string }[]): string[] {
+/** A check run, as far as the rule needs it. `finishedMs` is null while unfinished. */
+export interface RunRow {
+  id: bigint;
+  stage: string;
+  status: string;
+  inputHash: string;
+  finishedMs: number | null;
+}
+
+/**
+ * The checks that failed or are blocked, as of the statement's own input snapshot, never the ECR's latest runs:
+ * a later failure of a re-run must not turn an unchanged statement's recommendation into Send back.
+ *  - s2_cost: the statement's own run.
+ *  - s1_bom_delta: the run whose input hash the s2 run names as its upstream (`inputs.upstream.s1_bom_delta`).
+ *  - s0_extract reads the ECR's text and nothing names it, so it counts as of the moment the s2 run finished: its
+ *    latest run created before the s2 run, and only if it had already failed by then.
+ */
+export function failedChecksOf(runs: readonly RunRow[], run: RunRow, upstreamS1: string | undefined): string[] {
+  const bad = (st: string) => st === 'failed' || st === 'blocked';
+  const live = runs.filter(r => r.status !== 'cancelled');
   const out: string[] = [];
-  for (const stage of ['s0_extract', 's1_bom_delta', 's2_cost']) {
-    const latest = runs.filter(r => r.stage === stage && r.status !== 'cancelled').at(-1);
-    if (latest && (latest.status === 'failed' || latest.status === 'blocked')) out.push(stage);
-  }
+  const s0 = live.filter(r => r.stage === 's0_extract' && r.id < run.id).at(-1);
+  if (s0 && bad(s0.status) && (s0.status === 'blocked' || (s0.finishedMs !== null && run.finishedMs !== null && s0.finishedMs <= run.finishedMs))) out.push('s0_extract');
+  const s1 = upstreamS1 === undefined ? undefined : live.filter(r => r.stage === 's1_bom_delta' && r.inputHash === upstreamS1).at(-1);
+  if (s1 && bad(s1.status)) out.push('s1_bom_delta');
+  if (bad(run.status)) out.push('s2_cost');
   return out;
 }
 
 /** The rule's input from the stored result rows of one s2_cost run. */
-export function ruleInputOf(rows: readonly { key: string; detailJson: string }[], failedChecks: string[]): RuleInput {
+export function ruleInputOf(rows: readonly { key: string; label?: string; detailJson: string }[], failedChecks: string[]): RuleInput {
+  const parse = (j: string): Record<string, unknown> | undefined => {
+    try {
+      const v = JSON.parse(j);
+      return typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   const row = rows.find(r => r.key === 'detail');
-  let detail: RuleDetail | undefined;
-  try {
-    const v = row ? JSON.parse(row.detailJson) : undefined;
-    if (typeof v === 'object' && v !== null) detail = v as RuleDetail;
-  } catch {
-    detail = undefined;
+  const lines: RuleLine[] = [];
+  for (const r of rows) {
+    if (!r.key.startsWith('line:cost:')) continue;
+    const d = parse(r.detailJson);
+    if (d) lines.push({ id: r.key.slice('line:'.length), label: r.label ?? r.key, basis: typeof d.basis === 'string' ? d.basis : undefined, oneTime: d.oneTime, unitCost: d.unitCost });
   }
-  return { detail, failedChecks };
+  return { detail: row ? (parse(row.detailJson) as RuleDetail | undefined) : undefined, failedChecks, lines };
 }

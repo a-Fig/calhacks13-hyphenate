@@ -244,19 +244,37 @@ try {
   console.error(`\nFAILED: ${(e as Error).message}`);
   for (const [name, lines] of logs) console.error(`--- ${name}\n${lines.slice(-6).join('\n')}`);
 } finally {
-  // Stop the publisher first: it sweeps every 15 s and would write the statement again after the clear.
+  // Stop every process first, and wait until each has exited: the publisher sweeps every 15 s, and a PLM write it had
+  // already started would otherwise land after the clear.
+  const exited = children.map(c => (c.exitCode !== null || c.signalCode !== null ? Promise.resolve(true) : new Promise<boolean>(res => (c.once('exit', () => res(true)), setTimeout(() => res(false), 15_000)))));
   for (const c of children) killTree(c);
-  await sleep(1_000);
-  // Whatever happened, do not leave the demo ECR carrying a test statement unless asked.
+  if (!(await Promise.all(exited)).every(Boolean)) {
+    console.error('A child process did not exit within 15 s; the PLM may still be written to.');
+    ok = false;
+  }
+  // Whatever happened, do not leave the demo ECR carrying a test statement unless asked. Read back after the clear,
+  // clear again if anything is there (a write already in the PLM's queue can still land), and fail loudly if it stays.
   if (clear) {
+    let clean = false;
     try {
-      const s = await plm.readImpact(ECR);
-      if (s && Object.keys(s).length) {
-        await clearImpact(plm, ECR);
-        say(`cleared the impact fields of ${ECR} again`);
+      for (let attempt = 1; attempt <= 5 && !clean; attempt++) {
+        const left = await plm.readImpact(ECR);
+        if (left && Object.keys(left).length) {
+          await clearImpact(plm, ECR);
+          say(`cleared the impact fields of ${ECR} again (attempt ${attempt})`);
+          await sleep(2_000);
+          continue;
+        }
+        await sleep(2_000); // empty: look once more after a pause, so a delayed write is seen
+        const later = await plm.readImpact(ECR);
+        clean = !later || Object.keys(later).length === 0;
       }
     } catch (e) {
-      console.error(`COULD NOT CLEAR ${ECR}: ${(e as Error).message}. Run: npx tsx src/level1/plm-impact.ts clear ${ECR}`);
+      console.error(`COULD NOT CLEAR ${ECR}: ${(e as Error).message}`);
+    }
+    if (!clean) {
+      console.error(`FAILED TO LEAVE ${ECR} CLEAN: the impact fields are not empty. Run: npx tsx src/level1/plm-impact.ts clear ${ECR}`);
+      ok = false;
     }
   }
   mkdirSync(tmp, { recursive: true });

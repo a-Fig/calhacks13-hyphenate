@@ -3,9 +3,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { statementToPlmFields, type StatementDoc } from './format.ts';
-import { jobPrompt, screenDetail, SYSTEM_PROMPT, type Detail, type JobFacts } from './prompt.ts';
-import { deriveRecommendation, failedChecksOf, ruleInputOf } from './recommendation.ts';
-import { conflictRows, storedRows } from './routing-fixture.ts';
+import { LEVEL1_TOOLS } from './dispatcher.ts';
+import { jobPrompt, screenDetail, SYSTEM_PROMPT, systemPromptFor, type Detail, type JobFacts } from './prompt.ts';
+import { overrideComment, recordOverride } from './publisher.ts';
+import { deriveRecommendation, failedChecksOf, ruleInputOf, type RunRow } from './recommendation.ts';
+import { blankAmountRows, conflictRows, noDispositionRows, storedRows } from './routing-fixture.ts';
+import { failedChecksForRun } from './source.ts';
 
 const derive = (rows: { key: string; detailJson: string }[], failed: string[] = []) => deriveRecommendation(ruleInputOf(rows, failed));
 
@@ -38,13 +41,71 @@ test('a BOM conflict with the baseline cannot be assessed as filed: Send back', 
   assert.ok(d.blockers.some(b => b.startsWith('BOM conflict with the baseline')), d.blockers.join('|'));
 });
 
-test('a failed or blocked check, or no cost detail at all, is Send back; a stale or pending one is not looked at', () => {
+test('a failed or blocked check, or no cost detail at all, is Send back', () => {
   const rows = storedRows('ECR-0417');
   assert.equal(derive(rows, ['s1_bom_delta']).recommendation, 'Send back');
   assert.equal(derive([], []).recommendation, 'Send back');
-  assert.deepEqual(failedChecksOf([{ stage: 's2_cost', status: 'done' }, { stage: 's1_bom_delta', status: 'failed' }, { stage: 's0_extract', status: 'blocked' }, { stage: 's4_supply', status: 'failed' }]), ['s0_extract', 's1_bom_delta']);
-  assert.deepEqual(failedChecksOf([{ stage: 's2_cost', status: 'failed' }, { stage: 's2_cost', status: 'done' }]), [], 'only the latest run counts');
-  assert.deepEqual(failedChecksOf([{ stage: 's2_cost', status: 'stale' }, { stage: 's2_cost', status: 'queued' }]), []);
+});
+
+// ---- the checks' state is read as of the statement's own run, never the ECR's latest runs -------------
+
+const run = (id: number, stage: string, status: string, inputHash = `h${id}`, finishedMs: number | null = id * 1000): RunRow => ({ id: BigInt(id), stage, status, inputHash, finishedMs });
+
+test("a failure after the statement's run does not change it: a later extraction failure leaves Approve as it was", () => {
+  const s2 = run(3, 's2_cost', 'done');
+  const before = [run(1, 's0_extract', 'done'), run(2, 's1_bom_delta', 'done', 'S1'), s2];
+  assert.deepEqual(failedChecksOf(before, s2, 'S1'), []);
+  // the text is edited and the extraction re-run fails: a newer run, created after the statement's own
+  const later = [...before, run(7, 's0_extract', 'failed')];
+  assert.deepEqual(failedChecksOf(later, s2, 'S1'), [], "a run created after the statement's own does not count");
+  // an s0 run created earlier that only failed after the s2 run finished does not count either
+  assert.deepEqual(failedChecksOf([run(1, 's0_extract', 'failed', 'h1', 9000), run(2, 's1_bom_delta', 'done', 'S1'), s2], s2, 'S1'), []);
+  const d = (failed: string[]) => deriveRecommendation(ruleInputOf(storedRows('ECR-0423'), failed));
+  assert.equal(d(failedChecksOf(later, s2, 'S1')).recommendation, 'Approve');
+});
+
+test("a check that had failed when the statement was written, or its own upstream run, still counts", () => {
+  const s2 = run(3, 's2_cost', 'done');
+  assert.deepEqual(failedChecksOf([run(1, 's0_extract', 'failed', 'h1', 500), run(2, 's1_bom_delta', 'done', 'S1'), s2], s2, 'S1'), ['s0_extract']);
+  assert.deepEqual(failedChecksOf([run(1, 's1_bom_delta', 'done', 'OLD'), run(2, 's1_bom_delta', 'failed', 'S1'), s2], s2, 'S1'), ['s1_bom_delta'], 'the run the s2 run names, not the latest');
+  assert.deepEqual(failedChecksOf([run(1, 's1_bom_delta', 'failed', 'NEWER'), run(2, 's1_bom_delta', 'done', 'S1'), s2], s2, 'S1'), [], "another revision's s1 is not this snapshot");
+  assert.deepEqual(failedChecksOf([], run(3, 's2_cost', 'failed'), undefined), ['s2_cost']);
+});
+
+test("failedChecksForRun reads the cache the same way: a later s0 failure on the ECR is not this statement's", () => {
+  const at = (s: number) => ({ microsSinceUnixEpoch: BigInt(s) * 1_000_000n });
+  const rows = [
+    { id: 1n, stage: 's0_extract', status: 'done', inputHash: 'a', inputsJson: '{}', finishedAt: at(1) },
+    { id: 2n, stage: 's1_bom_delta', status: 'done', inputHash: 'S1', inputsJson: '{}', finishedAt: at(2) },
+    { id: 3n, stage: 's2_cost', status: 'done', inputHash: 'c', inputsJson: JSON.stringify({ upstream: { s1_bom_delta: 'S1' } }), finishedAt: at(3) },
+    { id: 9n, stage: 's0_extract', status: 'failed', inputHash: 'z', inputsJson: '{}', finishedAt: at(9) },
+  ];
+  const db = { checkRun: { prId: { filter: () => rows }, id: { find: (id: bigint) => rows.find(r => r.id === id) } } } as any;
+  assert.deepEqual(failedChecksForRun(db, 5n, 3n), []);
+  rows[0]!.status = 'failed';
+  assert.deepEqual(failedChecksForRun(db, 5n, 3n), ['s0_extract'], 'failed before the statement\'s run finished');
+});
+
+test('a cost line on a stated basis with no amount is a gap, whatever the check flagged', () => {
+  const rows = blankAmountRows();
+  const detail = JSON.parse(rows.find(r => r.key === 'detail')!.detailJson);
+  assert.ok(!detail.flags.some((f: { kind: string }) => f.kind === 'needs_estimate'), 'the check itself says nothing about it');
+  assert.ok(!detail.inputs.some((i: { needsEstimate?: boolean }) => i.needsEstimate));
+  const d = derive(rows);
+  assert.equal(d.recommendation, 'Approve with conditions');
+  assert.equal(d.conditions.length, 1);
+  assert.ok(d.conditions[0]!.includes('Expedite fee for the first lot') && d.conditions[0]!.includes('states no amount'), d.conditions[0]);
+  assert.equal(derive(storedRows('ECR-0423')).recommendation, 'Approve', 'the unchanged ECR-0423 has no such line');
+  assert.equal(derive(storedRows('ECR-0417')).conditions.length, 3, 'and a blank line is not counted twice');
+});
+
+test('an undecided stock disposition is a gap even though the check only says so as information', () => {
+  const rows = noDispositionRows();
+  const detail = JSON.parse(rows.find(r => r.key === 'detail')!.detailJson);
+  assert.equal(detail.flags.find((x: { kind: string }) => x.kind === 'no_disposition')?.severity, 'info');
+  const d = derive(rows);
+  assert.equal(d.recommendation, 'Approve with conditions');
+  assert.ok(d.conditions.some(c => c.includes('no disposition proposed')), d.conditions.join('|'));
 });
 
 test('an error flag or a forecast that did not converge is Send back; a warning is a gap; info is neither', () => {
@@ -96,8 +157,15 @@ test('the system prompt states the three rules, never Reject, and the rule is a 
   for (const w of ['1. Send back', '2. Approve with conditions', '3. Approve', 'Never Reject', 'BOM conflict', 'needs_estimate', 'name the rule that fired', 'That claim is a judgment']) assert.ok(SYSTEM_PROMPT.includes(w), w);
 });
 
-test('the system prompt carries the fast-track rule (the tool itself is not wired yet)', () => {
-  for (const w of ['fastTrack.candidate is true', 'request_fast_track_approval', 'exactly once', 'after you have posted the statement', 'never mark a test true without evidence', 'do not call it']) assert.ok(SYSTEM_PROMPT.toLowerCase().includes(w.toLowerCase()), w);
+test("the fast-track instruction is built only when the tool is in the job's allowed tools", () => {
+  assert.ok(!LEVEL1_TOOLS.some(t => t.endsWith('request_fast_track_approval')), 'not allowed yet');
+  for (const prompt of [SYSTEM_PROMPT, systemPromptFor(LEVEL1_TOOLS)]) {
+    assert.ok(!prompt.includes('request_fast_track_approval') && !prompt.includes('Fast track.'), 'so the section is absent');
+    assert.ok(prompt.includes('Do not use any other tool. Do not propose'));
+  }
+  const on = systemPromptFor([...LEVEL1_TOOLS, 'mcp__norn__request_fast_track_approval']);
+  for (const w of ['fastTrack.candidate is true', 'request_fast_track_approval', 'exactly once', 'after you have posted the statement', 'never mark a test true without evidence', 'do not call it']) assert.ok(on.toLowerCase().includes(w.toLowerCase()), w);
+  assert.ok(on.includes('except request_fast_track_approval'));
 });
 
 // ---- the publisher writes the rule's recommendation ----------------------------------------------
@@ -144,4 +212,22 @@ test("Reject from the agent is overruled too; a statement with no run keeps the 
   assert.equal(statementToPlmFields(statement('Reject. No.'), ecr, prov(storedRows('ECR-0423')), opts).fields.impact_recommendation, 'Approve');
   const noRun = statementToPlmFields(statement('Reject. No.'), ecr, { baseline: 'b', changeRequest: 'c', formulas: {}, mock: false }, opts);
   assert.equal(noRun.fields.impact_recommendation, 'Reject');
+});
+
+// ---- the override is recorded in Norn ----------------------------------------------------------------
+
+test('an override leaves one comment on the ECR, and a second sweep or a restart adds none', async () => {
+  const f = statementToPlmFields(statement('Send back. Three lines are blank.'), ecr, prov(storedRows('ECR-0417')), opts);
+  const comments: string[] = [];
+  const deps = { existing: () => [...comments], add: async (b: string) => void comments.push(b) };
+  assert.equal(await recordOverride(deps, 12, f), true);
+  assert.equal(comments.length, 1);
+  assert.ok(comments[0]!.startsWith('Norn\'s rule set the recommendation to Approve with conditions; the Level 1 agent wrote "Send back" (rule 2, statement 12).'), comments[0]);
+  assert.equal(await recordOverride(deps, 12, f), false, 'the same statement and outcome');
+  assert.equal(comments.length, 1);
+  assert.equal(await recordOverride(deps, 13, f), true, 'a new statement is a new record');
+  const agrees = statementToPlmFields(statement('Approve with conditions. Rule 2.'), ecr, prov(storedRows('ECR-0417')), opts);
+  assert.equal(await recordOverride(deps, 14, agrees), false, 'nothing to record when the agent agreed');
+  assert.equal(comments.length, 2);
+  assert.ok(overrideComment(1, { agent: null, derived: deriveRecommendation({ detail: {} }) }).includes('wrote none'));
 });

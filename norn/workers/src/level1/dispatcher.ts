@@ -28,11 +28,11 @@ import { connect, subscribe } from '../connect.ts';
 import { provenanceOf, type Inputs } from '../impact.ts';
 import { agentEventWriter } from './agent-events.ts';
 import { actorFor, decide, jobIdFor, jobsFromEvents, spawnedByFor, supersededJobs, type EcrFacts, type EventRow } from './plan.ts';
-import { deriveRecommendation, failedChecksOf, ruleInputOf } from './recommendation.ts';
-import { SYSTEM_PROMPT, jobPrompt, screenDetail, type Detail, type HeadlineKey } from './prompt.ts';
+import { deriveRecommendation, ruleInputOf } from './recommendation.ts';
+import { jobPrompt, systemPromptFor, screenDetail, type Detail, type HeadlineKey } from './prompt.ts';
 import { costCheckOf, routeFor, storedCompanyConfig } from './routing.ts';
 import { settingsFromEnv, type Level1Settings } from './settings.ts';
-import { crSeqOfRun } from './source.ts';
+import { crSeqOfRun, failedChecksForRun } from './source.ts';
 
 type Db = DbConnection['db'];
 type Pr = NonNullable<ReturnType<Db['pullRequest']['id']['find']>>;
@@ -93,7 +93,7 @@ export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
     storedCompanyConfig(db)
   );
   // The same rule and the same rows the publisher applies, so the agent is told what the PLM will say.
-  const recommendation = deriveRecommendation(ruleInputOf(rows, failedChecksOf([...db.checkRun.prId.filter(pr.id)].sort((a, b) => Number(a.id - b.id)))));
+  const recommendation = deriveRecommendation(ruleInputOf(rows, failedChecksForRun(db, pr.id, run.id)));
   return { ecr: pr.plmEcrNumber, title: pr.title, revision, s2RunId, baseline: p.baseline, changeRequest: p.changeRequest, numbers, screened, routing, recommendation };
 }
 
@@ -105,7 +105,7 @@ export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; 
     model: opts.settings.model,
     maxTurns: opts.settings.maxTurns,
     timeoutMs: opts.settings.timeoutMs,
-    systemPrompt: SYSTEM_PROMPT,
+    systemPrompt: systemPromptFor(LEVEL1_TOOLS),
     prompt: opts.prompt,
     identity,
     mcpServers: { [NORN_MCP_SERVER_NAME]: nornMcpFor(identity, { jobId: opts.jobId, role: opts.settings.role, ecrs: [opts.ecr], ttlSeconds: opts.settings.tokenTtlSeconds, signingKey: opts.signingKey, url: opts.mcpUrl }) },
