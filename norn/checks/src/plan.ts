@@ -8,7 +8,7 @@
 // every number carries a trace; a run that misses the convergence tolerance doubles its draws.
 
 import { applyOverlay, type HeadState } from './bom.ts';
-import { COST_DEFAULTS } from './cost.ts';
+import { COST_DEFAULTS } from './defaults.ts';
 import { type Dist, lognormal, lognormalFromQuantiles, pert, pointOf } from './dist.ts';
 import { type Draws, type Variable, drawAll, summarize, type Summary } from './sim.ts';
 import { type SerialTable, addMonthsToDay, dateOf, dayOf, dayOfSerial, serialAtDay, serialTable } from './time.ts';
@@ -157,6 +157,11 @@ export class Book {
     });
     this.vars.set(v.id, { id: v.id, dist, groups: v.groups ?? [] });
     return v.id;
+  }
+
+  /** Whether an assumption with this id was applied, or recorded and refused, by an input of this book. */
+  wasUsed(id: string): boolean {
+    return this.used.has(id);
   }
 
   /** Assumptions that matched nothing, as flags. */

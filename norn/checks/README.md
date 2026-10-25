@@ -145,6 +145,37 @@ for, and S4 reports the shared supplier without a shift.
 
 The cost check prices the rows that exist, so a cost the cost page leaves off entirely used to read as an assessed $0. `assessCostFactors(ecr)` (pure, no draws) gives each factor the DD 1692 Block 50 page must account for one status: `assessed` (a row covers it, an explicit $0 included), `not_applicable` (with its reason) or `unknown` (applicable, no estimate). A row covers a factor when it carries `factor: '<key>'` or the ECR's `costFactors` names it; labels are never guessed. Factors: `qualification` (applicable when `testAndQualification` is anything but an explicit None/N/A, blank included), `retrofit_installation` and `retrofit_test` (applicable when the effectivity states a retrofit that is not `tbd`; parts rows cover neither), and any other key an ECR declares in `costFactors`. A declared `not_applicable` needs a `note`. An unknown factor with no row of its own becomes a blank $0 row with the usual `needs_estimate` flag, input and `needsEstimate`, so the recommendation rule, the web report and the PLM statement see it as they see a blank row; an assumption with the row's id fills it. Every factor is also an input `factor:<ecr>:<key>` whose value is its status.
 
+## Schedule exposure, budget and runway (finance)
+
+Written 2026-10-24 (#137). The cost check also answers what a change does to the program budget and to cash. All of it needs the
+baseline's optional `finance` (`types.ts`: per-program `budgets` and `delayCosts`, and company `cash`); the ERP holds none of it, so
+a baseline carries it only from the company's data or configuration. Without `finance` the result is as before: `finance`,
+`exposure` and `financeConvergence` are null, and no new rows are written.
+
+- **Schedule exposure.** Weeks late x the cost of a week of delay. Weeks late is the timeline model's (S3) lateness against the stated
+  effectivity, drawn inside the cost run from the same streams, so it equals S3's `late_weeks` draw for draw, floored at 0 per draw
+  (arriving early costs nothing). The weekly cost is the program's `delayCosts` p10/p50/p90, lognormal, in the `labor:internal` group.
+  It is a worst case: what the delay costs if the line holds for every late week, when a team usually moves to other work. So it is
+  **in none of the totals**: not the one-time total, the year-one or plan totals, the blocks, the cost measures an approval rule reads,
+  or the budget and runway figures below. It is reported beside them (`exposure`, rows `delay_weeks` and `schedule_exposure`, and a
+  "Schedule exposure (not in totals)" section of the text page). The originator's blank delay line is untouched: still a flagged $0
+  (an assumption on it still counts, as before). When the ECR states no effectivity the volume plan can place, or the old stock runs past
+  the plan, there is no exposure and a blank delay row gets an `exposure_not_computed` note.
+- **Budget impact.** The cost in the budget period / (budget - spent to date), for the ECR's program, as p10/p50/p90, and the share of
+  draws in which the cost exceeds what is left (`probabilityOver`). The cost in the period is every one-time cost in full (assumed to fall in
+  the period) plus the program's recurring change on units built from the cut-in (or the period start) to the period's last month. The
+  remaining budget is a stated number, so the share is the cost's quantiles over a constant.
+- **Runway impact.** The same period cost across every program the change touches, / (monthly burn x 12 / 365): days of runway used,
+  negative for a saving. Also `runwayDaysNow`, cash / burn per day.
+- **Including the exposure.** `finance.withExposure` repeats the period cost, budget share (and chance over) and runway days with the
+  exposure added draw for draw. Rows: `period_cost_with_exposure:<program>`, `budget_share_with_exposure:<program>`, `runway_days_with_exposure`.
+- **Rows.** `delay_weeks` (weeks), `schedule_exposure` (USD), `period_cost:<program>`, `budget_share:<program>` (fraction),
+  `p_over_budget:<program>` (probability), `runway_days` (days), and the three "with exposure" rows. All carry traces; `detail` has
+  `finance` and `exposure` (without their traces, which the rows carry).
+- **Convergence.** The totals' convergence loop is exactly the cost check's, so their draws and numbers do not change when `finance` is
+  present. The exposure, weeks late and period cost get their own two-seed check at those draws (`financeConvergence`), which flags
+  `exposure_not_converged` but never doubles the draws: a product of two wide ranges has a slow P90 (ECR-0410's differs by 2% at 10,000 draws).
+
 ## Ranges
 
 - 10,000 Monte Carlo draws, Latin hypercube sampled (one draw in each of 10,000 equal-probability

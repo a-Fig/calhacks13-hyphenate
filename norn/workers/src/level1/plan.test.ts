@@ -93,6 +93,33 @@ test('attempts are capped per revision, not per restart', () => {
   assert.match((decide(facts({ jobs }), opts({ nowMs: T0 + 3_600_000 })) as any).reason, /attempt/);
 });
 
+test('a text edit gives the ECR a fresh attempt budget: sessions refused for the old ECR revision do not count (Sol #128 round 5)', () => {
+  const jobs = jobsFromEvents([
+    ev(jobIdFor('ECR-0417', 1, 1, 1), 'job_finished', T0 + 20_000, { status: 'succeeded' }), // ended without posting
+    ev(jobIdFor('ECR-0417', 1, 2, 1), 'job_finished', T0 + 200_000, { status: 'succeeded' }), // refused: the text changed under it
+  ]);
+  const later = opts({ nowMs: T0 + 3_600_000 });
+  assert.match((decide(facts({ jobs, ecrRevision: 1 }), later) as any).reason, /attempt/);
+  assert.deepEqual(decide(facts({ jobs, ecrRevision: 2 }), later), { action: 'dispatch', revision: 1, attempt: 3, s2RunId: 7 });
+  const more = jobsFromEvents([
+    ...[1, 2].map(a => ev(jobIdFor('ECR-0417', 1, a, 1), 'job_finished', T0 + a * 1000, { status: 'succeeded' })),
+    ...[3, 4].map(a => ev(jobIdFor('ECR-0417', 1, a, 2), 'job_finished', T0 + a * 1000, { status: 'succeeded' })),
+  ]);
+  assert.match((decide(facts({ jobs: more, ecrRevision: 2 }), later) as any).reason, /attempt/);
+  // an older id without the ECR revision still counts, whatever the ECR's revision now
+  const legacy = jobsFromEvents([1, 2].map(a => ev(jobIdFor('ECR-0417', 1, a), 'job_finished', T0 + a * 1000, { status: 'failed' })));
+  assert.match((decide(facts({ jobs: legacy, ecrRevision: 5 }), later) as any).reason, /attempt/);
+});
+
+test('job ids carry the ECR revision and still read back, and older ids still parse', () => {
+  const id = jobIdFor('ECR-0417', 3, 2, 7);
+  assert.equal(id, 'l1-ECR-0417-r3-e7-a2');
+  assert.deepEqual(parseJobId(id), { revision: 3, attempt: 2, ecrRevision: 7 });
+  assert.deepEqual(parseJobId('l1-ECR-0417-r3-a2'), { revision: 3, attempt: 2 });
+  assert.equal(jobsFromEvents([ev(id, 'job_queued', T0)])[0]!.ecrRevision, 7);
+  assert.deepEqual(supersededJobs({ number: 'ECR-0417', crSeq: 4 }, [id]), [id]);
+});
+
 test('a session that died with its process is retried once its events stop for the orphan time', () => {
   const id = jobIdFor('ECR-0417', 1, 1);
   const jobs = jobsFromEvents([ev(id, 'job_queued', T0), ev(id, 'job_started', T0 + 2000)]);

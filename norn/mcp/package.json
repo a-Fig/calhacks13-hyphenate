@@ -10,11 +10,12 @@
   "scripts": {
     "start": "tsx src/main.ts",
     "typecheck": "tsc -p .",
-    "test:unit": "tsx --test test/unit.ts",
+    "test:unit": "tsx --test test/unit.ts test/fasttrack-unit.ts",
     "key:ensure": "node scripts/ensure-key.mjs",
     "token:person": "tsx scripts/mint-person-token.ts",
     "db:publish": "npm run typecheck -w @norn/module --silent && spacetime publish norn-mcp --no-config --module-path ../module --server local --delete-data=always --yes",
     "check:gate": "tsx test/gate.ts",
+    "check:fasttrack": "tsx test/fasttrack.ts",
     "e2e": "tsx test/e2e.ts",
     "probe:argv": "tsx test/argv-probe.ts"
   },

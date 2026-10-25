@@ -173,7 +173,7 @@ try {
 
   // ---- put all three in review with a Level 1 read ---------------------------------------------------------
   for (const p of [p423, p417, pDrawn]) {
-    await R.setPrStatus({ prId: p.id, status: 'review' });
+    // ingest_ecr opened them in review already: the status is what the PLM shows, not set by hand.
     await statement(A, p.id);
   }
   await until(() => [p423, p417, pDrawn].every(p => pr(p.id).status === 'review') || undefined, 5000, 'the ECRs to be in review');
