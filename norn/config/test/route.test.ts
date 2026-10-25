@@ -97,12 +97,14 @@ function eligible(ecrId: string, size: number, more: Partial<EcrFacts> = {}): Ec
 }
 
 describe('the real cost facts for the demo ECRs', () => {
-  it('ECR-0423 saves a few hundred dollars over its first year, ECR-0417 costs about 160,000', () => {
+  it('ECR-0423 saves a few hundred dollars over its first year, ECR-0417 costs about 590,000 (about 160,000 plus the delay exposure)', () => {
     const small = forecasts.get('ECR-0423')!;
     const bracket = forecasts.get('ECR-0417')!;
     assert.equal(small.windowMonths, 12);
     assert.ok(small.windowTotal.p10 > -700 && small.windowTotal.p90 < -500, JSON.stringify(small.windowTotal));
-    assert.ok(bracket.windowTotal.p50 > 150_000 && bracket.windowTotal.p90 < 170_000, JSON.stringify(bracket.windowTotal));
+    // 157,000 for the bracket, retrofit, scrap and tooling as the originator filled them, plus the delay line: about 13 weeks late
+    // at about $32,000 a week (the delay cost is an exposure, so it is part of the size an approval rule sees).
+    assert.ok(bracket.windowTotal.p50 > 500_000 && bracket.windowTotal.p50 < 700_000 && bracket.windowTotal.p90 < 1_100_000, JSON.stringify(bracket.windowTotal));
   });
 });
 
@@ -464,7 +466,7 @@ describe('releasing an ECO carries out an approval while the approving body stil
     assert.equal(release(factsFor('ECR-0417')).outcome, 'deny');
   });
 
-  it('releases ECR-0417 at 160,000 when the CCB approved it, though the limit is 25,000', () => {
+  it('releases ECR-0417 at about 1,000,000 (its p90) when the CCB approved it, though the limit is 25,000', () => {
     const d = release({ ...factsFor('ECR-0417'), approvedBy: 'ccb' });
     assert.equal(d.outcome, 'approve');
     assert.equal(d.actsNow, true);
@@ -475,7 +477,7 @@ describe('releasing an ECO carries out an approval while the approving body stil
   it('does not when only the technical review committee approved it, which does not cover its tier', () => {
     const d = release({ ...factsFor('ECR-0417'), approvedBy: 'trc' });
     assert.equal(d.outcome, 'recommend');
-    assert.match(flat(d), /16\d,\d{3} USD against a limit of 25,000 USD/);
+    assert.match(flat(d), /1,0\d\d,\d{3} USD against a limit of 25,000 USD/);
   });
 
   it('stops waiving when a re-quote lifts the change past the approving body\'s tier', () => {

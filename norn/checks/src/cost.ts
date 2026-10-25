@@ -8,6 +8,7 @@
 // carries a trace: the formula, and each input and assumption it used with its source.
 
 import { applyOverlay, changedRows, type HeadState } from './bom.ts';
+import { COST_DEFAULTS, type CostDefaults } from './defaults.ts';
 import { type Dist, isFixed, lognormal, lognormalFromQuantiles, pert, point, pointOf } from './dist.ts';
 import {
   type Draws, type Expr, type Summary, type Variable, constant, drawAll, evaluate, evaluateAt, pairedDelta,
@@ -15,31 +16,17 @@ import {
 } from './sim.ts';
 import {
   type AssumptionOverride, type Baseline, type ChangeRequest, type CostBlock, type CostPageRow, type Disposition,
-  type Flag, type InputRecord, type ItemCode, type MonthStr, type Program, type ProgramId, type Source,
+  type Flag, type InputRecord, type ItemCode, type MonthStr, type Program, type ProgramId, type Range3, type Source,
   type StockLocation, type StockRow, type Trace, type TraceUse, CHECKS_CODE_VERSION, COST_BLOCKS,
 } from './types.ts';
 import { assessCostFactors, rowKeys, slug } from './completeness.ts';
+import { Book, evaluateSchedules, gatherSchedule, mergePlanDefaults, WEEK } from './plan.ts';
+import { type DelayResult, type FinanceImpact, figureText, monthSpan, perDay } from './finance.ts';
 import { addMonths, firstSerialFrom, lastBuiltSerial, monthOfSerial, serialsByMonth, unitsAfterCutIn } from './volume.ts';
 
 // ---------------------------------------------------------------- defaults
 
-export interface CostDefaults {
-  /** Log-space spread around a stated cost, by who stated it (Joint Agency handbook Table 2-9). */
-  spread: Record<'supplier_quote' | 'budgetary_quote' | 'engineer_estimate' | 'agent_estimated', number>;
-  /** Forward price range for an item with no sourcing record, as multipliers on its price. */
-  newItemPrice: { p10: number; p90: number };
-  /** Share of a scrapped unit's value that is recovered: resale, reuse elsewhere, or metal value (#32). */
-  scrapRecovery: { min: number; mode: number; max: number };
-  /** Charge for cancelling units on order and not started, as a share of their price. */
-  cancellation: { min: number; mode: number; max: number };
-}
-
-export const COST_DEFAULTS: CostDefaults = {
-  spread: { supplier_quote: 0.05, budgetary_quote: 0.15, engineer_estimate: 0.15, agent_estimated: 0.25 },
-  newItemPrice: { p10: 0.95, p90: 1.08 },
-  scrapRecovery: { min: 0, mode: 0.0153, max: 0.05 },
-  cancellation: { min: 0.05, mode: 0.1, max: 0.3 },
-};
+export { COST_DEFAULTS, type CostDefaults };
 
 const DEFAULT_WHY: Record<string, string> = {
   'spread:supplier_quote': 'A firm supplier quote moves little: change orders only. Log-space spread 0.05 (Norn default).',
@@ -85,6 +72,8 @@ export interface CostRow {
   extended: Money | null;
   total: Money;
   needsEstimate?: boolean;
+  /** An upper bound on what the line costs, not an expected cost: the delay line assumes the line holds for every week of delay. */
+  exposure?: boolean;
   ref?: string;
   note?: string;
 }
@@ -164,6 +153,10 @@ export interface CostCheckResult {
   drivers: Driver[];
   /** The cost measures asked for in the options, in their order. */
   measures: CostMeasure[];
+  /** The change against the ECR's program budget and the company's runway. Null when the baseline carries no finance for the program. */
+  finance: FinanceImpact | null;
+  /** The delay cost on the cost page's blank delay line. Null when that line was not filled from the timeline model. */
+  delay: DelayResult | null;
   convergence: {
     seeds: [string, string];
     tolerance: number;
@@ -255,6 +248,7 @@ interface RowDraft {
   formula: string;
   uses: string[];
   needsEstimate?: boolean;
+  exposure?: boolean;
   ref?: string;
   note?: string;
 }
@@ -275,6 +269,12 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const overrides = new Map((options.assumptions ?? []).map((a) => [a.id, a]));
   const flags: Flag[] = [];
   const pending = new Map<string, Pending>();
+  /**
+   * Series computed from the draws rather than drawn: the weeks a change is late, floored at 0, which no sum of
+   * products can express. Each is added to the draws after they are made, and read like an input by the
+   * expressions. Its trace names the inputs it was computed from.
+   */
+  const derived = new Map<string, { label: string; point: number; compute: (d: Draws) => Float64Array; uses: string[] }>();
   const usedOverrides = new Set<string>();
   /** Ids with a known reason an assumption can't apply there, for the unused-assumption flag. */
   const noVariable = new Map<string, string>();
@@ -545,6 +545,60 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     });
   }
 
+  // The originator's blank delay line (docs/IN-PRACTICE.md §1: "delay cost of holding ... at the station"). When the baseline
+  // has the program's cost of a week of delay and the timeline model can place the change against the stated effectivity,
+  // the line is weeks late (the timeline's own draws, floored at 0) x the weekly cost. It is an exposure: the most the
+  // delay costs if the line holds for all of it. Otherwise the line stays a blank, counted as $0 and flagged.
+  const DELAY_ROW = /delay|holding|idle|stand[- ]?down|stoppage/i;
+  const delayBasis = baseline.finance?.delayCosts.find((x) => x.program === ecr.program);
+  let delayDraft: RowDraft | null = null;
+  let delayInfo = null as { weeks: string; weekly: string; perWeek: Range3 } | null;
+  const delayLine = (id: string, rowInput: string, row: CostPageRow, ref: string): RowDraft | null => {
+    if (!delayBasis) return null;
+    const book = new Book(options.assumptions ?? [], mergePlanDefaults());
+    const sched = gatherSchedule(book, baseline, ecr, { baseline: fromBaseline, changeRequest: fromEcr });
+    const statedDay = sched.stated.day;
+    if (statedDay === null || sched.floor?.beyondPlan) {
+      flags.push({
+        kind: 'delay_not_computed', severity: 'info', ref: id,
+        message: statedDay === null
+          ? `"${row.label}" is left blank: ${ecr.id} states no effectivity the volume plan can place, so there is no date the change could be late against.`
+          : `"${row.label}" is left blank: using up the old stock runs past the volume plan, so no date can be placed for the change.`,
+      });
+      return null;
+    }
+    // The schedule's inputs and uncertain variables join this run's, so the weeks late are drawn here exactly as the timeline check draws them.
+    for (const rec of book.reg.values()) if (!reg.has(rec.id)) reg.set(rec.id, rec);
+    for (const v of book.vars.values()) vars.set(v.id, v);
+    for (const a of options.assumptions ?? []) if (book.wasUsed(a.id)) usedOverrides.add(a.id);
+    flags.push(...book.flags);
+    const w = delayBasis.perWeekUsd;
+    const weekly = variable({
+      id: `finance:${ecr.program}:delay-per-week`, label: `Cost of a week's delay on ${ecr.program}`, source: 'given', groups: ['labor:internal'],
+      dist: lognormalFromQuantiles(w.p10, w.p50, w.p90), ref: `${fromBaseline}: finance, cost of delay`,
+      rationale: [delayBasis.basis, figureText(delayBasis.prov)].filter(Boolean).join(' '),
+    });
+    const weeks = `delay:${ecr.id}:weeks-late`;
+    const pt = evaluateSchedules([sched], book.pointDraws(), false)[0];
+    derived.set(weeks, {
+      label: `Weeks after the stated effectivity (${sched.stated.label}) that ${ecr.id} can first reach the line, floored at 0`,
+      point: Math.max(0, (pt.cutIn[0] - statedDay) / WEEK),
+      compute: (d) => {
+        const cut = evaluateSchedules([sched], d, false)[0].cutIn;
+        return Float64Array.from(cut, (x) => Math.max(0, (x - statedDay) / WEEK));
+      },
+      uses: [...sched.uses, sched.stated.id],
+    });
+    delayInfo = { weeks, weekly, perWeek: w };
+    return {
+      id, block: 'other', label: `${row.label} (exposure)`, recurring: false, basis: 'computed',
+      oneTime: [{ coef: 1, vars: [weeks, weekly] }], unit: null, quantity: null,
+      formula: 'weeks the change reaches the line after the stated effectivity (the timeline model, floored at 0) × the cost of a week of delay. An exposure: what the delay costs if the line holds for all of it',
+      uses: [rowInput, weekly], ref, exposure: true,
+      note: `${row.note ? `${row.note} ` : ''}Left blank by the originator. Filled as an exposure (worst case): the line is assumed to hold for every week the change is late against ${sched.stated.label}.`,
+    };
+  };
+
   // The originator's cost page.
   let engineerRecurring = 0;
   const engineerRecurringRefs: string[] = [];
@@ -568,6 +622,14 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
           blankScrapRows.push({ id, label: row.label, ref, rowInput, ...(row.note ? { note: row.note } : {}) });
           noVariable.set(id, `"${row.label}" is filled by the inventory disposition line; record a recovery share (recovery:<item>) instead`);
           return;
+        }
+        // The originator's blank "delay" line, filled from the timeline model and the company's cost of a week of delay.
+        if (block === 'other' && !delayDraft && DELAY_ROW.test(row.label) && !overrides.get(id)?.dist) {
+          delayDraft = delayLine(id, rowInput, row, ref);
+          if (delayDraft) {
+            rows.push(delayDraft);
+            return;
+          }
         }
         const v = variable({
           id, label: row.label, dist: point(0), source: 'default', ref, needsEstimate: true,
@@ -853,6 +915,42 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const recurringPlan = sum(...programs.map((p) => scale(deltaExpr(p.id), counts.get(p.id)!.total)));
   track('recurringPlan', recurringPlan, 'Σ programs: per-unit change × every planned unit after the cut-in', recurringRows.flatMap((r) => r.uses));
   track('planTotal', sum(oneTimeTotal, recurringPlan), 'one-time total + recurring over the whole volume plan', allUses);
+
+  // The budget and the runway (see finance.ts). The cost in the budget period is every one-time cost, counted in full, plus the
+  // recurring change on the units built from the cut-in (or the start of the period) to the period's last month. The budget is the
+  // ECR's program only; runway counts every program the change touches. A budget and a cash figure are stated, so the share and the
+  // days are the period cost times a constant: a quantile of the cost is the same quantile of its share.
+  const pBudget = baseline.finance?.budgets.find((b) => b.program === ecr.program);
+  const cash = baseline.finance?.cash;
+  let finIds: { budget: string; spent: string; cash: string; burn: string; remaining: number; burnPerDay: number } | null = null;
+  if (pBudget && cash && cash.monthlyBurnUsd > 0) {
+    const unitsInPeriod = (p: Program): number => {
+      const cutMonth = effectivity.get(p.id)!.cutInMonth;
+      if (!cutMonth) return 0;
+      const from = cutMonth > pBudget.period.from ? cutMonth : pBudget.period.from;
+      if (from > pBudget.period.to) return 0;
+      return unitsAfterCutIn(serials.get(p.id)!, { serial: effectivity.get(p.id)!.cutInSerial }, { from, months: monthSpan(from, pBudget.period.to) }).inWindow;
+    };
+    const where = `${fromBaseline}: finance`;
+    const budget = input({ id: `finance:${ecr.program}:budget`, label: `${ecr.program} budget, ${pBudget.period.label}`, source: 'given', value: pBudget.budgetUsd, ref: `${where}, program budget`, rationale: figureText(pBudget.prov) });
+    const spent = input({ id: `finance:${ecr.program}:spent`, label: `${ecr.program} spent to date (${pBudget.asOf})`, source: 'given', value: pBudget.spentToDateUsd, ref: `${where}, program budget`, rationale: figureText(pBudget.prov) });
+    const cashId = input({ id: 'finance:cash', label: `Cash on hand (${cash.asOf})`, source: 'given', value: cash.cashOnHandUsd, ref: `${where}, cash`, rationale: figureText(cash.prov) });
+    const burnId = input({ id: 'finance:burn', label: `Monthly burn (${cash.asOf})`, source: 'given', value: cash.monthlyBurnUsd, ref: `${where}, cash`, rationale: figureText(cash.prov) });
+    const remaining = pBudget.budgetUsd - pBudget.spentToDateUsd;
+    const burnPerDay = perDay(cash.monthlyBurnUsd);
+    finIds = { budget, spent, cash: cashId, burn: burnId, remaining, burnPerDay };
+    const recurringIn = (ps: Program[]) => ps.map((p) => scale(deltaExpr(p.id), unitsInPeriod(p)));
+    const periodUses = (ps: Program[]) => [...nonRecurring.flatMap((r) => r.uses), ...ps.flatMap((p) => ['baseline:items', 'baseline:bom', `ecr:${ecr.id}:overlay`, effectivity.get(p.id)!.id, `volume:${p.id}`, ...changedRows(s, p.id).flatMap((r) => priceEvidence.get(r.item) ?? [])])];
+    const own = programs.filter((p) => p.id === ecr.program);
+    const periodFormula = (what: string) => `Σ one-time rows + per-unit change × units built from the cut-in to ${pBudget.period.to} (${what}); the cost in ${pBudget.period.label}`;
+    track('periodCost', sum(oneTimeTotal, ...recurringIn(own)), periodFormula(`${ecr.program} only`), [...periodUses(own), budget, spent]);
+    track('periodCostCompany', sum(oneTimeTotal, ...recurringIn(programs)), periodFormula('every program the change touches'), [...periodUses(programs), cashId, burnId]);
+    if (remaining > 0) track('budgetShare', scale(sum(oneTimeTotal, ...recurringIn(own)), 1 / remaining), `period cost / (budget − spent to date) = period cost / ${remaining}`, [...periodUses(own), budget, spent]);
+    track('runwayDays', scale(sum(oneTimeTotal, ...recurringIn(programs)), 1 / burnPerDay), `period cost / (monthly burn × 12 / 365) = period cost / ${Math.round(burnPerDay)} per day`, [...periodUses(programs), cashId, burnId]);
+  } else if (baseline.finance && !pBudget) {
+    flags.push({ kind: 'no_budget', severity: 'info', message: `The baseline has finance data but no budget for ${ecr.program}, so the change is not measured against a budget or runway.` });
+  }
+  if (delayInfo) track('delayWeeks', [{ coef: 1, vars: [delayInfo.weeks] }], 'weeks after the stated effectivity the change can first reach the line (cut-in day − stated effectivity day) / 7, floored at 0', []);
   for (const p of programs) {
     const uses = ['baseline:items', 'baseline:bom', `ecr:${ecr.id}:overlay`];
     track(`unitCost:${p.id}/base`, unitCostExpr(p.id, 'base'), 'Σ items qty per unit × unit price × price index, plus labour hours × rate, at base', uses);
@@ -887,6 +985,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const varList = [...vars.values()];
   const runOnce = (seed: string, n: number, only?: string[]) => {
     const d = drawAll(varList, seed, n, rho, n0);
+    for (const [id, x] of derived) d.values.set(id, x.compute(d));
     const out = new Map<string, Summary>();
     const arrays = new Map<string, Float64Array>();
     for (const [key, p] of only ? only.map((k) => [k, pending.get(k)!] as const) : pending) {
@@ -899,7 +998,11 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   // Convergence of P80 and P90 across two seeds (docs/IN-PRACTICE.md §8, recommendation 8). A run
   // that misses the tolerance doubles its draws, up to maxDraws, and the result says how many it used.
   const seed2 = `${options.seed}:convergence`;
-  const convKeys = ['oneTimeTotal', 'recurringWindow', 'windowTotal', 'recurringPlan', ...programs.map((p) => `unitCost:${p.id}/delta`)];
+  const convKeys = [
+    'oneTimeTotal', 'recurringWindow', 'windowTotal', 'recurringPlan', ...programs.map((p) => `unitCost:${p.id}/delta`),
+    // Weeks late, the delay line and the period cost move with the timeline's draws, which converge more slowly than prices.
+    ...(delayInfo ? ['delayWeeks', `${delayDraft!.id}/total`] : []), ...(finIds ? ['periodCost'] : []),
+  ];
   const compare = (a1: Map<string, Summary>, a2: Map<string, Summary>) => convKeys.map((key) => {
     const a = a1.get(key)!;
     const b = a2.get(key)!;
@@ -918,20 +1021,22 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const converged = metrics.every((m) => m.relDiff <= tol);
   if (!converged) flags.push({ kind: 'not_converged', severity: 'warn', message: `P80/P90 moved by more than ${tol * 100}% between seeds at ${n.toLocaleString('en-US')} draws, the most allowed; raise maxDraws.` });
 
-  const pointOfVar = (id: string) => pointOf(vars.get(id)!.dist);
+  const pointOfVar = (id: string) => (derived.has(id) ? derived.get(id)!.point : pointOf(vars.get(id)!.dist));
   const trace = (p: Pending): Trace => {
-    const ids = [...new Set([...p.uses, ...varsOf(p.expr)])];
+    // A computed series is traced to the inputs it was computed from.
+    const ids = [...new Set([...p.uses, ...varsOf(p.expr)].flatMap((id) => derived.get(id)?.uses ?? [id]))];
     const named = [...new Set(ids.map((id) => (bulk.has(id) ? BULK_ID : id)))];
     const missing = named.filter((id) => !reg.has(id));
     if (missing.length) throw new Error(`trace of ${p.key} names ids that are not inputs: ${missing.join(', ')}`);
     const uses: TraceUse[] = named.map((id) => ({ id, source: reg.get(id)!.source }));
     return { formula: p.formula, uses, evidence: 'computation' };
   };
-  const money = (key: string, sumOverride?: Summary): Money => {
+  const money = (key: string, sumOverride?: Summary, digits = 2): Money => {
     const p = pending.get(key);
     if (!p) throw new Error(`no metric ${key}`);
     const sm = sumOverride ?? run1.out.get(key)!;
-    return { p10: r2(sm.p10), p50: r2(sm.p50), p90: r2(sm.p90), mean: r2(sm.mean), point: r2(evaluateAt(p.expr, pointOfVar)), trace: trace(p) };
+    const rd = (x: number) => Math.round(x * 10 ** digits) / 10 ** digits;
+    return { p10: rd(sm.p10), p50: rd(sm.p50), p90: rd(sm.p90), mean: rd(sm.mean), point: rd(evaluateAt(p.expr, pointOfVar)), trace: trace(p) };
   };
   const maybe = (key: string) => (pending.has(key) ? money(key) : null);
 
@@ -939,7 +1044,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     id: r.id, block: r.block, label: r.label, recurring: r.recurring, basis: r.basis,
     oneTime: maybe(`${r.id}/oneTime`), unitCost: maybe(`${r.id}/unit`), quantity: r.quantity,
     extended: maybe(`${r.id}/extended`), total: money(`${r.id}/total`),
-    ...(r.needsEstimate ? { needsEstimate: true } : {}), ...(r.ref ? { ref: r.ref } : {}), ...(r.note ? { note: r.note } : {}),
+    ...(r.needsEstimate ? { needsEstimate: true } : {}), ...(r.exposure ? { exposure: true } : {}), ...(r.ref ? { ref: r.ref } : {}), ...(r.note ? { note: r.note } : {}),
   });
   const blocks = Object.fromEntries(COST_BLOCKS.map((b) => [b, blockRows(b).map(toRow)])) as Record<CostBlock, CostRow[]>;
   const blockTotals = Object.fromEntries(
@@ -985,12 +1090,16 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const base0 = evaluateAt(windowExpr, pointOfVar);
   const drivers: Driver[] = [];
   for (const id of varsOf(windowExpr)) {
-    const v = vars.get(id)!;
-    if (isFixed(v.dist)) continue;
-    const at = (q: number) => evaluateAt(windowExpr, (x) => (x === id ? quantileOfVariable(v, q) : pointOfVar(x)));
+    const dv = derived.get(id);
+    const v = vars.get(id);
+    if (!dv && isFixed(v!.dist)) continue;
+    // A computed series takes its p10 and p90 from the draws.
+    const sm = dv ? summarize(run1.d.values.get(id)!) : null;
+    const quantile = (q: number) => (dv ? (q === 0.1 ? sm!.p10 : sm!.p90) : quantileOfVariable(v!, q));
+    const at = (q: number) => evaluateAt(windowExpr, (x) => (x === id ? quantile(q) : pointOfVar(x)));
     const lo = at(0.1);
     const hi = at(0.9);
-    drivers.push({ id, label: reg.get(id)!.label, kind: 'input', low: r2(Math.min(lo, hi)), high: r2(Math.max(lo, hi)), swing: r2(Math.abs(hi - lo)) });
+    drivers.push({ id, label: dv ? dv.label : reg.get(id)!.label, kind: 'input', low: r2(Math.min(lo, hi)), high: r2(Math.max(lo, hi)), swing: r2(Math.abs(hi - lo)) });
   }
   for (const inv of inventory) {
     const chosen = evaluateAt(sum(...inv.parts.map((x) => x.expr)), pointOfVar);
@@ -1051,6 +1160,28 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     periods,
     drivers: drivers.slice(0, 8),
     measures: (options.measures ?? []).map(measureOf),
+    finance: finIds && pBudget && cash ? (() => {
+      const costs = run1.arrays.get('periodCost')!;
+      let over = 0;
+      for (const x of costs) if (x > finIds.remaining) over++;
+      return {
+        program: ecr.program,
+        period: pBudget.period,
+        asOf: pBudget.asOf,
+        periodCost: money('periodCost'),
+        budget: {
+          budgetUsd: pBudget.budgetUsd, spentToDateUsd: pBudget.spentToDateUsd, remainingUsd: finIds.remaining,
+          share: finIds.remaining > 0 ? money('budgetShare', undefined, 6) : null,
+          probabilityOver: Math.round((over / costs.length) * 10_000) / 10_000,
+        },
+        runway: {
+          cashOnHandUsd: cash.cashOnHandUsd, monthlyBurnUsd: cash.monthlyBurnUsd, burnPerDayUsd: r2(finIds.burnPerDay),
+          runwayDaysNow: Math.round(cash.cashOnHandUsd / finIds.burnPerDay),
+          periodCost: money('periodCostCompany'), daysUsed: money('runwayDays', undefined, 4),
+        },
+      };
+    })() : null,
+    delay: delayInfo && delayDraft ? { row: delayDraft.id, weeksLate: money('delayWeeks'), perWeekUsd: delayInfo.perWeek, cost: money(`${delayDraft.id}/total`) } : null,
     convergence: { seeds: [options.seed, seed2], tolerance: tol, converged, metrics },
     bomDelta: { ok: s.conflicts.length === 0, conflicts: s.conflicts.length },
     flags,

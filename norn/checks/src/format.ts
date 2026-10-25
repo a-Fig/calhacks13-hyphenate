@@ -33,8 +33,10 @@ const lpad = (s: string, w: number) => (s.length >= w ? s : ' '.repeat(w - s.len
 
 function rowLine(r: CostRow): string {
   const qty = r.quantity === null ? '' : String(r.quantity);
-  const flag = r.needsEstimate ? ' *' : '';
-  return `  ${pad(r.label + flag, 58)}${lpad(formatMoney(r.oneTime), 30)}${lpad(formatMoney(r.unitCost), 28)}${lpad(qty, 6)}${lpad(formatMoney(r.total), 32)}`;
+  const flag = r.needsEstimate ? ' *' : r.exposure ? ' †' : '';
+  // The label is cut to leave room for its marker.
+  const label = r.exposure ? r.label.replace(/ \(exposure\)$/, '') : r.label;
+  return `  ${pad(label.length + flag.length > 57 ? label.slice(0, 57 - flag.length) + '…' : label, 58 - flag.length)}${flag}${lpad(formatMoney(r.oneTime), 30)}${lpad(formatMoney(r.unitCost), 28)}${lpad(qty, 6)}${lpad(formatMoney(r.total), 32)}`;
 }
 
 /** The cost page as text: p50 with [p10 to p90] in every cell, savings in parentheses. */
@@ -58,6 +60,20 @@ export function renderCostPage(r: CostCheckResult): string {
   out.push(`Recurring, year one: ${formatMoney(h.recurringWindow)}`);
   out.push(`Net total, year one: ${formatMoney(h.windowTotal)}`);
   out.push(`Net total, whole volume plan: ${formatMoney(h.planTotal)}`);
+  if (COST_BLOCKS.some((b) => r.blocks[b].some((x) => x.exposure))) out.push('† exposure, not an expected cost: the line is assumed to hold for every week the change is late');
+  if (r.delay) out.push(`Weeks late against the stated effectivity (floored at 0): ${r.delay.weeksLate.p10 === r.delay.weeksLate.p90 ? r.delay.weeksLate.p50 : `${r.delay.weeksLate.p50} [${r.delay.weeksLate.p10} to ${r.delay.weeksLate.p90}]`}, at ${formatMoney({ ...r.delay.cost, ...r.delay.perWeekUsd, mean: 0, point: 0 })} per week`);
+  const fin = r.finance;
+  if (fin) {
+    const pctOf = (x: number) => `${(100 * x).toLocaleString('en-US', { maximumFractionDigits: 2 })}%`;
+    const range = (m: Money, f: (x: number) => string) => (m.p10 === m.p90 ? f(m.p50) : `${f(m.p50)} [${f(m.p10)} to ${f(m.p90)}]`);
+    out.push(`Cost in ${fin.period.label}, ${fin.program}: ${formatMoney(fin.periodCost)}`);
+    if (fin.budget.share) {
+      out.push(`Share of the remaining ${fin.program} budget: ${range(fin.budget.share, pctOf)} of ${formatUsd(fin.budget.remainingUsd)} (budget ${formatUsd(fin.budget.budgetUsd)}, spent ${formatUsd(fin.budget.spentToDateUsd)} by ${fin.asOf}); chance it exceeds the remainder: ${pctOf(fin.budget.probabilityOver)}`);
+    } else {
+      out.push(`The ${fin.program} budget for ${fin.period.label} is spent (${formatUsd(fin.budget.spentToDateUsd)} of ${formatUsd(fin.budget.budgetUsd)}); chance the change costs more than what is left: ${pctOf(fin.budget.probabilityOver)}`);
+    }
+    out.push(`Runway used: ${range(fin.runway.daysUsed, (x) => `${x.toLocaleString('en-US', { maximumFractionDigits: 2 })} days`)} of ${fin.runway.runwayDaysNow} (cash ${formatUsd(fin.runway.cashOnHandUsd)}, burn ${formatUsd(fin.runway.monthlyBurnUsd)} a month)`);
+  }
   if (r.blocks.production.some((x) => x.needsEstimate) || COST_BLOCKS.some((b) => r.blocks[b].some((x) => x.needsEstimate))) {
     out.push('* left blank on the cost page; counted as 0 until estimated');
   }

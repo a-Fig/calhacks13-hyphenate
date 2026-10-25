@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bowman } from '../../../bowman/data/index.ts';
+import { bowman as dataset } from '../../../bowman/data/index.ts';
 import { demoScenarios } from '../../../bowman/data/scenarios.ts';
 import { costCheck, slug, type CostCheckResult, type Money } from '../src/cost.ts';
 import { lognormal, point } from '../src/dist.ts';
@@ -9,6 +9,9 @@ import { costCheckRows } from '../src/rows.ts';
 import { COST_BLOCKS, type ChangeRequest } from '../src/types.ts';
 
 const SEED = 'norn-seed-1';
+// These tests are about the cost page as the originator filled it, so they run on the dataset without its finance
+// section (no cost of delay, no budget): the blank delay line stays blank. test/finance.test.ts covers the finance section.
+const bowman = { ...dataset, finance: undefined };
 const ecr = (id: string): ChangeRequest => {
   const e = bowman.ecrs.find((x) => x.id === id);
   if (!e) throw new Error(`no ${id}`);
