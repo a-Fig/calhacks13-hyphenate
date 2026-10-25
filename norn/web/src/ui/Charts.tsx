@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { Driver, SCurve } from '../assessment/types.ts';
 import { fitQuantiles, likelihoodWord } from '../assessment/fit.ts';
-import { Glyph, EV, useWhy } from './Evidence.tsx';
+import { EvidenceLabel, useWhy } from './Evidence.tsx';
 import { usdK } from './fmt.ts';
 
 function niceTicks(lo: number, hi: number, want = 6): number[] {
@@ -158,7 +158,7 @@ export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: numbe
               onClick={() => why.open(d.id)}
             >
               <span className="nx-tornado-heading">
-                <span className="nx-tornado-name"><Glyph ev={d.evidence} /><span>{d.label}</span></span>
+                <span className="nx-tornado-name"><EvidenceLabel ev={d.evidence} /><span>{d.label}</span></span>
                 <span className="nx-tornado-swing num">{usdK(swing)} swing</span>
               </span>
               <svg viewBox={`0 0 ${W} 36`} preserveAspectRatio="none" aria-hidden="true">
@@ -171,7 +171,6 @@ export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: numbe
                 <span><span className="nx-fg-muted">{leftLab ?? 'Lower cost'}</span><b className="num">Net {usdK(leftVal)}</b></span>
                 <span><span className="nx-fg-muted">{rightLab ?? 'Higher cost'}</span><b className="num">Net {usdK(rightVal)}</b></span>
               </span>
-              <span className="nx-tornado-evidence">{EV[d.evidence].label}</span>
             </button>
           );
         })}

@@ -128,7 +128,7 @@ Hyphenate asks "would you hire it?", and wants "a clean record of its work". The
   and only what Bowman allows agents to do.
 - **Autonomy is configuration, never a hard rule** (#24). Per kind of action, Bowman chooses:
   approve, approve with a sampled second check, recommend only, or escalate.
-- **Every number and claim is coloured by evidence class:** fact, assumption, computation or
+- **Every number and claim is labelled by evidence class:** fact, assumption, computation or
   judgment. Likelihood uses the ICD 203 words (`GLOSSARY.md`).
 - **Every recommendation can be dug into** (#25): the sources the agent read, the researchers it
   spawned, the assumptions and where each came from, the calculations, and the reasoning that
@@ -174,7 +174,7 @@ Priority follows the milestone. The order is by dependency.
 | **M1 Foundations** | ERPNext, the PLM and Norn all run from the repo, seeded with Bowman's data, and Norn's skeleton passes the SpacetimeDB spike | immediate |
 | **M2 One ECR end to end** | Filing ECR-0417 in the PLM puts a Level 1 impact statement on it, and on Norn's own page, with cost ranges shaped like the ECP cost page | immediate |
 | **M3 Decision and write-back** | Bowman's configuration routes each ECR, the policy gate checks every write, and releasing the ECO puts a traceable ERP change package on it, which shows as entered once a person enters it in ERPNext (Norn never writes to the ERP, #71) | immediate |
-| **M4 Depth and trust** | The full assessment runs on demand to Level 3 with adversarial review; every number is coloured and traceable; timeline and supply risk are simulated | before demo |
+| **M4 Depth and trust** | The full assessment runs on demand to Level 3 with adversarial review; every number is labelled and traceable; timeline and supply risk are simulated | before demo |
 | **M5 Outside agents** | A person's own agent connects over MCP, acts on their behalf within the stricter limit, and its posts pass the post check | before demo |
 | **M6 Demo and submission** | The demo path is rehearsed on the machines and network it will run on; the video and the Devpost draft are done | before demo |
 
@@ -186,6 +186,6 @@ Ideas past these milestones keep their `priority: if time` label: SAP's Engineer
 - Can a Level 1 report trigger fast-track approval, or only Level 3? (#26)
 - What does a typical fast-tracked ECR at Bowman look like, and what are its limits? (#22)
 - How do engineers come to file an ECR, and who is involved? (#7)
-- The colours for the evidence classes, and whether the T/V/R/C letters are adopted.
+- Whether the T/V/R/C verification letters are adopted (separate from the evidence-class labels, #115).
 - Whether Ankit can approve what the workflow says Tyler approves.
 - Code-freeze time, the video deadline, and who records it.

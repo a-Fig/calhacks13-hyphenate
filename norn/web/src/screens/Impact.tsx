@@ -93,7 +93,9 @@ function CostCheck({ a }: { a: ImpactAssessment }) {
         <div className="nx-box-title">
           Cost page <SavedRun source={a.source} /> <span className="nx-fg-muted">&middot; {a.cost.window.label}, point estimates, savings in parentheses</span>
         </div>
-        <CostTable a={a} />
+        <div className="nx-table-scroll" role="region" aria-label="Cost page numbers" tabIndex={0}>
+          <CostTable a={a} />
+        </div>
         <div className="nx-foot">
           {a.cost.run.draws.toLocaleString('en-US')} paired draws, seed {a.cost.run.seed}, {a.cost.run.codeVersion}. Ranges are P10 to P90; the values are the point estimate, which adds up.
         </div>
