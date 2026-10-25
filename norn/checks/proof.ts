@@ -2,7 +2,7 @@
 // what the code produced. Offline, seeded, deterministic: a second run writes the same file.
 //
 //   node norn/checks/proof.ts               from the repo root; runs the test suites too (about 40 s)
-//   node norn/checks/proof.ts --skip-tests  leaves the test counts as "not run"; use only while editing
+//   node norn/checks/proof.ts --skip-tests  leaves the test counts as "not run" and writes to the temp directory, never docs/PROOF.md
 //
 // What the script reads: Bowman's dataset (bowman/data), Norn's checks (norn/checks/src), Norn's routing
 // and decision rules (norn/config/src) and Bowman's configuration (bowman/norn-config). It reaches no
@@ -14,14 +14,16 @@ import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { bowman } from '../../bowman/data/index.ts';
 import { bomDelta, costCheck, supplyCheck, timelineCheck } from './src/index.ts';
 import { costForecastFromCheck, decideAction, loadConfigFile, routeEcr, formatIssue } from '../config/src/index.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const OUT = join(ROOT, 'docs/PROOF.md');
 const SEED = 'norn-seed-1'; // the seed the workers use (norn/workers/src/checks-*.ts)
 const skipTests = process.argv.includes('--skip-tests');
+// A partial run (no test counts) never overwrites the committed page; it writes to the OS temp directory instead.
+const OUT = skipTests ? join(tmpdir(), 'PROOF.skip-tests.md') : join(ROOT, 'docs/PROOF.md');
 
 // ---------------------------------------------------------------- bookkeeping
 
