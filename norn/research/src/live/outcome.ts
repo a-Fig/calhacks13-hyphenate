@@ -30,6 +30,8 @@ export interface ProposalRecord {
   /** What the agent said, as far as it was well-formed. */
   sourceUrl?: string;
   quote?: string;
+  /** The date the source states for itself (publication or "prices as of"); absent when the agent gave none. */
+  sourceDate?: string;
   retrievedAt?: string;
   confidence?: string;
   rationale?: string;
@@ -54,6 +56,8 @@ export interface Outcome {
   targets: { key: string; label: string; inputId: string; swing: number | null }[];
   proposals: ProposalRecord[];
   unresolved: { targetKey: string; reason: string }[];
+  /** Questions that got no answer at all: no proposal (used, held or rejected) and no unresolved entry. */
+  unanswered: { targetKey: string; label: string }[];
   /** Accepted but not recorded, with why. */
   notRecorded: { targetKey: string; why: string }[];
   /** record_assumption calls the worker made, filled in by the worker after it has checked each took effect. */
@@ -87,6 +91,8 @@ export interface OutcomeInput {
 
 const r4 = (x: number) => Math.round(x * 10_000) / 10_000;
 const str = (x: unknown) => (typeof x === 'string' ? x : undefined);
+/** Agent text that goes on the ECR page: no control characters, one line, bounded (the same cleaning as the report's). */
+const clean = (s: unknown) => String(s ?? '').replace(/[\p{Cc}\p{Cf}]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
 
 export function buildOutcome(i: OutcomeInput): { outcome: Outcome; calls: { targetKey: string; args: RecordAssumptionArgs }[] } {
   const byKey = new Map(i.targets.map((t) => [t.key, t]));
@@ -108,7 +114,7 @@ export function buildOutcome(i: OutcomeInput): { outcome: Outcome; calls: { targ
       rec.proposed = { p10: r4(quantileOf(v.dist, 0.1)), p50: r4(quantileOf(v.dist, 0.5)), p90: r4(quantileOf(v.dist, 0.9)) };
       rec.distJson = distToJson(v.dist);
     }
-    for (const [k, f] of [['sourceUrl', 'sourceUrl'], ['quote', 'quote'], ['retrievedAt', 'retrievedAt'], ['confidence', 'confidence'], ['rationale', 'rationale']] as const) {
+    for (const [k, f] of [['sourceUrl', 'sourceUrl'], ['quote', 'quote'], ['sourceDate', 'sourceDate'], ['retrievedAt', 'retrievedAt'], ['confidence', 'confidence'], ['rationale', 'rationale']] as const) {
       const s = str(raw[f]);
       if (s !== undefined) (rec as unknown as Record<string, unknown>)[k] = s.slice(0, 1200);
     }
@@ -141,7 +147,10 @@ export function buildOutcome(i: OutcomeInput): { outcome: Outcome; calls: { targ
     at: i.now,
     targets: i.targets.map((t) => ({ key: t.key, label: t.label, inputId: t.inputId, swing: t.swing })),
     proposals,
-    unresolved: (i.agentOutput.unresolved ?? []).map((u) => ({ targetKey: String(u.targetId), reason: String(u.reason).slice(0, 400) })),
+    unresolved: (i.agentOutput.unresolved ?? []).map((u) => ({ targetKey: clean(u.targetId), reason: clean(u.reason) })),
+    unanswered: i.targets
+      .filter((t) => !new Set<string>([...i.verdicts.map((v) => v.targetId), ...(i.agentOutput.unresolved ?? []).map((u) => u.targetId)].filter((k): k is string => k !== null)).has(t.key))
+      .map((t) => ({ targetKey: t.key, label: t.label })),
     notRecorded,
     recorded: [],
     failed: [],
@@ -160,7 +169,7 @@ const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` 
 function source(p: ProposalRecord): string {
   if (!p.sourceUrl) return 'no source given';
   const q = p.quote ? ` "${cut(p.quote, 240)}"` : '';
-  return `${p.sourceUrl}${q}, retrieved ${p.retrievedAt?.slice(0, 10) ?? 'on an unknown date'}, confidence ${p.confidence ?? 'unstated'}${p.quoteVerified ? '' : ', quote not verified'}`;
+  return `${p.sourceUrl}${q}, source dated ${p.sourceDate ?? 'unknown (the agent gave none)'}, retrieved ${p.retrievedAt?.slice(0, 10) ?? 'on an unknown date'}, confidence ${p.confidence ?? 'unstated'}${p.quoteVerified ? '' : ', quote not verified'}`;
 }
 
 /**
@@ -173,7 +182,7 @@ export function commentFor(o: Outcome): string | null {
   const held = o.proposals.filter((p) => p.status === 'needs_person');
   const rejected = o.proposals.filter((p) => p.status === 'rejected');
   const lines: string[] = [];
-  if (!held.length && !rejected.length && !flagged.length && !o.unresolved.length && !o.notRecorded.length && !o.failed.length && !o.superseded) return null;
+  if (!held.length && !rejected.length && !flagged.length && !o.unresolved.length && !o.unanswered.length && !o.notRecorded.length && !o.failed.length && !o.superseded) return null;
   const recordedNow = o.recorded.length;
   lines.push(`Research agent (cost engineer), ${o.mode === 'RECORDED' ? 'RECORDED run, not researched live' : `public sources through Bright Data`}. ${o.targets.length} question(s)${o.revision > 0 ? ` on change request revision ${o.revision}` : ''}; ${recordedNow} used as agent estimate(s).`);
   if (o.superseded) lines.push(`Not used: ${o.superseded}`);
@@ -184,7 +193,7 @@ export function commentFor(o: Outcome): string | null {
   if (held.length) {
     lines.push('', `Held for a person (${held.length}). Not used in the forecast:`);
     for (const p of held) {
-      lines.push(`- ${p.label ?? 'a question'}: ${range(p.proposed, p.unit)}. ${source(p)}. Why held: ${p.reasons.map((r) => r.message).join(' ')}`);
+      lines.push(`- ${p.label ?? 'a question'}: ${range(p.proposed, p.unit)}. ${source(p)}. Why held: ${[...p.reasons.map((r) => r.message), ...p.flags.map((f) => f.message)].join(' ')}`);
       if (p.distJson && p.inputId) lines.push(`  To use it, record an assumption on ${p.inputId} with ${p.distJson}`);
     }
   }
@@ -195,6 +204,10 @@ export function commentFor(o: Outcome): string | null {
   if (o.unresolved.length) {
     lines.push('', `Not found (${o.unresolved.length}):`);
     for (const u of o.unresolved) lines.push(`- ${o.targets.find((t) => t.key === u.targetKey)?.label ?? u.targetKey}: ${u.reason}`);
+  }
+  if (o.unanswered.length) {
+    lines.push('', `No answer (${o.unanswered.length}): the agent made no proposal and did not say it was unresolved:`);
+    for (const u of o.unanswered) lines.push(`- ${u.label}`);
   }
   if (o.notRecorded.length || o.failed.length) {
     lines.push('', 'Accepted but not recorded:');

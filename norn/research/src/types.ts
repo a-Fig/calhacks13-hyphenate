@@ -41,6 +41,8 @@ export interface Proposal {
   unit: Unit;
   sourceUrl: string;
   quote: string;
+  /** The date the source states for itself: its publication, last-updated or "prices as of" date (YYYY-MM-DD, YYYY-MM or YYYY). Omitted when the page states none. */
+  sourceDate?: string;
   retrievedAt: string;
   confidence: 'low' | 'medium' | 'high';
   rationale: string;
@@ -57,14 +59,21 @@ export type Status = 'accepted' | 'rejected' | 'needs_person';
 export interface Reason {
   code:
     | 'schema' | 'unknown_target' | 'duplicate_target' | 'unit_mismatch' | 'leak' | 'quote_missing'
-    | 'quote_not_found' | 'page_unavailable' | 'out_of_bounds' | 'low_confidence' | 'bad_distribution';
+    | 'quote_not_found' | 'page_unavailable' | 'out_of_bounds' | 'low_confidence' | 'bad_distribution'
+    | 'stale_source' | 'flagged' | 'review_error';
   message: string;
 }
 
 export interface Flag {
-  code: 'disagrees_with_current' | 'disagrees_with_history' | 'replaces_blank_row' | 'wide_range';
+  code: 'disagrees_with_current' | 'disagrees_with_history' | 'replaces_blank_row' | 'wide_range' | 'no_source_date';
   message: string;
 }
+
+/** Flags that are shown to a person but do not hold a proposal: filling a blank row is the research agent's job. */
+export const INFORMATIONAL_FLAGS: readonly Flag['code'][] = ['replaces_blank_row'];
+
+/** The flags that hold a proposal for a person (all but the informational ones). */
+export const holdingFlags = (flags: Flag[]): Flag[] => flags.filter((f) => !INFORMATIONAL_FLAGS.includes(f.code));
 
 export interface Verdict {
   /** Position in the agent's list. */
@@ -72,7 +81,7 @@ export interface Verdict {
   targetId: string | null;
   status: Status;
   reasons: Reason[];
-  /** Accepted proposals the reader should still look at. */
+  /** What a person should look at. A proposal with a holding flag is held (needs_person), never applied; an informational flag (replaces_blank_row) is shown and does not hold. */
   flags: Flag[];
   /** Set on accepted proposals only. */
   override?: AssumptionOverride;

@@ -77,6 +77,7 @@ export async function finish(prep: ResearchRun, opts: FinishOptions): Promise<{ 
     provenance: opts.provenance,
     targets: prep.targets,
     verdicts,
+    unresolved: opts.agentOutput.unresolved,
     run: prep.run,
   });
   return { verdicts, report };

@@ -2,6 +2,7 @@
 // Every section of a replay says RECORDED; nothing recorded is shown as live.
 
 import type { ResearchReport, Change } from './apply.ts';
+import { INFORMATIONAL_FLAGS } from './types.ts';
 
 const usd = (x: number) => `${x < 0 ? '-' : ''}$${Math.abs(Math.round(x * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: Math.abs(x) < 1000 ? 2 : 0 })}`;
 const fmt = (c: Change, r: { p10: number; p50: number; p90: number }) =>
@@ -24,8 +25,13 @@ export function renderReport(r: ResearchReport): string {
     out.push(`${head}${p.label ? `  (${p.label})` : ''}`);
     if (p.proposed) out.push(`      proposed: ${q(p.proposed)}`);
     if (p.source) out.push(`      quote verified on ${p.source.url} (retrieved ${p.source.retrievedAt.slice(0, 10)})`);
-    for (const x of p.reasons) out.push(`      ${p.status === 'rejected' ? 'rejected' : 'held'} (${x.code}): ${x.message}`);
-    for (const f of p.flags) out.push(`      flag for a person (${f.code}): ${f.message}`);
+    for (const x of p.reasons) out.push(`      ${p.status === 'rejected' ? 'rejected' : 'held for a person'} (${x.code}): ${x.message}`);
+    for (const f of p.flags) out.push(`      ${INFORMATIONAL_FLAGS.includes(f.code) ? 'note for a person, not held' : 'flagged'} (${f.code}): ${f.message}`);
+  }
+  if (r.unresolved.length > 0 || r.unanswered.length > 0) {
+    out.push('', `Unresolved and unanswered [${tag}]`);
+    for (const u of r.unresolved) out.push(`  ${u.targetKey}  UNRESOLVED${u.label ? `  (${u.label})` : '  (not one of the targets)'}: ${u.reason || 'no reason given'}`);
+    for (const u of r.unanswered) out.push(`  ${u.key}  NO ANSWER  (${u.label}): the agent made no proposal and did not say it was unresolved`);
   }
   out.push('', `Before and after, accepted assumptions applied [${tag}]`);
   if (r.changes.length === 0) out.push('  No headline number changed.');

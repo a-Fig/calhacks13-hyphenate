@@ -54,9 +54,9 @@ describe('the per-run budget reaches the job', () => {
   const env = { BRIGHT_DATA_API_TOKEN: 'not-a-real-token' };
   it('sets the runner turn and time limits from the settings, and keeps the old defaults without them', () => {
     const s = settingsFromEnv({ NORN_RESEARCH_MAX_TURNS: '8', NORN_RESEARCH_TIMEOUT_MS: '90000' });
-    const job = buildResearchJob(targets.slice(0, 1), { jobId: 'j', ecr: 'E', env, maxTurns: s.maxTurns, timeoutMs: s.timeoutMs });
+    const job = buildResearchJob(targets.slice(0, 1), { jobId: 'j', ecr: 'E', identifiers: [], env, maxTurns: s.maxTurns, timeoutMs: s.timeoutMs });
     assert.deepEqual([job.maxTurns, job.timeoutMs], [8, 90_000]);
-    const dflt = buildResearchJob(targets.slice(0, 1), { jobId: 'j', ecr: 'E', env });
+    const dflt = buildResearchJob(targets.slice(0, 1), { jobId: 'j', ecr: 'E', identifiers: [], env });
     assert.deepEqual([dflt.maxTurns, dflt.timeoutMs], [30, 600_000]);
   });
 });

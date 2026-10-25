@@ -233,7 +233,7 @@ async function researchOne(pr: Pr, d: Extract<Decision, { action: 'research' }>)
       return;
     }
 
-    const job = buildResearchJob(targets, { jobId: d.jobId, ecr: pr.plmEcrNumber, identifiers, maxTurns: settings.maxTurns, timeoutMs: settings.timeoutMs, ...(settings.model ? { model: settings.model } : {}) });
+    const job = buildResearchJob(targets, { jobId: d.jobId, ecr: pr.plmEcrNumber, identifiers, onToolCall: (c) => { if (!c.allowed) log(`${d.jobId}: the tool guard refused a ${c.tool} call (it carried: ${c.kinds.join(', ') || 'nothing nameable'})`); }, maxTurns: settings.maxTurns, timeoutMs: settings.timeoutMs, ...(settings.model ? { model: settings.model } : {}) });
     log(`${d.jobId}: ${targets.length} question(s) on ${pr.plmEcrNumber} revision ${d.seq}, up to ${settings.maxTurns} turns and ${settings.timeoutMs / 1000} s`);
     const result = await runner.run(job);
     await writer.drain();

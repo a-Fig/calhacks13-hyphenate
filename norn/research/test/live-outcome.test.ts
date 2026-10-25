@@ -22,14 +22,21 @@ const company = bowman as unknown as Company;
 const AGENT = 'ab'.repeat(32);
 const PR = 7n;
 
-async function recorded() {
+async function recorded(asRecorded = false) {
   const rec = await loadRecording(here('../recordings/ecr-0417.recording.json'));
   const prep = prepare(company, { ecrId: rec.ecr, seed: rec.seed, n: rec.n, ...(rec.context ? { context: rec.context } : {}) });
+  // The recording shows the guardrails holding the researched share (it is 5 times below the current one) and nothing is
+  // applied. The worker's plumbing needs one accepted proposal, so the share here is one that agrees with the current value.
+  if (!asRecorded) {
+    const agentOutput = structuredClone(rec.agentOutput);
+    (agentOutput.proposals[0] as { dist: unknown }).dist = { kind: 'pert', min: 0.01, mode: 0.0178, max: 0.03 };
+    rec.agentOutput = agentOutput;
+  }
   const verdicts = await reviewProposals(rec.agentOutput.proposals, prep.targets, recordedFetcher(rec.pages), { today: rec.recordedOn, identifiers: prep.identifiers });
   return { rec, prep, verdicts };
 }
-const input = async (over: Partial<OutcomeInput> = {}): Promise<OutcomeInput> => {
-  const { rec, prep, verdicts } = await recorded();
+const input = async (over: Partial<OutcomeInput> = {}, asRecorded = false): Promise<OutcomeInput> => {
+  const { rec, prep, verdicts } = await recorded(asRecorded);
   return { mode: 'LIVE', key: 'ECR-0417@d1', ecr: 'ECR-0417', prId: PR, revision: 2, digest: 'd1', s2RunId: 11n, jobId: 'research-ECR-0417-r2-d1-a1', now: '2026-10-25T05:00:00.000Z', targets: prep.targets, agentOutput: rec.agentOutput, verdicts, existing: [], agentHex: AGENT, ...over };
 };
 
@@ -63,21 +70,22 @@ describe('accepted proposals as record_assumption calls', () => {
     assert.equal(call.args.source, 'agent_estimated');
     assert.deepEqual(call.args.affects, ['s2_cost']);
     assert.equal(call.args.expectedRev, 0);
-    assert.equal(call.args.distJson, '{"kind":"pert","min":0.002,"mode":0.0036,"max":0.006}');
+    assert.equal(call.args.distJson, '{"kind":"pert","min":0.01,"mode":0.0178,"max":0.03}');
     assert.equal(typeof call.args.expectedRev, 'number');
     assert.equal(typeof call.args.prId, 'bigint');
     assert.equal(call.targetKey, 'T1');
     assert.equal(outcome.recorded.length, 0, 'nothing is recorded until the worker has seen the assumption');
   });
 
-  it('carries the URL, the quote, the retrieval date, the confidence and the flag in the rationale', async () => {
+  it('carries the URL, the quote, the source date, the retrieval date and the confidence in the rationale', async () => {
     const { calls } = buildOutcome(await input());
     const r = calls[0]!.args.rationale;
     assert.match(r, /Source: https:\/\/rockawayrecycling\.com\/metal\/al-machine-cuts\//);
     assert.match(r, /Quote: "[^"]*CURRENT PRICE \$0\.75\/lb[^"]*"/);
     assert.match(r, /Retrieved 2026-10-25/);
     assert.match(r, /confidence medium/);
-    assert.match(r, /Flagged for a person to read: p50 .* more than 3 times apart/);
+    assert.match(r, /dated 2026-10-25/);
+    assert.doesNotMatch(r, /Flagged for a person to read/, 'a flagged proposal is held, never recorded');
   });
 
   it('is read by the worker the way the checks library takes it, to the same distribution', async () => {
@@ -207,8 +215,33 @@ describe('what a person can see of what was not used', () => {
     assert.match(body, /record an assumption on cost:ECR-0417:retrofit:re-inspection-and-test-after-retrofit with \{"kind":"lognormal"/);
     assert.match(body, /Rejected \(2\)/);
     assert.match(body, /the quote does not appear in the page text/);
-    assert.match(body, /Used, and worth a read \(1\)/);
+    assert.match(body, /source dated 2025-12-02/);
     assert.ok(body.length <= 4000);
+  });
+
+  it('lists a proposal held because it was flagged, with the flag, and never records it', async () => {
+    // As recorded, the researched share is far below the current one: held for disagreeing, not applied.
+    const { outcome, calls } = buildOutcome(await input({}, true));
+    assert.equal(calls.length, 0);
+    const body = commentFor(outcome)!;
+    assert.match(body, /Held for a person \(2\)/);
+    assert.match(body, /Share of the purchase price recovered when scrapped parts are sold/);
+    assert.match(body, /Why held: not applied, flagged for disagrees_with_current p50 .* more than 3 times apart/);
+    assert.match(body, /record an assumption on recovery:BW-5120-210 with \{"kind":"pert"/);
+  });
+
+  it('lists the questions the agent declared unresolved and the ones it did not answer at all, in the comment and the stored result', async () => {
+    const base = await input();
+    const keep = base.verdicts.filter((v) => v.targetId === 'T1');
+    const reason = `no public${String.fromCharCode(7)} source found${String.fromCharCode(10)} at all`;
+    const { outcome } = buildOutcome({ ...base, verdicts: keep, agentOutput: { proposals: [base.agentOutput.proposals[0]!], unresolved: [{ targetId: 'T2', reason }] } });
+    assert.deepEqual(outcome.unresolved, [{ targetKey: 'T2', reason: 'no public source found at all' }]);
+    assert.deepEqual(outcome.unanswered.map((u) => u.targetKey), ['T3', 'T4']);
+    const body = commentFor(outcome)!;
+    assert.match(body, /Not found \(1\):\r?\n- Re-inspection and test after retrofit: no public source found at all/);
+    assert.match(body, /No answer \(2\)/);
+    assert.match(body, /- Spares, maintenance manual task update, training/);
+    assert.equal(JSON.parse(JSON.stringify(outcome)).unanswered.length, 2, 'both are in the research_result event');
   });
 
   it('is attached to the cost run it came from, on the ECR', async () => {
@@ -222,7 +255,7 @@ describe('what a person can see of what was not used', () => {
 
   it('says nothing when every proposal was used and none was flagged', async () => {
     const base = await input();
-    const clean = buildOutcome({ ...base, agentOutput: { proposals: [], unresolved: [] }, verdicts: [] });
+    const clean = buildOutcome({ ...base, targets: [], agentOutput: { proposals: [], unresolved: [] }, verdicts: [] });
     assert.equal(commentFor(clean.outcome), null);
   });
 
@@ -263,6 +296,8 @@ describe('--replay', () => {
     const tsx = here('../../node_modules/tsx/dist/cli.mjs');
     const out = execFileSync(process.execPath, [tsx, 'src/worker.ts', '--replay', 'recordings/ecr-0417.recording.json'], { cwd: here('..'), encoding: 'utf8', env: { PATH: process.env.PATH ?? '' } });
     assert.ok(out.trim().split('\n').every((l) => l.startsWith('RECORDED | ')));
-    assert.match(out, /record_assumption calls \(1\)/);
+    // The recording's only researched share is held by the guardrails (far from the current value), so nothing would be recorded.
+    assert.match(out, /record_assumption calls \(0\)/);
+    assert.match(out, /NEEDS_PERSON/);
   });
 });

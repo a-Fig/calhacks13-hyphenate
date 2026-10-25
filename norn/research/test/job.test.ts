@@ -34,7 +34,7 @@ describe('the research job', () => {
     void mcpServers;
   });
   it('fails without the token and the message names the variable, not a value', () => {
-    assert.throws(() => buildResearchJob(prep.targets, { jobId: 'x', ecr: 'ECR-0417', env: {} }), (e: Error) => e instanceof MissingTokenError && /BRIGHT_DATA_API_TOKEN/.test(e.message));
+    assert.throws(() => buildResearchJob(prep.targets, { jobId: 'x', ecr: 'ECR-0417', env: {}, identifiers: prep.identifiers }), (e: Error) => e instanceof MissingTokenError && /BRIGHT_DATA_API_TOKEN/.test(e.message));
   });
   it('sends the agent nothing from the dataset: no part, supplier, person, program, company or ECR in the prompts or the identity-free text', () => {
     const text = `${SYSTEM_PROMPT}\n${userPrompt(prep.targets)}`;

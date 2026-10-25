@@ -2,12 +2,19 @@
 // suppliers, people, programs or change records. Web search goes to a third party, and Bowman's
 // facts are not on the web anyway (the agent researches the world, not the company).
 //
-// Pure and deterministic. Matching is by whole words after folding case and punctuation, so
-// 'bw-5120-210', 'BW 5120 210' and 'BW5120-210 bracket' all hit the item code. The check errs
-// towards rejecting: a distinctive first word of a supplier or a surname also counts. A word that
-// is also an ordinary term (cobalt, the metal) goes in `allow`.
+// Pure and deterministic. Text is first folded: zero-width, soft-hyphen and bidi characters are
+// removed, NFKC applied, accents stripped, case and punctuation dropped. Then two matches run:
+//   - whole words, so 'bw-5120-210' and 'BW 5120 210' hit the item code, and 'shaldenx' does not
+//     hit Halden;
+//   - compact forms, with every separator and space removed, for part numbers, record ids and
+//     multi-word names, so '5120210', 'BW5120210' and 'JeffHargrove' hit too. A digit at the edge
+//     of such a match must be the edge of a number in the text (15120210 is not part 5120-210).
+// The check errs towards rejecting: a distinctive first word of a supplier or a surname also
+// counts. A word that is also an ordinary term (cobalt, the metal) goes in `allow`. Not covered:
+// look-alike letters from another script (a Cyrillic "a" in "Halden").
 
-import { wordForm } from './text.ts';
+import { domainToUnicode } from 'node:url';
+import { compactForm, stripInvisible, wordForm } from './text.ts';
 
 /** The parts of a company dataset the leak check reads. Bowman's dataset satisfies it as is. */
 export interface IdentifierSource {
@@ -93,21 +100,86 @@ export function collectIdentifiers(src: IdentifierSource): Identifier[] {
   });
 }
 
+/** The compact form of `text` with, for each character, whether it opens or closes a token of the text. */
+function compactWithEdges(text: string): { chars: string; opens: boolean[]; closes: boolean[] } {
+  const tokens = wordForm(text).trim().split(' ').filter((t) => t !== '');
+  let chars = '';
+  const opens: boolean[] = [];
+  const closes: boolean[] = [];
+  for (const t of tokens) {
+    for (let i = 0; i < t.length; i++) {
+      chars += t[i];
+      opens.push(i === 0);
+      closes.push(i === t.length - 1);
+    }
+  }
+  return { chars, opens, closes };
+}
+
+const isDigitChar = (c: string | undefined) => c !== undefined && c >= '0' && c <= '9';
+
+/** Does `needle` (compact) occur in the compact haystack without cutting a number in two? */
+function compactHit(hay: ReturnType<typeof compactWithEdges>, needle: string): boolean {
+  for (let at = hay.chars.indexOf(needle); at >= 0; at = hay.chars.indexOf(needle, at + 1)) {
+    const end = at + needle.length;
+    if (isDigitChar(needle[0]) && isDigitChar(hay.chars[at - 1]) && !hay.opens[at]) continue;
+    if (isDigitChar(needle[needle.length - 1]) && isDigitChar(hay.chars[end]) && !hay.closes[end - 1]) continue;
+    return true;
+  }
+  return false;
+}
+
 /** Every identifier found in `text`. Empty: clean. */
 export function findLeaks(text: string, ids: Identifier[], allow: readonly string[] = DEFAULT_ALLOW): Leak[] {
   const hay = wordForm(text);
+  const compactHay = compactWithEdges(text);
   const allowed = new Set(allow.map((w) => wordForm(w)));
   const leaks: Leak[] = [];
   for (const id of ids) {
     const needle = wordForm(id.text);
     if (allowed.has(needle)) continue;
-    // Compare with the digits and letters of an item code run together as well, for 'BW5120210'.
-    const squashed = needle.replace(/ /g, '');
-    if (hay.includes(needle) || (id.kind === 'item' && squashed.length >= 8 && hay.replace(/ /g, '').includes(squashed))) {
-      leaks.push({ identifier: id.text, kind: id.kind, query: text });
-    }
+    // Part numbers, record ids and names of several words are also matched with every separator
+    // removed: '5120210', 'BW5120210', 'JeffHargrove'.
+    const compact = compactForm(id.text);
+    const multi = needle.trim().includes(' ');
+    const byCompact = (id.kind === 'item' || id.kind === 'record' || multi) && compact.length >= 7 && compactHit(compactHay, compact);
+    if (hay.includes(needle) || byCompact) leaks.push({ identifier: id.text, kind: id.kind, query: text });
   }
-  const m = RECORD_ID.exec(text);
+  const m = RECORD_ID.exec(stripInvisible(text));
   if (m && !leaks.some((l) => wordForm(l.identifier) === wordForm(m[0]))) leaks.push({ identifier: m[0], kind: 'record', query: text });
   return leaks;
+}
+
+/** Percent-decodes as far as it goes (a few rounds, in case of double encoding); a malformed escape is left as written. */
+function decodeAll(s: string): string {
+  let cur = s;
+  for (let i = 0; i < 3; i++) {
+    let next: string;
+    try {
+      next = decodeURIComponent(cur);
+    } catch {
+      next = cur.replace(/%([0-9a-f]{2})/gi, (m, h: string) => String.fromCharCode(parseInt(h, 16)));
+    }
+    if (next === cur) break;
+    cur = next;
+  }
+  return cur;
+}
+
+/**
+ * Every identifier found in a URL: its host, credentials, path, query and fragment, as written and
+ * percent-decoded. A URL is sent to a third party when it is fetched, so it is held to the same rule
+ * as a search query.
+ */
+export function findUrlLeaks(rawUrl: string, ids: Identifier[], allow: readonly string[] = DEFAULT_ALLOW): Leak[] {
+  const forms = new Set<string>([rawUrl, decodeAll(rawUrl)]);
+  try {
+    const u = new URL(rawUrl);
+    forms.add(decodeAll(`${u.username} ${u.password} ${domainToUnicode(u.hostname)} ${u.pathname} ${u.search} ${u.hash}`));
+  } catch {
+    // Not a URL: the raw and decoded text above are still checked.
+  }
+  const out: Leak[] = [];
+  for (const f of forms) for (const l of findLeaks(f, ids, allow)) if (!out.some((o) => o.identifier === l.identifier)) out.push({ ...l, query: rawUrl });
+  return out;
 }
