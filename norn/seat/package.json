@@ -3,5 +3,19 @@
   "private": true,
   "type": "module",
   "description": "Norn holding a company seat: duties, who to ask, deadlines and escalation (#155).",
-  "scripts": { "test": "node --test test/*.test.ts", "demo": "node demo.ts" }
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "demo": "node demo.ts",
+    "seat": "tsx src/worker.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@norn/bindings": "*",
+    "spacetimedb": "2.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
 }

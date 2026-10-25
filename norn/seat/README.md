@@ -33,9 +33,41 @@ on the ECR, recording the assumption); wiring it to the live database is the nex
 
 ```
 node demo.ts ECR-0417        # from norn/seat: the seat chasing ECR-0417, with SIMULATED replies
-node --test test/*.test.ts   # 6 tests: reply parsing, gaps, routing, ask/record/re-run, reminders and escalation, follow-ups
+node --test test/*.test.ts   # 13 tests: the seat logic, plus the live half (state from comments, reply matching, reducer arguments)
 ```
 
 On ECR-0417 the seat asks Quality (re-inspection), the CM analyst (spares, manuals, training), the
 planner (the held station) and procurement (scrap recovery). With the simulated reply "$3,000 to
 $5,000" from Quality, the one-time total moves from $148,521 to $152,445 at p50, traced to her answer.
+
+## Live: chasing on the running stack (#162)
+
+`src/worker.ts` is a process that connects to SpacetimeDB as "Norn · Product Cost Engineer" (an agent of
+origin `norn`) and, for each draft or in-review ECR whose newest s2 cost run is done and not mock, reads
+the gaps from the run's stored detail row, derives the seat's state from the ECR's comments, runs
+`nextActions` on the real clock and carries the actions out. It keeps no state of its own, so a restart
+resumes the conversation and never asks a question that is already on the ECR.
+
+- Questions, reminders, escalations and follow-ups are `add_comment` on the ECR. Each comment's anchor
+  says what it is and which input it is about (`thread.ts`): `seat:ask:<personId>:<inputId>` and so on.
+- A person answers under the question on the ECR page. The reply box posts `seat:reply:<personId>:<inputId>`
+  from the web's own connection and the page labels it "Replying as Beatriz Nowak (demo sign-in)". The
+  module has one author per comment (the connection's identity), so the person is carried in the anchor;
+  nothing proves it, which is why it is a demo sign-in. The audit line on the recorded assumption names
+  both the person and the connection that typed the reply.
+- A clear figure or range becomes `record_assumption` with source `given`, so the module re-checks the
+  ECR. The worker has no job scope on purpose: the scoped gate refuses an agent a `given` assumption.
+  When the new cost run is done it posts one note (`seat:record:<inputId>`) with the new one-time cost.
+- `--demo-clock +25h` shifts the clock the seat uses for reminders and escalations. The log lines say
+  `DEMO CLOCK +25h` and each reminder or escalation comment ends with "(demo clock +25h)".
+
+```
+cd norn
+npm run db:start                    # SpacetimeDB; then db:publish, and the demo stack (npm run demo -w @norn/workers) so ECR-0417 has a current cost check
+npm run seat -- --dry-run --once    # print the comments it would write, write nothing
+npm run seat                        # the live seat; open ECR-0417 and answer Quality's question as Beatriz
+npm run seat -- --demo-clock +25h   # DEMO CLOCK: reminders and escalations fire without waiting
+```
+
+Only `ECR-0417`'s people come from Bowman's data (`bowman.people`); the seat file is
+`bowman/norn-config/seats/cost-engineer.ts`.

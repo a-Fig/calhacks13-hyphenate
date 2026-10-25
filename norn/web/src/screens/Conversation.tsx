@@ -10,6 +10,8 @@ import { DiffTable } from './Changes.tsx';
 import { CheckStateIcon, LevelLabel, MockTag, Person, SavedRun, StaleNote } from '../ui/Bits.tsx';
 import { BoardIcon, CaliperIcon, CostIcon, GaugeIcon, NcrIcon, ReleaseIcon } from '../ui/EngineeringIcons.tsx';
 import { Highlight, Mark, Num } from '../ui/Evidence.tsx';
+import { SeatThreads } from './SeatThread.tsx';
+import { seatThreadsOf } from './seatThreads.ts';
 import { ago, dateTime, dayLabel, dateShort, range as rangeText, usdK } from '../ui/fmt.ts';
 import { Link } from '../router.tsx';
 import { ApprovalRows, ApproverItems, ErpPackageCard, RecommendationRow, ReleaseFoot } from './GateBox.tsx';
@@ -21,7 +23,8 @@ const kindOf = (e: ActivityEvent) => (e.actorKind === 'norn' ? 'norn' : e.actorK
 export function Conversation({ a }: { a: ImpactAssessment }) {
   const events = [...a.activity].sort((x, y) => x.at.localeCompare(y.at));
   const filed = events.find(e => e.kind === 'filed');
-  const rest = events.filter(e => e !== filed);
+  const { threads, others: rest0 } = seatThreadsOf(events.filter(e => e !== filed));
+  const rest = rest0;
 
   return (
     <PageLayout containerWidth="full" padding="none" columnGap="normal">
@@ -30,7 +33,7 @@ export function Conversation({ a }: { a: ImpactAssessment }) {
           <Timeline clipSidebar>
             {filed && <OpeningComment a={a} filed={filed} />}
             <BotComment a={a} />
-            {rest.map(e => <EventItem key={e.id} e={e} mock={a.mock.includes('narrative')} />)}
+            <SeatThreads a={a} threads={threads} others={rest} renderEvent={e => <EventItem key={e.id} e={e} mock={a.mock.includes('narrative')} />} />
           </Timeline>
           <MergeBox a={a} />
           {a.erpPackage && <ErpCard pkg={a.erpPackage} mock={a.mock.includes('erp')} />}
@@ -46,7 +49,7 @@ export function Conversation({ a }: { a: ImpactAssessment }) {
 
 // ---------------------------------------------------------------- comments
 
-function CommentBox({ name, kind, label, time, edited, children, right }: {
+export function CommentBox({ name, kind, label, time, edited, children, right }: {
   name: string; kind: 'person' | 'norn' | 'agent'; label?: ReactNode; time: string; edited?: boolean; children: ReactNode; right?: ReactNode;
 }) {
   return (

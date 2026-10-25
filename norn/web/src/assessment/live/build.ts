@@ -547,7 +547,7 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
   }
   for (const c of s.comments.filter(x => x.prId === pr.id)) {
     const p = s.principals.find(x => x.identity.toHexString() === c.author.toHexString());
-    events.push({ id: `comment:${c.id}`, at: iso(c.createdAt), actor: p?.name ?? 'Someone', actorKind: p?.origin === 'norn' ? 'norn' : p?.origin === 'external' ? 'person_agent' : 'person', onBehalfOf: p?.onBehalfOf, kind: 'comment', text: 'commented', detail: c.body });
+    events.push({ id: `comment:${c.id}`, at: iso(c.createdAt), actor: p?.name ?? 'Someone', actorKind: p?.origin === 'norn' ? 'norn' : p?.origin === 'external' ? 'person_agent' : 'person', onBehalfOf: p?.onBehalfOf, kind: 'comment', text: 'commented', detail: c.body, ...(c.anchor ? { anchor: c.anchor } : {}) });
   }
   // A queued or running check is an event too, so the page shows the run that is still going.
   for (const r of runs.filter(live).filter(x => x.status === 'queued' || x.status === 'running')) {

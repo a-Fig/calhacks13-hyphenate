@@ -338,6 +338,8 @@ export interface ActivityEvent {
   /** What spawned it: "Norn, for Jeff Hargrove". */
   spawnedBy?: string;
   kind?: EventKind;
+  /** A comment's anchor, when it has one: the seat's conversation is read from it. */
+  anchor?: string;
   text: string;
   detail?: string;
   /** A report that was published by this step. */
