@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto';
 import type { CompanyConfig, CostCheckHeadline } from '../../../config/src/index.ts';
 import { routeFor, ROUTE_PENDING, type AssessmentRef, type EcrRef } from './routing.ts';
 import type { ImpactFields } from './plm.ts';
+import { deriveRecommendation, type Derived, type RuleInput } from './recommendation.ts';
 
 export interface StatementNumber {
   key: string;
@@ -61,6 +62,12 @@ export interface Provenance {
   mock: boolean;
   /** The run's cost check with its rows, for routing (`costCheckOf`). Not shown in the statement. */
   costCheck?: CostCheckHeadline;
+  /**
+   * What the recommendation rule reads (recommendation.ts), from the statement's own run. With it the
+   * PLM's recommendation is the rule's, whatever the agent wrote; without it (a statement that rests
+   * on no run) the agent's stands.
+   */
+  ruleInput?: RuleInput;
 }
 
 export interface FormatOptions {
@@ -155,8 +162,10 @@ export interface Formatted {
   fields: ImpactFields;
   /** Short token written into the HTML; a later read finds it to know this statement is already there. */
   ref: string;
-  /** The recommendation parsed from the claims, if any. */
+  /** The recommendation written to the PLM: the rule's when it could be derived, else the one parsed from the claims. */
   recommendation: Recommendation | null;
+  /** Set when the agent's recommendation differed from the rule's (or was missing) and the rule's was written. */
+  overridden?: { agent: Recommendation | null; derived: Derived };
 }
 
 /** The ECR number's own link in Norn. */
@@ -169,7 +178,13 @@ export function assessmentOf(s: StatementDoc, costCheck?: CostCheckHeadline): As
 }
 
 export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provenance, opts: FormatOptions): Formatted {
-  const rec = parseRecommendation(s.claims);
+  const agentRec = parseRecommendation(s.claims);
+  // Two runs on the same inputs must not differ: the rule's recommendation wins over the agent's, with a note.
+  const derived = prov.ruleInput ? deriveRecommendation(prov.ruleInput) : undefined;
+  const overridden = derived && agentRec?.value !== derived.recommendation ? { agent: agentRec?.value ?? null, derived } : undefined;
+  const rec: { value: Recommendation; reasoning: string } | null = !derived
+    ? agentRec
+    : { value: derived.recommendation, reasoning: overridden || !agentRec?.reasoning ? derived.reasoning : agentRec.reasoning };
   const proposal = parseClassProposal(s.claims);
   // What Norn's routing decides wins; where it decides nothing (no configuration, or no class set) the statement's own class and route stand.
   const routed = routeFor(ecr, assessmentOf(s, prov.costCheck), opts.config);
@@ -183,7 +198,10 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
   out.push(`<p style="margin:0 0 8px 0;color:#555555">${esc(LEVELS[s.level] ?? `Level ${s.level}`)}. Revision ${ecr.revision} of ${esc(ecr.number)}.${prov.mock ? ' <b style="color:#b00020">MOCK numbers: placeholders, not a forecast.</b>' : ''}</p>`);
   out.push(`<p style="margin:0 0 8px 0"><b>Bottom line.</b> ${esc(s.headline)}</p>`);
   if (rec) {
-    out.push(`<p style="margin:0 0 8px 0"><b>Recommendation: ${esc(rec.value)}</b> ${tag('judgment')}${rec.reasoning ? `<br>${esc(rec.reasoning)}` : ''}</p>`);
+    const note = overridden
+      ? `<br><i style="color:#555555">Norn's rule gave this recommendation (rule ${overridden.derived.rule}); the Level 1 agent ${overridden.agent ? `wrote "${esc(overridden.agent)}"` : 'wrote none'}, so the rule's stands.</i>`
+      : '';
+    out.push(`<p style="margin:0 0 8px 0"><b>Recommendation: ${esc(rec.value)}</b> ${tag('judgment')}${rec.reasoning ? `<br>${esc(rec.reasoning)}` : ''}${note}</p>`);
   }
 
   // Headline numbers.
@@ -256,7 +274,7 @@ export function statementToPlmFields(s: StatementDoc, ecr: EcrRef, prov: Provena
     impact_norn_url: url,
     impact_statement: `${body}\n${footer}`,
   };
-  return { fields, ref, recommendation: rec?.value ?? null };
+  return { fields, ref, recommendation: rec?.value ?? null, ...(overridden ? { overridden } : {}) };
 }
 
 /** Whether the PLM already shows this exact statement: same ref in the text, same plain fields. */

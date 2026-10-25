@@ -62,16 +62,25 @@ export function Num({ f, kind = 'full', plus = false, use = 'point', className }
 /** The key, with how many of each class the assessment has. Lives on the Impact tab. */
 export function Legend({ counts }: { counts?: Record<Evidence, number> }) {
   return (
-    <div className="nx-legend" aria-label="Evidence key">
-      <span className="nx-legend-title">Evidence</span>
-      {EV_ORDER.map(k => (
-        <span key={k} className={`k nx-ev-${k}`}>
-          <Glyph ev={k} />
-          <span className={`nx-sample nx-ev-${k}`}>{EV[k].label}</span>
-          <span className="hint">{EV[k].hint}</span>
-          {counts && <span className="n">{counts[k]}</span>}
-        </span>
-      ))}
+    <div className="nx-legend" role="group" aria-label="Evidence key">
+      <div className="nx-legend-heading">
+        <span className="nx-legend-title">Evidence</span>
+        {counts && <span className="hint">Numbers and claims in this assessment</span>}
+      </div>
+      <ul className="nx-legend-entries">
+        {EV_ORDER.map(k => (
+          <li key={k}>
+            <Glyph ev={k} size={12} />
+            <div className="nx-legend-copy">
+              <div className="nx-legend-label">
+                <b>{EV[k].label}</b>
+                {counts && <span className="n" aria-label={`${counts[k]} items`}>{counts[k]}</span>}
+              </div>
+              <span className="hint">{k === 'assumption' ? 'Assumed input' : EV[k].hint}</span>
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

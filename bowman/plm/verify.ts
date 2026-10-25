@@ -5,7 +5,7 @@
 //   ENV_FILE=<repo>/.env node bowman/plm/verify.ts --clear   remove the test impact assessment from ECR-0417
 //
 // The impact assessment it writes is labelled as a test posting, not a Norn result.
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -23,6 +23,10 @@ const log = (...a: unknown[]) => console.log(...a);
 const show = (o: unknown, n = 600) => JSON.stringify(o).slice(0, n);
 let failures = 0;
 const check = (ok: boolean, what: string) => { log(`  ${ok ? 'PASS' : 'FAIL'}  ${what}`); if (!ok) failures++; };
+// Every record and comment this run creates carries RUN, so cleanup can tell them from anyone else's: the six accounts
+// it uses are shared, so an owner or a timestamp cannot.
+const RUN = randomBytes(4).toString('hex');
+const MARK = `[verify.ts run ${RUN}]`;
 
 const mac = env.BOWMAN_PLM_SSH || env.BOWMAN_ERP_SSH;
 const ssh = (cmd: string, input?: string) =>
@@ -37,11 +41,6 @@ const STATEMENT = `
 <ul><li>Single source: <span style="color:#b91c1c">Halden Precision</span></li><li>Cut-in: S/N 011</li></ul>
 <p>See <a href="https://example.com/norn/ECR-0417">the full report</a>.</p>`;
 const TAGS = ['<table', '<thead', '<h4', '<b>', '<ul', '<li>', 'color:#b91c1c', '<a href'];
-
-async function setSeries(prefix: string, next: number) {
-  const cur = (await admin.get('/api/resource/Document Naming Settings/Document Naming Settings')).body.data;
-  await admin.post('/api/method/run_doc_method', { docs: JSON.stringify({ ...cur, transaction_type: 'x', prefix, current_value: next - 1 }), method: 'update_series_start' });
-}
 
 async function clear() {
   await norn.put('/api/resource/ECR/ECR-0417', Object.fromEntries(IMPACT_FIELDS.map((k) => [k, null])));
@@ -115,7 +114,7 @@ async function main() {
   check(still.description === e.description && still.priority === e.priority && still.workflow_state === 'Submitted' && still.cost_production.length === e.cost_production.length, 'ECR-0417 unchanged after the refused writes');
 
   log('5. Norn adds a comment');
-  const c = await norn.post('/api/resource/Comment', { doctype: 'Comment', comment_type: 'Comment', reference_doctype: 'ECR', reference_name: 'ECR-0417', content: 'Test comment from verify.ts (not a Norn result).' }, { allow: true });
+  const c = await norn.post('/api/resource/Comment', { doctype: 'Comment', comment_type: 'Comment', reference_doctype: 'ECR', reference_name: 'ECR-0417', content: `Test comment from verify.ts (not a Norn result). ${MARK}` }, { allow: true });
   log(`  POST /api/resource/Comment {comment_type: Comment, reference_doctype: ECR, reference_name: ECR-0417, content} -> ${c.status}`);
   check(c.status === 200, 'comment added by the Norn user');
 
@@ -157,46 +156,137 @@ async function main() {
     try { ssh('docker rm -f bowman-plm-webhook-sink'); } catch { /* gone */ }
   }
 
-  log('7. Approving an ECR releases its ECO (temporary ECR, removed afterwards)');
-  const jeff = new Plm(base); await jeff.login('jeff.hargrove@bowman-aviation.example', env.PLM_USER_PASSWORD);
-  const dana = new Plm(base); await dana.login('dana.okafor@bowman-aviation.example', env.PLM_USER_PASSWORD);
-  const rafael = new Plm(base); await rafael.login('rafael.quintero@bowman-aviation.example', env.PLM_USER_PASSWORD);
-  const t = (await jeff.post('/api/resource/ECR', { doctype: 'ECR', title: 'Verification ECR (deleted after the test)', program: 'Vesper V4', priority: 'Routine', justification_code: 'D', company_class: 'Class I', faa_class: 'Minor', description: 'test', need: 'test', affected_items: [{ part: 'BW-5120-210', change_type: 'Revise', from_revision: 'B', to_revision: 'C' }] })).body.data;
-  const act = async (who: Plm, action: string) => { const d = (await who.get(`/api/resource/ECR/${t.name}`)).body.data; await who.post('/api/method/frappe.model.workflow.apply_workflow', { doc: JSON.stringify(d), action }); };
-  await act(jeff, 'Submit'); await act(dana, 'Start CM review'); await act(dana, 'Send to CCB'); await act(rafael, 'Approve');
-  let ecos: any[] = [];
-  for (let i = 0; i < 10 && !ecos.length; i++) { await sleep(2000); ecos = await admin.list('ECO', { fields: ['name', 'ecr', 'status', 'released_on', 'released_by', 'decided_by'], filters: [['ecr', '=', t.name]] }); }
-  log(`  ${t.name}: Draft -> Submitted -> In CM Review -> CCB Review -> Approved; ECO: ${show(ecos)}`);
-  check(ecos.length === 1 && ecos[0].released_by === 'rafael.quintero@bowman-aviation.example' && ecos[0].status === 'Released', 'ECO released by the approving chair');
-  // The ECO is linked back onto the ECR by the same bot, so a poller of ECRs sees the release.
-  const approvedAt = Date.now();
-  let linked: any = {};
-  for (let i = 0; i < 15 && !linked.released_eco; i++) { linked = (await norn.get(`/api/resource/ECR/${t.name}`)).body.data; if (!linked.released_eco) await sleep(1000); }
-  log(`  ECR after release: released_eco ${linked.released_eco}, modified_by ${linked.modified_by}, state ${linked.workflow_state} (first read ${Math.round((Date.now() - approvedAt) / 1000)} s after the ECO was seen)`);
-  check(linked.released_eco === ecos[0]?.name, 'the ECR carries released_eco = its ECO, read by Norn');
-  check(linked.modified_by === 'eco-release@bowman-aviation.example', "the link moved the ECR's modified_by to the release bot (not Norn), so a poller reports it");
-  const wr = await norn.put(`/api/resource/ECR/${t.name}`, { released_eco: 'ECO-0001' }, { allow: true });
-  const still7 = (await norn.get(`/api/resource/ECR/${t.name}`)).body.data;
-  log(`  PUT released_eco as Norn -> ${wr.status} (Frappe drops writes to a permission level the user cannot write); released_eco is still ${still7.released_eco}`);
-  check(still7.released_eco === ecos[0]?.name, 'Norn cannot change released_eco (the write is ignored)');
-  await admin.put(`/api/resource/ECR/${t.name}`, { released_eco: null }); // an ECO cannot be deleted while an ECR links to it
-  for (const x of ecos) await admin.del(`/api/resource/ECO/${x.name}`);
-  await admin.del(`/api/resource/ECR/${t.name}`);
-  await setSeries('ECR-', 424);
-  await setSeries('ECO-', 319);
-  log('  test ECR and ECO deleted; naming series restored (next ECR-0424, ECO-0319)');
-
-  log('8. Holes a review found, now closed (throwaway ECR made as Administrator, deleted afterwards)');
-  const probe = (await admin.post('/api/resource/ECR', { doctype: 'ECR', title: 'Permission probe (deleted after the test)', program: 'Vesper V4', priority: 'Routine', justification_code: 'D', company_class: 'Class I', faa_class: 'Minor', description: 'probe', need: 'probe', decision_note: 'CCB private deliberation (test)', ccb_meeting: '2026-11-12' })).body.data;
+  // Steps 7 to 12 make throwaway records. Each step lists what it made, in creation order, as soon as it exists, and its
+  // finally block removes them. Only records carrying this run's mark are removed, plus the release bot's ECO for a
+  // probe of this run's (made by the bot, after the probe, on that probe), and only the comments this run posted, by the
+  // names their creates returned, are deleted. Anything else is left, and fails the step by name; so is a probe that
+  // carries a comment or File this run did not make, since deleting the probe would take it along. A person's comment
+  // can quote the mark, so it is never matched by text. A failed delete is not ignored either. The naming series are
+  // never rewound here: Frappe winds a series back itself when the deleted record is the last in it, and a rewind of
+  // ours could hand out a number someone filed meanwhile.
+  type Made = [doctype: string, name: string][];
+  const BOT = 'eco-release@bowman-aviation.example';
+  const runUsers = new Set(['Administrator', 'norn@bowman-aviation.example', 'jeff.hargrove@bowman-aviation.example', 'dana.okafor@bowman-aviation.example', 'rafael.quintero@bowman-aviation.example', BOT]);
+  const ownComments = new Set<string>(); // names returned by this run's own comment creates on its probes
+  const reason = (e: unknown) => (e instanceof PlmError ? `HTTP ${e.status}` : String(e)).slice(0, 80);
+  const marked = (dt: string, doc: any) => String((dt === 'NCR' ? doc.description : dt === 'File' ? doc.file_name : doc.title) ?? '').includes(RUN);
+  const ours = async (dt: string, nm: string) => {
+    const r = await admin.get(`/api/resource/${enc(dt)}/${enc(nm)}`, undefined, { allow: true });
+    return r.status === 200 && marked(dt, r.body.data);
+  };
+  const removeProbes = async (made: Made) => {
+    const left: string[] = [];
+    const keep = new Set<string>(); // left in place: not this run's, or carrying something that is not
+    const botEcos = new Set<string>();
+    const comments: string[] = [];
+    let system = 0;
+    // `made` grows while this runs: the bot's ECOs are added, and checked in turn.
+    for (let i = 0; i < made.length; i++) {
+      const [dt, nm] = made[i];
+      try {
+        const r = await admin.get(`/api/resource/${enc(dt)}/${enc(nm)}`, undefined, { allow: true });
+        if (r.status === 404) continue;
+        if (r.status !== 200) throw new PlmError(r.status, 'GET', `/api/resource/${dt}/${nm}`, r.body);
+        const doc = r.body.data;
+        if (!botEcos.has(nm) && !marked(dt, doc)) { keep.add(`${dt} ${nm}`); left.push(`${dt} ${nm}, kept because it does not carry this run's mark`); continue; }
+        const since = doc.creation as string; // the server's clock, comparable to the rows below
+        const foreign: string[] = [];
+        if (dt === 'ECR') {
+          for (const x of await admin.list('ECO', { fields: ['name', 'owner', 'creation', 'title', 'ecr'], filters: [['ecr', '=', nm]] })) {
+            if (made.some(([d, n]) => d === 'ECO' && n === x.name)) continue;
+            if (marked('ECO', x)) made.push(['ECO', x.name]);
+            else if (x.owner === BOT && x.creation >= since && x.ecr === nm) { botEcos.add(x.name); made.push(['ECO', x.name]); }
+            else foreign.push(`ECO ${x.name} by ${x.owner}`);
+          }
+        }
+        for (const c of await admin.list('Comment', { fields: ['name', 'owner', 'creation', 'comment_type'], filters: [['reference_doctype', '=', dt], ['reference_name', '=', nm]] })) {
+          if (ownComments.has(c.name)) comments.push(c.name);
+          // Frappe's log line for a workflow step this run took on its probe (steps 7 and 9; the only type they write,
+          // read on the live PLM 2026-10-24). Frappe removes it in a job after the probe is deleted.
+          else if (c.comment_type === 'Workflow' && runUsers.has(c.owner) && c.creation >= since) system++;
+          else foreign.push(`Comment ${c.name} (${c.comment_type}) by ${c.owner}`);
+        }
+        // Deleting a record deletes the Files attached to it, so a File this run did not make keeps the probe.
+        for (const f of await admin.list('File', { fields: ['name', 'owner'], filters: [['attached_to_doctype', '=', dt], ['attached_to_name', '=', nm]] }))
+          if (!made.some(([d, n]) => d === 'File' && n === f.name)) foreign.push(`File ${f.name} by ${f.owner}`);
+        if (foreign.length) { keep.add(`${dt} ${nm}`); left.push(`${dt} ${nm}, kept because it carries records this run did not make: ${foreign.join(', ')}`); }
+      } catch (e) { keep.add(`${dt} ${nm}`); left.push(`${dt} ${nm} (${reason(e)})`); }
+    }
+    if (system) log(`  ${system} log comment(s) Frappe wrote for this run's actions go with their probes`);
+    const removable = new Set(made.map(([d, n]) => `${d} ${n}`).filter((k) => !keep.has(k)));
+    try {
+      for (const name of comments) await admin.del(`/api/resource/Comment/${enc(name)}`);
+      // An ECO cannot be deleted while an ECR links to it. Only a link to an ECO this run removes is cleared.
+      for (const [, nm] of made.filter(([d]) => d === 'ECR')) {
+        if (!removable.has(`ECR ${nm}`)) continue;
+        const r = await admin.get(`/api/resource/ECR/${enc(nm)}`, undefined, { allow: true });
+        const eco = r.status === 200 ? r.body.data.released_eco : undefined;
+        if (eco && removable.has(`ECO ${eco}`)) await admin.put(`/api/resource/ECR/${enc(nm)}`, { released_eco: null });
+      }
+    } catch (e) { left.push(`comments or ECO links on this step's probes (${reason(e)})`); }
+    for (const [dt, nm] of [...made].reverse()) {
+      if (!removable.has(`${dt} ${nm}`)) continue;
+      try {
+        if (!(await admin.exists(dt, nm))) continue;
+        await admin.del(`/api/resource/${enc(dt)}/${enc(nm)}`, { allow: true });
+        if (await admin.exists(dt, nm)) left.push(`${dt} ${nm}`);
+      } catch (e) { left.push(`${dt} ${nm} (${reason(e)})`); }
+    }
+    return left;
+  };
+  const probeCleanup = async (made: Made) => {
+    const left = await removeProbes(made);
+    check(left.length === 0, left.length ? `probe records left behind, remove by hand: ${left.join('; ')}` : `probe records removed (${made.map(([, n]) => n).join(', ') || 'none made'})`);
+  };
+  const probeEcr = (title: string, extra: object = {}) => admin.post('/api/resource/ECR', { doctype: 'ECR', title: `${title} ${MARK}`, program: 'Vesper V4', priority: 'Routine', justification_code: 'D', company_class: 'Class I', faa_class: 'Minor', description: 'probe', need: 'probe', ...extra });
   const refusal = (r: { status: number; body: any }) => {
     let msg = '';
     try { msg = JSON.parse(r.body._server_messages ?? '[]').map((m: string) => JSON.parse(m).message).join(' ').replace(/<[^>]+>/g, ''); } catch { /* none */ }
     return `${r.status} ${r.body.exc_type ?? ''} ${msg.slice(0, 110)}`;
   };
+
+  log('7. Approving an ECR releases its ECO (temporary ECR, removed afterwards)');
+  const jeff = new Plm(base); await jeff.login('jeff.hargrove@bowman-aviation.example', env.PLM_USER_PASSWORD);
+  const dana = new Plm(base); await dana.login('dana.okafor@bowman-aviation.example', env.PLM_USER_PASSWORD);
+  const rafael = new Plm(base); await rafael.login('rafael.quintero@bowman-aviation.example', env.PLM_USER_PASSWORD);
+  const made7: Made = [];
   try {
-    const rn = await norn.post('/api/method/frappe.client.rename_doc', { doctype: 'ECR', old_name: probe.name, new_name: 'ECR-9999' }, { allow: true });
-    log(`  rename_doc -> ${refusal(rn)}`);
-    check(rn.status >= 400 && (await admin.exists('ECR', probe.name)) && !(await admin.exists('ECR', 'ECR-9999')), 'rename refused, the ECR keeps its number');
+    const t = (await jeff.post('/api/resource/ECR', { doctype: 'ECR', title: `Verification ECR (deleted after the test) ${MARK}`, program: 'Vesper V4', priority: 'Routine', justification_code: 'D', company_class: 'Class I', faa_class: 'Minor', description: 'test', need: 'test', affected_items: [{ part: 'BW-5120-210', change_type: 'Revise', from_revision: 'B', to_revision: 'C' }] })).body.data;
+    made7.push(['ECR', t.name]);
+    const act = async (who: Plm, action: string) => { const d = (await who.get(`/api/resource/ECR/${t.name}`)).body.data; await who.post('/api/method/frappe.model.workflow.apply_workflow', { doc: JSON.stringify(d), action }); };
+    await act(jeff, 'Submit'); await act(dana, 'Start CM review'); await act(dana, 'Send to CCB'); await act(rafael, 'Approve');
+    let ecos: any[] = [];
+    for (let i = 0; i < 10 && !ecos.length; i++) { await sleep(2000); ecos = await admin.list('ECO', { fields: ['name', 'ecr', 'status', 'released_on', 'released_by', 'decided_by'], filters: [['ecr', '=', t.name]] }); }
+    log(`  ${t.name}: Draft -> Submitted -> In CM Review -> CCB Review -> Approved; ECO: ${show(ecos)}`);
+    check(ecos.length === 1 && ecos[0].released_by === 'rafael.quintero@bowman-aviation.example' && ecos[0].status === 'Released', 'ECO released by the approving chair');
+    // The ECO is linked back onto the ECR by the same bot, so a poller of ECRs sees the release.
+    const approvedAt = Date.now();
+    let linked: any = {};
+    for (let i = 0; i < 15 && !linked.released_eco; i++) { linked = (await norn.get(`/api/resource/ECR/${t.name}`)).body.data; if (!linked.released_eco) await sleep(1000); }
+    log(`  ECR after release: released_eco ${linked.released_eco}, modified_by ${linked.modified_by}, state ${linked.workflow_state} (first read ${Math.round((Date.now() - approvedAt) / 1000)} s after the ECO was seen)`);
+    check(linked.released_eco === ecos[0]?.name, 'the ECR carries released_eco = its ECO, read by Norn');
+    check(linked.modified_by === 'eco-release@bowman-aviation.example', "the link moved the ECR's modified_by to the release bot (not Norn), so a poller reports it");
+    const wr = await norn.put(`/api/resource/ECR/${t.name}`, { released_eco: 'ECO-0001' }, { allow: true });
+    const still7 = (await norn.get(`/api/resource/ECR/${t.name}`)).body.data;
+    log(`  PUT released_eco as Norn -> ${wr.status} (Frappe drops writes to a permission level the user cannot write); released_eco is still ${still7.released_eco}`);
+    check(still7.released_eco === ecos[0]?.name, 'Norn cannot change released_eco (the write is ignored)');
+  } finally {
+    await probeCleanup(made7);
+  }
+
+  log('8. Holes a review found, now closed (throwaway ECR made as Administrator, deleted afterwards)');
+  const made8: Made = [];
+  try {
+    const probe = (await probeEcr('Permission probe (deleted after the test)', { decision_note: 'CCB private deliberation (test)', ccb_meeting: '2026-11-12' })).body.data;
+    made8.push(['ECR', probe.name]);
+    // The rename target must be free beforehand, so a rename that worked is this run's record and is removed with the probe.
+    if (await admin.exists('ECR', 'ECR-9999')) check(false, 'the rename target ECR-9999 is free (it is not, so the rename was not tried)');
+    else {
+      const rn = await norn.post('/api/method/frappe.client.rename_doc', { doctype: 'ECR', old_name: probe.name, new_name: 'ECR-9999' }, { allow: true });
+      if (await ours('ECR', 'ECR-9999')) made8.push(['ECR', 'ECR-9999']);
+      log(`  rename_doc -> ${refusal(rn)}`);
+      check(rn.status >= 400 && (await admin.exists('ECR', probe.name)) && !(await admin.exists('ECR', 'ECR-9999')), 'rename refused, the ECR keeps its number');
+    }
 
     const form = new FormData();
     form.append('file', new Blob(['probe'], { type: 'text/plain' }), 'probe.txt');
@@ -209,11 +299,13 @@ async function main() {
     log(`  assign_to.add -> ${refusal(as)}`);
     check(as.status >= 400 && (await admin.list('ToDo', { fields: ['name'], filters: [['reference_name', '=', probe.name]] })).length === 0, 'assignment refused, no ToDo');
 
-    const sp = await norn.post('/api/resource/Comment', { doctype: 'Comment', comment_type: 'Comment', reference_doctype: 'ECR', reference_name: probe.name, content: 'Spoof probe (not a Norn result).', comment_by: 'Rafael Quintero', comment_email: 'rafael.quintero@bowman-aviation.example' }, { allow: true });
+    const sp = await norn.post('/api/resource/Comment', { doctype: 'Comment', comment_type: 'Comment', reference_doctype: 'ECR', reference_name: probe.name, content: `Spoof probe (not a Norn result). ${MARK}`, comment_by: 'Rafael Quintero', comment_email: 'rafael.quintero@bowman-aviation.example' }, { allow: true });
+    if (sp.status === 200) ownComments.add(sp.body.data.name);
     const stored = sp.status === 200 ? (await admin.get(`/api/resource/Comment/${enc(sp.body.data.name)}`)).body.data : {};
     log(`  Comment sent as Rafael Quintero -> ${sp.status}; stored author "${stored.comment_by}" <${stored.comment_email}>`);
     check(sp.status === 200 && stored.comment_email === 'norn@bowman-aviation.example' && stored.comment_by !== 'Rafael Quintero', 'a spoofed comment author lands as Norn');
-    const odd = await norn.post('/api/resource/Comment', { doctype: 'Comment', comment_type: 'Edit', reference_doctype: 'ECR', reference_name: probe.name, content: 'x' }, { allow: true });
+    const odd = await norn.post('/api/resource/Comment', { doctype: 'Comment', comment_type: 'Edit', reference_doctype: 'ECR', reference_name: probe.name, content: `x ${MARK}` }, { allow: true });
+    if (odd.status === 200) ownComments.add(odd.body.data.name);
     check(odd.status >= 400, 'a comment of another type (Edit) refused');
 
     const g = (await norn.get(`/api/resource/ECR/${probe.name}`)).body.data;
@@ -226,18 +318,17 @@ async function main() {
     log(`  Version history as Norn -> ${vers.status}, ${leak ? 'shows decision_note' : 'no decision_note'}`);
     check(!leak, "the version history does not show the CCB's decision note to Norn");
   } finally {
-    for (const c of await admin.list('Comment', { fields: ['name'], filters: [['reference_name', '=', probe.name]] })) await admin.del(`/api/resource/Comment/${c.name}`, { allow: true });
-    await admin.del(`/api/resource/ECR/${probe.name}`, { allow: true });
-    await setSeries('ECR-', 424);
-    log('  probe ECR deleted; naming series restored (next ECR-0424)');
+    await probeCleanup(made8);
   }
 
   log('9. released_eco cannot be reached through ECO creation (throwaway ECR kept In CM Review, removed afterwards)');
-  const t9 = (await jeff.post('/api/resource/ECR', { doctype: 'ECR', title: 'Bypass probe ECR (deleted after the test)', program: 'Vesper V4', priority: 'Routine', justification_code: 'D', company_class: 'Class I', faa_class: 'Minor', description: 'test', need: 'test', affected_items: [{ part: 'BW-5120-210', change_type: 'Revise', from_revision: 'B', to_revision: 'C' }] })).body.data;
-  const act9 = async (who: Plm, action: string) => { const d = (await who.get(`/api/resource/ECR/${t9.name}`)).body.data; await who.post('/api/method/frappe.model.workflow.apply_workflow', { doc: JSON.stringify(d), action }); };
+  const made9: Made = [];
   try {
+    const t9 = (await jeff.post('/api/resource/ECR', { doctype: 'ECR', title: `Bypass probe ECR (deleted after the test) ${MARK}`, program: 'Vesper V4', priority: 'Routine', justification_code: 'D', company_class: 'Class I', faa_class: 'Minor', description: 'test', need: 'test', affected_items: [{ part: 'BW-5120-210', change_type: 'Revise', from_revision: 'B', to_revision: 'C' }] })).body.data;
+    made9.push(['ECR', t9.name]);
+    const act9 = async (who: Plm, action: string) => { const d = (await who.get(`/api/resource/ECR/${t9.name}`)).body.data; await who.post('/api/method/frappe.model.workflow.apply_workflow', { doc: JSON.stringify(d), action }); };
     await act9(jeff, 'Submit'); await act9(dana, 'Start CM review'); // In CM Review: not approved, and not sent on to the CCB
-    const eco9 = { doctype: 'ECO', ecr: t9.name, title: 'Bypass probe (deleted after the test)', status: 'Released' };
+    const eco9 = { doctype: 'ECO', ecr: t9.name, title: `Bypass probe (deleted after the test) ${MARK}`, status: 'Released' };
     const asDana = await dana.post('/api/resource/ECO', eco9, { allow: true });
     const asRafael = await rafael.post('/api/resource/ECO', eco9, { allow: true });
     log(`  POST /api/resource/ECO for the unapproved ${t9.name}: as the CM analyst -> ${asDana.status}, as the CCB chair -> ${asRafael.status}`);
@@ -245,45 +336,21 @@ async function main() {
     check((await admin.list('ECO', { fields: ['name'], filters: [['ecr', '=', t9.name]] })).length === 0, 'no ECO exists for the unapproved ECR');
     // Second line of defence: an ECO that does exist (made here as Administrator) is not linked by the bot while its ECR is unapproved.
     const made = (await admin.post('/api/resource/ECO', eco9)).body.data;
+    made9.push(['ECO', made.name]);
     await sleep(8000); // the link-back webhook tries three times over about 5 seconds
     const after9 = (await norn.get(`/api/resource/ECR/${t9.name}`)).body.data;
     log(`  ${made.name} made on the unapproved ECR by Administrator; ECR released_eco afterwards: ${after9.released_eco ?? 'empty'}, state ${after9.workflow_state}`);
     check(!after9.released_eco && after9.workflow_state === 'In CM Review', 'the release bot does not link an ECO onto an unapproved ECR');
   } finally {
-    await admin.put(`/api/resource/ECR/${t9.name}`, { released_eco: null }, { allow: true }); // an ECO cannot be deleted while an ECR links to it
-    for (const x of await admin.list('ECO', { fields: ['name'], filters: [['ecr', '=', t9.name]] })) await admin.del(`/api/resource/ECO/${x.name}`, { allow: true });
-    await admin.del(`/api/resource/ECR/${t9.name}`, { allow: true });
-    await setSeries('ECR-', 424);
-    await setSeries('ECO-', 319);
-    log('  probe ECR and ECO deleted; naming series restored (next ECR-0424, ECO-0319)');
+    await probeCleanup(made9);
   }
 
-  // Removes throwaway records (given in creation order) and reports any that are still there. A failed delete is not ignored: the step fails and names the leftover.
-  const removeProbes = async (made: [string, string][]) => {
-    const left: string[] = [];
-    for (const [dt, nm] of [...made].reverse()) {
-      if (!(await admin.exists(dt, nm))) continue;
-      await admin.del(`/api/resource/${enc(dt)}/${enc(nm)}`, { allow: true });
-      if (await admin.exists(dt, nm)) left.push(`${dt} ${nm}`);
-    }
-    return left;
-  };
-  const probeCleanup = async (made: [string, string][], series: [string, number][]) => {
-    const left = await removeProbes(made);
-    check(left.length === 0, left.length ? `probe records left behind, remove by hand: ${left.join(', ')}` : 'probe records removed');
-    if (!left.length) {
-      for (const [prefix, next] of series) await setSeries(prefix, next);
-      log(`  probe records deleted; naming series restored (${series.map(([p, n]) => p + String(n).padStart(4, '0')).join(', ')})`);
-    }
-  };
-  const probeEcr = (title: string, extra: object = {}) => admin.post('/api/resource/ECR', { doctype: 'ECR', title, program: 'Vesper V4', priority: 'Routine', justification_code: 'D', company_class: 'Class I', faa_class: 'Minor', description: 'probe', need: 'probe', ...extra });
-
   log('10. Document.discard is refused (throwaway ECR and ECO made as Administrator, removed afterwards)');
-  const made10: [string, string][] = [];
+  const made10: Made = [];
   try {
     const d10 = (await probeEcr('Discard probe ECR (deleted after the test)')).body.data;
     made10.push(['ECR', d10.name]);
-    const eco10 = (await admin.post('/api/resource/ECO', { doctype: 'ECO', ecr: d10.name, title: 'Discard probe (deleted after the test)', status: 'Released' })).body.data;
+    const eco10 = (await admin.post('/api/resource/ECO', { doctype: 'ECO', ecr: d10.name, title: `Discard probe (deleted after the test) ${MARK}`, status: 'Released' })).body.data;
     made10.push(['ECO', eco10.name]);
     // discard needs only write permission, skips Before Validate and the workflow, and sets docstatus 2 (cancelled).
     const discard = (who: Plm, doc: any) => who.post('/api/method/run_doc_method', { docs: JSON.stringify(doc), method: 'discard' }, { allow: true });
@@ -295,13 +362,13 @@ async function main() {
     check(asNorn.status >= 400 && ecrDoc.docstatus === 0, 'Norn cannot discard an ECR');
     check(asCm.status >= 400 && ecoDoc.docstatus === 0, 'a CM analyst cannot discard an ECO');
   } finally {
-    await probeCleanup(made10, [['ECR-', 424], ['ECO-', 319]]);
+    await probeCleanup(made10);
   }
 
   log('11. A forced rename is refused (throwaway ECR and NCR made as Administrator, removed afterwards)');
   // Document.rename(force=True) ignores allow_rename and skips Before Validate; the release bot holds write on ECR, a CM analyst on NCR.
   // The rename targets must be free beforehand; only names this run created (a rename that worked) are ever deleted.
-  const made11: [string, string][] = [];
+  const made11: Made = [];
   try {
     const hdrs = (await admin.get('/api/resource/Webhook/ecr.approved')).body.data.webhook_headers as { key: string; value: string }[];
     const bot = new Plm(base, { token: hdrs.find((h) => h.key === 'Authorization')!.value.replace(/^token /, '') });
@@ -310,26 +377,26 @@ async function main() {
     if (free) {
       const r11 = (await probeEcr('Rename probe ECR (deleted after the test)')).body.data;
       made11.push(['ECR', r11.name]);
-      const n11 = (await admin.post('/api/resource/NCR', { doctype: 'NCR', part: 'BW-5120-210', status: 'Open', description: 'rename probe (deleted after the test)' })).body.data;
+      const n11 = (await admin.post('/api/resource/NCR', { doctype: 'NCR', part: 'BW-5120-210', status: 'Open', description: `rename probe (deleted after the test) ${MARK}` })).body.data;
       made11.push(['NCR', n11.name]);
       const forceRename = (who: Plm, doc: any, to: string) =>
         who.post('/api/method/run_doc_method', { docs: JSON.stringify(doc), method: 'rename', args: JSON.stringify({ name: to, force: true }) }, { allow: true });
       const botTry = await forceRename(bot, (await bot.get(`/api/resource/ECR/${r11.name}`)).body.data, 'ECR-9999');
-      if (botTry.status < 400) made11.push(['ECR', 'ECR-9999']);
+      if (await ours('ECR', 'ECR-9999')) made11.push(['ECR', 'ECR-9999']);
       const danaTry = await forceRename(dana, (await dana.get(`/api/resource/NCR/${n11.name}`)).body.data, 'NCR-9999');
-      if (danaTry.status < 400) made11.push(['NCR', 'NCR-9999']);
+      if (await ours('NCR', 'NCR-9999')) made11.push(['NCR', 'NCR-9999']);
       const kept = (await admin.exists('ECR', r11.name)) && !(await admin.exists('ECR', 'ECR-9999')) && (await admin.exists('NCR', n11.name)) && !(await admin.exists('NCR', 'NCR-9999'));
       log(`  run_doc_method rename force=true: ECR ${r11.name} as the release bot -> ${refusal(botTry)}; NCR ${n11.name} as the CM analyst -> ${refusal(danaTry)}; names unchanged: ${kept}`);
       check(botTry.status === 403 && (await admin.exists('ECR', r11.name)) && !(await admin.exists('ECR', 'ECR-9999')), 'the release bot cannot rename an ECR, even forced');
       check(danaTry.status === 403 && (await admin.exists('NCR', n11.name)) && !(await admin.exists('NCR', 'NCR-9999')), 'a CM analyst cannot rename an NCR, even forced');
     }
   } finally {
-    await probeCleanup(made11, [['ECR-', 424], ['NCR-', 125]]);
+    await probeCleanup(made11);
   }
 
   log('12. Child rows cannot be discarded or renamed, and a File cannot be moved onto an ECR (throwaway ECR, removed afterwards)');
   // A child row inherits its parent's permissions, so the parent's guards do not cover a call made on the row itself.
-  const made12: [string, string][] = [];
+  const made12: Made = [];
   try {
     const c12 = (await probeEcr('Child row probe ECR (deleted after the test)', { affected_items: [{ part: 'BW-5120-210', change_type: 'Revise', from_revision: 'B', to_revision: 'C' }] })).body.data;
     made12.push(['ECR', c12.name]);
@@ -343,14 +410,21 @@ async function main() {
     log(`  ECR Affected Item ${row.name} as Norn: forced rename -> ${refusal(rn)}; discard -> ${refusal(dc)}; row afterwards: ${rowAfter.map((r: any) => `${r.name} docstatus ${r.docstatus}`).join(', ')}`);
     check(rn.status === 403 && dc.status === 403 && rowAfter.length === 1 && rowAfter[0].name === row.name && rowAfter[0].docstatus === 0, 'Norn cannot rename or discard an ECR child row');
 
-    const f = await norn.post('/api/resource/File', { doctype: 'File', file_name: 'probe.txt', content: 'probe', is_private: 1 }, { allow: true });
-    if (f.status === 200) made12.push(['File', f.body.data.name]);
-    const mv = f.status === 200 ? await norn.put(`/api/resource/File/${f.body.data.name}`, { attached_to_doctype: 'ECR', attached_to_name: c12.name }, { allow: true }) : f;
-    const fileAfter = f.status === 200 ? (await admin.get(`/api/resource/File/${f.body.data.name}`)).body.data : {};
-    log(`  Norn creates an unattached File -> ${f.status}; points it at ${c12.name} -> ${refusal(mv)}; attached_to_doctype afterwards: ${fileAfter.attached_to_doctype ?? 'n/a'}`);
-    check(mv.status >= 400 && fileAfter.attached_to_doctype !== 'ECR', 'Norn cannot attach a File to an ECR by updating it');
+    // The re-attach is only tried on a File Norn made itself. If Norn cannot make one, the check fails rather than
+    // passing on the create's refusal: the update it is about was never attempted.
+    const f = await norn.post('/api/resource/File', { doctype: 'File', file_name: `probe-${RUN}.txt`, content: 'probe', is_private: 1 }, { allow: true });
+    if (f.status !== 200) {
+      log(`  Norn creates an unattached File -> ${refusal(f)}; the re-attach was not tried`);
+      check(false, 'Norn cannot attach a File to an ECR by updating it (not tried: Norn could not create the probe File)');
+    } else {
+      made12.push(['File', f.body.data.name]);
+      const mv = await norn.put(`/api/resource/File/${enc(f.body.data.name)}`, { attached_to_doctype: 'ECR', attached_to_name: c12.name }, { allow: true });
+      const fileAfter = (await admin.get(`/api/resource/File/${enc(f.body.data.name)}`)).body.data;
+      log(`  Norn creates an unattached File -> ${f.status}; points it at ${c12.name} -> ${refusal(mv)}; attached_to_doctype afterwards: ${fileAfter.attached_to_doctype ?? 'empty'}`);
+      check(mv.status >= 400 && fileAfter.attached_to_doctype !== 'ECR', 'Norn cannot attach a File to an ECR by updating it');
+    }
   } finally {
-    await probeCleanup(made12, [['ECR-', 424]]);
+    await probeCleanup(made12);
   }
 
   log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed. ECR-0417 now carries the test impact assessment; run with --clear to remove it.');
