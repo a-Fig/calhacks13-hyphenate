@@ -9,7 +9,7 @@
 
 import { applyOverlay, changedRows, type HeadState } from './bom.ts';
 import { COST_DEFAULTS, type CostDefaults } from './defaults.ts';
-import { type Dist, isFixed, lognormal, lognormalFromQuantiles, pert, point, pointOf } from './dist.ts';
+import { type Dist, isFixed, lognormal, lognormalFromQuantiles, pert, point, pointOf, quantileOf } from './dist.ts';
 import {
   type Draws, type Expr, type Summary, type Variable, constant, drawAll, evaluate, evaluateAt, pairedDelta,
   quantileOfVariable, scale, sum, summarize, varsOf,
@@ -583,11 +583,17 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
       for (const v of book.vars.values()) vars.set(v.id, v);
       for (const a of options.assumptions ?? []) if (book.wasUsed(a.id)) usedOverrides.add(a.id);
       // The schedule's own flags belong to the timeline check, which reports them; repeating them here would feed the
-      // recommendation rule conditions that are not about cost.
+      // recommendation rule conditions that are not about cost. What the schedule says about an assumption is not a
+      // timeline finding: one it recorded and refused (a stated number without replacesGiven) was marked handled above,
+      // so its warning is kept, or nobody would be told it was not applied.
+      for (const f of book.flags) {
+        if (f.kind === 'assumption_not_applied' && !flags.some((x) => x.kind === f.kind && x.ref === f.ref)) flags.push(f);
+      }
       const w = delayBasis.perWeekUsd;
+      const weeklyDist = lognormalFromQuantiles(w.p10, w.p50, w.p90);
       const weekly = variable({
         id: `finance:${ecr.program}:delay-per-week`, label: `Cost of a week's delay on ${ecr.program}`, source: 'given', groups: ['labor:internal'],
-        dist: lognormalFromQuantiles(w.p10, w.p50, w.p90), ref: `${fromBaseline}: finance, cost of delay`,
+        dist: weeklyDist, ref: `${fromBaseline}: finance, cost of delay`,
         rationale: [delayBasis.basis, figureText(delayBasis.prov)].filter(Boolean).join(' '),
       });
       const weeks = `delay:${ecr.id}:weeks-late`;
@@ -601,7 +607,10 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
         },
         uses: [...sched.uses, sched.stated.id],
       });
-      delayInfo = { weeks, weekly, perWeek: w, stated: sched.stated.label };
+      // The weekly cost as applied: the baseline's range, or the distribution an assumption replaced it with.
+      const applied = vars.get(weekly)!.dist;
+      const perWeek: Range3 = applied === weeklyDist ? w : { p10: r2(quantileOf(applied, 0.1)), p50: r2(quantileOf(applied, 0.5)), p90: r2(quantileOf(applied, 0.9)) };
+      delayInfo = { weeks, weekly, perWeek, stated: sched.stated.label };
     }
   }
 
@@ -956,10 +965,14 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     // The same figures with the schedule exposure added: what they would be if the line held for every late week.
     if (delayInfo) {
       const ex = pending.get('exposure')!.expr;
+      // The delay line is the holding cost the exposure models, so in the combined scenario the exposure takes its place: an
+      // estimate recorded on the line is not added on top of it. The ordinary totals above keep the line as it is.
+      const delayLines = nonRecurring.filter((r) => r.id.startsWith(`cost:${ecr.id}:`) && DELAY_ROW.test(r.label));
+      const oneTimeExposed = sum(...nonRecurring.filter((r) => !delayLines.includes(r)).map(rowTotal));
       const exUses = [...pending.get('exposure')!.uses];
-      track('periodCostExposed', sum(oneTimeTotal, ...recurringIn(own), ex), `${periodFormula(`${ecr.program} only`)} + the schedule exposure`, [...periodUses(own), ...exUses, budget, spent]);
-      if (remaining > 0) track('budgetShareExposed', scale(sum(oneTimeTotal, ...recurringIn(own), ex), 1 / remaining), `(period cost + schedule exposure) / (budget − spent to date) = / ${remaining}`, [...periodUses(own), ...exUses, budget, spent]);
-      track('runwayDaysExposed', scale(sum(oneTimeTotal, ...recurringIn(programs), ex), 1 / burnPerDay), `(period cost + schedule exposure) / (monthly burn × 12 / 365) = / ${Math.round(burnPerDay)} per day`, [...periodUses(programs), ...exUses, cashId, burnId]);
+      track('periodCostExposed', sum(oneTimeExposed, ...recurringIn(own), ex), `${periodFormula(`${ecr.program} only`)}, with the schedule exposure in place of the delay line`, [...periodUses(own), ...exUses, budget, spent]);
+      if (remaining > 0) track('budgetShareExposed', scale(sum(oneTimeExposed, ...recurringIn(own), ex), 1 / remaining), `(period cost with the schedule exposure in place of the delay line) / (budget − spent to date) = / ${remaining}`, [...periodUses(own), ...exUses, budget, spent]);
+      track('runwayDaysExposed', scale(sum(oneTimeExposed, ...recurringIn(programs), ex), 1 / burnPerDay), `(period cost with the schedule exposure in place of the delay line) / (monthly burn × 12 / 365) = / ${Math.round(burnPerDay)} per day`, [...periodUses(programs), ...exUses, cashId, burnId]);
     }
   } else if (baseline.finance && !pBudget) {
     flags.push({ kind: 'no_budget', severity: 'info', message: `The baseline has finance data but no budget for ${ecr.program}, so the change is not measured against a budget or runway.` });

@@ -101,7 +101,7 @@ test('budget impact: the cost in the period over the remaining budget, hand-chec
   assert.ok(f.budget.share!.p50 > 0.0025 && f.budget.share!.p50 < 0.0035, `about 0.3% (the exposure is not in it): ${f.budget.share!.p50}`);
   for (const q of ['p10', 'p50', 'p90'] as const) near(f.budget.share![q], f.periodCost[q] / 51_600_000, 0.00005, `share ${q} is the cost's ${q} over a constant`);
   assert.ok(f.budget.share!.p10 < f.budget.share!.p50 && f.budget.share!.p50 < f.budget.share!.p90);
-  
+
   assert.equal(f.budget.probabilityOver, 0, 'half a million against $51.6M left');
   // It is the year-one cost less the units after June 2027.
   assert.ok(f.periodCost.p50 < r.headline.windowTotal.p50, 'a period that ends in June 2027 holds less recurring cost than the 12 months from the cut-in');
@@ -287,6 +287,62 @@ test('an assumption still replaces the delay line, and the weekly cost needs rep
   const quick = costCheck(bowman, ecr('ECR-0417'), { ...fast, assumptions: [{ id: 'decision:ECR-0417', source: 'agent_estimated', dist: point(1), rationale: 'Emergency board' }] });
   assert.ok(quick.exposure!.weeksLate.p50 < r.exposure!.weeksLate.p50, 'a quicker decision means fewer weeks late');
   assert.ok(!quick.flags.some((f) => f.kind === 'unused_assumption' && f.ref === 'decision:ECR-0417'));
+});
+
+test('an estimate on the delay line is not counted twice: the combined scenario takes the exposure in its place', () => {
+  const est = costCheck(bowman, ecr('ECR-0417'), { ...fast, assumptions: [{ id: DELAY, source: 'agent_estimated', dist: point(30_000), rationale: 'Four aircraft held two days' }] });
+  // The ordinary totals count the estimate, as on main.
+  near(est.headline.oneTimeTotal.point - none.headline.oneTimeTotal.point, 30_000, 0.01, 'the totals still hold the estimate');
+  near(est.finance!.periodCost.point - r.finance!.periodCost.point, 30_000, 0.01, 'and so does the period cost without the exposure');
+  // The combined figure holds the holding cost once, as the exposure: the estimate on the line changes nothing in it.
+  const a = est.finance!.withExposure!;
+  const b = r.finance!.withExposure!;
+  near(a.periodCost.point, b.periodCost.point, 0.01, 'point: the combined period cost equals the blank-line run');
+  for (const q of ['p10', 'p50', 'p90', 'mean'] as const) assert.equal(a.periodCost[q], b.periodCost[q], `combined period cost ${q}`);
+  const nums = (m: Money | null) => (m ? [m.p10, m.p50, m.p90, m.mean, m.point] : null);
+  assert.deepEqual(nums(a.budgetShare), nums(b.budgetShare));
+  assert.deepEqual(nums(a.daysUsed), nums(b.daysUsed));
+  near(a.periodCost.point, r.finance!.periodCost.point + r.exposure!.cost.point, 0.01, 'period cost without the line + the exposure');
+  assert.equal(est.exposure!.cost.point, r.exposure!.cost.point, 'the exposure is unchanged');
+});
+
+test('a weekly-cost override shows the rate that was applied, in the text and in the row metadata', () => {
+  const weeklyId = 'finance:vesper:delay-per-week';
+  const x = costCheck(bowman, ecr('ECR-0417'), { ...fast, assumptions: [{ id: weeklyId, source: 'agent_estimated', dist: point(10_000), rationale: 'cheaper', replacesGiven: true }] });
+  assert.deepEqual(x.exposure!.perWeekUsd, { p10: 10_000, p50: 10_000, p90: 10_000 });
+  near(x.exposure!.cost.point, x.exposure!.weeksLate.point * 10_000, 0.01, 'weeks x $10,000');
+  const text = renderCostPage(x);
+  assert.match(text, /Cost of a week of delay: 10,000\n/);
+  assert.ok(!text.includes('32,000'), 'the baseline rate is not printed beside an exposure that used another');
+  const by = new Map(costCheckRows(x).map((y) => [y.key, y]));
+  assert.deepEqual(JSON.parse(by.get('schedule_exposure')!.detailJson).perWeekUsd, { p10: 10_000, p50: 10_000, p90: 10_000 });
+  assert.deepEqual(JSON.parse(by.get('delay_weeks')!.detailJson).perWeekUsd, { p10: 10_000, p50: 10_000, p90: 10_000 });
+  // Another shape: the quantiles shown are the applied distribution's, not the baseline's.
+  const y = costCheck(bowman, ecr('ECR-0417'), { ...fast, assumptions: [{ id: weeklyId, source: 'agent_estimated', dist: lognormal(8_000, 0.2), rationale: 'cheaper', replacesGiven: true }] });
+  near(y.exposure!.perWeekUsd.p50, 8_000, 0.01, 'median');
+  assert.ok(y.exposure!.perWeekUsd.p10 < 8_000 && y.exposure!.perWeekUsd.p90 > 8_000);
+  // Not overridden: the baseline's own range, unchanged.
+  assert.deepEqual(r.exposure!.perWeekUsd, { p10: 20_000, p50: 32_000, p90: 55_000 });
+});
+
+test('a schedule assumption that was recorded but refused is still reported', () => {
+  const id = 'lead:ECR-0417:BW-5120-210';
+  const lead = r.inputs.find((i) => i.id === id)!;
+  const refused = costCheck(bowman, ecr('ECR-0417'), { ...fast, assumptions: [{ id, source: 'agent_estimated', dist: point(1), rationale: 'x' }] });
+  assert.ok(refused.flags.some((f) => f.kind === 'assumption_not_applied' && f.ref === id), 'told that it was not applied');
+  assert.equal(refused.flags.filter((f) => f.kind === 'assumption_not_applied' && f.ref === id).length, 1);
+  assert.ok(!refused.flags.some((f) => f.kind === 'unused_assumption' && f.ref === id), 'it was recognised, so it is not reported as matching nothing');
+  assert.equal(refused.inputs.find((i) => i.id === id)!.value, lead.value, 'the stated lead time stays');
+  assert.equal(refused.exposure!.cost.point, r.exposure!.cost.point);
+  // The timeline's own findings are still not copied into the cost check.
+  assert.deepEqual(
+    refused.flags.filter((f) => f.ref !== id).map((f) => `${f.kind}|${f.ref ?? ''}`),
+    r.flags.map((f) => `${f.kind}|${f.ref ?? ''}`),
+  );
+  // With replacesGiven it applies, and there is nothing to warn about.
+  const applied = costCheck(bowman, ecr('ECR-0417'), { ...fast, assumptions: [{ id, source: 'agent_estimated', dist: point(1), rationale: 'x', replacesGiven: true }] });
+  assert.ok(!applied.flags.some((f) => (f.kind === 'assumption_not_applied' || f.kind === 'unused_assumption') && f.ref === id));
+  assert.ok(applied.exposure!.weeksLate.p50 < r.exposure!.weeksLate.p50);
 });
 
 test('no stated effectivity to be late against: no exposure, the blank line stays flagged, and the budget is still measured', () => {
