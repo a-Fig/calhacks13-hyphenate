@@ -72,8 +72,6 @@ export interface CostRow {
   extended: Money | null;
   total: Money;
   needsEstimate?: boolean;
-  /** An upper bound on what the line costs, not an expected cost: the delay line assumes the line holds for every week of delay. */
-  exposure?: boolean;
   ref?: string;
   note?: string;
 }
@@ -155,14 +153,24 @@ export interface CostCheckResult {
   measures: CostMeasure[];
   /** The change against the ECR's program budget and the company's runway. Null when the baseline carries no finance for the program. */
   finance: FinanceImpact | null;
-  /** The delay cost on the cost page's blank delay line. Null when that line was not filled from the timeline model. */
-  delay: DelayResult | null;
+  /**
+   * The schedule exposure: weeks late against the stated effectivity x the cost of a week of delay. A worst case, not an expected
+   * cost, so it is in none of the totals above. Null when the baseline has no cost of delay or the ECR states no date to be late against.
+   */
+  exposure: DelayResult | null;
   convergence: {
     seeds: [string, string];
     tolerance: number;
     converged: boolean;
     metrics: { key: string; p80: [number, number]; p90: [number, number]; relDiff: number }[];
   };
+  /** The same check on the schedule exposure and the period cost, which are not part of `convergence` because they must not change the totals' draws. */
+  financeConvergence: {
+    seeds: [string, string];
+    tolerance: number;
+    converged: boolean;
+    metrics: { key: string; p80: [number, number]; p90: [number, number]; relDiff: number }[];
+  } | null;
   bomDelta: { ok: boolean; conflicts: number };
   flags: Flag[];
   inputs: InputRecord[];
@@ -248,7 +256,6 @@ interface RowDraft {
   formula: string;
   uses: string[];
   needsEstimate?: boolean;
-  exposure?: boolean;
   ref?: string;
   note?: string;
 }
@@ -274,6 +281,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
    * products can express. Each is added to the draws after they are made, and read like an input by the
    * expressions. Its trace names the inputs it was computed from.
    */
+  let noExposure: string | undefined;
   const derived = new Map<string, { label: string; point: number; compute: (d: Draws) => Float64Array; uses: string[] }>();
   const usedOverrides = new Set<string>();
   /** Ids with a known reason an assumption can't apply there, for the unused-assumption flag. */
@@ -545,59 +553,50 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     });
   }
 
-  // The originator's blank delay line (docs/IN-PRACTICE.md §1: "delay cost of holding ... at the station"). When the baseline
-  // has the program's cost of a week of delay and the timeline model can place the change against the stated effectivity,
-  // the line is weeks late (the timeline's own draws, floored at 0) x the weekly cost. It is an exposure: the most the
-  // delay costs if the line holds for all of it. Otherwise the line stays a blank, counted as $0 and flagged.
+  // The schedule exposure (docs/IN-PRACTICE.md §1: "delay cost of holding ... at the station"). When the baseline has the program's
+  // cost of a week of delay and the timeline model can place the change against the stated effectivity, the exposure is weeks late
+  // (the timeline's own draws, floored at 0) x the weekly cost. It is a worst case: what the delay costs if the line holds for all of
+  // it. The originator's blank delay line stays a blank ($0, flagged) and the exposure is in none of the totals, the budget or runway
+  // figures, or the approval size; it is reported beside them, and the budget and runway also get a figure that includes it.
   const DELAY_ROW = /delay|holding|idle|stand[- ]?down|stoppage/i;
   const delayBasis = baseline.finance?.delayCosts.find((x) => x.program === ecr.program);
-  let delayDraft: RowDraft | null = null;
-  let delayInfo = null as { weeks: string; weekly: string; perWeek: Range3 } | null;
-  const delayLine = (id: string, rowInput: string, row: CostPageRow, ref: string): RowDraft | null => {
-    if (!delayBasis) return null;
+  let delayInfo = null as { weeks: string; weekly: string; perWeek: Range3; stated: string; notComputed?: string } | null;
+  if (delayBasis) {
     const book = new Book(options.assumptions ?? [], mergePlanDefaults());
     const sched = gatherSchedule(book, baseline, ecr, { baseline: fromBaseline, changeRequest: fromEcr });
     const statedDay = sched.stated.day;
     if (statedDay === null || sched.floor?.beyondPlan) {
-      flags.push({
-        kind: 'delay_not_computed', severity: 'info', ref: id,
-        message: statedDay === null
-          ? `"${row.label}" is left blank: ${ecr.id} states no effectivity the volume plan can place, so there is no date the change could be late against.`
-          : `"${row.label}" is left blank: using up the old stock runs past the volume plan, so no date can be placed for the change.`,
+      // Nothing was drawn from this schedule; its flags (no stated effectivity, stock beyond the plan) are not this check's to repeat.
+      delayInfo = null;
+      noExposure = statedDay === null
+        ? `${ecr.id} states no effectivity the volume plan can place, so there is no date the change could be late against.`
+        : 'using up the old stock runs past the volume plan, so no date can be placed for the change.';
+    } else {
+      // The schedule's inputs and uncertain variables join this run's, so the weeks late are drawn here exactly as the timeline check draws them.
+      for (const rec of book.reg.values()) if (!reg.has(rec.id)) reg.set(rec.id, rec);
+      for (const v of book.vars.values()) vars.set(v.id, v);
+      for (const a of options.assumptions ?? []) if (book.wasUsed(a.id)) usedOverrides.add(a.id);
+      flags.push(...book.flags);
+      const w = delayBasis.perWeekUsd;
+      const weekly = variable({
+        id: `finance:${ecr.program}:delay-per-week`, label: `Cost of a week's delay on ${ecr.program}`, source: 'given', groups: ['labor:internal'],
+        dist: lognormalFromQuantiles(w.p10, w.p50, w.p90), ref: `${fromBaseline}: finance, cost of delay`,
+        rationale: [delayBasis.basis, figureText(delayBasis.prov)].filter(Boolean).join(' '),
       });
-      return null;
+      const weeks = `delay:${ecr.id}:weeks-late`;
+      const pt = evaluateSchedules([sched], book.pointDraws(), false)[0];
+      derived.set(weeks, {
+        label: `Weeks after the stated effectivity (${sched.stated.label}) that ${ecr.id} can first reach the line, floored at 0`,
+        point: Math.max(0, (pt.cutIn[0] - statedDay) / WEEK),
+        compute: (d) => {
+          const cut = evaluateSchedules([sched], d, false)[0].cutIn;
+          return Float64Array.from(cut, (x) => Math.max(0, (x - statedDay) / WEEK));
+        },
+        uses: [...sched.uses, sched.stated.id],
+      });
+      delayInfo = { weeks, weekly, perWeek: w, stated: sched.stated.label };
     }
-    // The schedule's inputs and uncertain variables join this run's, so the weeks late are drawn here exactly as the timeline check draws them.
-    for (const rec of book.reg.values()) if (!reg.has(rec.id)) reg.set(rec.id, rec);
-    for (const v of book.vars.values()) vars.set(v.id, v);
-    for (const a of options.assumptions ?? []) if (book.wasUsed(a.id)) usedOverrides.add(a.id);
-    flags.push(...book.flags);
-    const w = delayBasis.perWeekUsd;
-    const weekly = variable({
-      id: `finance:${ecr.program}:delay-per-week`, label: `Cost of a week's delay on ${ecr.program}`, source: 'given', groups: ['labor:internal'],
-      dist: lognormalFromQuantiles(w.p10, w.p50, w.p90), ref: `${fromBaseline}: finance, cost of delay`,
-      rationale: [delayBasis.basis, figureText(delayBasis.prov)].filter(Boolean).join(' '),
-    });
-    const weeks = `delay:${ecr.id}:weeks-late`;
-    const pt = evaluateSchedules([sched], book.pointDraws(), false)[0];
-    derived.set(weeks, {
-      label: `Weeks after the stated effectivity (${sched.stated.label}) that ${ecr.id} can first reach the line, floored at 0`,
-      point: Math.max(0, (pt.cutIn[0] - statedDay) / WEEK),
-      compute: (d) => {
-        const cut = evaluateSchedules([sched], d, false)[0].cutIn;
-        return Float64Array.from(cut, (x) => Math.max(0, (x - statedDay) / WEEK));
-      },
-      uses: [...sched.uses, sched.stated.id],
-    });
-    delayInfo = { weeks, weekly, perWeek: w };
-    return {
-      id, block: 'other', label: `${row.label} (exposure)`, recurring: false, basis: 'computed',
-      oneTime: [{ coef: 1, vars: [weeks, weekly] }], unit: null, quantity: null,
-      formula: 'weeks the change reaches the line after the stated effectivity (the timeline model, floored at 0) × the cost of a week of delay. An exposure: what the delay costs if the line holds for all of it',
-      uses: [rowInput, weekly], ref, exposure: true,
-      note: `${row.note ? `${row.note} ` : ''}Left blank by the originator. Filled as an exposure (worst case): the line is assumed to hold for every week the change is late against ${sched.stated.label}.`,
-    };
-  };
+  }
 
   // The originator's cost page.
   let engineerRecurring = 0;
@@ -623,13 +622,8 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
           noVariable.set(id, `"${row.label}" is filled by the inventory disposition line; record a recovery share (recovery:<item>) instead`);
           return;
         }
-        // The originator's blank "delay" line, filled from the timeline model and the company's cost of a week of delay.
-        if (block === 'other' && !delayDraft && DELAY_ROW.test(row.label) && !overrides.get(id)?.dist) {
-          delayDraft = delayLine(id, rowInput, row, ref);
-          if (delayDraft) {
-            rows.push(delayDraft);
-            return;
-          }
+        if (block === 'other' && delayBasis && !delayInfo && noExposure && DELAY_ROW.test(row.label)) {
+          flags.push({ kind: 'exposure_not_computed', severity: 'info', ref: id, message: `No schedule exposure for "${row.label}": ${noExposure}` });
         }
         const v = variable({
           id, label: row.label, dist: point(0), source: 'default', ref, needsEstimate: true,
@@ -916,6 +910,11 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   track('recurringPlan', recurringPlan, 'Σ programs: per-unit change × every planned unit after the cut-in', recurringRows.flatMap((r) => r.uses));
   track('planTotal', sum(oneTimeTotal, recurringPlan), 'one-time total + recurring over the whole volume plan', allUses);
 
+  if (delayInfo) {
+    track('delayWeeks', [{ coef: 1, vars: [delayInfo.weeks] }], 'weeks after the stated effectivity the change can first reach the line (cut-in day − stated effectivity day) / 7, floored at 0', []);
+    track('exposure', [{ coef: 1, vars: [delayInfo.weeks, delayInfo.weekly] }], 'weeks late against the stated effectivity (the timeline model, floored at 0) × the cost of a week of delay. A worst case: what the delay costs if the line holds for every late week. In no total', [delayInfo.weekly]);
+  }
+
   // The budget and the runway (see finance.ts). The cost in the budget period is every one-time cost, counted in full, plus the
   // recurring change on the units built from the cut-in (or the start of the period) to the period's last month. The budget is the
   // ECR's program only; runway counts every program the change touches. A budget and a cash figure are stated, so the share and the
@@ -947,10 +946,17 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     track('periodCostCompany', sum(oneTimeTotal, ...recurringIn(programs)), periodFormula('every program the change touches'), [...periodUses(programs), cashId, burnId]);
     if (remaining > 0) track('budgetShare', scale(sum(oneTimeTotal, ...recurringIn(own)), 1 / remaining), `period cost / (budget − spent to date) = period cost / ${remaining}`, [...periodUses(own), budget, spent]);
     track('runwayDays', scale(sum(oneTimeTotal, ...recurringIn(programs)), 1 / burnPerDay), `period cost / (monthly burn × 12 / 365) = period cost / ${Math.round(burnPerDay)} per day`, [...periodUses(programs), cashId, burnId]);
+    // The same figures with the schedule exposure added: what they would be if the line held for every late week.
+    if (delayInfo) {
+      const ex = pending.get('exposure')!.expr;
+      const exUses = [...pending.get('exposure')!.uses];
+      track('periodCostExposed', sum(oneTimeTotal, ...recurringIn(own), ex), `${periodFormula(`${ecr.program} only`)} + the schedule exposure`, [...periodUses(own), ...exUses, budget, spent]);
+      if (remaining > 0) track('budgetShareExposed', scale(sum(oneTimeTotal, ...recurringIn(own), ex), 1 / remaining), `(period cost + schedule exposure) / (budget − spent to date) = / ${remaining}`, [...periodUses(own), ...exUses, budget, spent]);
+      track('runwayDaysExposed', scale(sum(oneTimeTotal, ...recurringIn(programs), ex), 1 / burnPerDay), `(period cost + schedule exposure) / (monthly burn × 12 / 365) = / ${Math.round(burnPerDay)} per day`, [...periodUses(programs), ...exUses, cashId, burnId]);
+    }
   } else if (baseline.finance && !pBudget) {
     flags.push({ kind: 'no_budget', severity: 'info', message: `The baseline has finance data but no budget for ${ecr.program}, so the change is not measured against a budget or runway.` });
   }
-  if (delayInfo) track('delayWeeks', [{ coef: 1, vars: [delayInfo.weeks] }], 'weeks after the stated effectivity the change can first reach the line (cut-in day − stated effectivity day) / 7, floored at 0', []);
   for (const p of programs) {
     const uses = ['baseline:items', 'baseline:bom', `ecr:${ecr.id}:overlay`];
     track(`unitCost:${p.id}/base`, unitCostExpr(p.id, 'base'), 'Σ items qty per unit × unit price × price index, plus labour hours × rate, at base', uses);
@@ -1000,10 +1006,8 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const seed2 = `${options.seed}:convergence`;
   const convKeys = [
     'oneTimeTotal', 'recurringWindow', 'windowTotal', 'recurringPlan', ...programs.map((p) => `unitCost:${p.id}/delta`),
-    // Weeks late, the delay line and the period cost move with the timeline's draws, which converge more slowly than prices.
-    ...(delayInfo ? ['delayWeeks', `${delayDraft!.id}/total`] : []), ...(finIds ? ['periodCost'] : []),
   ];
-  const compare = (a1: Map<string, Summary>, a2: Map<string, Summary>) => convKeys.map((key) => {
+  const compare = (a1: Map<string, Summary>, a2: Map<string, Summary>, keys = convKeys) => keys.map((key) => {
     const a = a1.get(key)!;
     const b = a2.get(key)!;
     const scaleOf = Math.max(Math.abs(a.p50), a.p90 - a.p10, 1e-9);
@@ -1019,6 +1023,17 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     metrics = compare(run1.out, runOnce(seed2, n, convKeys).out);
   }
   const converged = metrics.every((m) => m.relDiff <= tol);
+  // The schedule exposure, the period cost and what rests on them are checked the same way, once, at the draws the totals settled on.
+  // They are not in the loop above: a product of two wide ranges converges more slowly than a price, and doubling the draws for it
+  // would move the totals, which the exposure must not touch.
+  const finKeys = [...(delayInfo ? ['delayWeeks', 'exposure'] : []), ...(finIds ? ['periodCost', ...(delayInfo ? ['periodCostExposed'] : [])] : [])];
+  const finConvergence = finKeys.length ? (() => {
+    const m = compare(run1.out, runOnce(seed2, n, finKeys).out, finKeys);
+    return { seeds: [options.seed, seed2] as [string, string], tolerance: tol, converged: m.every((x) => x.relDiff <= tol), metrics: m };
+  })() : null;
+  if (finConvergence && !finConvergence.converged) {
+    flags.push({ kind: 'exposure_not_converged', severity: 'info', message: `At ${n.toLocaleString('en-US')} draws the schedule exposure or the period cost moved by more than ${tol * 100}% (P80/P90) between seeds: ${finConvergence.metrics.filter((x) => x.relDiff > tol).map((x) => `${x.key} ${Math.round(x.relDiff * 1000) / 10}%`).join(', ')}. The totals are not affected; raise draws for steadier exposure figures.` });
+  }
   if (!converged) flags.push({ kind: 'not_converged', severity: 'warn', message: `P80/P90 moved by more than ${tol * 100}% between seeds at ${n.toLocaleString('en-US')} draws, the most allowed; raise maxDraws.` });
 
   const pointOfVar = (id: string) => (derived.has(id) ? derived.get(id)!.point : pointOf(vars.get(id)!.dist));
@@ -1044,7 +1059,7 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
     id: r.id, block: r.block, label: r.label, recurring: r.recurring, basis: r.basis,
     oneTime: maybe(`${r.id}/oneTime`), unitCost: maybe(`${r.id}/unit`), quantity: r.quantity,
     extended: maybe(`${r.id}/extended`), total: money(`${r.id}/total`),
-    ...(r.needsEstimate ? { needsEstimate: true } : {}), ...(r.exposure ? { exposure: true } : {}), ...(r.ref ? { ref: r.ref } : {}), ...(r.note ? { note: r.note } : {}),
+    ...(r.needsEstimate ? { needsEstimate: true } : {}), ...(r.ref ? { ref: r.ref } : {}), ...(r.note ? { note: r.note } : {}),
   });
   const blocks = Object.fromEntries(COST_BLOCKS.map((b) => [b, blockRows(b).map(toRow)])) as Record<CostBlock, CostRow[]>;
   const blockTotals = Object.fromEntries(
@@ -1164,6 +1179,9 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
       const costs = run1.arrays.get('periodCost')!;
       let over = 0;
       for (const x of costs) if (x > finIds.remaining) over++;
+      let overExposed = 0;
+      const exposed = delayInfo ? run1.arrays.get('periodCostExposed')! : null;
+      if (exposed) for (const x of exposed) if (x > finIds.remaining) overExposed++;
       return {
         program: ecr.program,
         period: pBudget.period,
@@ -1179,9 +1197,16 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
           runwayDaysNow: Math.round(cash.cashOnHandUsd / finIds.burnPerDay),
           periodCost: money('periodCostCompany'), daysUsed: money('runwayDays', undefined, 4),
         },
+        withExposure: exposed ? {
+          periodCost: money('periodCostExposed'),
+          budgetShare: finIds.remaining > 0 ? money('budgetShareExposed', undefined, 6) : null,
+          probabilityOver: Math.round((overExposed / exposed.length) * 10_000) / 10_000,
+          daysUsed: money('runwayDaysExposed', undefined, 4),
+        } : null,
       };
     })() : null,
-    delay: delayInfo && delayDraft ? { row: delayDraft.id, weeksLate: money('delayWeeks'), perWeekUsd: delayInfo.perWeek, cost: money(`${delayDraft.id}/total`) } : null,
+    exposure: delayInfo ? { weeksLate: money('delayWeeks'), perWeekUsd: delayInfo.perWeek, stated: delayInfo.stated, cost: money('exposure') } : null,
+    financeConvergence: finConvergence,
     convergence: { seeds: [options.seed, seed2], tolerance: tol, converged, metrics },
     bomDelta: { ok: s.conflicts.length === 0, conflicts: s.conflicts.length },
     flags,

@@ -5,11 +5,6 @@ import { bowman } from '../../../../bowman/data/index.ts';
 import { costCheck, costCheckRows } from '../../../checks/src/index.ts';
 import { formatIssue, loadConfigFile, type CompanyConfig } from '../../../config/src/index.ts';
 
-// These fixtures are the Level 1 story as the originator filed it: ECR-0417 with three blank cost lines. Norn now fills the
-// delay line itself when the baseline carries the company's finance data, so the fixtures read the dataset without it.
-// What the Level 1 story becomes with two blank lines is for its owner to decide.
-const books = { ...bowman, finance: undefined };
-
 const BOWMAN_CONFIG = fileURLToPath(new URL('../../../../bowman/norn-config/bowman.config.ts', import.meta.url));
 
 export async function bowmanConfig(): Promise<CompanyConfig> {
@@ -22,7 +17,7 @@ export async function bowmanConfig(): Promise<CompanyConfig> {
 export function storedRows(ecrId: string) {
   const ecr = bowman.ecrs.find(e => e.id === ecrId);
   if (!ecr) throw new Error(`no ${ecrId} in Bowman's data`);
-  return costCheckRows(costCheck(books, ecr, { seed: 'norn-seed-1' }));
+  return costCheckRows(costCheck(bowman, ecr, { seed: 'norn-seed-1' }));
 }
 
 /**
@@ -33,13 +28,13 @@ export function conflictRows() {
   const base = bowman.ecrs.find(e => e.id === 'ECR-0423');
   if (!base) throw new Error("no ECR-0423 in Bowman's data");
   const ecr = { ...base, itemChanges: base.itemChanges.map(c => (c.op === 'revise' ? { ...c, fromRev: 'Z' } : c)) };
-  return costCheckRows(costCheck(books, ecr, { seed: 'norn-seed-1' }));
+  return costCheckRows(costCheck(bowman, ecr, { seed: 'norn-seed-1' }));
 }
 
 const rowsOf0423 = (change: (e: (typeof bowman.ecrs)[number]) => (typeof bowman.ecrs)[number]) => {
   const base = bowman.ecrs.find(e => e.id === 'ECR-0423');
   if (!base) throw new Error("no ECR-0423 in Bowman's data");
-  return costCheckRows(costCheck(books, change(base), { seed: 'norn-seed-1' }));
+  return costCheckRows(costCheck(bowman, change(base), { seed: 'norn-seed-1' }));
 };
 
 /** ECR-0423 with a cost-page line that rests on an engineer's estimate but states no amount: the check counts it as $0 and flags nothing. */

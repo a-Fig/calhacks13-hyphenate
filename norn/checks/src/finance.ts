@@ -44,17 +44,27 @@ export interface FinanceImpact {
   periodCost: Money;
   budget: BudgetImpact;
   runway: RunwayImpact;
+  /** The same figures with the schedule exposure added (the line holds for every late week). Null when there is no exposure. */
+  withExposure: {
+    periodCost: Money;
+    budgetShare: Money | null;
+    probabilityOver: number;
+    daysUsed: Money;
+  } | null;
 }
 
-/** The delay cost the cost page carries on the originator's blank "delay" line. */
+/**
+ * The schedule exposure: what the delay costs if the line holds for every week the change is late. A worst case. It is in no
+ * total, no budget or runway figure and no approval size; it is reported beside them.
+ */
 export interface DelayResult {
-  /** The cost-page row it fills. */
-  row: string;
+  /** The effectivity the change is late against, e.g. "S/N 11 and subsequent". */
+  stated: string;
   /** Weeks after the stated effectivity that the change can first reach the line, floored at 0 (the timeline model's lateness). */
   weeksLate: Money;
   /** The weekly cost basis: p10, p50 and p90 dollars per week of delay. */
   perWeekUsd: { p10: number; p50: number; p90: number };
-  /** weeksLate x the weekly cost: an exposure, the most it costs if the line holds for the whole delay. */
+  /** weeksLate x the weekly cost. */
   cost: Money;
 }
 
