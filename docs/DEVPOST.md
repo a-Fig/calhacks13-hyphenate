@@ -29,8 +29,10 @@ the Change Control Board.
 ## What it does
 
 Norn reads an engineering change request (ECR) from the company's PLM, and the costs, suppliers,
-stock and history from its ERP. It returns the unit cost, the one-time cost, the cut-in date and
-the supply risk as ranges, and posts them on the ECR where engineers and the board already work.
+stock and history from its ERP. Its checks compute the unit cost, the one-time cost, the cut-in
+date and the supply risk as ranges. Today the impact statement it posts on the ECR, where engineers
+and the board already work, carries the cost numbers; the timeline and supply results are stored in
+Norn and not yet published to the PLM.
 
 We show it deployed at Bowman Aviation, a fictional maker of electric aircraft modelled on public
 data about Archer. Bowman builds the Vesper V4 eVTOL air taxi and is developing the Meridian M6.
@@ -48,7 +50,7 @@ lands back on the ECR in the PLM about 35 seconds after the ECR reached Norn (#8
 - three blank cost lines, flagged for an estimate;
 - "Approve with conditions", from a stated rule that names those three gaps (#112);
 - the route from Bowman's own configuration: the Change Control Board with a Technical Review
-  Committee review, because the p90 cost of about $164,556 is above Bowman's $150,000 limit (#95).
+  Committee review, because the p90 cost of about $164,556 is above Bowman's $150,000 limit (#112).
 
 **When the change reaches the line, and who it collides with.** The timeline check puts ECR-0417's
 cut-in at 2027-02-16 at the median, 13 weeks later than the engineer stated, because the supplier
@@ -62,18 +64,22 @@ approved on the fast track for ECR-0423, a small change at $622, and becomes "No
 approval" for ECR-0417, which is over the cost and schedule limits. Both decisions are stored with
 their reasons (#100).
 
-**The ERP stays the people's.** Norn reads the ERP and never writes to it; its ERPNext user is
-read-only. When an ECO is released, Norn puts the ERP change package on it: the new standard cost,
-the BOM lines and the journal entries for scrap and the supplier's cancellation charge, each traced
-to the ECO and the assessment. The cost accountant enters them, and Norn's next read shows which
-lines are entered (#74, #114). In the PLM, Norn writes only its own seven impact fields and
+**The ERP stays the people's.** Norn reads the ERP, and its code has no ERP write path.
+Tightening the live ERPNext account's role to read-only is pending (#66). When an ECO is released,
+Norn puts the ERP change package on it: the new standard cost, the BOM lines and the journal entries
+for scrap and the supplier's cancellation charge, each traced to the ECO and the assessment. The
+cost accountant enters the costs and journal entries, and the manufacturing engineer enters the BOM
+lines. Norn's next read shows which lines are entered (#74, #114). In the PLM, Norn writes only its own seven impact fields and
 comments.
 
 **What's real and what's simulated.** Bowman, its people and its history are fictional, and the
 dataset marks each value `sourced` or `invented`. ERPNext is real software, seeded from that
-dataset. The ECR-0417 run above used the real PLM, live ERPNext read-only and a real Claude
-session. The fast track and the ERP change package were tested on scratch databases, with the ERP
-side replaced by a test planner where marked.
+dataset. The ECR-0417 run above used the real PLM, reads of live ERPNext and a real Claude
+session. The policy gate and the fast track were tested on scratch databases with real workers
+reading a baseline file in place of ERPNext (#100). The ERP change package was built by a test
+planner in place of ERPNext (#74). On the ECR page, the approvals, recommendations and release
+shown are real database rows, and the package lines, problems and effects are hand-made test data
+(#114).
 
 ## How we built it
 
@@ -87,9 +93,10 @@ side replaced by a test planner where marked.
 - **Norn's agents are Claude Code sessions**, started and steered through the Claude Agent SDK.
   Each job runs isolated: only Norn's MCP tools are offered, nothing from the host's Claude setup
   loads, and every step streams into the action log (#53).
-- **One MCP server** is the only way in for every agent. Each request carries a signed,
-  short-lived token naming the job, the actor, on whose behalf it acts, what spawned it and which
-  ECRs it may write to. A write outside that scope is refused and logged (#64).
+- **One MCP server.** The agent sessions Norn's runner starts reach Norn only through its MCP
+  tools, scoped to one ECR. Each request carries a signed, short-lived token naming the job, the
+  actor, on whose behalf it acts, what spawned it and which ECRs it may write to. A write outside
+  that scope is refused and logged (#64).
 - **Configuration, not code, makes it Bowman's.** Vocabulary, the ECR form, change classes, the
   approval matrix, roles and agent autonomy limits are one config file, validated when the worker
   starts (#58, #83).
@@ -119,7 +126,7 @@ side replaced by a test planner where marked.
 - Every number on the statement traces to the change request revision and the ERP baseline it was
   computed from.
 - The agents run under limits a finance team would accept: named seats, scoped tokens, a
-  read-only ERP user and a log the platform writes, not the agent.
+  code with no ERP write path, and a log the platform writes, not the agent.
 - Hundreds of offline tests and live checks against scratch databases, and fresh-context review
   rounds on the changes to money, routing and permissions.
 
@@ -128,7 +135,8 @@ side replaced by a test planner where marked.
 - Agents are good at reading a messy change request and explaining a forecast. Code should
   compute every number they report.
 - A recommendation people act on has to follow a rule they can read, or it drifts between runs.
-- Keeping the ERP read-only made the trust story one sentence anyone can check.
+- Giving Norn no way to write to the ERP made the trust story one sentence a reviewer can check
+  in the code.
 
 ## What's next for Norn
 
