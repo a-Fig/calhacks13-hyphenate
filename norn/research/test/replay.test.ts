@@ -61,6 +61,21 @@ describe('replay of the ECR-0417 recording', () => {
     assert.deepEqual(report.notApplied, []);
   });
 
+  it('applies a verified, medium-confidence blank-row estimate, and the report still shows the blank was filled', async () => {
+    const { report, verdicts } = await replay((rec) => ({
+      proposals: [{ ...(rec.agentOutput.proposals[1] as object), confidence: 'medium', dist: { kind: 'quantiles', p10: 3500, p50: 4500, p90: 6500 } }],
+      unresolved: [],
+    }));
+    assert.equal(verdicts[0]!.status, 'accepted');
+    assert.deepEqual(verdicts[0]!.flags.map((f) => f.code), ['replaces_blank_row']);
+    assert.match(verdicts[0]!.override!.rationale, /Note: this fills a cost-page row that was blank/);
+    const one = report.changes.find((c) => c.key === 'oneTimeTotal')!;
+    assert.ok(one.after.p50 > one.before.p50 + 3000, 'a blank counted as $0 now carries a cost');
+    assert.deepEqual(one.movedBy.map((m) => m.targetKey), ['T2']);
+    const text = renderReport(report);
+    assert.match(text, /note for a person, not held \(replaces_blank_row\)/);
+  });
+
   it('is deterministic: two replays give identical reports', async () => {
     const a = await replay();
     const b = await replay();

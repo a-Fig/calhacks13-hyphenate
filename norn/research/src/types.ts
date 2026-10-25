@@ -69,13 +69,19 @@ export interface Flag {
   message: string;
 }
 
+/** Flags that are shown to a person but do not hold a proposal: filling a blank row is the research agent's job. */
+export const INFORMATIONAL_FLAGS: readonly Flag['code'][] = ['replaces_blank_row'];
+
+/** The flags that hold a proposal for a person (all but the informational ones). */
+export const holdingFlags = (flags: Flag[]): Flag[] => flags.filter((f) => !INFORMATIONAL_FLAGS.includes(f.code));
+
 export interface Verdict {
   /** Position in the agent's list. */
   index: number;
   targetId: string | null;
   status: Status;
   reasons: Reason[];
-  /** What a person should look at. A proposal with any flag is held (needs_person), never applied. */
+  /** What a person should look at. A proposal with a holding flag is held (needs_person), never applied; an informational flag (replaces_blank_row) is shown and does not hold. */
   flags: Flag[];
   /** Set on accepted proposals only. */
   override?: AssumptionOverride;

@@ -396,11 +396,25 @@ describe('flags hold a proposal for a person (review finding 7)', () => {
     assert.deepEqual(v.flags, []);
     assert.equal(v.status, 'accepted');
   });
-  it('holds a filled blank row, and a disagreement with the company\'s history', async () => {
+  it('shows a filled blank row without holding it: accepted, with the flag kept in the verdict and the rationale', async () => {
+    const v = await one(good({ targetId: 'T2', unit: 'usd', dist: { kind: 'quantiles', p10: 3000, p50: 4000, p90: 5500 }, quote: RATE }));
+    assert.equal(v.status, 'accepted');
+    assert.deepEqual(v.reasons, []);
+    assert.deepEqual(v.flags.map((f) => f.code), ['replaces_blank_row']);
+    assert.equal(v.override?.id, 'cost:E:retrofit:x');
+    assert.match(v.override!.rationale, /Note: this fills a cost-page row that was blank \(counted as \$0\)/);
+  });
+  it('still holds a filled blank row that also disagrees with the company\'s history, or states no date', async () => {
     const v = await one(good({ targetId: 'T2', unit: 'usd', dist: undefined, value: 4000, quote: RATE }), { ...config, history: { T2: [{ label: 'the last retrofit re-inspection', value: 500 }] } });
     assert.deepEqual(v.flags.map((f) => f.code).sort(), ['disagrees_with_history', 'replaces_blank_row']);
     assert.equal(v.status, 'needs_person');
+    assert.deepEqual(codes(v), ['flagged']);
+    assert.match(v.reasons[0]!.message, /disagrees_with_history/);
+    assert.ok(!/replaces_blank_row/.test(v.reasons[0]!.message));
     assert.equal(v.override, undefined);
+    const undated = await one(good({ targetId: 'T2', unit: 'usd', dist: undefined, value: 4000, quote: RATE, sourceDate: undefined }));
+    assert.equal(undated.status, 'needs_person');
+    assert.deepEqual(undated.flags.map((f) => f.code).sort(), ['no_source_date', 'replaces_blank_row']);
   });
 });
 

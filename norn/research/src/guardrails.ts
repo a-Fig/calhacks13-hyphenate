@@ -22,7 +22,7 @@
 import { lognormal, lognormalFromQuantiles, pert, point, quantileOf, type AssumptionOverride, type Dist } from '../../checks/src/index.ts';
 import { findLeaks, findUrlLeaks, DEFAULT_ALLOW, type Identifier } from './leak.ts';
 import { quoteInPage } from './text.ts';
-import { UNIT_OF, type Flag, type PageFetcher, type Proposal, type ProposedDist, type Reason, type Status, type Target, type Verdict } from './types.ts';
+import { holdingFlags, INFORMATIONAL_FLAGS, UNIT_OF, type Flag, type PageFetcher, type Proposal, type ProposedDist, type Reason, type Status, type Target, type Verdict } from './types.ts';
 
 export const AGENT_NAME = 'norn research agent (cost engineer)';
 
@@ -350,16 +350,18 @@ export async function reviewProposals(raw: unknown[], targets: Target[], fetchPa
       const p10 = quantileOf(dist, 0.1), p90 = quantileOf(dist, 0.9);
       if (p10 > 0 && p90 / p10 > 4) flags.push({ code: 'wide_range', message: `p90 is ${Math.round((p90 / p10) * 10) / 10} times p10` });
       if (stated === null) flags.push({ code: 'no_source_date', message: 'the proposal states no date for the source, so its age is unknown' });
-      if (flags.length > 0) worsen('needs_person', { code: 'flagged', message: `not applied, flagged for ${flags.map((f) => f.code).join(', ')}` });
+      const holding = holdingFlags(flags);
+      if (holding.length > 0) worsen('needs_person', { code: 'flagged', message: `not applied, flagged for ${holding.map((f) => f.code).join(', ')}` });
     }
 
     const verdict: Verdict = { index, targetId: p.targetId, status: st.status, reasons, flags, ...(dist ? { dist } : {}), ...(verifiedAgainst ? { verifiedAgainst } : {}) };
-    if (st.status === 'accepted' && dist && flags.length === 0) {
+    if (st.status === 'accepted' && dist && holdingFlags(flags).length === 0) {
+      const notes = flags.filter((f) => INFORMATIONAL_FLAGS.includes(f.code)).map((f) => ` Note: ${f.message}.`).join('');
       const date = (verifiedAgainst?.retrievedAt ?? p.retrievedAt).slice(0, 10);
       verdict.override = {
         id: target.inputId,
         source: 'agent_estimated',
-        rationale: `${p.rationale.trim()} Source: ${p.sourceUrl}${p.sourceDate ? ` (dated ${p.sourceDate})` : ''}. Quote: "${qn}". Retrieved ${date}. Proposed ${describeDist(dist)}; confidence ${p.confidence}.`,
+        rationale: `${p.rationale.trim()} Source: ${p.sourceUrl}${p.sourceDate ? ` (dated ${p.sourceDate})` : ''}. Quote: "${qn}". Retrieved ${date}. Proposed ${describeDist(dist)}; confidence ${p.confidence}.${notes}`,
         dist,
         by: AGENT_NAME,
       } satisfies AssumptionOverride;
