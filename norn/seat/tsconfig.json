@@ -14,6 +14,7 @@
   "include": [
     "src",
     "test",
-    "demo.ts"
+    "demo.ts",
+    "options-demo.ts"
   ]
 }

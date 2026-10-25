@@ -29,11 +29,36 @@ Nothing here names a company. A seat file is data; another company writes its ow
 same actions, so any decision can be replayed. A worker carries the actions out (posting the question
 on the ECR, recording the assumption); wiring it to the live database is the next step.
 
+## Find the best option (#157)
+
+`src/options.ts` lists the decisions hidden in an ECR and simulates each: the old stock (as filed, scrap all,
+use up), the cut-in (using the stock up moves it to the serial the timeline check gives), retrofit of built
+aircraft (as filed, none) and, when `supplyCheck` finds a peer ECR on the same supplier slot, qualifying
+together. Each option is a changed ECR plus, at most, a cut-in serial override: never a typed amount, so every
+number is the checks' own. All options use one seed, so they are paired.
+
+A code screen (data-driven `PolicyRule`s) marks an option not eligible, quoting the text: keeping the old design
+when the ECR or its NCR describes a failure, unless the NCR's disposition accepts use-as-is and does not reject
+it; dropping a retrofit the ECR makes mandatory. The recommendation is the eligible option with the lowest
+12-month total at p50; its tradeoffs sentence is a code template. An LLM narration is not built; it could be
+added without touching a number.
+
+```
+node options-demo.ts ECR-0417 [--json out.json]   # from norn/seat: the options table and the recommendation
+```
+
+On ECR-0417 using the old stock up saves $38k one-time (the $60k disposition line includes $22k of Rev B
+returned from built aircraft, scrapped either way) and is excluded for the fatigue crack; so is skipping the
+retrofit. The ECR as filed is recommended. On ECR-0419, qualifying with ECR-0421 saves about $120k.
+
+The ECR page shows a saved run (`web/src/assessment/fixtures/options-ecr-*.json`, with the time it was computed).
+Computing options in the worker and storing them is not done.
+
 ## Run it
 
 ```
 node demo.ts ECR-0417        # from norn/seat: the seat chasing ECR-0417, with SIMULATED replies
-node --test test/*.test.ts   # 13 tests: the seat logic, plus the live half (state from comments, reply matching, reducer arguments)
+node --test test/*.test.ts   # the seat logic, the live half (state from comments, reply matching, reducer arguments) and the options (enumeration, pairing, safety screen, recommendation)
 ```
 
 On ECR-0417 the seat asks Quality (re-inspection), the CM analyst (spares, manuals, training), the
