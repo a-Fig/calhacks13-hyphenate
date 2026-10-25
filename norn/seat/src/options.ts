@@ -281,7 +281,10 @@ export function evaluateOptions(baseline: Baseline, ecr: ChangeRequest, o: Optio
     let bundle: OptionResult['bundle'];
     if (c.bundle && bundleDef) {
       const s = rng(bundleDef.ownSaving);
-      oneTime = minus(oneTime, s); window12 = minus(window12, s); plan = minus(plan, s);
+      // The bundle saving is recurring purchasing savings (a price break on the year's spend and a discount on the
+      // qualification lot). It lowers what the change costs over 12 months and over the plan, but the one-time
+      // (nonrecurring) cost stays as the cost check gives it.
+      window12 = minus(window12, s); plan = minus(plan, s);
       const peer = peers.find((p) => p.id === c.bundle!.peer)!;
       const back = supplyCheck(baseline, peer, { ...base, peers: [e] });
       const shift = back.interaction?.cutIn?.shiftWeeks.p50 ?? null;

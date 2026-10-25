@@ -49,7 +49,7 @@ node options-demo.ts ECR-0417 [--json out.json]   # from norn/seat: the options 
 
 On ECR-0417 using the old stock up saves $38k one-time (the $60k disposition line includes $22k of Rev B
 returned from built aircraft, scrapped either way) and is excluded for the fatigue crack; so is skipping the
-retrofit. The ECR as filed is recommended. On ECR-0419, qualifying with ECR-0421 saves about $120k.
+retrofit. The ECR as filed is recommended. On ECR-0419, qualifying with ECR-0421 saves about $120k over 12 months; the one-time cost, $306k, is the same as filed.
 
 The ECR page shows a saved run (`web/src/assessment/fixtures/options-ecr-*.json`, with the time it was computed).
 Computing options in the worker and storing them is not done.

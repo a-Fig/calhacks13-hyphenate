@@ -3,7 +3,7 @@
   "title": "Forward rotor magnet set BW-3120-340: SH grade to UH grade",
   "seed": "norn-seed-1",
   "draws": 10000,
-  "computedAt": "2026-10-25T07:49:47.875Z",
+  "computedAt": "2026-10-25T09:07:17.761Z",
   "basis": "Options are decisions on the ECR run through the same cost, timeline and supply checks with one seed. Ranked on the 12-month total at p50.",
   "options": [
     {
@@ -57,9 +57,9 @@
       ],
       "overrides": [],
       "oneTime": {
-        "p10": 136147.25,
-        "p50": 186437.35,
-        "p90": 238115.74
+        "p10": 268939.95,
+        "p50": 306429.03,
+        "p90": 351096.52
       },
       "window12": {
         "p10": 578545.51,
@@ -78,7 +78,7 @@
       },
       "weeksLate": -1.45,
       "vsFiled": {
-        "oneTime": -119991.68,
+        "oneTime": 0,
         "window12": -119991.68,
         "plan": -119991.68,
         "weeksLate": 0
@@ -116,9 +116,9 @@
       ],
       "overrides": [],
       "oneTime": {
-        "p10": 560946.01,
-        "p50": 616653.47,
-        "p90": 673441.42
+        "p10": 692151.8,
+        "p50": 736645.15,
+        "p90": 787136.73
       },
       "window12": {
         "p10": 1004860.24,
@@ -137,7 +137,7 @@
       },
       "weeksLate": -1.45,
       "vsFiled": {
-        "oneTime": 310224.44,
+        "oneTime": 430216.12,
         "window12": 310598.27,
         "plan": 311088.85,
         "weeksLate": 0

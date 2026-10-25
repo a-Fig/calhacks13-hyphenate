@@ -62,7 +62,12 @@ test('recommendation is the cheapest eligible option, and says what it passed ov
 test('ECR-0419: bundling with ECR-0421 is offered, wins, and shows the peer cost; certification acceptance is quoted', () => {
   const b = r19.options.find((o) => o.bundle)!;
   assert.equal(b.bundle!.peer, 'ECR-0421');
-  assert.ok(b.vsFiled.oneTime < -50_000);
+  // The bundle saving is recurring purchasing savings: it lowers the 12-month and plan totals, never the one-time cost (review bug 1).
+  const filed0 = opt(r19, 'as-filed');
+  assert.equal(b.oneTime.p50, filed0.oneTime.p50);
+  assert.equal(b.vsFiled.oneTime, 0);
+  assert.ok(b.vsFiled.window12 < -50_000);
+  assert.ok(b.vsFiled.plan < -50_000);
   assert.ok((b.bundle!.peerShiftWeeks ?? 0) > 0);
   assert.equal(r19.recommended, b.id);
   const filed = opt(r19, 'as-filed');
