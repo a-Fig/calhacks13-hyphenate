@@ -9,8 +9,9 @@
 // refused).
 import { SenderError, t } from 'spacetimedb/server';
 import { ScheduleAt } from 'spacetimedb';
-import spacetimedb, { StatementAssumption, StatementClaim, StatementNumber, reaperSchedule } from './schema';
+import spacetimedb, { StatementAssumption, StatementClaim, StatementNumber, TestAnswer, reaperSchedule } from './schema';
 import './scope'; // registers the job-scope rule with the policy gate
+import { assertReleasable, codeStagesNotDone, endApproval, recordApproval, recordRecommendation, settleApproval, standingApproval } from './gate'; // registers the company rule, after the job-scope rule
 import {
   CONFIG_DEFAULTS,
   OPEN_PR,
@@ -29,7 +30,7 @@ import {
   currentMain,
   currentRevision,
   decisionText,
-  digestOf,
+  approvalDigest,
   effectiveAssumptions,
   enqueueDeepOnOpen,
   fnv1a64,
@@ -48,9 +49,11 @@ import {
   stageInfos,
   write,
   type Actor,
+  type Call,
   type Ctx,
   type PrStatus,
 } from './core';
+import { COMPANY_CONFIG_KEY, checkCompanyConfig } from './company-config';
 
 function nonEmpty(s: string, what: string, max: number) {
   const v = s.trim();
@@ -137,6 +140,20 @@ export const registerActor = write(
 
 // Policy knobs, e.g. Bowman's deep_review_mode. Only known keys.
 export const setConfig = write('set_config', { key: t.string(), value: t.string() }, (ctx, a, call) => {
+  // The whole company config (#59) is accepted next to the knobs but is not one of CONFIG_DEFAULTS:
+  // it has no default, and its row appears when the first one is stored. See company-config.ts.
+  if (a.key === COMPANY_CONFIG_KEY) {
+    const stored = ctx.db.nornConfig.key.find(a.key);
+    const check = checkCompanyConfig(a.value, stored?.value);
+    if (!check.ok) throw new SenderError(check.error);
+    if (check.unchanged) return null;
+    if (stored) ctx.db.nornConfig.key.update({ key: a.key, value: a.value });
+    else ctx.db.nornConfig.insert({ key: a.key, value: a.value });
+    // The cost measure is an input of the cost check, and the tiers decide what an approval stands on:
+    // every open ECR is brought up to date, and an approval whose tier moved is withdrawn.
+    const n = reconcileAllOpen(ctx, call, 'company configuration changed');
+    return { entity: `norn_config:${a.key}`, summary: `${check.summary}; re-checked ${n} open ECR(s)`, detail: check.detail };
+  }
   if (!(a.key in CONFIG_DEFAULTS)) throw new SenderError(`unknown config key '${a.key}'`);
   if (a.key === 'deep_review_mode' && a.value !== 'auto' && a.value !== 'on_request')
     throw new SenderError(`deep_review_mode is 'auto' or 'on_request'`);
@@ -163,7 +180,7 @@ export const setConfig = write('set_config', { key: t.string(), value: t.string(
 type RevisionIn = { changeRequestJson: string; source: string; sourceRef: string };
 
 // Open an ECR, with its first change request if one came with it, in the caller's transaction.
-function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description: string }, first?: RevisionIn) {
+function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description: string }, first?: RevisionIn, call?: Call) {
   const title = nonEmpty(a.title, 'title', 200);
   if (a.description.length > 20000) throw new SenderError('description is too long (max 20000 characters)');
   const plm = a.plmEcrNumber.trim();
@@ -193,21 +210,23 @@ function openPr(ctx: Ctx, a: { plmEcrNumber: string; title: string; description:
   ctx.db.pullRequest.id.update({
     ...pr,
     plmEcrNumber: plm || `NORN-${pr.id}`,
-    inputsDigest: digestOf(stageInfos(ctx, pr)),
+    inputsDigest: approvalDigest(ctx, pr),
   });
   const outcome = reconcile(ctx, pr.id);
   const deep = enqueueDeepOnOpen(ctx, pr.id);
+  // The other open ECRs compare themselves with this one in s4: re-run them.
+  const others = first && call ? reconcileAllOpen(ctx, call, `ECR ${pr.id} filed`, pr.id) : 0;
   return {
     prId: pr.id,
     entity: `pull_request:${pr.id}`,
-    summary: `opened ECR '${title}' (${plm || `NORN-${pr.id}`}) on baseline v${base}${first ? ', change request rev 1' : ''}; ${outcome}${deep ? `; ${deep} deep run(s) requested by config` : ''}`,
+    summary: `opened ECR '${title}' (${plm || `NORN-${pr.id}`}) on baseline v${base}${first ? ', change request rev 1' : ''}; ${outcome}${deep ? `; ${deep} deep run(s) requested by config` : ''}${others ? `; ${others} other open ECR(s) checked against it` : ''}`,
   };
 }
 
 export const createPr = write(
   'create_pr',
   { plmEcrNumber: t.string(), title: t.string(), description: t.string() },
-  (ctx, a) => openPr(ctx, a)
+  (ctx, a, call) => openPr(ctx, a, undefined, call)
 );
 
 // A change request must be a JSON object naming the ECR it belongs to (the checks library's
@@ -251,11 +270,11 @@ function insertRevision(ctx: Ctx, prId: bigint, r: RevisionIn, digest: string) {
 export const ingestEcr = write(
   'ingest_ecr',
   { plmEcrNumber: t.string(), title: t.string(), description: t.string(), changeRequestJson: t.string(), source: t.string(), sourceRef: t.string() },
-  (ctx, a) => {
+  (ctx, a, call) => {
     const plm = nonEmpty(a.plmEcrNumber, 'plmEcrNumber', 64);
     const rev: RevisionIn = { changeRequestJson: a.changeRequestJson, source: a.source, sourceRef: a.sourceRef };
     const existing = ctx.db.pullRequest.plmEcrNumber.find(plm);
-    if (!existing) return openPr(ctx, { plmEcrNumber: plm, title: a.title, description: a.description }, rev);
+    if (!existing) return openPr(ctx, { plmEcrNumber: plm, title: a.title, description: a.description }, rev, call);
 
     const digest = checkedChangeRequest(a.changeRequestJson, plm);
     const title = nonEmpty(a.title, 'title', 200);
@@ -276,10 +295,13 @@ export const ingestEcr = write(
       const row = insertRevision(ctx, existing.id, rev, digest);
       what.push(`change request rev ${row.seq}`);
     }
+    const own = reconcile(ctx, existing.id);
+    // A new change request is what the other open ECRs compare themselves with in s4.
+    const others = crChanged ? reconcileAllOpen(ctx, call, `${plm} change request rev updated`, existing.id) : 0;
     return {
       prId: existing.id,
       entity: `pull_request:${existing.id}`,
-      summary: `${plm} from ${rev.source}: ${what.join(' and ')} updated; ${reconcile(ctx, existing.id)}`,
+      summary: `${plm} from ${rev.source}: ${what.join(' and ')} updated; ${own}${others ? `; ${others} other open ECR(s) checked against it` : ''}`,
     };
   }
 );
@@ -314,6 +336,90 @@ export const recordBaseline = write(
   }
 );
 
+// The PLM has released the change order for this ECR (#72): its number, by the PLM's ECR number, as
+// the ingest loop reports it. A worker puts the ERP change package on it once the ECR is released in
+// Norn too (status merged).
+export const recordEcoRelease = write(
+  'record_eco_release',
+  { plmEcrNumber: t.string(), ecoNumber: t.string(), source: t.string(), sourceRef: t.string() },
+  (ctx, a) => {
+    const plm = nonEmpty(a.plmEcrNumber, 'plmEcrNumber', 64);
+    const found = ctx.db.pullRequest.plmEcrNumber.find(plm);
+    if (!found) throw new SenderError(`Norn has no ECR ${plm}`);
+    const pr = getPr(ctx, found.id);
+    const ecoNumber = nonEmpty(a.ecoNumber, 'ecoNumber', 64);
+    const source = nonEmpty(a.source, 'source', 32);
+    if (a.sourceRef.length > 200) throw new SenderError('sourceRef is too long (max 200 characters)');
+    if (pr.status === 'closed') throw new SenderError(`ECR ${pr.id} is closed; a closed ECR has no change order`);
+    const seen = ctx.db.ecoRelease.prId.find(pr.id);
+    if (seen?.ecoNumber === ecoNumber) return null;
+    if (seen) throw new SenderError(`ECR ${pr.id} was released as ${seen.ecoNumber}; a released change order keeps its number, so ${ecoNumber} is refused`);
+    ctx.db.ecoRelease.insert({ prId: pr.id, ecoNumber, source, sourceRef: a.sourceRef, recordedBy: ctx.sender, recordedAt: ctx.timestamp });
+    return { prId: pr.id, entity: `eco_release:${pr.id}`, summary: `change order ${ecoNumber} released (${source})` };
+  }
+);
+
+// The ERP change package on a released ECO (#72), from a worker: what a person enters in the ERP, with
+// each line's status on the ERP read named. Norn never writes to the ERP (#71). Recording the same
+// package again on a new ERP read only moves erpBaseline, and adds no log row.
+export const recordErpPackage = write(
+  'record_erp_package',
+  {
+    prId: t.u64(),
+    ecoNumber: t.string(),
+    s2RunId: t.u64(),
+    erpBaseline: t.string(),
+    releaseJson: t.string(),
+    packageJson: t.string(),
+    lines: t.u32(),
+    entered: t.u32(),
+    conflicts: t.u32(),
+    notesJson: t.string(),
+  },
+  (ctx, a) => {
+    const pr = getPr(ctx, a.prId);
+    if (pr.status !== 'merged') throw new SenderError(`ECR ${pr.id} is ${pr.status}; an ERP change package is for a released ECO`);
+    const eco = ctx.db.ecoRelease.prId.find(pr.id);
+    if (!eco) throw new SenderError(`ECR ${pr.id} has no change order number from the PLM yet`);
+    if (eco.ecoNumber !== a.ecoNumber) throw new SenderError(`ECR ${pr.id} was released as ${eco.ecoNumber}, not ${a.ecoNumber}`);
+    const run = ctx.db.checkRun.id.find(a.s2RunId);
+    if (!run || run.prId !== pr.id || run.stage !== 's2_cost' || run.status !== 'done')
+      throw new SenderError(`check run ${a.s2RunId} is not a finished s2_cost run of ECR ${pr.id}`);
+    const erpBaseline = nonEmpty(a.erpBaseline, 'erpBaseline', 128);
+    if (!ctx.db.baselineSnapshot.hash.find(erpBaseline)) throw new SenderError(`ERP baseline ${erpBaseline.slice(0, 12)} has not been recorded`);
+    for (const [what, v] of [['releaseJson', a.releaseJson], ['packageJson', a.packageJson], ['notesJson', a.notesJson]] as const) parseJson(v, what);
+    // A package lists every line of every BOM it versions, so a large assembly runs to a few hundred KB.
+    if (a.releaseJson.length + a.packageJson.length + a.notesJson.length > 2_000_000)
+      throw new SenderError('releaseJson, packageJson and notesJson are too long (max 2,000,000 characters together)');
+    if (a.entered + a.conflicts > a.lines) throw new SenderError(`${a.entered} entered and ${a.conflicts} in conflict is more than the ${a.lines} line(s)`);
+
+    const prev = ctx.db.erpPackage.prId.find(pr.id);
+    const row = {
+      prId: pr.id,
+      ecoNumber: a.ecoNumber,
+      s2RunId: a.s2RunId,
+      erpBaseline,
+      releaseJson: a.releaseJson,
+      packageJson: a.packageJson,
+      lines: a.lines,
+      entered: a.entered,
+      conflicts: a.conflicts,
+      notesJson: a.notesJson,
+      builtBy: ctx.sender,
+      updatedAt: ctx.timestamp,
+    };
+    if (prev) {
+      const same = prev.s2RunId === row.s2RunId && prev.releaseJson === row.releaseJson && prev.packageJson === row.packageJson && prev.notesJson === row.notesJson;
+      ctx.db.erpPackage.prId.update({ ...prev, ...row });
+      if (same) return null;
+    } else {
+      ctx.db.erpPackage.insert({ ...row, builtAt: ctx.timestamp });
+    }
+    const state = a.lines === 0 ? 'nothing to enter' : `${a.entered} of ${a.lines} line(s) entered${a.conflicts ? `, ${a.conflicts} in conflict` : ''}`;
+    return { prId: pr.id, entity: `erp_package:${pr.id}`, summary: `ERP change package for ${a.ecoNumber}: ${state} (ERP ${erpBaseline.slice(0, 12)})` };
+  }
+);
+
 // The ECR text is what the extraction stage reads, so an edit makes a finished extraction stale.
 export const editPrText = write('edit_pr_text', { prId: t.u64(), description: t.string() }, (ctx, a) => {
   const pr = getPr(ctx, a.prId);
@@ -337,15 +443,12 @@ export const setPrStatus = write(
 
     if (to === 'approved') {
       // Approval is of a specific forecast: every cheap check must have finished on today's inputs.
-      const infos = stageInfos(ctx, pr);
-      const notReady = STAGE_ORDER.filter(s => STAGES[s]!.tier === 'code').filter(
-        s => ![...ctx.db.checkRun.prId.filter(pr.id)].some(r => r.stage === s && r.status === 'done' && r.inputHash === infos[s]!.hash)
-      );
+      const notReady = codeStagesNotDone(ctx, pr);
       if (notReady.length)
         throw new SenderError(`cannot approve ECR ${pr.id}: checks not finished on current inputs (${notReady.join(', ')})`);
       if (call.decision.effect === 'downgrade') {
-        // The policy gate allows a recommendation but not an approval. The recommendation record
-        // itself comes with #43; for now the log row is the record.
+        // The policy gate allows a recommendation but not an approval: file it, with who and why.
+        recordRecommendation(ctx, call, pr, 'approve_ecr_at_tier');
         return {
           prId: pr.id,
           entity: `pull_request:${pr.id}`,
@@ -359,10 +462,28 @@ export const setPrStatus = write(
       const main = currentMain(ctx);
       if (pr.baseVersion !== main.version)
         throw new SenderError(`ECR ${pr.id} is based on baseline v${pr.baseVersion}, but the baseline is at v${main.version}; it must be re-checked first`);
+      // Never released on checks that have not finished on its current inputs, nor at a tier other than the one it was approved at.
+      assertReleasable(ctx, pr);
+      if (call.decision.effect === 'downgrade') {
+        recordRecommendation(ctx, call, pr, 'release_eco');
+        return {
+          prId: pr.id,
+          entity: `pull_request:${pr.id}`,
+          summary: `recommends release; not released (${call.decision.reason})`,
+          outcome: 'downgraded',
+        };
+      }
     }
 
     // Finish with this ECR's own row first, so the re-check of other ECRs below never touches it.
     ctx.db.pullRequest.id.update({ ...pr, status: to, updatedAt: ctx.timestamp });
+    // The approval record follows the status: one is made when the ECR is approved, and one that
+    // stands ends when the ECR leaves 'approved' (a release ends it below, with the version it made).
+    if (to === 'approved') recordApproval(ctx, call, pr, 'tier');
+    else if (from === 'approved' && to !== 'merged') {
+      const standing = standingApproval(ctx, pr.id);
+      if (standing) endApproval(ctx, standing, 'withdrawn', to === 'closed' ? 'the ECR was closed' : `moved back to ${to} by ${call.actor.name}`);
+    }
 
     if (to === 'merged' || to === 'closed') {
       // Nothing left to compute for an ECR that is released or abandoned.
@@ -386,15 +507,20 @@ export const setPrStatus = write(
       // it, with a log row on each ECR whose state changed.
       const row = appendMain(ctx, { cause: 'eco', mergedPrId: pr.id, note: `ECO from ECR ${pr.id}: ${pr.title}` });
       ctx.db.pullRequest.id.update({ ...getPr(ctx, pr.id), mergedVersion: row.version });
+      const standing = standingApproval(ctx, pr.id);
+      if (standing) endApproval(ctx, standing, 'released', `released as baseline v${row.version}`);
       const n = reconcileAllOpen(ctx, call, `ECR ${pr.id} released as baseline v${row.version}`);
       extra = `; baseline v${row.parent} -> v${row.version}, re-checked ${n} other open ECR(s)`;
     } else if (from === 'closed') {
       // Reopening: move onto today's baseline and replace whatever went out of date meanwhile.
       extra = `; ${reconcile(ctx, pr.id)}`;
+      reconcileAllOpen(ctx, call, `ECR ${pr.id} reopened`, pr.id); // its change request is a peer again
+    } else if (to === 'closed') {
+      reconcileAllOpen(ctx, call, `ECR ${pr.id} closed`, pr.id); // no longer a peer
     }
     return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: `${from} -> ${to}${extra}` };
   },
-  { downgradable: a => a.status === 'approved' }
+  { downgradable: a => a.status === 'approved' || a.status === 'merged' }
 );
 
 export const addComment = write(
@@ -413,6 +539,45 @@ export const addComment = write(
     });
     return { prId: a.prId, entity: `comment:${c.id}`, summary: `commented${c.anchor ? ` on ${c.anchor}` : ''}` };
   }
+);
+
+// ---------------------------------------------------------------------------------------------
+// The fast track (#22, #43). An agent (or a person) asks to approve an ECR on the fast track and
+// brings its answers to the configuration's tests, with the classes it proposes. The gate decides
+// from the company's rules: approve, approve with a draw for the blind second check, recommend (to
+// the people who decide), or escalate. The answers are stored with the decision either way.
+// ---------------------------------------------------------------------------------------------
+
+export const requestFastTrackApproval = write(
+  'request_fast_track_approval',
+  {
+    prId: t.u64(),
+    answers: t.array(TestAnswer),
+    companyClass: t.string(), // the company class the agent proposes; '' for none
+    regulatoryClass: t.string(),
+    triggers: t.array(t.string()), // the named conditions the agent saw on the ECR (its own report)
+  },
+  (ctx, a, call) => {
+    const pr = getPr(ctx, a.prId);
+    if (pr.status !== 'review') throw new SenderError(`ECR ${pr.id} is ${pr.status}; the fast track decides ECRs in review`);
+    if (call.decision.detail === undefined)
+      throw new SenderError("no company configuration is stored: the fast track is the company's rule, and there is none to apply");
+    const notReady = codeStagesNotDone(ctx, pr);
+    if (notReady.length) throw new SenderError(`cannot approve ECR ${pr.id}: checks not finished on current inputs (${notReady.join(', ')})`);
+    if (call.decision.effect === 'downgrade') {
+      recordRecommendation(ctx, call, pr, 'approve_fast_track_ecr');
+      return {
+        prId: pr.id,
+        entity: `pull_request:${pr.id}`,
+        summary: `recommends approval; not approved (${call.decision.reason})`,
+        outcome: 'downgraded',
+      };
+    }
+    ctx.db.pullRequest.id.update({ ...pr, status: 'approved', updatedAt: ctx.timestamp });
+    recordApproval(ctx, call, pr, 'fast_track');
+    return { prId: pr.id, entity: `pull_request:${pr.id}`, summary: `review -> approved on the fast track (${call.decision.reason})` };
+  },
+  { downgradable: () => true }
 );
 
 // ---------------------------------------------------------------------------------------------
@@ -463,7 +628,7 @@ export const postImpactStatement = write(
     assumptions: t.array(StatementAssumption),
     claims: t.array(StatementClaim),
   },
-  (ctx, a) => {
+  (ctx, a, call) => {
     const required = (v: string, what: string, max: number) => {
       try {
         return nonEmpty(v, what, max);
@@ -485,8 +650,22 @@ export const postImpactStatement = write(
       if (!EVIDENCE.includes(e)) throw new Refusal(`${what}: evidence must be one of ${EVIDENCE.join(', ')}`);
     };
 
+    // A session started by a check run ('norn:check_run:7') may post only while that run still stands:
+    // the ECR's inputs have not changed since it read them. A session left over from an earlier
+    // change-request revision (or baseline) is refused even if some of its numbers happen to match.
+    // spawnedBy comes from the signed credential, not from the agent.
+    let checkRunId = 0n;
+    const started = /(?:^|:)check_run:(\d+)$/.exec(call.spawnedBy);
+    if (started) {
+      const run = ctx.db.checkRun.id.find(BigInt(started[1]!));
+      if (!run || run.prId !== pr.id) throw new Refusal(`this session was started by check run ${started[1]}, which is not a check run of ${pr.plmEcrNumber}`);
+      if (run.status !== 'done')
+        throw new Refusal(`check run ${run.id}, which started this session, is ${run.status}: ${pr.plmEcrNumber}'s inputs changed after the session read them (a new change-request revision, baseline or assumption), so its numbers are out of date. Post nothing; Norn starts a new session on the current numbers`);
+      checkRunId = run.id;
+    }
+
     // The newest result per key among runs that are still current ('done'; a stale run's are not).
-    const current = new Map<string, { id: bigint; label: string; unit: string; p10: number; p50: number; p90: number }>();
+    const current = new Map<string, { id: bigint; checkRunId: bigint; label: string; unit: string; p10: number; p50: number; p90: number }>();
     for (const r of ctx.db.checkResult.prId.filter(pr.id)) {
       if (ctx.db.checkRun.id.find(r.checkRunId)?.status !== 'done') continue;
       const seen = current.get(r.key);
@@ -507,6 +686,7 @@ export const postImpactStatement = write(
           throw new Refusal(`${what} is marked computation, so it keeps the label and unit of check result '${n.resultKey}' ('${r.label}', '${r.unit}'), not '${n.label}', '${n.unit}'`);
         if (r.p10 !== n.p10 || r.p50 !== n.p50 || r.p90 !== n.p90)
           throw new Refusal(`${what} is marked computation but differs from check result '${n.resultKey}' (${r.p10} / ${r.p50} / ${r.p90}); quote it exactly or mark it judgment`);
+        if (checkRunId === 0n) checkRunId = r.checkRunId; // no session run named: the run its first computation number came from
       }
     }
     for (const c of [...a.drivers, ...a.claims]) {
@@ -527,6 +707,7 @@ export const postImpactStatement = write(
       prId: pr.id,
       level: a.level,
       prRevision: pr.revision,
+      checkRunId,
       changeClass,
       route,
       headline,
@@ -541,10 +722,57 @@ export const postImpactStatement = write(
       prId: pr.id,
       entity: `impact_statement:${row.id}`,
       summary: `posted Level ${a.level} impact statement on ${pr.plmEcrNumber} (revision ${pr.revision}): ${headline.slice(0, 100)}`,
-      detail: { level: a.level, numbers: a.numbers.length, drivers: a.drivers.length, assumptions: a.assumptions.length, claims: a.claims.length },
+      detail: { level: a.level, numbers: a.numbers.length, drivers: a.drivers.length, assumptions: a.assumptions.length, claims: a.claims.length, checkRunId },
     };
   }
 );
+
+// ---------------------------------------------------------------------------------------------
+// Publication lease (#42). The publisher writes a statement into the PLM, which cannot refuse a
+// second identical write, so the write is taken in turns: claim, read the PLM, write, release.
+// A lease that is not released (the holder died) ends by itself.
+// ---------------------------------------------------------------------------------------------
+
+// Only Norn's own agents publish. The module has no stronger notion of "Norn" than a registered
+// agent principal with origin 'norn' (register_actor does not prove it), so this keeps out people,
+// outside agents, unregistered connections and job-scoped agents (the scope rule already denies
+// those every reducer but comments, assumptions and statements).
+const isNornAgent = (a: { kind: string; origin: string }) => a.kind === 'agent' && a.origin === 'norn';
+
+export const claimPublication = write(
+  'claim_publication',
+  { prId: t.u64(), statementId: t.u64(), processId: t.string(), leaseMs: t.u32() },
+  (ctx, a, call) => {
+    if (!isNornAgent(call.actor)) throw new SenderError(`[forbidden] ${call.actor.name} is not one of Norn's own agents; only they publish to the PLM`);
+    const pr = getPr(ctx, a.prId);
+    if (!ctx.db.impactStatement.id.find(a.statementId)) throw new SenderError(`statement ${a.statementId} does not exist`);
+    const processId = nonEmpty(a.processId, 'processId', 64);
+    if (a.leaseMs < 1000 || a.leaseMs > 300_000) throw new SenderError('a publication lease lasts 1 to 300 seconds');
+    const held = ctx.db.publicationClaim.prId.find(pr.id);
+    const now = ctx.timestamp.microsSinceUnixEpoch;
+    const mine = held && held.holder.isEqual(ctx.sender) && held.processId === processId;
+    // A thrown SenderError is the answer "someone else is writing": the caller's call rejects, atomically.
+    if (held && !mine && held.expiresAt.microsSinceUnixEpoch > now)
+      throw new SenderError(`[held] ${pr.plmEcrNumber} is being published by another holder until ${held.expiresAt.toISOString()}`);
+    const row = { prId: pr.id, statementId: a.statementId, holder: ctx.sender, processId, expiresAt: plusMs(ctx.timestamp, a.leaseMs) };
+    if (held) ctx.db.publicationClaim.prId.update(row);
+    else ctx.db.publicationClaim.insert(row);
+    return { prId: pr.id, entity: `publication_claim:${pr.id}`, summary: `claimed publishing statement ${a.statementId} to the PLM for ${a.leaseMs} ms` };
+  }
+);
+
+// Released by the connection that took it (and the process that took it); anyone else's release does
+// nothing. A lease that has run out may be cleared by any of Norn's agents, though claiming over it
+// works without that.
+export const releasePublication = write('release_publication', { prId: t.u64(), processId: t.string() }, (ctx, a, call) => {
+  const held = ctx.db.publicationClaim.prId.find(a.prId);
+  if (!held) return null;
+  const mine = held.holder.isEqual(ctx.sender) && held.processId === a.processId;
+  const expired = held.expiresAt.microsSinceUnixEpoch <= ctx.timestamp.microsSinceUnixEpoch;
+  if (!mine && !(expired && isNornAgent(call.actor))) return null;
+  ctx.db.publicationClaim.prId.delete(a.prId);
+  return null;
+});
 
 // ---------------------------------------------------------------------------------------------
 // Baseline parts (the connectors fill this in; only the external key exists so far)
@@ -628,6 +856,9 @@ export const recordAssumption = write(
       outcome = `baseline v${main.parent} -> v${main.version}, re-checked ${reconcileAllOpen(ctx, call, `baseline assumption ${key} rev ${row.rev}`)} open ECR(s)`;
     } else {
       outcome = reconcile(ctx, a.prId);
+      // The other open ECRs' s4 compares them with this one under its assumptions.
+      const others = reconcileAllOpen(ctx, call, `ECR ${a.prId} assumption ${key} rev ${row.rev}`, a.prId);
+      if (others) outcome += `; ${others} other open ECR(s) checked against it`;
     }
     return {
       prId: a.prId,
@@ -783,7 +1014,7 @@ const ResultInput = t.object('ResultInput', {
 export const completeCheck = write(
   'complete_check',
   { checkRunId: t.u64(), attempt: t.u32(), results: t.array(ResultInput) },
-  (ctx, a) => {
+  (ctx, a, call) => {
     const run = ownRun(ctx, a.checkRunId, a.attempt);
     for (const r of a.results) {
       if (![r.p10, r.p50, r.p90].every(Number.isFinite) || !(r.p10 <= r.p50 && r.p50 <= r.p90))
@@ -812,6 +1043,10 @@ export const completeCheck = write(
     }
     ctx.db.checkRun.id.update({ ...run, status: 'done', leaseExpiresAt: undefined, finishedAt: ctx.timestamp, note: '' });
     clearProgress(ctx, run.id);
+    // The last code check of an approved ECR whose inputs changed ends its re-check: the approval stands
+    // or is withdrawn now, and the log says which and why.
+    const settled = STAGES[run.stage]?.tier === 'code' ? settleApproval(ctx, run.prId) : '';
+    if (settled) call.log({ prId: run.prId, entity: `pull_request:${run.prId}`, summary: settled, spawnedBy: `check_run:${run.id}` });
     return { prId: run.prId, entity: `check_run:${run.id}`, summary: `${run.stage} done: ${a.results.length} result(s)`, spawnedBy: `check_run:${run.id}` };
   }
 );

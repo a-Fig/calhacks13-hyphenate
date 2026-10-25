@@ -12,7 +12,15 @@
     "spike:crash": "tsx src/spike/s4-crash.ts",
     "check:policy": "tsx src/checks-policy.ts",
     "ingest": "tsx src/ingest.ts",
-    "check:pipeline": "tsx src/checks-pipeline.ts"
+    "check:pipeline": "tsx src/checks-pipeline.ts",
+    "check:package": "tsx src/checks-package.ts",
+    "level1:dispatcher": "tsx src/level1/dispatcher.ts",
+    "level1:publisher": "tsx src/level1/publisher.ts",
+    "level1:e2e": "tsx src/level1/e2e.ts",
+    "test:level1": "tsx --test src/level1/*.test.ts",
+    "check:config": "tsx src/checks-config.ts",
+    "check:gate": "tsx src/checks-gate.ts",
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@norn/bindings": "*",

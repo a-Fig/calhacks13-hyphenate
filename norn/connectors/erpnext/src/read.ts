@@ -5,10 +5,10 @@
 
 import { createHash } from 'node:crypto';
 import type {
-  Baseline, BomLine, BuiltUnit, Item, ItemCode, Program, Sourcing, StockRow, VolumeRow, WorkCenter,
+  Baseline, BomLine, BuiltUnit, Item, ItemCode, Program, Sourcing, StockRow, SupplierConstraint, VolumeRow, WorkCenter,
 } from './baseline.ts';
 import { ErpnextClient } from './client.ts';
-import type { ErpnextOptions, StockLocationKey } from './options.ts';
+import type { ErpnextOptions, StockLocationKey, SupplierConstraintSource } from './options.ts';
 
 /** Where a baseline part came from: ERPNext's own records, or the fallback passed in the options. */
 export type PartSource = 'erpnext' | 'fallback' | 'none';
@@ -24,7 +24,7 @@ export interface ReadResult {
     readAt: string;
     readMs: number;
     requests: number;
-    counts: Record<keyof Baseline, number>;
+    counts: Record<Exclude<keyof Baseline, 'supplierConstraints'>, number> & { supplierConstraints?: number };
     sources: { volumePlan: PartSource; builtAircraft: PartSource };
     /** Things a reader should look at: an item with no current standard cost, a program with no BOM, ... */
     warnings: string[];
@@ -87,18 +87,24 @@ export async function readBaseline(opts: ErpnextOptions): Promise<ReadResult> {
   const quoteFields = ['name', 'item_code', 'price_list', 'supplier', 'price_list_rate', 'lead_time_days', 'valid_from', 'valid_upto',
     quoteF.priceP10, quoteF.priceP90, quoteF.leadWeeksP10, quoteF.leadWeeksP90, quoteF.qualified, quoteF.primary, quoteF.allocation].filter((f): f is string => !!f);
 
-  const [items, itemDefaults, boms, bomItems, bomOps, stations, prices, bins, serials, schedule] = await Promise.all([
+  const wcF = cf.workCenter?.externalId;
+  const [items, itemDefaults, boms, bomItems, bomOps, stations, prices, bins, serials, schedule, constraintRows] = await Promise.all([
     c.list('Item', { fields: itemFields }),
     c.list('Item Default', { parent: 'Item', fields: ['parent', 'company', 'default_supplier'] }),
     c.list('BOM', { filters: [co, ['docstatus', '=', 1], ['is_active', '=', 1], ['is_default', '=', 1]], fields: ['name', 'item', 'quantity'] }),
     c.list('BOM Item', { parent: 'BOM', filters: [['docstatus', '=', 1]], fields: ['parent', 'item_code', 'stock_qty', 'qty', 'idx'] }),
     c.list('BOM Operation', { parent: 'BOM', filters: [['docstatus', '=', 1]], fields: ['parent', 'workstation', 'time_in_mins', 'idx'] }),
-    c.list('Workstation', { fields: ['name', 'hour_rate'] }),
+    c.list('Workstation', { fields: wcF ? ['name', 'hour_rate', wcF] : ['name', 'hour_rate'] }),
     c.list('Item Price', { filters: [['price_list', 'in', [opts.standardCostPriceList, opts.supplierPriceList]]], fields: quoteFields }),
     c.list('Bin', { fields: ['item_code', 'warehouse', 'actual_qty', 'ordered_qty'] }),
     readSerials(c, opts),
     readSchedule(c, opts),
+    opts.supplierConstraints ? readConstraintRows(c, opts.supplierConstraints) : undefined,
   ]);
+
+  // Work center ids the company's other systems use, when the ERP holds them; otherwise the ERPNext name.
+  const centerId = new Map<string, string>(stations.filter((w) => wcF && w[wcF]).map((w) => [w.name, String(w[wcF!])]));
+  const wid = (name: string) => centerId.get(name) ?? name;
 
   // ---- items, programs, BOM -----------------------------------------------------------------
   const itemRow = new Map<ItemCode, (typeof items)[number]>(items.map((i) => [i.name, i]));
@@ -125,11 +131,11 @@ export async function readBaseline(opts: ErpnextOptions): Promise<ReadResult> {
     if (!parent) continue;
     const cur = labor.get(parent.item) ?? { hours: 0 };
     cur.hours += num(o.time_in_mins) / 60 / parent.quantity;
-    cur.workCenter ??= o.workstation || undefined;
+    cur.workCenter ??= o.workstation ? wid(o.workstation) : undefined;
     labor.set(parent.item, cur);
   }
 
-  const workCenters: WorkCenter[] = stations.map((w) => ({ id: w.name, laborRatePerHour: r6(num(w.hour_rate)) }));
+  const workCenters: WorkCenter[] = stations.map((w) => ({ id: wid(w.name), laborRatePerHour: r6(num(w.hour_rate)) }));
 
   // ---- prices: standard cost and supplier quotes ----------------------------------------------
   const costRow = new Map<ItemCode, (typeof prices)[number]>();
@@ -252,6 +258,11 @@ export async function readBaseline(opts: ErpnextOptions): Promise<ReadResult> {
     volumePlan: volumePlan.sort((a, b) => cmp(a.month, b.month) || cmp(a.program, b.program)),
     builtAircraft: builtAircraft.sort((a, b) => cmp(a.program, b.program) || a.serial - b.serial),
   };
+  // Only a company that keeps constraints in its ERP configures them; without the setting the key is absent, so the hash is as before.
+  if (opts.supplierConstraints && constraintRows) {
+    const supplied = new Set(baseline.sourcing.map((s) => s.supplier));
+    baseline.supplierConstraints = mapSupplierConstraints(opts.supplierConstraints, constraintRows.parents, constraintRows.items, supplied, warnings);
+  }
   return {
     baseline, asOf, hash: hashOf(baseline),
     meta: {
@@ -278,4 +289,70 @@ async function readSerials(c: ErpnextClient, opts: ErpnextOptions): Promise<{ na
   const tops = await c.list('Item', { filters: [['item_group', '=', opts.programItemGroup]], fields: ['name'] });
   if (!tops.length) return [];
   return c.list('Serial No', { filters: [['company', '=', opts.company], ['item_code', 'in', tops.map((t) => t.name)]], fields: ['name', 'serial_no', 'item_code', 'posting_date'] });
+}
+
+/** Raw rows of the constraint doctype and its items table, as ERPNext returns them. */
+interface ConstraintRows { parents: Record<string, any>[]; items: Record<string, any>[] }
+
+/** The constraint doctype and its child table of items: two list requests, GET only. */
+async function readConstraintRows(c: ErpnextClient, src: SupplierConstraintSource): Promise<ConstraintRows> {
+  const f = src.fields;
+  const fields = ['name', f.id, f.supplier, f.kind, f.capacityPerYear, f.windowFrom, f.windowTo, f.description, f.slotCadenceMonths,
+    f.bundleWithinWeeks, f.bundleSecondQualificationDiscount, f.bundlePriceBreak].filter((x): x is string => !!x);
+  const [parents, items] = await Promise.all([
+    c.list(src.doctype, { fields }),
+    c.list(src.items.doctype, { parent: src.doctype, fields: ['parent', src.items.itemField, 'idx'] }),
+  ]);
+  return { parents, items };
+}
+
+/**
+ * ERPNext rows to the baseline's `supplierConstraints`. Frappe leaves null fields out and stores an unset number as 0,
+ * so a 0 or a missing value means "not stated". Sorted by id, items by code, so the baseline hash is stable.
+ * A row with an unknown kind, or no id, supplier or items is skipped with a warning. A constraint whose supplier no sourcing
+ * row names is kept, with a warning: the supply check matches a constraint to the sourcing rows by that exact string, so it
+ * will find nothing to apply it to, and the warning says why.
+ */
+export function mapSupplierConstraints(
+  src: SupplierConstraintSource, parents: Record<string, any>[], itemRows: Record<string, any>[], sourcingSuppliers: Set<string>, warnings: string[],
+): SupplierConstraint[] {
+  const f = src.fields;
+  const itemsOf = new Map<string, ItemCode[]>();
+  for (const r of itemRows) {
+    const code = r[src.items.itemField];
+    if (code) itemsOf.set(r.parent, [...(itemsOf.get(r.parent) ?? []), String(code)]);
+  }
+  const positive = (v: unknown) => { const n = num(v); return n > 0 ? r6(n) : undefined; };
+  const out: SupplierConstraint[] = [];
+  for (const row of parents) {
+    const id = String(row[f.id] ?? '');
+    const supplier = String(row[f.supplier] ?? '');
+    const kind = row[f.kind];
+    const items = [...new Set(itemsOf.get(row.name) ?? [])].sort(cmp);
+    if (!id || !supplier || !items.length || (kind !== 'qualification_slot' && kind !== 'capacity')) {
+      warnings.push(`supplier constraint ${row.name} skipped: it needs an id, a supplier, items and a kind of qualification_slot or capacity`);
+      continue;
+    }
+    if (!sourcingSuppliers.has(supplier)) warnings.push(`supplier constraint ${id}: no sourcing row names its supplier ${supplier}`);
+    const c: SupplierConstraint = { id, supplier, kind, items };
+    const capacity = f.capacityPerYear ? positive(row[f.capacityPerYear]) : undefined;
+    if (capacity !== undefined) c.capacityPerYear = capacity;
+    const from = f.windowFrom ? row[f.windowFrom] : undefined;
+    const to = f.windowTo ? row[f.windowTo] : undefined;
+    if (from && to) c.window = { from: String(from), to: String(to) };
+    const description = f.description ? String(row[f.description] ?? '').trim() : '';
+    if (description) c.description = description;
+    const cadence = f.slotCadenceMonths ? positive(row[f.slotCadenceMonths]) : undefined;
+    if (cadence !== undefined) c.slotCadenceMonths = cadence;
+    const weeks = f.bundleWithinWeeks ? positive(row[f.bundleWithinWeeks]) : undefined;
+    if (weeks !== undefined) {
+      c.bundle = { withinWeeks: weeks };
+      const discount = f.bundleSecondQualificationDiscount ? positive(row[f.bundleSecondQualificationDiscount]) : undefined;
+      const priceBreak = f.bundlePriceBreak ? positive(row[f.bundlePriceBreak]) : undefined;
+      if (discount !== undefined) c.bundle.secondQualificationDiscount = discount;
+      if (priceBreak !== undefined) c.bundle.priceBreak = priceBreak;
+    }
+    out.push(c);
+  }
+  return out.sort((a, b) => cmp(a.id, b.id));
 }

@@ -5,13 +5,14 @@
 // event stream. What the module does not hold yet (reviewers, the approval route as steps) is a
 // labelled mock built from the change request's seats.
 import type { CheckResultRow } from '../../../../checks/src/rows.ts';
-import { fromChecks, monthLabel } from '../adapter.ts';
+import { fromChecks, monthLabel, type ChecksView } from '../adapter.ts';
 import { likelihoodWord } from '../fit.ts';
 import type {
   ActivityEvent, ActorKind, AgentRun, ChangeClass, Check, CutIn, EcrSummary, Evidence, Figure, ImpactAssessment,
   MockSection, Origin, Revision, RouteStep, StatementView, Supply, Trace,
 } from '../types.ts';
 import { changedItems } from './changes.ts';
+import { dateTime, staleNote } from '../../ui/fmt.ts';
 import { personOf, SEATS } from './directory.ts';
 
 // ---------------------------------------------------------------- the rows, as much of them as we read
@@ -21,7 +22,7 @@ interface Id { toHexString(): string }
 export interface PrRow { id: bigint; plmEcrNumber: string; title: string; description: string; status: string; revision: number; createdBy: Id; createdAt: Ts; updatedAt: Ts }
 export interface RevisionRow { id: bigint; prId: bigint; seq: number; changeRequestJson: string; source: string; current: boolean; createdBy: Id; createdAt: Ts }
 export interface RunRow { id: bigint; prId: bigint; stage: string; status: string; note: string; createdAt: Ts; finishedAt: Ts | undefined }
-export interface ResultRow { id: bigint; checkRunId: bigint; prId: bigint; key: string; label: string; unit: string; p10: number; p50: number; p90: number; detailJson: string; mock: boolean }
+export interface ResultRow { id: bigint; checkRunId: bigint; prId: bigint; key: string; label: string; unit: string; p10: number; p50: number; p90: number; detailJson: string; mock: boolean; createdAt?: Ts }
 export interface StatementRow {
   id: bigint; prId: bigint; level: number; prRevision: number; changeClass: string; route: string; headline: string;
   numbers: { key: string; label: string; unit: string; p10: number; p50: number; p90: number; evidence: string; resultKey: string }[];
@@ -59,6 +60,73 @@ function currentCr(s: Snapshot, pr: PrRow): any {
   return row ? parse(row.changeRequestJson) : {};
 }
 
+// ---------------------------------------------------------------- the cost run behind a page
+
+const COST_ROWS = ['detail', 'net_total_year_one', 'one_time_total', 'recurring_year_one'];
+
+/**
+ * The cost page of one run's rows, or why there is none. A cost run that returns only a per-unit estimate
+ * (the worker's fallback for an ECR without a structured revision) has no `detail` row, and fromChecks()
+ * would throw; the page then shows "not available" instead.
+ */
+export function costViewOf(rows: CheckResultRow[]): { view: ChecksView; why?: undefined } | { view?: undefined; why: string } {
+  const keys = new Set(rows.map(r => r.key));
+  if (COST_ROWS.some(k => !keys.has(k))) {
+    return { why: 'Cost not available for this revision: the cost check returned a per-unit estimate only, with no itemised cost page.' };
+  }
+  try {
+    return { view: fromChecks(rows) };
+  } catch (e) {
+    return { why: `Cost not available for this revision: Norn could not read the cost check's output (${e instanceof Error ? e.message : String(e)}).` };
+  }
+}
+
+interface CostPick {
+  run?: RunRow;
+  /** The numbers are from a run an input change has replaced. */
+  stale?: 'rechecking' | 'failed';
+  view?: ChecksView;
+  why?: string;
+}
+
+/**
+ * The cost run a page shows: the newest finished one. While a replacement waits for a worker, the page keeps
+ * the last numbers (the newest stale run that has results) and says so; when the replacement failed or was
+ * blocked, it keeps them and says that instead.
+ */
+function costFor(s: Snapshot, runs: RunRow[]): CostPick {
+  const hasResults = (r: RunRow) => s.results.some(x => x.checkRunId === r.id);
+  const done = newest(runs, r => r.stage === 's2_cost' && r.status === 'done');
+  const prev = done ? undefined : newest(runs, r => r.stage === 's2_cost' && r.status === 'stale' && hasResults(r));
+  const run = done ?? prev;
+  if (!run) return {};
+  let stale: CostPick['stale'];
+  if (prev) {
+    const next = newest(runs, r => r.stage === 's2_cost' && live(r));
+    stale = next && (next.status === 'queued' || next.status === 'running') ? 'rechecking' : 'failed';
+  }
+  return { run, stale, ...costViewOf(s.results.filter(r => r.checkRunId === run.id).map(toRow)) };
+}
+
+/** The reducers' status words, in the business's words. */
+const STATUS_WORD: Record<string, string> = { draft: 'submitted', review: 'in review', approved: 'approved', merged: 'released', closed: 'rejected' };
+const STATUS_RE = Object.keys(STATUS_WORD).join('|');
+
+/** A reducer's log summary, with status changes ("approved -> merged") in the business's words. */
+export function plainSummary(text: string): string {
+  return text
+    .replace(new RegExp(`\\b(${STATUS_RE}) -> (${STATUS_RE})\\b`, 'g'), (_m, from: string, to: string) => `moved from ${STATUS_WORD[from]} to ${STATUS_WORD[to]}`)
+    .replace(/\bmerged\b/g, 'released')
+    .replace(/ -> /g, ' to ');
+}
+
+// The module's action names, in the words a person at Bowman would use.
+const ACTION_WORD: Record<string, string> = {
+  ingest_ecr: 'take in the ECR', complete_check: 'record a check result', record_assumption: 'record an assumption',
+  set_pr_status: 'change the ECR status', post_impact_statement: 'post an impact statement', set_config: 'change the company config',
+  edit_pr_text: 'edit the ECR text',
+};
+
 const principalName = (s: Snapshot, id: Id) => s.principals.find(p => p.identity.toHexString() === id.toHexString())?.name ?? id.toHexString().slice(0, 8);
 
 // ---------------------------------------------------------------- the list
@@ -66,15 +134,16 @@ const principalName = (s: Snapshot, id: Id) => s.principals.find(p => p.identity
 export function buildSummary(s: Snapshot, pr: PrRow): EcrSummary {
   const cr = currentCr(s, pr);
   const runs = s.runs.filter(r => r.prId === pr.id);
-  const s2 = newest(runs, r => r.stage === 's2_cost' && r.status === 'done');
-  const net = s2 ? s.results.find(r => r.checkRunId === s2.id && r.key === 'net_total_year_one') : undefined;
-  const detail = s2 ? s.results.find(r => r.checkRunId === s2.id && r.key === 'detail') : undefined;
+  const pick = costFor(s, runs);
+  const s2 = pick.run;
+  const net = s2 && pick.view ? s.results.find(r => r.checkRunId === s2.id && r.key === 'net_total_year_one') : undefined;
+  const detail = s2 && pick.view ? s.results.find(r => r.checkRunId === s2.id && r.key === 'detail') : undefined;
   const d = detail ? parse(detail.detailJson) : undefined;
   const need = (d?.flags ?? []).filter((f: any) => f.kind === 'needs_estimate').length;
   const stmt = newest(s.statements.filter(x => x.prId === pr.id), () => true);
   const latest = newest(s.actions.filter(a => a.prId === pr.id && a.reducer !== 'report_progress' && a.reducer !== 'heartbeat_check'), () => true);
   const active = runs.filter(live);
-  const checks: EcrSummary['checks'] = active.some(r => r.status === 'queued' || r.status === 'running') ? 'running' : need > 0 || d?.bomDelta?.ok === false ? 'attention' : s2 ? 'passed' : undefined;
+  const checks: EcrSummary['checks'] = active.some(r => r.status === 'queued' || r.status === 'running') ? 'running' : pick.why || pick.stale === 'failed' || need > 0 || d?.bomDelta?.ok === false ? 'attention' : s2 ? 'passed' : undefined;
   const nComments = s.comments.filter(c => c.prId === pr.id).length;
   const companyClass = /Class\s+(I{1,2})\b/.exec(stmt?.changeClass ?? '')?.[1] ?? cr.companyClass ?? 'I';
   const faa = /\b(major|minor)\b/i.exec(stmt?.changeClass ?? '')?.[1]?.toLowerCase() ?? cr.faaClass ?? 'minor';
@@ -91,14 +160,16 @@ export function buildSummary(s: Snapshot, pr: PrRow): EcrSummary {
     cost: net && d ? { p10: net.p10, p50: net.p50, p90: net.p90, point: parse(net.detailJson).point, from: d.window?.from } : undefined,
     level: stmt ? (stmt.level as 1 | 2 | 3) : undefined,
     lastActivity: latest ? iso(latest.at) : iso(pr.updatedAt),
-    lastActivityBy: latest ? latest.summary.slice(0, 60) : 'Opened',
+    lastActivityBy: latest ? plainSummary(latest.summary).slice(0, 60) : 'Opened',
     originator: personOf(cr.originator),
     filedOn: cr.filedOn ?? iso(pr.createdAt).slice(0, 10),
-    flag: need > 0 ? `${need} cost line${need > 1 ? 's' : ''} need an estimate` : d?.bomDelta?.ok === false ? 'Conflicts with the baseline' : undefined,
+    flag: need > 0 ? `${need} cost line${need > 1 ? 's need' : ' needs'} an estimate` : d?.bomDelta?.ok === false ? 'Conflicts with the baseline' : undefined,
+    staleCost: pick.stale,
+    costNote: pick.why,
     comments: nComments,
     checks,
     change: mainItem ? `${mainItem.item}${mainItem.fromRev ? ` from Rev ${mainItem.fromRev} to Rev ${mainItem.toRev}` : ''}` : undefined,
-    hasAssessment: !!s2,
+    hasAssessment: !!pick.view,
   };
 }
 
@@ -124,7 +195,29 @@ const traceFor = (id: string, title: string, evidence: Evidence, summary: string
   id, title, evidence, summary, value, inputs: [], assumptions: [], producedBy: { check, actor: by, at },
 });
 
-function statementView(s: Snapshot, st: StatementRow, pr: PrRow, v: ReturnType<typeof fromChecks>, traces: Record<string, Trace>): StatementView {
+/** Where a statement's check-result numbers can be opened: the run the page shows, the run it was written on, or nowhere. */
+type StatementRun = { kind: 'same' } | { kind: 'earlier'; view: ChecksView; finishedAt: string } | { kind: 'gone' };
+
+/** The cost run a statement was written on: the newest one that had finished when it was posted. */
+function runForStatement(s: Snapshot, runs: RunRow[], st: StatementRow, shown: RunRow): StatementRun {
+  const posted = st.createdAt.microsSinceUnixEpoch;
+  // When a run's results were written. Not finishedAt: the module overwrites that when it marks the run stale.
+  const doneAt = (r: RunRow): bigint | undefined => {
+    const own = s.results.filter(x => x.checkRunId === r.id);
+    if (!own.length) return undefined;
+    const at = own.map(x => x.createdAt?.microsSinceUnixEpoch).filter((x): x is bigint => x !== undefined);
+    return at.length ? at.reduce((m, x) => (x > m ? x : m)) : (r.finishedAt ?? r.createdAt).microsSinceUnixEpoch;
+  };
+  const candidates = runs.filter(r => r.stage === 's2_cost' && (r.status === 'done' || r.status === 'stale'))
+    .map(r => ({ r, at: doneAt(r) })).filter((x): x is { r: RunRow; at: bigint } => x.at !== undefined && x.at <= posted);
+  const run = candidates.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))[0]?.r;
+  if (!run) return { kind: 'gone' };
+  if (run.id === shown.id) return { kind: 'same' };
+  const c = costViewOf(s.results.filter(r => r.checkRunId === run.id).map(toRow));
+  return c.view ? { kind: 'earlier', view: c.view, finishedAt: iso(run.finishedAt ?? run.createdAt) } : { kind: 'gone' };
+}
+
+function statementView(s: Snapshot, st: StatementRow, pr: PrRow, src: StatementRun, traces: Record<string, Trace>): StatementView {
   const author = principalName(s, st.author);
   const log = s.actions.find(a => a.entity === `impact_statement:${st.id}`);
   const authorKind: ActorKind = log?.actorOrigin === 'external' ? 'person_agent' : 'norn';
@@ -136,15 +229,27 @@ function statementView(s: Snapshot, st: StatementRow, pr: PrRow, v: ReturnType<t
     return id;
   };
   const e = (x: string): Evidence => (['fact', 'assumption', 'computation', 'judgment'].includes(x) ? (x as Evidence) : 'judgment');
+  // A number from the check results opens the trace of the run the statement was written on, not the newest run's.
+  const resultTrace = (key: string, value: { text: string; range?: string }): string | undefined => {
+    if (src.kind === 'same') return traces[key] ? key : undefined;
+    if (src.kind === 'gone') return undefined;
+    const t = src.view.traces[key];
+    if (!t) return undefined;
+    const id = `stmt:${st.id}:run:${key}`;
+    traces[id] = { ...t, id, value, summary: `From the cost run before the ECR changed (finished ${dateTime(src.finishedAt)}), not the one on the Impact tab. ${t.summary}`, inputs: t.inputs.map(i => ({ ...i, traceId: undefined })) };
+    return id;
+  };
   const fmt = (n: StatementRow['numbers'][number], x: number) =>
     n.unit === 'USD' ? (Math.abs(x) >= 1000 ? `$${Math.round(x).toLocaleString('en-US')}` : `$${x.toFixed(2)}`) : `${x}${n.unit ? ` ${n.unit}` : ''}`;
   return {
     id: String(st.id), level: st.level as 1 | 2 | 3, at, author, authorKind, headline: st.headline, changeClass: st.changeClass, route: st.route,
     numbers: st.numbers.map((n, i) => ({
       key: n.key, label: n.label, unit: n.unit, p10: n.p10, p50: n.p50, p90: n.p90, evidence: e(n.evidence),
-      traceId: n.resultKey && traces[n.resultKey]
-        ? n.resultKey
-        : synth(`n${i}`, n.label, e(n.evidence), `Stated in Norn's Level ${st.level} impact statement. It is not a check result.`, { text: fmt(n, n.p50), range: n.p10 !== n.p90 ? `${fmt(n, n.p10)} – ${fmt(n, n.p90)}` : undefined }),
+      traceId: n.resultKey && src.kind !== 'same'
+        ? resultTrace(n.resultKey, { text: fmt(n, n.p50), range: n.p10 !== n.p90 ? `${fmt(n, n.p10)} – ${fmt(n, n.p90)}` : undefined })
+        : n.resultKey && traces[n.resultKey]
+          ? n.resultKey
+          : synth(`n${i}`, n.label, e(n.evidence), `Stated in Norn's Level ${st.level} impact statement. It is not a check result.`, { text: fmt(n, n.p50), range: n.p10 !== n.p90 ? `${fmt(n, n.p10)} – ${fmt(n, n.p90)}` : undefined }),
     })),
     drivers: st.drivers.map((d, i) => ({ text: d.text, evidence: e(d.evidence), traceId: synth(`d${i}`, 'A driver', e(d.evidence), d.text) })),
     claims: st.claims.map((c, i) => ({ text: c.text, evidence: e(c.evidence), traceId: synth(`c${i}`, 'A claim', e(c.evidence), c.text) })),
@@ -156,6 +261,10 @@ function statementView(s: Snapshot, st: StatementRow, pr: PrRow, v: ReturnType<t
       traceId: traces[`in:${a.key}`] ? `in:${a.key}` : undefined,
     })),
     outdated: st.prRevision < pr.revision,
+    numbersNote: !st.numbers.some(n => n.resultKey) ? undefined
+      : src.kind === 'earlier' ? 'These figures come from an earlier cost run than the one on the Impact tab. Opening one shows that earlier run.'
+      : src.kind === 'gone' ? 'These figures come from a cost run that is no longer stored, so they cannot be opened to see where they came from.'
+      : undefined,
   };
 }
 
@@ -199,18 +308,20 @@ function agentRuns(s: Snapshot, pr: PrRow): ActivityEvent[] {
 export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | undefined {
   const runs = s.runs.filter(r => r.prId === pr.id);
   // While a new run waits for a worker, the page keeps the last numbers (the newest stale run that has
-  // results) and shows its checks as queued or running; with no results at all there is no page yet.
-  const s2 = newest(runs, r => r.stage === 's2_cost' && r.status === 'done') ?? newest(runs, r => r.stage === 's2_cost' && r.status === 'stale' && s.results.some(x => x.checkRunId === r.id));
-  if (!s2) return undefined;
+  // results) and shows its checks as queued or running; with no results, or no readable cost page, there is
+  // no page (the list row says why).
+  const pick = costFor(s, runs);
+  const s2 = pick.run;
+  const v = pick.view;
+  if (!s2 || !v) return undefined;
   const cr = currentCr(s, pr);
-  const v = fromChecks(s.results.filter(r => r.checkRunId === s2.id).map(toRow));
   const traces: Record<string, Trace> = { ...v.traces };
   const summary = buildSummary(s, pr);
 
   // ---- statements: the newest is Norn's bot comment, the earlier levels go in the timeline
   const stmts = s.statements.filter(x => x.prId === pr.id).sort((a, b) => Number(a.id - b.id));
   const latest = stmts[stmts.length - 1];
-  const statement = latest ? statementView(s, latest, pr, v, traces) : undefined;
+  const statement = latest ? statementView(s, latest, pr, runForStatement(s, runs, latest, s2), traces) : undefined;
   if (statement) {
     traces['stmt-class'] = traceFor('stmt-class', 'Change class and approval route', 'judgment', `${statement.changeClass}. Proposed route: ${statement.route}.`, { text: statement.changeClass }, statement.author, statement.at, `Impact statement, Level ${statement.level}`);
   }
@@ -231,7 +342,7 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
     },
     {
       id: 'cost', name: 'Cost', state: costRun && costRun.status !== 'done' ? runState(costRun) : need > 0 ? 'attention' : 'passed',
-      summary: `Net ${v.headline.year1.point !== undefined ? `$${Math.round(v.headline.year1.point).toLocaleString('en-US')}` : ''} in ${v.cost.window.label}${need ? `; ${need} line${need > 1 ? 's' : ''} need an estimate` : ''}`,
+      summary: `Net ${v.headline.year1.point !== undefined ? `$${Math.round(v.headline.year1.point).toLocaleString('en-US')}` : ''} in ${v.cost.window.label}${need ? `; ${need} line${need > 1 ? 's need' : ' needs'} an estimate` : ''}${pick.stale ? `. ${staleNote(pick.stale)}` : ''}`,
       by: 'Norn cost check',
     },
     {
@@ -292,21 +403,21 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
   });
   for (const a of s.actions.filter(x => x.prId === pr.id)) {
     const base = { id: `log:${a.id}`, at: iso(a.at), actor: a.actorName, actorKind: actorKind(a), onBehalfOf: a.onBehalfOf, spawnedBy: a.spawnedBy };
-    const why = `${allowed(a.policy)} · ${a.reducer}${a.outcome !== 'applied' ? `, ${a.outcome}` : ''}`;
-    if (a.reducer === 'ingest_ecr') events.push({ ...base, kind: 'policy', text: 'opened the ECR in Norn from the feed', detail: `${a.summary}. ${why}` });
+    const why = `${allowed(a.policy)} · ${ACTION_WORD[a.reducer] ?? a.reducer.replace(/_/g, ' ')}${a.outcome !== 'applied' ? `, ${a.outcome}` : ''}`;
+    if (a.reducer === 'ingest_ecr') events.push({ ...base, kind: 'policy', text: 'opened the ECR in Norn from the feed', detail: `${plainSummary(a.summary)}. ${why}` });
     else if (a.reducer === 'complete_check' && /^s[12]_/.test(a.summary)) {
       // A run an input change has since replaced is not shown: the timeline keeps the checks that stand.
       const ran = runs.find(r => `check_run:${r.id}` === a.entity);
       if (ran && !live(ran)) continue;
       const stage = /^(s\d_\w+)/.exec(a.summary)?.[1] ?? '';
-      events.push({ ...base, kind: 'ran_checks', text: `ran the ${CHECK_STAGES[stage]?.name.toLowerCase() ?? stage} check`, detail: `${a.summary}. ${why}` });
-    } else if (a.reducer === 'record_assumption') events.push({ ...base, kind: 'research', text: 'recorded an assumption', detail: `${a.summary}. ${why}` });
-    else if (a.reducer === 'set_pr_status') events.push({ ...base, kind: /approved/.test(a.summary) ? 'approved' : 'policy', text: a.summary, detail: why });
+      events.push({ ...base, kind: 'ran_checks', text: `ran the ${CHECK_STAGES[stage]?.name.toLowerCase() ?? stage} check`, detail: `${plainSummary(a.summary)}. ${why}` });
+    } else if (a.reducer === 'record_assumption') events.push({ ...base, kind: 'research', text: 'recorded an assumption', detail: `${plainSummary(a.summary)}. ${why}` });
+    else if (a.reducer === 'set_pr_status') events.push({ ...base, kind: a.outcome === 'applied' && /-> approved\b/.test(a.summary) ? 'approved' : 'policy', text: plainSummary(a.summary), detail: why });
     else if (a.reducer === 'post_impact_statement') {
       const st = stmts.find(x => `impact_statement:${x.id}` === a.entity);
       if (a.outcome === 'applied' && st) events.push({ ...base, kind: 'report', text: `posted the impact statement, Level ${st.level}`, detail: `${st.headline.slice(0, 160)} ${why}`, level: st.level as 1 | 2 | 3 });
-      else if (a.outcome !== 'applied') events.push({ ...base, kind: 'changes_requested', text: `was refused: ${a.summary.slice(0, 120)}`, detail: why });
-    } else if (a.reducer === 'set_config' || a.reducer === 'edit_pr_text') events.push({ ...base, kind: 'policy', text: a.summary.slice(0, 120), detail: why });
+      else if (a.outcome !== 'applied') events.push({ ...base, kind: 'changes_requested', text: `was refused: ${plainSummary(a.summary).slice(0, 120)}`, detail: why });
+    } else if (a.reducer === 'set_config' || a.reducer === 'edit_pr_text') events.push({ ...base, kind: 'policy', text: plainSummary(a.summary).slice(0, 120), detail: why });
   }
   for (const c of s.comments.filter(x => x.prId === pr.id)) {
     const p = s.principals.find(x => x.identity.toHexString() === c.author.toHexString());

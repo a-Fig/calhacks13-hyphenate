@@ -215,6 +215,7 @@
 .nx-row-labels { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .nx-row-sub { margin-top: 4px; font-size: 12px; color: var(--fgColor-muted, #59636e); }
 .nx-flag { color: var(--fgColor-attention, #9a6700); }
+.nx-flash { margin-bottom: 16px; }
 .nx-row-right {
   display: grid;
   grid-template-columns: 20px 64px 44px 86px;
@@ -671,3 +672,9 @@ button.nx-merge-head:hover { background: var(--bgColor-muted, #f6f8fa); }
 .nx-noact { cursor: default !important; }
 .nx-trail { display: inline-flex; align-items: center; gap: 4px; color: var(--fgColor-default, #1f2328); font-weight: 600; }
 .nx-by { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.nx-statebadge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 2em; font-size: 14px; font-weight: 500; line-height: 20px; color: #fff; white-space: nowrap; }
+.nx-statebadge.sm { padding: 0 8px; font-size: 12px; line-height: 24px; }
+.nx-statebadge-open { background: var(--bgColor-open-emphasis, #1f883d); }
+.nx-statebadge-done { background: var(--bgColor-done-emphasis, #8250df); }
+.nx-statebadge-closed { background: var(--bgColor-closed-emphasis, #cf222e); }
+.nx-statebadge-draft { background: var(--bgColor-neutral-emphasis, #59636e); }

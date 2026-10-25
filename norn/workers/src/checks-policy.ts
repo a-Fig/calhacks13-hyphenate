@@ -1,6 +1,6 @@
 // Checks for the policy gate (allow, deny, downgrade) against the test module, which registers
-// a few rules (module-test/src/rules.ts); the real module has none until #43.
-//   npm run test-db:publish && npm run check:policy      (from norn/)
+// a few rules (module-test/src/rules.ts); the real module's company gate (gate.ts, #43) is registered here too, and idle without a stored configuration; checks-gate.ts covers it.
+//   npm run test-db:publish && npm run check:policy      (from norn/); NORN_DB=<scratch> runs it on another database you published the test module to
 import * as TestBindings from '@norn/module-test/bindings';
 import { connect, subscribe, type Client } from './connect.ts';
 import { TABLES, kit, recorder } from './testkit.ts';
@@ -8,7 +8,7 @@ import { TABLES, kit, recorder } from './testkit.ts';
 type TestConn = InstanceType<typeof TestBindings.DbConnection>;
 const { check, finish } = recorder();
 const open = (name: string, kind: 'agent' | 'person', origin: 'norn' | 'external' | 'human', onBehalfOf?: string) =>
-  connect<TestConn>({ kind, name, origin, onBehalfOf, spawnedBy: 'Norn' }, { persistToken: false, quiet: true, bindings: TestBindings, database: 'norn-test' });
+  connect<TestConn>({ kind, name, origin, onBehalfOf, spawnedBy: 'Norn' }, { persistToken: false, quiet: true, bindings: TestBindings, database: process.env.NORN_DB ?? 'norn-test' });
 
 const A = await open('policy-a', 'agent', 'norn');
 const X = await open('policy-external', 'agent', 'external', 'Tyler');
@@ -27,7 +27,7 @@ check('a denied call returns normally and its log row is kept, matched by reques
 check('...and the write did not happen', ![...db.comment.iter()].some(c => c.prId === E.id && c.body.startsWith('policy:deny')));
 await A.R.addComment({ prId: E.id, anchor: '', body: 'an ordinary comment', meta: { requestId: `ok-${stamp}` } });
 const okRow = await until(() => logs(l => l.requestId === `ok-${stamp}`)[0], 3000, 'the allowed call in the log');
-check('an allowed call is logged as applied with the allow reason', okRow.outcome === 'applied' && okRow.policy === 'allow (no rules yet)' && [...db.comment.iter()].some(c => c.prId === E.id && c.body === 'an ordinary comment'), okRow.policy);
+check('an allowed call is logged as applied with the allow reason', okRow.outcome === 'applied' && okRow.policy === 'allow (no company configuration is stored, so no company limits apply)' && [...db.comment.iter()].some(c => c.prId === E.id && c.body === 'an ordinary comment'), okRow.policy);
 
 // downgrade: approve -> recommend
 await allCodeDone(E.id);

@@ -1,12 +1,12 @@
 import { Fragment, useMemo, type ReactNode } from 'react';
-import { ActionList, Label, PageLayout, Spinner } from '@primer/react';
+import { ActionList, Flash, Label, PageLayout, Spinner } from '@primer/react';
 import type { Check, CostBlock, CostRow, Evidence, ImpactAssessment } from '../assessment/types.ts';
 import { monthLabel } from '../assessment/adapter.ts';
 import { CheckStateIcon, MockTag, SavedRun } from '../ui/Bits.tsx';
 import { CaliperIcon, CcbTableIcon, CrateIcon, GaugeIcon, SerialPlateIcon } from '../ui/icons.tsx';
 import { SCurveChart, TornadoChart } from '../ui/Charts.tsx';
 import { EV_ORDER, Glyph, Legend, Mark, Num } from '../ui/Evidence.tsx';
-import { fig as figText, range as rangeText, usd, usdK } from '../ui/fmt.ts';
+import { fig as figText, range as rangeText, staleNote, usd, usdK } from '../ui/fmt.ts';
 import { navigate } from '../router.tsx';
 import { figureIndex } from '../ui/trace.ts';
 
@@ -87,8 +87,20 @@ const BLOCKS: CostBlock[] = ['production', 'retrofit', 'logisticsSupport', 'othe
 
 function CostCheck({ a }: { a: ImpactAssessment }) {
   const h = a.headline;
+  const need = a.cost.needsEstimate;
   return (
     <div className="nx-sections">
+      {a.ecr.staleCost && (
+        <Flash variant="warning" className="nx-flash">
+          <b>{staleNote(a.ecr.staleCost)}</b> The cost page below is the previous revision&rsquo;s.
+        </Flash>
+      )}
+      {need.length > 0 && (
+        <Flash variant="warning" className="nx-flash">
+          <b>{need.length} lines need an estimate.</b> The originator left them blank, so they count as $0 until someone estimates them:{' '}
+          {need.map(n => n.label).join('; ')}.
+        </Flash>
+      )}
       <div className="nx-stats">
         <div className="nx-stat">
           <div className="nx-stat-label">Net cost, first 12 months ({a.cost.window.label})</div>

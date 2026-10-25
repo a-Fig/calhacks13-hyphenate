@@ -266,8 +266,12 @@ export const StatementAssumption = t.object('StatementAssumption', {
 });
 
 // A Level 1-3 impact statement (#42). Append-only: a newer one for the same ECR and level
-// supersedes an older one in the reader's eyes. prRevision is the ECR revision it was written
-// against, so a reader can tell it has since gone out of date.
+// supersedes an older one in the reader's eyes. prRevision is the ECR's own revision counter when
+// it was written, so a reader can tell it has since gone out of date. checkRunId is the check run
+// the statement was written from. post_impact_statement records it and the agent cannot set it: the
+// run that started the session when the call's spawnedBy names one ('...check_run:<id>'), else the
+// run its first 'computation' number was copied from, else 0. That run's inputs name the
+// change-request revision and the ERP baseline, so a reader never has to guess them from numbers.
 const impactStatement = table(
   { name: 'impact_statement', public: true },
   {
@@ -275,6 +279,7 @@ const impactStatement = table(
     prId: t.u64().index('btree'),
     level: t.u8(), // 1 | 2 | 3
     prRevision: t.u32(),
+    checkRunId: t.u64(), // 0: no check run behind it (judgment only, posted outside a session)
     changeClass: t.string(),
     route: t.string(), // the proposed approval route
     headline: t.string(),
@@ -284,6 +289,23 @@ const impactStatement = table(
     claims: t.array(StatementClaim),
     author: t.identity(),
     createdAt: t.timestamp(),
+  }
+);
+
+// A short lease on writing one ECR's impact statement to the PLM (#42). The PLM has no
+// compare-and-set, so two publishers that each read "not there yet" would both write. The one
+// atomic step is claim_publication: it refuses while another holder's unexpired lease stands.
+// The holder is the caller's identity (taken from the connection, never from the arguments), so only
+// it can renew or release. `processId` is a random id per publisher process, because processes of
+// one name share a saved identity and must still take turns.
+const publicationClaim = table(
+  { name: 'publication_claim', public: true },
+  {
+    prId: t.u64().primaryKey(),
+    statementId: t.u64(),
+    holder: t.identity(),
+    processId: t.string(),
+    expiresAt: t.timestamp(),
   }
 );
 
@@ -325,6 +347,111 @@ const baselineSnapshot = table(
   }
 );
 
+// An agent's answer to one of the configuration's fast-track tests: whether the test's text is true of the
+// ECR, and what it rests on (request_fast_track_approval).
+export const TestAnswer = t.object('TestAnswer', { testId: t.string(), holds: t.bool(), evidence: t.string() });
+
+// One line of why: the rule in the company's configuration (a path or id), and what it says.
+export const GateReason = t.object('GateReason', { rule: t.string(), text: t.string() });
+
+// An approval, standing until it is withdrawn or the ECR is released (#43). One row per approval
+// event, kept after it ends: the history of who approved what on which numbers. At most one row per
+// ECR is 'standing'. It records what the approval rested on, so a later change can be judged against
+// it: `ownDigest` (the ECR's own title, text, change request and assumptions) and the approval tier
+// the cost pointed to. A change to the first withdraws the approval; a change to the baseline keeps
+// it unless the re-checked numbers point to a different tier (gate.ts, settleApproval).
+const approval = table(
+  { name: 'approval', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    prId: t.u64().index('btree'),
+    prRevision: t.u32(), // the ECR's revision when it was approved
+    kind: t.string(), // 'fast_track' | 'tier'
+    bodyId: t.string(), // 'fast_track', or the approval body that decided; '' when there was no company configuration
+    tierId: t.string(), // the tier the cost pointed to; '' without a configuration
+    tierIndex: t.i32(), // its position in the configuration's tiers; -1 without one
+    costSize: t.f64(), // the measured size of the change the tier rests on; -1 when it was not measured
+    costBasis: t.string(), // 'measured' | 'estimated' | 'lower_bound' | 'unmeasured' | 'none'
+    ownDigest: t.string(), // fingerprint of the ECR's own inputs when it was approved
+    decisionJson: t.string(), // the gate's decision: reasons, limits, sample, route
+    answersJson: t.string(), // a fast-track approval's answers to the configuration's tests, and the classes proposed
+    status: t.string().index('btree'), // standing | withdrawn | released
+    // True while the ECR's inputs have changed under a standing approval and its checks have not all
+    // finished again. The ECR cannot be released until they have (set_pr_status checks the runs, not this flag).
+    pendingRecheck: t.bool(),
+    approverKind: t.string(),
+    approverName: t.string(),
+    approverOrigin: t.string(),
+    onBehalfOf: t.option(t.string()),
+    sender: t.identity(),
+    at: t.timestamp(),
+    endedAt: t.option(t.timestamp()),
+    endedReason: t.string(), // why it was withdrawn (or 'released as baseline vN')
+  }
+);
+
+// What the gate did instead of an approval it would not allow the actor to give: a recommendation
+// to the people who decide (#43). Append-only. `outcome` is the decision's: 'recommend', 'escalate',
+// or 'sampled' (drawn for the blind second check, which is not built yet, so it waits).
+const recommendation = table(
+  { name: 'recommendation', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    prId: t.u64().index('btree'),
+    prRevision: t.u32(), // the ECR's revision it was made on; a reader can tell it is out of date
+    action: t.string(), // the company's action id, e.g. 'approve_ecr_at_tier'
+    outcome: t.string(),
+    recommenderKind: t.string(),
+    recommenderName: t.string(),
+    recommenderOrigin: t.string(),
+    onBehalfOf: t.option(t.string()),
+    sender: t.identity(),
+    reasons: t.array(GateReason),
+    recipients: t.array(t.string()), // role ids that get it
+    answersJson: t.string(), // the fast-track answers and proposed classes the agent gave, '' for other actions
+    decisionJson: t.string(), // the gate's whole decision
+    awaitingSecondCheck: t.bool(),
+    at: t.timestamp(),
+  }
+);
+
+// The change order the PLM released for an ECR: its number, and where Norn learned it. One per ECR;
+// a released change order keeps its number.
+const ecoRelease = table(
+  { name: 'eco_release', public: true },
+  {
+    prId: t.u64().primaryKey(),
+    ecoNumber: t.string(), // the PLM's number, e.g. ECO-0319
+    source: t.string(), // 'plm', or 'stub' for a test feed
+    sourceRef: t.string(),
+    recordedBy: t.identity(),
+    recordedAt: t.timestamp(),
+  }
+);
+
+// The ERP change package on a released ECO (#72): every line a person enters in the ERP to carry the
+// change out, with the values, traced to the ECO and the assessment. Norn never writes to the ERP
+// (#71). A worker builds it from the ECR's assessment and the ERP as read, and checks it again on each
+// new ERP read, so every line's status (entered, to enter, conflict) follows what people have entered.
+const erpPackage = table(
+  { name: 'erp_package', public: true },
+  {
+    prId: t.u64().primaryKey(),
+    ecoNumber: t.string(),
+    s2RunId: t.u64(), // the s2_cost run the amounts come from
+    erpBaseline: t.string(), // hash of the ERP read the package was last checked against
+    releaseJson: t.string(), // what the ECO changes in the ERP, from the assessment (the connector's EcoRelease)
+    packageJson: t.string(), // the lines to enter and their status (the connector's change package)
+    lines: t.u32(),
+    entered: t.u32(),
+    conflicts: t.u32(),
+    notesJson: t.string(), // what the package leaves out and why, and anything that kept it from being complete
+    builtBy: t.identity(),
+    builtAt: t.timestamp(),
+    updatedAt: t.timestamp(),
+  }
+);
+
 // Drives reap_expired_leases. Private: clients have no use for it.
 const reaperSchedule = table(
   { name: 'reaper_schedule' },
@@ -349,8 +476,13 @@ const spacetimedb = schema({
   agentEvent,
   actorScope,
   impactStatement,
+  publicationClaim,
   ecrRevision,
   baselineSnapshot,
+  approval,
+  recommendation,
+  ecoRelease,
+  erpPackage,
   reaperSchedule,
 });
 

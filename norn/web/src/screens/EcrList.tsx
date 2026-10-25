@@ -5,7 +5,7 @@ import {
 import { ActionList, ActionMenu, AvatarStack, CounterLabel, Label, TextInput } from '@primer/react';
 import { useEcrList } from '../assessment/source.ts';
 import type { EcrSummary } from '../assessment/types.ts';
-import { DrawingStamp, isOpen, LevelLabel, Person, StateIcon } from '../ui/Bits.tsx';
+import { DrawingStamp, isOpen, LevelLabel, Person, StaleNote, StateIcon } from '../ui/Bits.tsx';
 import { AircraftIcon, EcoStampIcon, EcrIcon } from '../ui/icons.tsx';
 import { ago, usdK } from '../ui/fmt.ts';
 import { Link, navigate } from '../router.tsx';
@@ -175,6 +175,8 @@ export function EcrList() {
                   {e.flag && isOpen(e.status) && (
                     <span className="nx-flag"> &middot; <AlertFillIcon size={12} className="nx-fg-attention" /> {e.flag}</span>
                   )}
+                  {e.staleCost && <> &middot; <StaleNote state={e.staleCost} /></>}
+                  {e.costNote && <span className="nx-flag" title={e.costNote}> &middot; <AlertFillIcon size={12} className="nx-fg-attention" /> Cost not available for this revision</span>}
                 </div>
               </div>
               <div className="nx-row-right">

@@ -1,5 +1,5 @@
 // End-to-end checks of the Norn pipeline (#40, #67) against a live database: an ECR reported by a
-// change-request source becomes a Norn ECR, the real worker runs the impact checks on it against
+// change-request source becomes a Norn ECR, the real worker runs the impact checks (s1 to s4) on it against
 // the baseline, and the stored results are exactly what the checks library returns for the same
 // inputs. Then a new revision, an agent's assumption and a baseline change each re-check it, and
 // an ECR with no change request stays mock.
@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bowman } from '../../../bowman/data/index.ts';
-import { bomDelta, bomDeltaRows, costCheck, costCheckRows, type AssumptionOverride, type Baseline, type ChangeRequest } from '../../checks/src/index.ts';
+import { bomDelta, bomDeltaRows, costCheck, costCheckRows, supplyCheck, supplyCheckRows, timelineCheck, timelineRows, type AssumptionOverride, type Baseline, type ChangeRequest } from '../../checks/src/index.ts';
 import { slug } from '../../checks/src/cost.ts';
 import { hashOf } from '../../connectors/erpnext/src/index.ts';
 import { DB, connect, subscribe } from './connect.ts';
@@ -35,12 +35,16 @@ const SEED = 'norn-seed-1';
 // ---- inputs: the dataset's baseline as a file, two of its ECRs under fresh numbers ------------------
 const baselineOf = (b: typeof bowman): Baseline => ({
   programs: b.programs, workCenters: b.workCenters, items: b.items, bom: b.bom, sourcing: b.sourcing, stock: b.stock, volumePlan: b.volumePlan, builtAircraft: b.builtAircraft,
+  supplierConstraints: b.supplierConstraints, // the slots and capacity s3 and s4 read; the ERP holds none, so these checks also run without
 });
 let baseline = structuredClone(baselineOf(bowman));
 writeFileSync(baselineFile, JSON.stringify(baseline));
 const ecrOf = (id: string, as: string) => ({ ...structuredClone(bowman.ecrs.find(e => e.id === id)!), id: as }) as ChangeRequest & { title: string; description: string };
 const e417 = ecrOf('ECR-0417', `ECR-0417-${stamp}`);
 const e423 = ecrOf('ECR-0423', `ECR-0423-${stamp}`);
+// The pair that share a supplier (Orrin); filed later, to see s4's interaction.
+const e419 = ecrOf('ECR-0419', `ECR-0419-${stamp}`);
+const e421 = ecrOf('ECR-0421', `ECR-0421-${stamp}`);
 const mkdir = () => import('node:fs').then(fs => fs.mkdirSync(ecrDir, { recursive: true }));
 await mkdir();
 const putEcr = (e: object & { id: string }) => writeFileSync(join(ecrDir, `${e.id}.json`), JSON.stringify(e));
@@ -103,6 +107,20 @@ const assumptionsNamed = (runInputs: string): AssumptionOverride[] =>
 const expectS2 = (runInputs: string, e: object, b: Baseline) =>
   costCheckRows(costCheck(b, JSON.parse(JSON.stringify(e)), { seed: SEED, assumptions: assumptionsNamed(runInputs), provenance: provenanceOf(JSON.parse(runInputs) as Inputs) }));
 const expectS1 = (e: object, b: Baseline) => bomDeltaRows(bomDelta(b, JSON.parse(JSON.stringify(e))));
+const expectS3 = (runInputs: string, e: object, b: Baseline) =>
+  timelineRows(timelineCheck(b, JSON.parse(JSON.stringify(e)), { seed: SEED, assumptions: assumptionsNamed(runInputs), provenance: provenanceOf(JSON.parse(runInputs) as Inputs) }));
+/**
+ * s4 compares an ECR with the other open ones, and its inputs name them (core.ts peerSnapshot: each
+ * one's pull request, revision and digest). The expectation is the library on exactly those change
+ * requests, read from the revisions the run names.
+ */
+const peersNamed = (runInputs: string): object[] =>
+  ((JSON.parse(runInputs) as Inputs).peers ?? []).map(n => JSON.parse([...db.ecrRevision.prId.filter(BigInt(n.pr))].find(r => r.seq === n.revision)!.changeRequestJson));
+const peerIdsOf = (runInputs: string): string[] => peersNamed(runInputs).map(c => (c as { id: string }).id).sort();
+const expectS4 = (runInputs: string, e: object, b: Baseline) =>
+  supplyCheckRows(supplyCheck(b, JSON.parse(JSON.stringify(e)), {
+    seed: SEED, assumptions: assumptionsNamed(runInputs), provenance: provenanceOf(JSON.parse(runInputs) as Inputs), peers: peersNamed(runInputs) as never,
+  }));
 const source = stubSource(ecrDir);
 const sent = new Map<string, string>();
 const log = (m: string) => console.log(`  ingest: ${m}`);
@@ -135,8 +153,13 @@ try {
   check('the trace says the baseline is a test file, not the ERP', /not the ERP/.test(itemsRef) && !detail!.detailJson.includes('ERP and PLM item master'), itemsRef);
   const s2b = await doneRun(p423.id, 's2_cost');
   check('a second ECR runs too, on its own numbers', same(results(s2b.id), expectS2(s2b.inputsJson, e423, baseline)), firstDiff(results(s2b.id), expectS2(s2b.inputsJson, e423, baseline)));
-  const s3 = await until(() => current(p417.id, 's3_timeline')?.status === 'done' && current(p417.id, 's3_timeline'), 30000, 's3 to finish');
-  check('stages without a real check stay mock and say so', results(s3.id).every(r => r.mock), results(s3.id).map(r => r.key).join(','));
+  const s3 = await doneRun(p417.id, 's3_timeline');
+  const want3 = expectS3(s3.inputsJson, e417, baseline);
+  check('s3 stores timelineRows unchanged, marked computed, with a cut-in date and the first serial', same(results(s3.id), want3) && results(s3.id).every(r => !r.mock) && results(s3.id).some(r => r.key === 'cut_in_date') && results(s3.id).some(r => r.key === 'cut_in_serial'), firstDiff(results(s3.id), want3));
+  const s4 = await doneRun(p417.id, 's4_supply');
+  const want4 = expectS4(s4.inputsJson, e417, baseline);
+  const single = results(s4.id).find(r => r.key === 'single_source_items');
+  check('s4 stores supplyCheckRows unchanged, marked computed, with the single-source part', same(results(s4.id), want4) && results(s4.id).every(r => !r.mock) && (single?.p50 ?? 0) >= 1 && single!.detailJson.includes('BW-5120-210'), firstDiff(results(s4.id), want4));
 
   // ---- the same report again changes nothing ------------------------------------------------------
   const runsBefore = [...db.checkRun.iter()].length;
@@ -203,11 +226,51 @@ try {
   const wantN = expectS2(s2n.inputsJson, e423, baseline);
   check('a new baseline is recorded and every open ECR is re-checked on it', run(s2ooo.id).status === 'stale' && same(results(s2n.id).filter(r => r.key !== 'assumption_errors'), wantN), firstDiff(results(s2n.id).filter(r => r.key !== 'assumption_errors'), wantN));
 
+  // ---- two ECRs on one supplier: filing the second re-runs the first's s4 ---------------------------
+  putEcr(e419);
+  await ingestOnce(R, source, sent, log);
+  const p419 = await until(() => byNumber(e419.id), 5000, `${e419.id} to be filed`);
+  const s4_419 = await doneRun(p419.id, 's4_supply');
+  const rev419 = byNumber(e419.id)!.revision;
+  check('the first ECR files with no peer on its supplier: s4 shows no interaction', JSON.parse(results(s4_419.id).find(r => r.key === 'detail')!.detailJson).interaction === null && peerIdsOf(s4_419.inputsJson).every(id => id !== e421.id), peerIdsOf(s4_419.inputsJson).join());
+  putEcr(e421);
+  await ingestOnce(R, source, sent, log);
+  const p421 = await until(() => byNumber(e421.id), 5000, `${e421.id} to be filed`);
+  const s4_421 = await doneRun(p421.id, 's4_supply');
+  const s3_421 = await doneRun(p421.id, 's3_timeline');
+  const w421 = expectS4(s4_421.inputsJson, e421, baseline);
+  const d421 = JSON.parse(results(s4_421.id).find(r => r.key === 'detail')!.detailJson);
+  check('the ECR filed second sees the first in s4: same rows as the library, its slot moves a quarter later', same(results(s4_421.id), w421) && d421.interaction?.peers.map((p: { ecr: string }) => p.ecr).join() === e419.id && results(s4_421.id).find(r => r.key === 'peer_cut_in_shift_weeks')?.p50 === 13 && results(s4_421.id).find(r => r.key === 'p_cut_in_later_with_peers')?.p50 === 1, firstDiff(results(s4_421.id), w421));
+  check('s3 on the same ECR is alone by construction: its own cut-in, unmoved by the pair', same(results(s3_421.id), expectS3(s3_421.inputsJson, e421, baseline)) && results(s3_421.id).every(r => !r.mock), firstDiff(results(s3_421.id), expectS3(s3_421.inputsJson, e421, baseline)));
+  // The first ECR's s4 names the second now: it re-ran by itself, on the same revision.
+  const s4_419b = await until(() => {
+    const r = current(p419.id, 's4_supply');
+    return r && r.id !== s4_419.id && r.status === 'done' && results(r.id).length > 0 && r;
+  }, 60000, 's4 on ECR-0419 after ECR-0421 was filed');
+  const w419 = expectS4(s4_419b.inputsJson, e419, baseline);
+  const d419 = JSON.parse(results(s4_419b.id).find(r => r.key === 'detail')!.detailJson);
+  const own = (rows: Row[], k: string) => rows.find(r => r.key === k)?.p50 ?? NaN;
+  check('filing the second ECR re-ran s4 on the first ECR by itself: it names the second, and shows the pair', run(s4_419.id).status === 'stale' && peerIdsOf(s4_419b.inputsJson).includes(e421.id) && same(results(s4_419b.id), w419) && d419.interaction?.peers.map((p: { ecr: string }) => p.ecr).join() === e421.id && own(results(s4_419b.id), 'peer_cut_in_shift_weeks') === 0 && own(results(s4_419b.id), 'pair_bundle_saving:CON-ORRIN-UH-SLOT') > own(results(s4_419b.id), 'bundle_saving:CON-ORRIN-UH-SLOT'), firstDiff(results(s4_419b.id), w419));
+  check('...without a new revision of the first ECR: another ECR being filed is not a change to its inputs', byNumber(e419.id)!.revision === rev419 && JSON.parse(s4_419b.inputsJson).revision === JSON.parse(s4_419.inputsJson).revision, `revision ${rev419} -> ${byNumber(e419.id)!.revision}`);
+  // A new revision of the first ECR is a new peer revision for the second.
+  const fee = e419.costPage.production.find(r => /Engineering and testing/.test(r.label))!;
+  fee.oneTime = (fee.oneTime ?? 0) + 1000;
+  putEcr(e419);
+  await ingestOnce(R, source, sent, log);
+  const s4_421b = await until(() => {
+    const r = current(p421.id, 's4_supply');
+    return r && r.id !== s4_421.id && r.status === 'done' && results(r.id).length > 0 && r;
+  }, 60000, 's4 on ECR-0421 after ECR-0419 revision 2');
+  const named419 = (JSON.parse(s4_421b.inputsJson) as Inputs).peers?.find(n => n.pr === String(p419.id));
+  check('a new revision of the first ECR re-runs s4 on the second ECR, on the revised change request', run(s4_421.id).status === 'stale' && named419?.revision === 2 && same(results(s4_421b.id), expectS4(s4_421b.inputsJson, e421, baseline)), `${JSON.stringify(named419)} ${firstDiff(results(s4_421b.id), expectS4(s4_421b.inputsJson, e421, baseline))}`);
+  console.log(`  pair: ECR-0421 cut-in later by ${own(results(s4_421.id), 'peer_cut_in_shift_weeks')} weeks in ${own(results(s4_421.id), 'p_cut_in_later_with_peers') * 100}% of draws; pair bundle saving $${Math.round(own(results(s4_419b.id), 'pair_bundle_saving:CON-ORRIN-UH-SLOT'))} (P50)`);
+
   // ---- an ECR with no change request keeps the mock handlers ----------------------------------------
   await R.createPr({ plmEcrNumber: '', title: `check pipeline: no change request ${stamp}`, description: 'check' });
   const bare = await until(() => [...db.pullRequest.iter()].find(p => p.title === `check pipeline: no change request ${stamp}`), 5000, 'the bare ECR');
-  const s2m = await doneRun(bare.id, 's2_cost');
-  check('an ECR with no change request gets mock results, labelled mock', results(s2m.id).every(r => r.mock), results(s2m.id).map(r => r.key).join(','));
+  const bareRuns = [] as { stage: string; rows: ReturnType<typeof results> }[];
+  for (const stage of ['s2_cost', 's3_timeline', 's4_supply']) bareRuns.push({ stage, rows: results((await doneRun(bare.id, stage)).id) });
+  check('an ECR with no change request gets mock results in s2, s3 and s4, labelled mock', bareRuns.every(b => b.rows.length > 0 && b.rows.every(r => r.mock)), bareRuns.map(b => `${b.stage}:${b.rows.map(r => r.key).join('/')}`).join(' '));
 
   // ---- the module refuses a change request for another ECR ------------------------------------------
   const wrong = await rejects(R.ingestEcr({ plmEcrNumber: e423.id, title: 'x', description: '', changeRequestJson: JSON.stringify({ ...e417 }), source: 'stub', sourceRef: 'wrong' }));
@@ -215,13 +278,13 @@ try {
   check('ingest refuses a change request for another ECR, or one that is not an object', wrong?.name === 'SenderError' && notObj?.name === 'SenderError' && !byNumber(`ECR-X-${stamp}`), `${wrong?.message} | ${notObj?.message}`);
 
   // ---- the worker with no baseline source left every real run alone ---------------------------------
-  const ours = new Set([p417.id, p423.id]);
+  const ours = new Set([p417.id, p423.id, p419.id, p421.id]);
   const failedRuns = [...db.checkRun.iter()].filter(r => ours.has(r.prId) && r.status === 'failed');
-  const blindClaims = blindLog.join('').split('\n').filter(l => /claimed run \d+ s[12]_/.test(l) && [...ours].some(id => l.includes(`(pr ${id},`)));
+  const blindClaims = blindLog.join('').split('\n').filter(l => /claimed run \d+ s[1-4]_/.test(l) && [...ours].some(id => l.includes(`(pr ${id},`)));
   check('a worker with no baseline source never claims or fails a real run', failedRuns.length === 0 && blindClaims.length === 0 && blindLog.join('').includes('connected'), `${failedRuns.length} failed, ${blindClaims.length} claimed by the blind worker`);
 
   // Leave the scratch database tidy: close what this run opened.
-  for (const p of [p417, p423, bare]) await R.setPrStatus({ prId: p.id, status: 'closed' }).catch(() => {});
+  for (const p of [p417, p423, p419, p421, bare]) await R.setPrStatus({ prId: p.id, status: 'closed' }).catch(() => {});
 } catch (e) {
   check('the pipeline run finished', false, (e as Error).message);
   console.log(workerLog.join('').split('\n').slice(-40).join('\n'));

@@ -3,16 +3,27 @@
 Processes that do Norn's work outside the database, through its reducers. Written 2026-10-24.
 
 - **The worker** (`src/worker.ts`) claims queued check runs and stores their results.
-  - s1 (BOM delta) and s2 (cost) run Norn's impact checks (`../checks`) on ECRs that have a change
-    request from the PLM.
+  - s1 (BOM delta), s2 (cost), s3 (timeline) and s4 (supply) run Norn's impact checks
+    (`../checks`) on ECRs that have a change request from the PLM.
   - Every other stage, and every ECR with no change request, is mock compute. Its results say
     `mock: true`.
-- **The ingest loop** (`src/ingest.ts`) reports the ECRs a change-request source has to Norn.
+- **The ingest loop** (`src/ingest.ts`) reports the ECRs a change-request source has to Norn, and the
+  change order number once the PLM releases one.
+- **The ERP change package** (`src/package.ts`, in the worker) puts on each released ECO what a person
+  enters in the ERP to carry it out. Norn never writes to the ERP (#71, #72).
+- **The company config** (`src/config.ts`): at start-up the worker loads and validates the file in
+  `NORN_COMPANY_CONFIG`, refuses to start on a malformed one, and stores the config through
+  `set_config` when it differs from what is stored. How it works and what the module checks are in
+  `../config/README.md`.
 
 ```
 npm run worker                                       # from norn/: the worker, on the database NORN_DB (default norn)
 npm run ingest                                       # the ingest loop (needs NORN_INGEST_SOURCE)
 NORN_DB=norn-pipe npm run check:pipeline             # end to end on a scratch database: ingest, real checks, revisions, assumptions, baseline change
+NORN_DB=norn-pipe npm run check:package              # the ERP change package on a released ECO, with a planner of its own instead of ERPNext
+npm run test:workers                                 # offline tests of the start-up config and of the module's company_config checks
+NORN_DB=norn-cfg npm run check:config                # end to end on a scratch database you named: start-up config stored once, a re-run stores nothing, a malformed file stops the worker
+NORN_DB=norn-gate-1 npm run check:gate                # end to end on a scratch database: the company gate, the fast track, and approvals across a re-check (starts two workers of its own)
 ```
 
 ## How an ECR gets its numbers
@@ -33,17 +44,29 @@ NORN_DB=norn-pipe npm run check:pipeline             # end to end on a scratch d
      ones, through the module's `reconcile`.
    - The worker computes on exactly what the run names. If the ERP has moved on in the meantime, the
      worker records the new baseline, which makes the run stale, and drops it.
-4. **Results.** s1 stores `bomDeltaRows`, and s2 stores `costCheckRows`. Both go into `check_result`
-   unchanged, with `mock: false`.
+4. **Results.** s1 stores `bomDeltaRows`, s2 `costCheckRows`, s3 `timelineRows` and s4
+   `supplyCheckRows`. All go into `check_result` unchanged, with `mock: false`.
    - That includes the `detail` row (unit `json`), which holds every input the traces name.
      `get_impact` returns them.
    - An assumption the library can't take is reported in an `assumption_errors` row, not dropped.
    - The trace names where the baseline and the change request came from (`ERPNext baseline 2c02958e,
      as of 2026-10-24`, or `file baseline … (not the ERP)`). The run's inputs carry the same:
      `erpBaselineSource`, `erpBaselineAsOf` and `revisionSource`.
-5. **Workers that can't serve a run.** A worker with no baseline source leaves s1 and s2 runs it
+5. **Workers that can't serve a run.** A worker with no baseline source leaves s1 to s4 runs it
    has no baseline for to a worker that has one, instead of failing them.
-6. **Code version.** `code_version` (default `checks-0.2.0`) is part of every hash. Set it to the
+   **Peers (s4).** s4 also reads the other open ECRs' change requests, to show what two changes to
+   one supplier do to each other. The run's inputs name them (each open ECR's id, revision number
+   and digest), and the worker reads exactly those revisions, so the same inputs always give the
+   same rows. Filing, editing, closing or reopening another ECR changes the list and re-runs s4 on
+   every other open ECR; the module cannot tell which share a supplier, so all are named and the
+   check decides. This does not change the ECR's own revision or withdraw an approval: the peer list
+   is left out of the digest an approval stands on. A named revision the worker doesn't have, or has
+   with another digest, drops the run (stale). The `detail` row lists the peers it compared with.
+   Each named peer also carries its own assumptions that s4 applies (a decision lag recorded on it,
+   say), by id and revision. The worker reads them with the ECR's own, the ECR's own winning a key
+   they share, so an assumption recorded on one ECR re-runs s4 on every other open ECR. A peer it
+   cannot read is skipped and flagged, not fatal.
+6. **Code version.** `code_version` (default `checks-0.3.0`) is part of every hash. Set it to the
    checks library's `CHECKS_CODE_VERSION` when the library changes. The worker warns when the two
    disagree.
 
@@ -55,6 +78,37 @@ current. A matching `revision` alone isn't enough, because the baseline or an as
 moved under the same revision.
 - A conflicted ECR still finishes `done`, with `bomDelta.ok: false` in the detail row.
 - `failed` means the run can't succeed, and its `note` says why.
+
+## The ERP change package (#72)
+
+When an ECR is released in Norn (status `merged`) and the PLM has given its change order number
+(`record_eco_release`, which ingest calls when a change request carries `eco`), a worker that reads the
+ERP builds the package and records it with `record_erp_package`, in `erp_package`.
+
+1. **What changes** (`src/release.ts`) comes from the ECR's newest finished `s2_cost` run, computed
+   again on exactly the inputs it names, and compared with its stored totals.
+   - **Standard costs.** Each item whose price the ECR changes gets its new price, at its new revision.
+   - **BOM lines.** The ECR's BOM changes.
+   - **Journal entries**, from the old stock's disposition, at the assessment's point values:
+     - stock on hand written down to scrap value (expense against the inventory reserve);
+     - units finished at the supplier, and the cancellation charge on units not started (expense
+       against accrued liabilities).
+   - The account roles are `scrapExpense`, `inventoryReserve` and `accruedLiability`, which the
+     company's ERP settings map to accounts.
+   - **What the package leaves out** is in its notes, with the reason. Units on built aircraft are
+     booked when the retrofit removes them. Undecided dispositions get no entry until decided.
+     Rework is booked as it is done.
+2. **The lines** come from the ERPNext connector's planner, which reads the ERP and writes nothing. It
+   turns the release into lines a person enters, each with a status.
+3. **On each new ERP read** the worker checks the package again, so each line shows whether it has been
+   entered. The amounts stay the assessment's: an entered standard cost does not change what was decided.
+
+For ECR-0417 the package gives BW-5120-210's new standard cost of 221.00 at Rev C from 2026-11-01. Its
+journal entries are 17,620.62 and 8,810.31 on hand, 11,012.88 at the supplier, and a 1,118.40
+cancellation charge.
+- #66 had 26,431.20 and 11,013.00 for the first two, from the answer key, rounding the scrap value to
+  2.85 per bracket first.
+- The 120 brackets on built aircraft (22,025.77) are left to the retrofit.
 
 **Assumptions.** An assumption's `key` is the checks library's input id, such as
 `cost:<ECR>:other:<row slug>`, `recovery:<item>` or `effectivity:<ECR>:<program>`. Its `distJson`
@@ -69,10 +123,13 @@ stated:
 
 | Variable | For | Meaning |
 |---|---|---|
+| `NORN_COMPANY_CONFIG` | worker | The company's configuration file: a module that default-exports it, or a `.json` file (for Bowman, `../../bowman/norn-config/bowman.config.ts` from `norn/workers`). Unset: the worker warns and keeps the stored config. Malformed: it exits with code 1 and prints the problems. A relative path is relative to where the worker starts (`norn/workers` for `npm run worker`). |
 | `NORN_ERP_SETTINGS` | worker | A module exporting the company's `erpnext` settings, for example `../bowman/norn-config/erpnext.ts`. The connection comes from `ERPNEXT_URL`, `ERPNEXT_API_KEY` and `ERPNEXT_API_SECRET` (the .env, or `ENV_FILE`). |
 | `NORN_BASELINE_FILE` | worker | A baseline JSON file instead of the ERP, for tests. Recorded with source `file`. |
 | `NORN_BASELINE_POLL_MS` | worker | How often to re-read the baseline. |
 | `NORN_BASELINE_CACHE_DIR` | worker | Where baselines are cached by hash (default `norn/workers/.cache/baselines`). |
 | `NORN_INGEST_SOURCE` | ingest | `plm`, which needs the PLM connector and isn't wired yet, or `stub`. |
-| `NORN_STUB_ECR_DIR` | ingest | For `stub`: a directory of change-request JSON files. A test feed, recorded with source `stub`. |
+| `NORN_STUB_ECR_DIR` | ingest | For `stub`: a directory of change-request JSON files. A test feed, recorded with source `stub`. A file's `eco` field is the released change order's number. |
+| `NORN_WEB_URL` | worker | Where Norn's ECR pages are (default `http://localhost:5173`): the trace on every package line links there. |
+| `NORN_PACKAGE_POLL_MS` | worker | How often a worker that reads the ERP looks for packages to build or check (default 15 s). |
 | `NORN_DB`, `NORN_URI` | both | The database, and the server (default `ws://127.0.0.1:3000`). |

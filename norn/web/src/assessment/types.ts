@@ -381,6 +381,13 @@ export interface EcrSummary {
   filedOn: string;
   /** One short flag the backlog list can show, e.g. "Conflicts with ECR-0415". */
   flag?: string;
+  /**
+   * The cost numbers are the previous revision's: `rechecking` while Norn checks the changed ECR again,
+   * `failed` when the replacement run failed and nothing newer exists. Absent when they are current.
+   */
+  staleCost?: 'rechecking' | 'failed';
+  /** Why there is no cost page for this ECR although a cost check finished (live only). */
+  costNote?: string;
   hasAssessment: boolean;
 }
 
@@ -400,6 +407,8 @@ export interface StatementView {
   assumptions: { key: string; label: string; source: Origin; note: string; traceId?: string }[];
   /** Written against an older revision of the ECR than the current one. */
   outdated: boolean;
+  /** Said under the numbers table when a number cannot be opened, or is not from the newest cost run. */
+  numbersNote?: string;
 }
 
 /** The impact assessment a CFO or CCB member reads. */

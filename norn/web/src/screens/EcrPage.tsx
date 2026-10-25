@@ -1,9 +1,9 @@
-import { useCallback, useMemo, useState } from 'react';
+import { Component, useCallback, useMemo, useState, type ErrorInfo, type ReactNode } from 'react';
 import { AlertFillIcon, CommentDiscussionIcon } from '@primer/octicons-react';
-import { Label, PageHeader, PageLayout, Spinner, UnderlineNav } from '@primer/react';
+import { Flash, Label, PageHeader, PageLayout, Spinner, UnderlineNav } from '@primer/react';
 import { source, useAssessment } from '../assessment/source.ts';
 import type { ImpactAssessment } from '../assessment/types.ts';
-import { DrawingStamp, LevelLabel, Person, StateBadge } from '../ui/Bits.tsx';
+import { DrawingStamp, LevelLabel, Person, StaleNote, StateBadge } from '../ui/Bits.tsx';
 import { AircraftIcon, CaliperIcon, CcbTableIcon, EcrIcon, GaugeIcon, RevisionTriangleIcon } from '../ui/icons.tsx';
 import { WhyContext } from '../ui/Evidence.tsx';
 import { WhyPanel } from '../ui/WhyPanel.tsx';
@@ -22,7 +22,34 @@ export function EcrPage({ id, tab, check }: { id: string; tab: Tab; check?: stri
   if (loading) return <div className="nx-container nx-tabbody"><p className="nx-fg-muted">Loading</p></div>;
   if (!summary) return <div className="nx-container nx-tabbody"><p>No ECR {id}.</p></div>;
   if (!a) return <SummaryOnly e={summary} tab={tab} />;
-  return <AssessmentView key={id} a={a} tab={tab} check={check} />;
+  return (
+    <PageBoundary key={id} id={id}>
+      <AssessmentView a={a} tab={tab} check={check} />
+    </PageBoundary>
+  );
+}
+
+/** Any throw while drawing an ECR page shows a message instead of a blank screen. */
+class PageBoundary extends Component<{ id: string; children: ReactNode }, { error?: Error }> {
+  state: { error?: Error } = {};
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(`ECR page ${this.props.id} failed to draw`, error, info.componentStack);
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <>
+        <main className="nx-container nx-tabbody">
+          <Flash variant="danger">
+            <b>Norn could not draw {this.props.id}.</b> The data for this ECR is not in a shape the page can show. {this.state.error.message}
+          </Flash>
+        </main>
+      </>
+    );
+  }
 }
 
 function AssessmentView({ a, tab, check }: { a: ImpactAssessment; tab: Tab; check?: string }) {
@@ -157,6 +184,7 @@ function SummaryOnly({ e, tab }: { e: NonNullable<ReturnType<typeof useAssessmen
                       <div className="nx-stat-label">Net cost, first 12 months (saved check run)</div>
                       <div className="nx-stat-value num">{usdK(e.cost.point ?? e.cost.p50, { plus: true })}</div>
                       <div className="nx-stat-sub num">P10 to P90: {usdK(e.cost.p10)} &ndash; {usdK(e.cost.p90)}</div>
+                      {e.staleCost && <div className="nx-stat-sub"><StaleNote state={e.staleCost} /></div>}
                     </div>
                     {e.flag && (
                       <div className="nx-stat">
@@ -167,9 +195,9 @@ function SummaryOnly({ e, tab }: { e: NonNullable<ReturnType<typeof useAssessmen
                   </div>
                 )}
                 {source.isMock ? (
-                  <p className="nx-fg-muted">
-                    Year-one cost is from Norn&rsquo;s saved check run on Bowman&rsquo;s dataset. Full conversation, item diffs and trace drill-down are mocked on <b>ECR-0417</b>, <b>ECR-0409</b> and <b>ECR-0423</b>.
-                  </p>
+                  <p className="nx-fg-muted">Only ECR-0417, ECR-0409 and ECR-0423 have a full page in this mock.</p>
+                ) : e.costNote ? (
+                  <p className="nx-fg-muted">{e.costNote}</p>
                 ) : e.checks === 'running' ? (
                   <p className="nx-fg-muted"><Spinner size="small" /> Norn&rsquo;s impact checks are queued or running for this ECR. The page fills in when the cost check finishes.</p>
                 ) : (

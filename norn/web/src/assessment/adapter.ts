@@ -247,7 +247,7 @@ export function fromChecks(rows: CheckResultRow[]): ChecksView {
   const year1Likelihood = needsEstimate.length > 0 ? undefined : net.p10 !== undefined && net.p50 > 0
     ? { word: likelihoodWord(pUnder), event: `under ${usdK(threshold)}`, probability: pUnder }
     : net.p10 !== undefined && net.p90! < 0
-      ? { word: likelihoodWord(1 - fit.cdf(0)), event: 'a net saving', probability: 1 - fit.cdf(0) }
+      ? { word: likelihoodWord(fit.cdf(0)), event: 'that this is a net saving', probability: fit.cdf(0) } // cost is positive, so P(saving) = P(net < 0)
       : undefined;
 
   // ---- cut-in: one fixed month from the ECR's stated effectivity, no range until the timeline check exists

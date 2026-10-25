@@ -61,6 +61,10 @@ export interface CustomFieldNames {
     /** The company's own PO number, when ERPNext's differs (history reads only). */
     externalId?: string;
   };
+  /** Ids other systems use for work centers, held on the Workstation. A workstation without a value keeps its name. */
+  workCenter?: {
+    externalId?: string;
+  };
 }
 
 /** Where the volume plan and built aircraft come from when ERPNext holds none of them. */
@@ -78,6 +82,38 @@ export interface PackageSettings {
   accounts: Record<string, string>;
   /** Cost center for the profit-and-loss rows. Default: ERPNext fills the company's default. */
   costCenter?: string;
+}
+
+/**
+ * Where a company keeps its supplier constraints (qualification slots, annual capacity) in ERPNext: a custom doctype with
+ * one row per constraint and a child table of the items it covers. Norn reads them; it never writes them.
+ * Each field name is the ERPNext fieldname on `doctype`. Leave an optional one out and the constraint just doesn't carry it.
+ */
+export interface SupplierConstraintSource {
+  /** The parent doctype, for example 'Supplier Constraint'. */
+  doctype: string;
+  /** The child table of items: its doctype and the Link field that holds the item code. */
+  items: { doctype: string; itemField: string };
+  fields: {
+    /** The constraint's id. Required. */
+    id: string;
+    /** Link to Supplier. The supplier's ERPNext name is what the baseline carries, as in `sourcing`. Required. */
+    supplier: string;
+    /** Select: 'qualification_slot' or 'capacity'. Required. */
+    kind: string;
+    capacityPerYear?: string;
+    /** Both window dates must be set for the constraint to have a window. */
+    windowFrom?: string;
+    windowTo?: string;
+    description?: string;
+    slotCadenceMonths?: string;
+    /** The bundle exists when this is above zero. */
+    bundleWithinWeeks?: string;
+    /** A fraction, 0.4 for 40%. */
+    bundleSecondQualificationDiscount?: string;
+    /** A fraction, 0.06 for 6%. */
+    bundlePriceBreak?: string;
+  };
 }
 
 export interface ErpnextSettings {
@@ -104,6 +140,8 @@ export interface ErpnextSettings {
   /** Serial No to the integer serial the checks use. Default: the trailing digits of the serial number. */
   serialNumber?: (serialNo: string) => number | undefined;
   customFields?: CustomFieldNames;
+  /** Where the company keeps supplier constraints. Unset: the baseline has no `supplierConstraints` and nothing extra is read. */
+  supplierConstraints?: SupplierConstraintSource;
   /** Only needed to build the ERP change package of a released ECO (package.ts). */
   changePackage?: PackageSettings;
   /**

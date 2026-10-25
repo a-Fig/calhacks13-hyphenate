@@ -10,8 +10,12 @@ the session does to an event sink. No Anthropic API key is used.
 Node 22.18 or newer. The `.ts` files run directly through Node's type stripping; `tsc` only
 typechecks. Everything below is run from `norn/runner/`.
 
+The runner is one of `norn/`'s npm workspaces (#96), so in this repo `npm ci` in `norn/` installs it with
+everything else, from the root lockfile. Its own `package-lock.json` is for installing it alone, for example
+on the home server: there, run `npm ci --workspaces=false` from `norn/runner/`.
+
 ```
-npm ci
+npm ci --workspaces=false               # standalone; inside the repo, `npm ci` in norn/ instead
 npm run typecheck                      # tsc --noEmit
 npm run test:unit                      # 61 tests, no model, no login
 npm run smoke                          # live: about 20 Haiku sessions on the machine's Claude login

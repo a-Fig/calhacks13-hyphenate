@@ -205,6 +205,73 @@ const sharedPt = ptItems.filter((i) => i.programs.includes('meridian'));
 const sharePct = (100 * sharedPt.length) / ptItems.length;
 ok(sharePct >= 35 && sharePct <= 46, `Meridian reuses ${pct(sharePct)} of Vesper powertrain parts, expected about 40%`);
 
+// ------------------------------------------------------------------ manufacturing BOM (stations)
+
+// The ERP's BOM is the engineering BOM below each program's top, plus d.mbom.bom for the top level.
+const topSet = new Set(d.programs.map((p) => p.topItem));
+const mbomLines = [...d.bom.filter((l) => !topSet.has(l.parent)), ...d.mbom.bom];
+const mbomItems = [...d.items, ...d.mbom.items];
+const mItemBy = new Map(mbomItems.map((i) => [i.code, i]));
+for (const s of d.mbom.items) {
+  ok(!itemBy.has(s.code), `station ${s.code} clashes with an engineering item`);
+  ok(s.makeBuy === 'make' && s.itemGroup === 'Build stations' && s.laborHours && s.workCenter && wcBy.has(s.workCenter), `station ${s.code} is not a make item in Build stations with labor`);
+  ok(!d.bom.some((l) => l.child === s.code || l.parent === s.code), `station ${s.code} appears in the engineering BOM`);
+}
+for (const t of topSet) {
+  const top = itemBy.get(t)!;
+  const stations = d.mbom.bom.filter((l) => l.parent === t);
+  const engKids = d.bom.filter((l) => l.parent === t);
+  ok(stations.length > 0 && stations.every((l) => mItemBy.get(l.child) && d.mbom.items.some((s) => s.code === l.child) && l.qty === 1), `${t}: MBOM top level is not a list of stations`);
+  // Every top-level child of the engineering BOM sits under exactly one station, with its quantity.
+  const placed = engKids.map((e) => d.mbom.bom.filter((l) => stations.some((s) => s.child === l.parent) && l.child === e.child && l.qty === e.qty));
+  ok(placed.every((p) => p.length === 1), `${t}: a top-level child is missing from, or repeated across, the stations`);
+  const held = d.mbom.bom.filter((l) => stations.some((s) => s.child === l.parent));
+  ok(held.length === engKids.length, `${t}: the stations hold ${held.length} lines, the engineering top level ${engKids.length}`);
+  // The top item's own labor is split across its stations, exactly.
+  const hours = stations.reduce((h, l) => h + (mItemBy.get(l.child)!.laborHours ?? 0), 0);
+  ok(hours === top.laborHours && stations.every((l) => mItemBy.get(l.child)!.workCenter === top.workCenter), `${t}: station hours ${hours} differ from the aircraft's own ${top.laborHours}, or sit in another work center`);
+}
+// Exploded leaf quantities per aircraft, engineering BOM against manufacturing BOM.
+function explodeLeaves(lines: { parent: ItemCode; child: ItemCode; qty: number }[], top: ItemCode): Map<ItemCode, number> {
+  const by = new Map<ItemCode, { child: ItemCode; qty: number }[]>();
+  for (const l of lines) by.set(l.parent, [...(by.get(l.parent) ?? []), l]);
+  const out = new Map<ItemCode, number>();
+  const walk = (code: ItemCode, mult: number) => {
+    const ks = by.get(code);
+    if (!ks) { out.set(code, (out.get(code) ?? 0) + mult); return; }
+    for (const k of ks) walk(k.child, mult * k.qty);
+  };
+  walk(top, 1);
+  return out;
+}
+let leafKinds = 0;
+for (const t of topSet) {
+  const eng = explodeLeaves(d.bom, t);
+  const mf = explodeLeaves(mbomLines, t);
+  const diffs = [...new Set([...eng.keys(), ...mf.keys()])].filter((c) => eng.get(c) !== mf.get(c));
+  ok(diffs.length === 0, `${t}: exploded leaf quantities differ between EBOM and MBOM: ${diffs.slice(0, 3).join(', ')}`);
+  ok(eng.size > 50, `${t}: suspiciously few leaves (${eng.size})`);
+  leafKinds += mf.size;
+}
+// MBOM roll-up: leaves at the primary quote, make items add their labor (the top has none in the MBOM).
+const mRolled = new Map<ItemCode, number>();
+const mKids = new Map<ItemCode, { child: ItemCode; qty: number }[]>();
+for (const l of mbomLines) mKids.set(l.parent, [...(mKids.get(l.parent) ?? []), l]);
+function mCost(code: ItemCode): number {
+  const hit = mRolled.get(code);
+  if (hit !== undefined) return hit;
+  const it = mItemBy.get(code)!;
+  const own = it.makeBuy === 'buy' ? srcBy.get(code)!.find((s) => s.primary)!.unitPrice.p50 : topSet.has(code) ? 0 : (it.laborHours ?? 0) * (it.workCenter ? wcBy.get(it.workCenter)!.laborRatePerHour : 0);
+  const c = own + (mKids.get(code) ?? []).reduce((a, k) => a + k.qty * mCost(k.child), 0);
+  mRolled.set(code, c);
+  return c;
+}
+for (const t of topSet) ok(near(mCost(t), itemBy.get(t)!.standardCost, 0.02), `${t}: MBOM roll-up ${mCost(t).toFixed(2)} differs from the engineering roll-up ${itemBy.get(t)!.standardCost}`);
+for (const s of d.mbom.items) {
+  ok(near(mCost(s.code), s.standardCost, 0.02), `station ${s.code}: stored ${s.standardCost}, recomputed ${mCost(s.code).toFixed(2)}`);
+  ok(near(s.standardCostMaterial + s.standardCostLabor, s.standardCost, 0.02), `station ${s.code}: cost split does not add up`);
+}
+
 // ------------------------------------------------------------------ stock, purchase orders
 
 const stockBy = new Map(d.stock.map((s) => [s.item, s]));
@@ -518,11 +585,11 @@ function provCount(label: string, records: { prov?: Provenance }[]) {
   return `${sourced}/${records.length}`;
 }
 const provRows: [string, string][] = [
-  ['items', provCount('items', d.items)], ['sourcing', provCount('sourcing', d.sourcing)], ['suppliers', provCount('suppliers', d.suppliers)],
+  ['items', provCount('items', d.items)], ['stations', provCount('mbom.items', d.mbom.items)], ['sourcing', provCount('sourcing', d.sourcing)], ['suppliers', provCount('suppliers', d.suppliers)],
   ['people', provCount('people', d.people)], ['programs', provCount('programs', d.programs)], ['ECOs', provCount('history', d.history)],
   ['NCRs', provCount('ncrs', d.ncrs)], ['ECRs', provCount('ecrs', d.ecrs)], ['stock', provCount('stock', d.stock)], ['POs', provCount('purchaseOrders', d.purchaseOrders)],
 ];
-for (const k of ['volumePlan', 'builtAircraft', 'standardCostHistory', 'bom', 'purchaseOrders', 'stock']) ok(d.sectionProvenance[k], `no section provenance for ${k}`);
+for (const k of ['volumePlan', 'builtAircraft', 'standardCostHistory', 'bom', 'mbom', 'purchaseOrders', 'stock']) ok(d.sectionProvenance[k], `no section provenance for ${k}`);
 
 // ------------------------------------------------------------------ exported JSON is current
 
@@ -544,6 +611,7 @@ console.log('Bowman dataset check');
 console.log(`  as of ${d.company.asOf}`);
 console.log(`  people ${d.people.length}, suppliers ${d.suppliers.length} (${d.suppliers.filter((s) => s.singleSource).length} strategic single-source), work centers ${d.workCenters.length}`);
 console.log(`  items ${d.items.length}: ${make.length} make, ${buyI.length} buy, ${d.items.filter((i) => i.status === 'proposed').length} proposed; BOM lines ${d.bom.length}; sourcing records ${d.sourcing.length}; sole-sourced buy items ${soleSourced}`);
+console.log(`  manufacturing BOM: ${d.mbom.items.length} build stations, ${d.mbom.bom.length} top-level lines (the ERP's BOM has ${mbomLines.length} lines, the PLM's ${d.bom.length}); ${leafKinds} leaf-quantity pairs equal across EBOM and MBOM`);
 console.log(`  stock rows ${d.stock.length}; purchase orders ${d.purchaseOrders.length} (${d.purchaseOrders.filter((p) => p.status === 'open').length} open), lines ${poLines}`);
 console.log(`  volume plan rows ${d.volumePlan.length}; Vesper per year ${[...vYear.entries()].map(([y, n]) => `${y}:${n}`).join(' ')}; built aircraft ${d.builtAircraft.length}`);
 console.log(`  history: ${d.history.length} released ECOs, mean cost error ${pct(100 * costErr.reduce((a, b) => a + b, 0) / costErr.length)} of forecast, mean cut-in slip ${(slipWeeks.reduce((a, b) => a + b, 0) / slipWeeks.length).toFixed(1)} weeks`);

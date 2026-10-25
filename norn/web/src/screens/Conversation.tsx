@@ -7,7 +7,7 @@ import { AvatarStack, Button, Checkbox, Label, PageLayout, ProgressBar, Spinner,
 import type { ActivityEvent, ErpPackage, EventKind, ImpactAssessment, LinkedRecord, RiskLevel, StepState } from '../assessment/types.ts';
 import { monthLabel } from '../assessment/adapter.ts';
 import { DiffTable } from './Changes.tsx';
-import { CheckStateIcon, LevelLabel, MockTag, Person, SavedRun } from '../ui/Bits.tsx';
+import { CheckStateIcon, LevelLabel, MockTag, Person, SavedRun, StaleNote } from '../ui/Bits.tsx';
 import {
   AircraftIcon, CaliperIcon, CcbTableIcon, CrateIcon, EcoStampIcon, EcrIcon, GaugeIcon, NcrCrackIcon, SerialPlateIcon,
 } from '../ui/icons.tsx';
@@ -31,7 +31,7 @@ export function Conversation({ a }: { a: ImpactAssessment }) {
           <Timeline clipSidebar>
             {filed && <OpeningComment a={a} filed={filed} />}
             <BotComment a={a} />
-            {rest.map(e => <EventItem key={e.id} e={e} />)}
+            {rest.map(e => <EventItem key={e.id} e={e} mock={a.mock.includes('narrative')} />)}
           </Timeline>
           <MergeBox a={a} />
           {a.erpPackage && <ErpCard pkg={a.erpPackage} mock={a.mock.includes('erp')} />}
@@ -69,7 +69,7 @@ function OpeningComment({ a, filed }: { a: ImpactAssessment; filed: ActivityEven
     <Timeline.Item className="nx-t-comment">
       <div className="nx-av-col"><Person name={filed.actor} size={40} /></div>
       <Timeline.Body className="nx-t-body">
-        <CommentBox name={filed.actor} kind="person" time={filed.at} label={<Label variant="secondary" size="small">Originator</Label>}>
+        <CommentBox name={filed.actor} kind="person" time={filed.at} label={<><MockTag on={a.mock.includes('narrative')} title="Mock: a saved ECR text, not read from the PLM" /> <Label variant="secondary" size="small">Originator</Label></>}>
           {a.body.map(s => (
             <div key={s.heading}>
               <h4 className="nx-h4">{s.heading}</h4>
@@ -95,7 +95,7 @@ function BotComment({ a }: { a: ImpactAssessment }) {
       <Timeline.Body className="nx-t-body">
         <CommentBox name="Norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? a.activity[a.activity.length - 1]?.at ?? ''} edited={a.source !== 'live'} right={a.level ? <LevelLabel level={a.level} long /> : undefined}>
           <h3 className="nx-h3">Impact assessment <SavedRun source={a.source} /></h3>
-          {a.checks.some(c => c.state === 'queued' || c.state === 'running') && <p className="nx-fg-muted nx-small">These are the numbers of the previous run. Norn is checking the changed ECR again.</p>}
+          {a.ecr.staleCost && <p className="nx-small"><StaleNote state={a.ecr.staleCost} /></p>}
           <table className="nx-bot-table">
             <thead>
               <tr><th /><th>Point estimate</th><th>P10 &ndash; P90</th><th>Likelihood</th></tr>
@@ -224,7 +224,8 @@ function forWho(e: ActivityEvent): string | undefined {
   return e.onBehalfOf ?? (e.spawnedBy?.startsWith('Norn, for ') ? e.spawnedBy.slice('Norn, for '.length) : undefined);
 }
 
-function EventItem({ e }: { e: ActivityEvent }) {
+/** `mock`: the timeline is a saved fixture, so a step marked running is not happening now. */
+function EventItem({ e, mock }: { e: ActivityEvent; mock: boolean }) {
   const b: BadgeSpec = BADGE[e.kind ?? 'comment'] ?? { icon: <NoteIcon /> };
   return (
     <Timeline.Item>
@@ -236,9 +237,10 @@ function EventItem({ e }: { e: ActivityEvent }) {
             <b>{e.actor}</b>
             {forWho(e) && <span className="nx-fg-muted"> for {forWho(e)}</span>}
             {' '}{e.text}
+            {mock && <> <MockTag title="Mock: a saved timeline entry, not an event in Norn" /></>}
             {e.level && <> <LevelLabel level={e.level} /></>}
             {e.reportedByAgent && <> <Label variant="attention" size="small">Reported by agent</Label></>}
-            {' '}<span className="nx-fg-muted" title={dateTime(e.at)}>{e.state === 'running' ? 'now' : ago(e.at)}</span>
+            {' '}<span className="nx-fg-muted" title={dateTime(e.at)}>{e.state === 'running' && !mock ? 'now' : ago(e.at)}</span>
           </span>
         </div>
         {e.detail && <div className="nx-ev-detail">{e.detail}</div>}
@@ -289,7 +291,7 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
       <MergeRow
         icon={working ? <Spinner size="medium" /> : bad ? <AlertFillIcon size={24} className="nx-fg-attention" /> : <CheckCircleFillIcon size={24} className="nx-fg-success" />}
         title={working ? `${working} impact check${working > 1 ? 's are' : ' is'} queued or running` : bad ? `${bad} impact check${bad > 1 ? 's' : ''} need${bad > 1 ? '' : 's'} attention` : ok === a.checks.length ? 'All impact checks have passed' : 'Impact checks not complete'}
-        sub={`${ok} passed${bad ? `, ${bad} need attention` : ''}${working ? `, ${working} waiting` : ''}`}
+        sub={<>{`${ok} passed${bad ? `, ${bad} need attention` : ''}${working ? `, ${working} waiting` : ''}`}{a.ecr.staleCost && <> &middot; <StaleNote state={a.ecr.staleCost} /></>}</>}
         open={open}
         onToggle={() => setOpen(o => !o)}
       >
@@ -497,6 +499,7 @@ function StatementComment({ a }: { a: ImpactAssessment }) {
               ))}
             </tbody>
           </table>
+          {st.numbersNote && <p className="nx-fg-muted nx-small">{st.numbersNote}</p>}
           <div className="nx-stmt-line">
             <b>Change class</b> <Mark ev="judgment" id="stmt-class">{st.changeClass}</Mark>
             <span className="nx-fg-muted"> &middot; route: {st.route}</span>

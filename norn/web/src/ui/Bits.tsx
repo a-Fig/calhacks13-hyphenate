@@ -1,27 +1,32 @@
 import {
   AlertFillIcon, CheckCircleFillIcon, CircleIcon, DotFillIcon, SkipIcon, XCircleFillIcon,
 } from '@primer/octicons-react';
-import { Avatar, Label, Spinner, StateLabel } from '@primer/react';
+import { Avatar, Label, Spinner } from '@primer/react';
 import type { Check, EcrSummary, ReportLevel } from '../assessment/types.ts';
 import { avatarSrc, type AvatarKind } from './avatars.ts';
 import { EcoStampIcon, EcrDraftIcon, EcrIcon, EcrRejectedIcon } from './icons.tsx';
+import { staleNote } from './fmt.ts';
 
 type Status = EcrSummary['status'];
 
 export const isOpen = (s: Status) => s === 'Draft' || s === 'Submitted' || s === 'In review';
 
-/** State colours: open is green, approved and ECO released are purple, rejected is red. */
+/**
+ * State colours: open is green, approved and ECO released are purple, rejected is red. Drawn here rather than
+ * with Primer's StateLabel, whose icons are the git pull request, merge and close glyphs.
+ */
 export function StateBadge({ status, size = 'medium' }: { status: Status; size?: 'small' | 'medium' }) {
-  const map: Record<Status, { status: 'pullOpened' | 'pullMerged' | 'pullClosed' | 'draft'; text: string }> = {
-    Draft: { status: 'draft', text: 'Draft' },
-    Submitted: { status: 'pullOpened', text: 'Submitted' },
-    'In review': { status: 'pullOpened', text: 'In review' },
-    Approved: { status: 'pullMerged', text: 'Approved' },
-    'ECO released': { status: 'pullMerged', text: 'ECO released' },
-    Rejected: { status: 'pullClosed', text: 'Rejected' },
+  const map: Record<Status, { tone: 'open' | 'done' | 'closed' | 'draft'; icon: typeof EcrIcon }> = {
+    Draft: { tone: 'draft', icon: EcrDraftIcon },
+    Submitted: { tone: 'open', icon: EcrIcon },
+    'In review': { tone: 'open', icon: EcrIcon },
+    Approved: { tone: 'done', icon: EcoStampIcon },
+    'ECO released': { tone: 'done', icon: EcoStampIcon },
+    Rejected: { tone: 'closed', icon: EcrRejectedIcon },
   };
   const m = map[status];
-  return <StateLabel status={m.status} size={size}>{m.text}</StateLabel>;
+  const Icon = m.icon;
+  return <span className={`nx-statebadge nx-statebadge-${m.tone} ${size === 'small' ? 'sm' : ''}`}><Icon size={size === 'small' ? 12 : 16} /> {status}</span>;
 }
 
 export function StateIcon({ status, size = 16 }: { status: Status; size?: number }) {
@@ -58,6 +63,13 @@ export function MockTag({ on = true, title = 'Mock: not produced by a check yet'
     <span title={title} className="nx-mock">
       <Label variant="attention" size="small">Mock</Label>
     </span>
+  );
+}
+
+/** Says the cost numbers beside it are the previous revision's. */
+export function StaleNote({ state }: { state: 'rechecking' | 'failed' }) {
+  return (
+    <span className="nx-flag"><AlertFillIcon size={12} className="nx-fg-attention" /> {staleNote(state)}</span>
   );
 }
 
