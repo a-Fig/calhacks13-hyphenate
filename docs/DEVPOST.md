@@ -125,7 +125,7 @@ shown are real database rows, and the package lines, problems and effects are ha
   restart writes nothing twice (#80).
 - Every number on the statement traces to the change request revision and the ERP baseline it was
   computed from.
-- The agents run under limits a finance team would accept: named seats, scoped tokens, a
+- The agents run under limits a finance team would accept: named seats, scoped tokens,
   code with no ERP write path, and a log the platform writes, not the agent.
 - Hundreds of offline tests and live checks against scratch databases, and fresh-context review
   rounds on the changes to money, routing and permissions.
