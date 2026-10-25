@@ -169,14 +169,18 @@ export function readFastTrackRequest(
 
 /**
  * What a Level 1 session's signed `spawnedBy` says: the check run that started it and, when the dispatcher
- * names it, the ECR's own revision (`pull_request.revision`) it read ("norn:check_run:32:revision:2"). A session
- * identity without ":revision:" (an older one, or a test client) has no revision to hold the ECR to. Undefined
- * when the call was not started by a check run.
+ * names them, the ECR's own revision (`pull_request.revision`) it read and the database time its snapshot of the
+ * timeline and supply checks was taken at, in microseconds ("norn:check_run:32:revision:2:snap:1790000000123456").
+ * The snapshot is what freezes the session's timeline and supply sections: the post guard, the module (which stores
+ * it on the statement) and the publisher all bind the same runs from it (workers/src/level1/siblings.ts). A session
+ * identity without ":revision:" (an older one, or a test client) has no revision to hold the ECR to; one without
+ * ":snap:" has no snapshot, and its statement binds as a statement outside a session does. A snapshot is only read
+ * after a revision. Undefined when the call was not started by a check run, or names one in a form not read here.
  */
-export function parseSessionSpawn(spawnedBy: string): { runId: string; revision?: number } | undefined {
-  const m = /(?:^|:)check_run:(\d+)(?::revision:(\d+))?$/.exec(spawnedBy);
+export function parseSessionSpawn(spawnedBy: string): { runId: string; revision?: number; snapshotUs?: bigint } | undefined {
+  const m = /(?:^|:)check_run:(\d+)(?::revision:(\d+)(?::snap:(\d+))?)?$/.exec(spawnedBy);
   if (!m) return undefined;
-  return m[2] === undefined ? { runId: m[1]! } : { runId: m[1]!, revision: Number(m[2]) };
+  return { runId: m[1]!, ...(m[2] === undefined ? {} : { revision: Number(m[2]) }), ...(m[3] === undefined ? {} : { snapshotUs: BigInt(m[3]) }) };
 }
 
 // ---------------------------------------------------------------------------------------------

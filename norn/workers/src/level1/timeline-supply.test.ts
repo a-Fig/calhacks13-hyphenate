@@ -7,13 +7,14 @@ import { jobFactsOf, factsOf } from './dispatcher.ts';
 import { statementToPlmFields, type StatementDoc } from './format.ts';
 import { statementGuardFor } from './guard.ts';
 import { findingsByCheck, findingsOf } from './prose.ts';
-import { decide, type DecideOptions, type EcrFacts } from './plan.ts';
+import { decide, spawnedByFor, type DecideOptions, type EcrFacts } from './plan.ts';
+import { parseSessionSpawn } from '../../../module/src/gate-logic.ts';
 import { CLAIM_FIT, SUPPLY_CLAIM, TIMELINE_CLAIM, jobPrompt, usd } from './prompt.ts';
 import { gather } from './publisher.ts';
 import { deriveRecommendation, ruleInputOf, type RunRow } from './recommendation.ts';
 import { storedRows, storedSupplyRows, storedTimelineRows } from './routing-fixture.ts';
-import { SIBLING_CACHE_GRACE_US, SIBLING_WAIT_MS, siblingCutoffUs, siblingOf, waitingForSiblings } from './siblings.ts';
-import { ruleInputForRun, ruleSiblingsOf, siblingsForRun } from './source.ts';
+import { SETTLE_WAIT_MS, SIBLING_CACHE_GRACE_US, SIBLING_WAIT_MS, settleCapUs, siblingCutoffUs, siblingOf, siblingSnapshotUs, siblingsUnsettled, waitingForSiblings } from './siblings.ts';
+import { ruleInputForRun, ruleSiblingsOf, siblingsForRun, snapshotForRun } from './source.ts';
 import { flagsOf, headlineNumbers, isTimelineSupplyKey, likelihoodWord, ruleCheckOf, supplierName, tableNumbers, timelineSupplyFacts, type SiblingView, type StoredRow } from './timeline-supply.ts';
 
 // ---- runs ---------------------------------------------------------------------------------------------
@@ -44,128 +45,141 @@ const run = (id: number, stage: string, status: string, over: Partial<RunRow> = 
 const s2 = run(3, 's2_cost', 'done', { createdUs: us(T0), startedUs: us(T0), finishedUs: us(T0 + 10_000), completedUs: us(T0 + 10_000) });
 /** An s3 or s4 run created with s2 (the same timestamp) that completed at T0+11 s unless told otherwise. */
 const done = (id: number, stage: string, over: Partial<RunRow> = {}) => run(id, stage, 'done', { createdUs: us(T0), startedUs: us(T0), finishedUs: us(T0 + 11_000), completedUs: us(T0 + 11_000), ...over });
+/** Where a statement with no snapshot binds: the s2 run's completion plus the fixed wait. */
 const CUTOFF = siblingCutoffUs(s2);
-const CUTOFF_MS = Number(CUTOFF / 1000n);
-/** The last moment the dispatcher still waits for a missing sibling: the cutoff plus the cache grace. One microsecond later it goes ahead. */
-const GO = CUTOFF + SIBLING_CACHE_GRACE_US;
+/** The moment the dispatcher's hold for supply ends: the s2 run's completion plus the settle wait. */
+const CAP = settleCapUs(s2);
+/** The last moment the dispatcher still holds a session back: the cap plus the cache grace. One microsecond later it goes ahead. */
+const GO = CAP + SIBLING_CACHE_GRACE_US;
+const CAP_MS = Number(CAP / 1000n);
 const GO_MS = Number(GO / 1000n);
 
-test('a sibling is the s3 or s4 run on the same s1 and revision created no later than the s2 run: a later run is never eligible, however soon it finishes', () => {
+test('a sibling is the newest s3 or s4 run on the same s1 and revision created no later than the snapshot: a run made after it is never eligible, however soon it finishes', () => {
   assert.equal(CUTOFF, us(T0 + 10_000 + SIBLING_WAIT_MS));
+  assert.equal(CAP, us(T0 + 10_000 + SETTLE_WAIT_MS));
   const runs = [s2, done(4, 's3_timeline'), done(5, 's4_supply')];
-  assert.equal(siblingOf(runs, s2, 's3_timeline').run?.id, 4n);
-  assert.equal(siblingOf(runs, s2, 's4_supply').state, 'ready');
-  // s4 re-runs because another ECR was filed: created later, so not the statement's, finished inside or after the window
-  for (const completedUs of [us(T0 + 12_000), CUTOFF - 1n, CUTOFF + 1n]) {
-    const rerun = done(9, 's4_supply', { createdUs: us(T0 + 5_000), completedUs, finishedUs: completedUs });
-    assert.equal(siblingOf([...runs, rerun], s2, 's4_supply').run?.id, 5n, `a run created after s2 is not eligible (completed at +${(completedUs - us(T0)) / 1000n} ms)`);
-    assert.equal(siblingOf([...runs, rerun], s2, 's4_supply').state, 'ready');
+  const snap = siblingSnapshotUs(runs, s2);
+  assert.equal(snap, us(T0 + 11_000), 'the newest time the cache holds on the three runs: s3 and s4 completed at +11 s');
+  assert.equal(siblingOf(runs, s2, 's3_timeline', snap).run?.id, 4n);
+  assert.equal(siblingOf(runs, s2, 's4_supply', snap).state, 'ready');
+  // s4 re-runs because another ECR was filed, after the session's snapshot: created later, so not the statement's, however soon it finishes
+  for (const completedUs of [snap + 1n, snap + 1_000n, CUTOFF - 1n, CUTOFF + 1n]) {
+    const rerun = done(9, 's4_supply', { createdUs: snap + 1n, completedUs, finishedUs: completedUs });
+    assert.equal(siblingOf([...runs, rerun], s2, 's4_supply', snap).run?.id, 5n, `a run created after the snapshot is not eligible (completed at +${(completedUs - us(T0)) / 1000n} ms)`);
+    assert.equal(siblingOf([...runs, rerun], s2, 's4_supply', snap).state, 'ready');
   }
-  // the run that was queued with s2 and went stale because of that re-run is still the statement's, with its own results
-  const staled = { ...done(5, 's4_supply'), status: 'stale', finishedUs: us(T0 + 5_000 /* overwritten when it went stale */) };
-  assert.equal(siblingOf([s2, done(4, 's3_timeline'), staled, done(9, 's4_supply', { createdUs: us(T0 + 5_000) })], s2, 's4_supply').run?.id, 5n);
-  assert.equal(siblingOf([s2, staled], s2, 's4_supply').state, 'ready');
+  // the run that was made with s2 and went stale because of a re-run made after the snapshot is still the statement's, with its own results
+  const staled = { ...done(5, 's4_supply'), status: 'stale', finishedUs: snap + 5_000n /* overwritten when it went stale */ };
+  assert.equal(siblingOf([s2, done(4, 's3_timeline'), staled, done(9, 's4_supply', { createdUs: snap + 1n })], s2, 's4_supply', snap).run?.id, 5n);
+  assert.equal(siblingOf([s2, staled], s2, 's4_supply', snap).state, 'ready');
+  // a snapshot that already holds the re-run binds it: the newest by id, whatever became stale on the way (the batch case, below)
+  const withRerun = [s2, done(4, 's3_timeline'), staled, done(9, 's4_supply', { createdUs: us(T0 + 5_000) })];
+  assert.equal(siblingOf(withRerun, s2, 's4_supply', siblingSnapshotUs(withRerun, s2)).run?.id, 9n);
   // another revision, another s1 run, and cancelled runs are not this snapshot's
   assert.equal(siblingOf([s2, done(4, 's3_timeline', { revision: 2 })], s2, 's3_timeline').state, 'pending');
   assert.equal(siblingOf([s2, done(4, 's3_timeline', { upstreamS1: 'other' })], s2, 's3_timeline').state, 'pending');
   assert.equal(siblingOf([s2, run(4, 's3_timeline', 'cancelled', { createdUs: us(T0) })], s2, 's3_timeline').state, 'pending');
   // eligible runs: the newest by id
   assert.equal(siblingOf([s2, done(4, 's3_timeline'), done(8, 's3_timeline', { completedUs: us(T0 + 12_000) })], s2, 's3_timeline').run?.id, 8n);
+  // with no snapshot the statement binds at the cutoff: the s2 run's completion plus the fixed wait, a function of the s2 run alone
+  const rerun = done(9, 's4_supply', { createdUs: us(T0 + 12_000), completedUs: us(T0 + 13_000), finishedUs: us(T0 + 13_000) });
+  assert.equal(siblingOf([...runs, rerun], s2, 's4_supply').run?.id, 9n, 'made before the cutoff, so it counts');
+  assert.equal(siblingOf([...runs, { ...rerun, createdUs: CUTOFF + 1n }], s2, 's4_supply').run?.id, 5n, 'made after it, so it does not');
 });
 
 test("a stale run's results say when it completed, not its overwritten finishedAt; the s2 run's cutoff does not move when it goes stale", () => {
   // finishedAt was overwritten to a time far past the cutoff when it went stale; its results are from T0+11 s
   const staleEarly = { ...done(4, 's3_timeline'), status: 'stale', finishedUs: CUTOFF + 99_000_000n };
   assert.equal(siblingOf([s2, staleEarly], s2, 's3_timeline').state, 'ready');
-  // the s2 run itself is stale now (a baseline-only change): the cutoff does not move with its overwritten finishedAt
+  // the s2 run itself is stale now (a baseline-only change): the cutoff and the cap do not move with its overwritten finishedAt
   assert.equal(siblingCutoffUs({ ...s2, status: 'stale', finishedUs: us(T0 + 900_000) }), CUTOFF);
+  assert.equal(settleCapUs({ ...s2, status: 'stale', finishedUs: us(T0 + 900_000) }), CAP);
   // a stale run with no results never completed
   assert.equal(siblingOf([s2, { ...run(4, 's3_timeline', 'stale', { createdUs: us(T0) }), completedUs: undefined }], s2, 's3_timeline').state, 'pending');
 });
 
-test('(b) a sibling created before s2 that completes after the cutoff is unavailable at dispatch once the cutoff has passed, and at publication even after it has finished', () => {
+test('(b) a sibling that completes after the snapshot is unavailable at dispatch, and at publication even after it has finished; the dispatcher holds until the cap and the grace have passed', () => {
   const late = (status: string, finishedUs: bigint | null) => run(4, 's3_timeline', status, { createdUs: us(T0 - 1_000), finishedUs, ...(finishedUs ? { completedUs: finishedUs } : {}) });
   const s4 = done(5, 's4_supply');
-  // at dispatch: up to and including the cutoff plus the grace the dispatcher still waits; only after it does it go ahead, and the check is unavailable
-  assert.equal(waitingForSiblings([s2, late('running', null), s4], s2, CUTOFF - 1n), true);
-  assert.equal(waitingForSiblings([s2, late('running', null), s4], s2, CUTOFF), true, 'at the cutoff itself it still waits (see below)');
+  // at dispatch: up to and including the cap plus the grace the dispatcher still waits; only after it does it go ahead, and the check is unavailable
+  assert.equal(waitingForSiblings([s2, late('running', null), s4], s2, CAP - 1n), true);
+  assert.equal(waitingForSiblings([s2, late('running', null), s4], s2, CAP), true, 'at the cap itself it still waits (see below)');
   assert.equal(waitingForSiblings([s2, late('running', null), s4], s2, GO), true, 'and through the grace');
   assert.equal(waitingForSiblings([s2, late('running', null), s4], s2, GO + 1n), false);
-  assert.equal(siblingOf([s2, late('running', null), s4], s2, 's3_timeline').state, 'pending');
-  // at publication, later: the run has finished (after the cutoff). Same answer: unavailable.
-  const finished = late('done', CUTOFF + 20_000_000n);
-  assert.equal(siblingOf([s2, finished, s4], s2, 's3_timeline').state, 'pending', 'completed after the cutoff');
-  assert.equal(siblingOf([s2, { ...finished, status: 'stale' }, s4], s2, 's3_timeline').state, 'pending', 'and still after it went stale');
-  assert.equal(siblingOf([s2, late('failed', CUTOFF + 5_000_000n), s4], s2, 's3_timeline').state, 'pending', 'a failure after the cutoff likewise');
-  // one that completed exactly at the cutoff counts
-  assert.equal(siblingOf([s2, late('done', CUTOFF), s4], s2, 's3_timeline').state, 'ready');
+  const snap = siblingSnapshotUs([s2, late('running', null), s4], s2);
+  assert.equal(siblingOf([s2, late('running', null), s4], s2, 's3_timeline', snap).state, 'pending');
+  // at publication, later: the run has finished, after the snapshot. Same answer: unavailable.
+  const finished = late('done', snap + 20_000_000n);
+  assert.equal(siblingOf([s2, finished, s4], s2, 's3_timeline', snap).state, 'pending', 'completed after the snapshot');
+  assert.equal(siblingOf([s2, { ...finished, status: 'stale' }, s4], s2, 's3_timeline', snap).state, 'pending', 'and still after it went stale');
+  assert.equal(siblingOf([s2, late('failed', snap + 5_000_000n), s4], s2, 's3_timeline', snap).state, 'pending', 'a failure after the snapshot likewise');
+  // one that completed exactly at the snapshot counts
+  assert.equal(siblingOf([s2, late('done', snap), s4], s2, 's3_timeline', snap).state, 'ready');
 });
 
-test('(c) timestamps are compared in microseconds: a rerun created 800 microseconds after s2 is not eligible, at dispatch or at publication', () => {
+test('(c) timestamps are compared in microseconds: a rerun created 800 microseconds after the snapshot is not eligible, at dispatch or at publication', () => {
   const s2At = (us(T0) + 123n); // not on a millisecond boundary
   const own = { ...s2, createdUs: s2At };
   const sibling = (id: number, stage: string, createdUs: bigint) => done(id, stage, { createdUs, startedUs: createdUs });
-  // the module made s3 and s4 with s2: one timestamp. Run 9 is a rerun made 800 us later, which truncates to the same millisecond
-  const rerun = sibling(9, 's4_supply', s2At + 800n);
-  assert.equal(rerun.createdUs / 1000n, s2At / 1000n, 'the fixture: both are in the same millisecond');
-  const runs = [own, sibling(4, 's3_timeline', s2At), sibling(5, 's4_supply', s2At), rerun];
-  assert.equal(siblingOf(runs, own, 's4_supply').run?.id, 5n);
+  const base = [own, sibling(4, 's3_timeline', s2At), sibling(5, 's4_supply', s2At)];
+  const snap = siblingSnapshotUs(base, own) + 123n; // the completions are on a millisecond boundary; the snapshot is not
+  // a rerun made 800 us after the snapshot, which truncates to the same millisecond
+  const rerun = sibling(9, 's4_supply', snap + 800n);
+  assert.equal(rerun.createdUs / 1000n, snap / 1000n, 'the fixture: both are in the same millisecond');
+  assert.equal(siblingOf([...base, rerun], own, 's4_supply', snap).run?.id, 5n);
   // 1 us is enough
-  assert.equal(siblingOf([...runs.slice(0, 3), sibling(9, 's4_supply', s2At + 1n)], own, 's4_supply').run?.id, 5n);
-  // and one made before s2, by any margin, is eligible
-  assert.equal(siblingOf([own, sibling(4, 's3_timeline', s2At - 1n)], own, 's3_timeline').run?.id, 4n);
-  // a cutoff that is not on a millisecond boundary counts the microseconds: finishing 1 us late is late
-  const cutoff = siblingCutoffUs(own);
-  assert.equal(siblingOf([own, done(4, 's3_timeline', { createdUs: s2At, completedUs: cutoff + 1n })], own, 's3_timeline').state, 'pending');
-  assert.equal(siblingOf([own, done(4, 's3_timeline', { createdUs: s2At, completedUs: cutoff })], own, 's3_timeline').state, 'ready');
+  assert.equal(siblingOf([...base, sibling(9, 's4_supply', snap + 1n)], own, 's4_supply', snap).run?.id, 5n);
+  // and one made at the snapshot, or before it by any margin, is eligible
+  assert.equal(siblingOf([...base, sibling(9, 's4_supply', snap)], own, 's4_supply', snap).run?.id, 9n);
+  assert.equal(siblingOf([own, sibling(4, 's3_timeline', s2At - 1n)], own, 's3_timeline', snap).run?.id, 4n);
+  // a snapshot that is not on a millisecond boundary counts the microseconds: finishing 1 us late is late
+  assert.equal(siblingOf([own, done(4, 's3_timeline', { createdUs: s2At, completedUs: snap + 1n })], own, 's3_timeline', snap).state, 'pending');
+  assert.equal(siblingOf([own, done(4, 's3_timeline', { createdUs: s2At, completedUs: snap })], own, 's3_timeline', snap).state, 'ready');
 });
 
-test('(c) the same on the client cache: dispatch and publication both pick run 5 when run 9 was created 800 microseconds after s2', () => {
+test('(c) the same on the client cache: dispatch and publication both pick run 5 when run 9 was created 800 microseconds after the snapshot', () => {
   const s2Us = us(T0) + 123n;
   const base = [s1, { ...s2, createdUs: s2Us }, done(4, 's3_timeline', { createdUs: s2Us }), done(5, 's4_supply', { createdUs: s2Us })];
-  const rerun = done(9, 's4_supply', { createdUs: s2Us + 800n, startedUs: s2Us + 800n, finishedUs: us(T0 + 12_000), completedUs: us(T0 + 12_000) });
+  const results = [...withRun(storedRows('ECR-0417'), 3, 1000), ...withRun(storedTimelineRows('ECR-0417'), 4, 2000), ...withRun(storedSupplyRows('ECR-0417'), 5, 3000)];
+  const snap = snapshotForRun(cache({ runs: base, results }), 5n, 3n)!; // what the dispatcher reads when it starts the session
+  const rerun = done(9, 's4_supply', { createdUs: snap + 800n, startedUs: snap + 800n, finishedUs: snap + 2_000n, completedUs: snap + 2_000n });
   const c = cache({
     runs: [...base.slice(0, 3), { ...base[3]!, status: 'stale' }, rerun],
-    results: [...withRun(storedRows('ECR-0417'), 3, 1000), ...withRun(storedTimelineRows('ECR-0417'), 4, 2000), ...withRun(storedSupplyRows('ECR-0417'), 5, 3000), ...withRun(storedSupplyRows('ECR-0421'), 9, 4000)],
+    results: [...results, ...withRun(storedSupplyRows('ECR-0421'), 9, 4000)],
   });
-  const r = resolved(c);
+  const r = resolved(c, T0 + 120_000, snap);
   assert.deepEqual(r.dispatchRuns, [4, 5], 'dispatch');
   assert.deepEqual(r.publishRuns, [4, 5], 'publication');
 });
 
-test('(d) a sibling that finishes or fails exactly at the cutoff resolves the same way at dispatch and at publication', () => {
-  const stillRunning = run(4, 's3_timeline', 'running', { createdUs: us(T0), startedUs: us(T0) });
+test('(d) a sibling that finishes or fails exactly at the snapshot resolves the same way at dispatch and at publication', () => {
   const s4 = done(5, 's4_supply');
-  // What the dispatcher would tell the agent at `nowUs` (null: it keeps waiting), given the sibling as the cache shows it.
-  const atDispatch = (s3: RunRow, nowUs: bigint) => (waitingForSiblings([s2, s3, s4], s2, nowUs) ? null : siblingOf([s2, s3, s4], s2, 's3_timeline').state);
-  const atPublication = (s3: RunRow) => siblingOf([s2, s3, s4], s2, 's3_timeline').state;
   const ended = (status: 'done' | 'failed', at: bigint) => run(4, 's3_timeline', status, { createdUs: us(T0), startedUs: us(T0), finishedUs: at, ...(status === 'done' ? { completedUs: at } : {}) });
   for (const [status, inside] of [['done', 'ready'], ['failed', 'failed']] as const) {
-    // ends at the cutoff: counts. A dispatcher that looks at the cutoff before it has seen the end must not go ahead, so it cannot have told the agent "pending".
-    assert.equal(atPublication(ended(status, CUTOFF)), inside, `${status} at the cutoff counts at publication`);
-    assert.equal(atDispatch(stillRunning, CUTOFF), null, `${status} at the cutoff: a dispatcher looking at the cutoff still waits`);
-    assert.equal(atDispatch(stillRunning, GO), null, `${status} at the cutoff: and through the grace`);
-    assert.equal(atDispatch(ended(status, CUTOFF), CUTOFF), inside, `${status} at the cutoff: and once it has seen the end it says the same as publication`);
-    // ends one microsecond after: too late. The dispatcher goes ahead only after the cutoff and the grace, when it is still running, and says pending; so does publication.
-    assert.equal(atDispatch(stillRunning, GO + 1n), 'pending');
-    assert.equal(atPublication(ended(status, CUTOFF + 1n)), 'pending', `${status} 1 us after the cutoff is late at publication`);
-    // ends one microsecond before: counts at both.
-    assert.equal(atDispatch(ended(status, CUTOFF - 1n), CUTOFF - 1n), inside);
-    assert.equal(atPublication(ended(status, CUTOFF - 1n)), inside);
+    // The dispatcher takes the snapshot from what it holds when it starts the session, which includes the sibling's end, so the end is never after it
+    // (unless the cache has not seen the end, in which case the sibling is queued or running and the dispatcher holds). Publication reads the same snapshot.
+    const e = ended(status, us(T0 + 40_000));
+    const snap = siblingSnapshotUs([s2, e, s4], s2);
+    assert.equal(snap, us(T0 + 40_000), 'the snapshot reaches the end');
+    assert.equal(siblingOf([s2, e, s4], s2, 's3_timeline', snap).state, inside, `${status} at the snapshot counts`);
+    assert.equal(siblingOf([s2, ended(status, snap + 1n), s4], s2, 's3_timeline', snap).state, 'pending', `${status} 1 us after it is late`);
+    assert.equal(siblingOf([s2, ended(status, snap - 1n), s4], s2, 's3_timeline', snap).state, inside);
+    // the dispatcher does not go ahead on a sibling it sees running before the cap and the grace
+    assert.equal(waitingForSiblings([s2, run(4, 's3_timeline', 'running', { createdUs: us(T0) }), s4], s2, snap), true);
   }
 });
 
-test('(g) a sibling that finished exactly at the cutoff but reaches the cache late, inside the grace, reads ready at dispatch and at publication', () => {
+test('(g) a sibling that finished exactly at the cap but reaches the cache late, inside the grace, reads ready at dispatch and at publication', () => {
   const s4 = done(5, 's4_supply');
   const stillRunning = run(4, 's3_timeline', 'running', { createdUs: us(T0), startedUs: us(T0) });
-  const finished = run(4, 's3_timeline', 'done', { createdUs: us(T0), startedUs: us(T0), finishedUs: CUTOFF, completedUs: CUTOFF });
+  const finished = run(4, 's3_timeline', 'done', { createdUs: us(T0), startedUs: us(T0), finishedUs: CAP, completedUs: CAP });
   // What the dispatcher would tell the agent at `nowUs` given what its cache shows then (null: it keeps waiting).
-  const atDispatch = (s3: RunRow, nowUs: bigint) => (waitingForSiblings([s2, s3, s4], s2, nowUs) ? null : siblingOf([s2, s3, s4], s2, 's3_timeline').state);
-  // The run finished in the database at the cutoff; the cache still shows it running a millisecond later, and then catches up 1.5 s after.
-  assert.equal(atDispatch(stillRunning, CUTOFF + 1_000n), null, 'the cache has not caught up: inside the grace the dispatcher still waits');
-  assert.equal(atDispatch(finished, CUTOFF + 1_500_000n), 'ready', 'the cache has caught up: the dispatcher tells the agent ready');
+  const atDispatch = (s3: RunRow, nowUs: bigint) => (waitingForSiblings([s2, s3, s4], s2, nowUs) ? null : siblingOf([s2, s3, s4], s2, 's3_timeline', siblingSnapshotUs([s2, s3, s4], s2)).state);
+  // The run finished in the database at the cap; the cache still shows it running a millisecond later, and then catches up 1.5 s after.
+  assert.equal(atDispatch(stillRunning, CAP + 1_000n), null, 'the cache has not caught up: inside the grace the dispatcher still waits');
+  assert.equal(atDispatch(finished, CAP + 1_500_000n), 'ready', 'the cache has caught up: the dispatcher tells the agent ready');
   assert.equal(atDispatch(finished, GO + 1n), 'ready', 'and the same had it looked only after the grace');
-  assert.equal(siblingOf([s2, finished, s4], s2, 's3_timeline').state, 'ready', 'publication reads ready too');
+  assert.equal(siblingOf([s2, finished, s4], s2, 's3_timeline', siblingSnapshotUs([s2, finished, s4], s2)).state, 'ready', 'publication reads ready too');
 });
 
 test('a queued or running sibling is not available, a failure or block is how it ended, and the newest eligible run decides', () => {
@@ -179,17 +193,38 @@ test('a queued or running sibling is not available, a failure or block is how it
   assert.equal(siblingOf([done(4, 's3_timeline')], { ...s2, upstreamS1: undefined }, 's3_timeline').state, 'pending');
 });
 
-test('the dispatcher waits while a sibling is unavailable, and goes ahead when both have settled or at the cutoff', () => {
+test('the dispatcher holds while supply has not settled: a queued or running s3 or s4, a newest run that is stale, a stage with no run; and goes ahead when both have settled or at the cap', () => {
   const both = [s2, done(4, 's3_timeline'), done(5, 's4_supply')];
-  assert.equal(waitingForSiblings(both, s2, us(T0 + 12_000)), false, 'both done: no waiting');
-  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline')], s2, us(T0 + 12_000)), true, 's4 not there yet');
-  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'running', { createdUs: us(T0) })], s2, GO), true, 'a hung s4 is waited for up to and including the cutoff plus the grace');
+  const now = us(T0 + 12_000);
+  assert.equal(waitingForSiblings(both, s2, now), false, 'both done: no waiting');
+  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline')], s2, now), true, 's4 not there yet');
+  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'running', { createdUs: us(T0) })], s2, GO), true, 'a hung s4 is waited for up to and including the cap plus the grace');
   assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'running', { createdUs: us(T0) })], s2, GO + 1n), false, 'and not a microsecond longer');
-  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'failed', { createdUs: us(T0) })], s2, us(T0 + 12_000)), false, 'a failed s4 is settled: no reason to wait');
-  assert.equal(waitingForSiblings([s2, run(4, 's3_timeline', 'blocked', { createdUs: us(T0) }), done(5, 's4_supply')], s2, us(T0 + 12_000)), false);
-  assert.equal(waitingForSiblings([s2], s2, us(T0 + 1_000_000)), false, 'neither ever ran: after the cutoff, go ahead');
-  // a re-run created later does not make the dispatcher wait again
-  assert.equal(waitingForSiblings([...both, run(9, 's4_supply', 'running', { createdUs: us(T0 + 5_000) })], s2, us(T0 + 12_000)), false);
+  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline'), run(5, 's4_supply', 'failed', { createdUs: us(T0) })], s2, now), false, 'a failed s4 is settled: no reason to wait');
+  assert.equal(waitingForSiblings([s2, run(4, 's3_timeline', 'blocked', { createdUs: us(T0) }), done(5, 's4_supply')], s2, now), false);
+  assert.equal(waitingForSiblings([s2], s2, us(T0 + 20_000)), true, 'neither has run yet: it may be about to');
+  assert.equal(waitingForSiblings([s2], s2, GO + 1n), false, 'neither ever ran: after the cap, go ahead');
+  // a re-run for a later-filed peer holds the session back, queued or running, until it is done, on the same revision
+  for (const status of ['queued', 'running']) {
+    const rerun = run(9, 's4_supply', status, { createdUs: us(T0 + 5_000) });
+    assert.equal(siblingsUnsettled([...both, rerun], s2), true, `a re-run that is ${status}`);
+    assert.equal(waitingForSiblings([...both, rerun], s2, now), true);
+    assert.equal(waitingForSiblings([...both, rerun], s2, GO + 1n), false, `${status} at the cap: it goes ahead and the supply check is unavailable`);
+    assert.equal(siblingOf([...both, rerun], s2, 's4_supply', siblingSnapshotUs([...both, rerun], s2)).state, 'pending');
+    assert.equal(siblingsUnsettled([...both, { ...rerun, status: 'done', finishedUs: us(T0 + 6_000), completedUs: us(T0 + 6_000) }], s2), false, 'released when it is done');
+    assert.equal(siblingsUnsettled([...both, { ...rerun, status: 'failed', finishedUs: us(T0 + 6_000) }], s2), false, 'or has failed');
+    assert.equal(siblingsUnsettled([...both, { ...rerun, revision: 2 }], s2), false, "a run on another change-request revision is not this ECR's current one");
+  }
+  // the newest is stale and its replacement is not in the cache yet
+  const stale9 = { ...done(9, 's4_supply', { createdUs: us(T0 + 5_000) }), status: 'stale' };
+  assert.equal(siblingsUnsettled([...both, stale9], s2), true);
+  assert.equal(siblingsUnsettled([...both, stale9, done(10, 's4_supply', { createdUs: us(T0 + 6_000), completedUs: us(T0 + 7_000), finishedUs: us(T0 + 7_000) })], s2), false, 'and settled again once it is');
+  // the s3 run is held for the same reasons
+  assert.equal(siblingsUnsettled([s2, run(4, 's3_timeline', 'running', { createdUs: us(T0) }), done(5, 's4_supply')], s2), true);
+  // a configured cap moves the end of the hold
+  const short = 5_000_000n;
+  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline')], s2, settleCapUs(s2, short) + SIBLING_CACHE_GRACE_US, short), true);
+  assert.equal(waitingForSiblings([s2, done(4, 's3_timeline')], s2, settleCapUs(s2, short) + SIBLING_CACHE_GRACE_US + 1n, short), false);
 });
 
 const opts = (over: Partial<DecideOptions> = {}): DecideOptions => ({ nowMs: T0 + 60_000, maxAttempts: 2, retryDelayMs: 60_000, orphanMs: 330_000, running: new Set(), ...over });
@@ -497,7 +532,8 @@ test('factsOf: the dispatcher waits while s4 is running and starts once it has f
   const rows = [s1, s2, done(4, 's3_timeline')];
   const waiting = cache({ runs: [...rows, run(5, 's4_supply', 'running', { createdUs: us(T0) })], results: [] });
   const f = factsOf(waiting, pr5, 'level1-statement').s2Done[0]!;
-  assert.deepEqual(f.siblings, { pending: true, cutoffUs: siblingCutoffUs(s2) });
+  assert.deepEqual(f.siblings, { pending: true, cutoffUs: CAP });
+  assert.deepEqual(factsOf(waiting, pr5, 'level1-statement', false, 5_000).s2Done[0]!.siblings, { pending: true, cutoffUs: us(T0 + 10_000 + 5_000) }, 'the cap is configurable (NORN_L1_SETTLE_MS)');
   assert.equal(decide({ ...ecrFacts(f.siblings), s2Done: [{ ...f, id: 3, inputsRevision: 1, mock: false }] }, opts({ nowMs: T0 + 20_000 })).action, 'skip');
   const settled = factsOf(cache({ runs: [...rows, done(5, 's4_supply')], results: [] }), pr5, 'level1-statement').s2Done[0]!;
   assert.equal(settled.siblings?.pending, false);
@@ -549,64 +585,75 @@ test('a failed s4 does not stop Level 1: the agent is told the supply check is n
 // ---- the snapshot is frozen: Sol's case and its mirror -----------------------------------------------------
 
 /** What the dispatcher tells the agent and what the publisher shows, for one cache: run ids, rule, prompt sentences and the PLM text. */
-function resolved(c: any, statementAtMs = T0 + 120_000) {
-  const sib = siblingsForRun(c, 5n, 3n)!;
-  const facts = jobFactsOf(c, pr5, 1, 3);
+function resolved(c: any, statementAtMs = T0 + 120_000, snapshotUs?: bigint) {
+  const sib = siblingsForRun(c, 5n, 3n, snapshotUs)!;
+  const facts = jobFactsOf(c, pr5, 1, 3, snapshotUs);
   const stmt = statementFor('ECR-0417');
-  c.impactStatement = { prId: { filter: () => [{ id: 12n, level: 1, prRevision: 3, checkRunId: 3n, createdAt: { toDate: () => new Date(statementAtMs) }, changeClass: 'Class I', route: 'r', headline: 'h', author: null, numbers: stmt.numbers, drivers: [], assumptions: [], claims: stmt.claims }] } };
+  c.impactStatement = { prId: { filter: () => [{ id: 12n, level: 1, prRevision: 3, checkRunId: 3n, snapshotUs: snapshotUs ?? 0n, createdAt: { toDate: () => new Date(statementAtMs) }, changeClass: 'Class I', route: 'r', headline: 'h', author: null, numbers: stmt.numbers, drivers: [], assumptions: [], claims: stmt.claims }] } };
   const g = gather(c, pr5)!;
   const html = statementToPlmFields(g.statement, g.ecr, g.prov, o).fields.impact_statement as string;
-  return { dispatchRuns: [sib.timeline.runId, sib.supply.runId], publishRuns: [g.prov.timelineRunId, g.prov.supplyRunId], states: [sib.timeline.state, sib.supply.state], conditions: facts.recommendation!.conditions, told: facts.timelineSupply, ruleConditions: deriveRecommendation(g.prov.ruleInput!).conditions, html };
+  // the post guard reads the snapshot from the credential the dispatcher signed
+  const spawnedBy = spawnedByFor(3, pr5.revision, snapshotUs);
+  const guardInput = ruleInputForRun(c, 5n, 3n, 'ECR-0417', parseSessionSpawn(spawnedBy)?.snapshotUs)!;
+  const guardText = statementGuardFor(c)(pr5, spawnedBy, { headline: 'Checks are clean.', drivers: [], claims: [] });
+  return { dispatchRuns: [sib.timeline.runId, sib.supply.runId], publishRuns: [g.prov.timelineRunId, g.prov.supplyRunId], states: [sib.timeline.state, sib.supply.state], conditions: facts.recommendation!.conditions, told: facts.timelineSupply, ruleConditions: deriveRecommendation(g.prov.ruleInput!).conditions, guardConditions: deriveRecommendation(guardInput.input).conditions, guardText, html };
 }
 
-test('(a) dispatch resolves run 5; a run 9 is created inside the window and finishes before the cutoff; publication still resolves run 5, with the same rows', () => {
-  const atDispatch = resolved(healthy());
+test('(a) dispatch resolves run 5; a run 9 is created after the snapshot and finishes within the window; publication and the guard still resolve run 5, with the same rows', () => {
+  const dispatchCache = healthy();
+  const snap = snapshotForRun(dispatchCache, 5n, 3n)!; // what the dispatcher reads when it starts the session, and signs
+  const atDispatch = resolved(dispatchCache, T0 + 120_000, snap);
   assert.deepEqual(atDispatch.dispatchRuns, [4, 5]);
-  // later, a peer ECR changed: s4 re-ran (run 9, created after s2, completed inside the 30 s window) with other numbers
+  // later, a peer ECR changed: s4 re-ran (run 9, created after the snapshot, completed soon after) with other numbers
   const rerunRows = withRun(storedSupplyRows('ECR-0421'), 9, 4000);
-  const rerun = done(9, 's4_supply', { createdUs: us(T0 + 2_000), startedUs: us(T0 + 2_000), finishedUs: us(T0 + 12_000), completedUs: us(T0 + 12_000) });
-  const staled5 = { ...done(5, 's4_supply'), status: 'stale', finishedUs: us(T0 + 2_000) }; // run 5 went stale when run 9 was queued
+  const rerun = done(9, 's4_supply', { createdUs: snap + 2_000_000n, startedUs: snap + 2_000_000n, finishedUs: snap + 3_000_000n, completedUs: snap + 3_000_000n });
+  const staled5 = { ...done(5, 's4_supply'), status: 'stale', finishedUs: snap + 2_000_000n }; // run 5 went stale when run 9 was queued
   const later = resolved(cache({
     runs: [s1, s2, done(4, 's3_timeline'), staled5, rerun],
     results: [...withRun(storedRows('ECR-0417'), 3, 1000), ...withRun(storedTimelineRows('ECR-0417'), 4, 2000), ...withRun(storedSupplyRows('ECR-0417'), 5, 3000), ...rerunRows],
-  }));
+  }), T0 + 120_000, snap);
   assert.deepEqual(later.dispatchRuns, [4, 5], 'a dispatcher looking now still resolves run 5');
   assert.deepEqual(later.publishRuns, [4, 5], 'and so does the publisher');
   assert.deepEqual(later.states, ['ready', 'ready']);
   assert.deepEqual(later.conditions, atDispatch.conditions);
+  assert.deepEqual(later.guardConditions, atDispatch.conditions, 'and the guard');
+  assert.equal(later.guardText, atDispatch.guardText);
   assert.deepEqual(later.told, atDispatch.told);
   assert.equal(later.html, atDispatch.html, 'the PLM text is byte for byte the one built from run 5');
   assert.ok(!later.html.includes('bundle_saving') && !later.html.includes('Ordering together'), "none of run 9's numbers");
 });
 
-test('(b) a sibling created before s2 that finishes after the cutoff is unavailable at dispatch and at publication, even when publication is evaluated after it has finished', () => {
+test('(b) a sibling that finishes after the snapshot is unavailable at dispatch, at the guard and at publication, even when publication is evaluated after it has finished', () => {
   const late = (completedUs: bigint | null, status = 'done') => run(4, 's3_timeline', status, { createdUs: us(T0 - 1_000), startedUs: us(T0 - 1_000), finishedUs: completedUs, ...(completedUs ? { completedUs } : {}) });
   const make = (s3: RunRow) => cache({ runs: [s1, s2, s3, done(5, 's4_supply')], results: [...withRun(storedRows('ECR-0417'), 3, 1000), ...(s3.completedUs ? withRun(storedTimelineRows('ECR-0417'), 4, 2000) : []), ...withRun(storedSupplyRows('ECR-0417'), 5, 3000)] });
-  // dispatch, once the cutoff has passed: still running. The dispatcher goes ahead and the timeline is unavailable.
+  // dispatch, once the cap and the grace have passed: still running. The dispatcher goes ahead and the timeline is unavailable.
   const running = make(late(null, 'running'));
   const f = factsOf(running, pr5, 'level1-statement').s2Done[0]!;
-  assert.deepEqual(f.siblings, { pending: true, cutoffUs: CUTOFF });
-  assert.equal(decide({ ...ecrFacts(f.siblings) }, opts({ nowMs: CUTOFF_MS - 1 })).action, 'skip', 'before the cutoff it waits');
-  assert.equal(decide({ ...ecrFacts(f.siblings) }, opts({ nowMs: CUTOFF_MS })).action, 'skip', 'at the cutoff it still waits');
+  assert.deepEqual(f.siblings, { pending: true, cutoffUs: CAP });
+  assert.equal(decide({ ...ecrFacts(f.siblings) }, opts({ nowMs: CAP_MS - 1 })).action, 'skip', 'before the cap it waits');
+  assert.equal(decide({ ...ecrFacts(f.siblings) }, opts({ nowMs: CAP_MS })).action, 'skip', 'at the cap it still waits');
   assert.equal(decide({ ...ecrFacts(f.siblings) }, opts({ nowMs: GO_MS })).action, 'skip', 'and through the grace');
   assert.equal(decide({ ...ecrFacts(f.siblings) }, opts({ nowMs: GO_MS + 1 })).action, 'dispatch', 'after it, it goes');
-  const atDispatch = resolved(running);
+  const snap = snapshotForRun(running, 5n, 3n)!;
+  const atDispatch = resolved(running, T0 + 120_000, snap);
   assert.deepEqual(atDispatch.states, ['pending', 'ready']);
   assert.deepEqual(atDispatch.told?.unavailable, [{ check: 'timeline', why: 'it had not finished in time' }]);
   assert.ok(atDispatch.html.includes('The timeline check had not finished when this assessment was made.'));
-  // publication, later: that run has since finished, 20 s after the cutoff. Still unavailable, the same words, the same conditions.
-  const finished = resolved(make(late(CUTOFF + 20_000_000n)), CUTOFF_MS + 60_000);
+  // publication, later: that run has since finished, 20 s after the snapshot. Still unavailable, the same words, the same conditions.
+  const finished = resolved(make(late(snap + 20_000_000n)), CAP_MS + 60_000, snap);
   assert.deepEqual(finished.states, ['pending', 'ready']);
   assert.deepEqual(finished.ruleConditions, atDispatch.ruleConditions);
+  assert.deepEqual(finished.guardConditions, atDispatch.ruleConditions);
   assert.deepEqual(finished.conditions, atDispatch.conditions);
   assert.ok(finished.html.includes('The timeline check had not finished when this assessment was made.'));
   assert.ok(!finished.html.includes('Earliest cut-in date'), 'none of its numbers in the table, though it has finished since');
   assert.equal(finished.conditions[3], 'The timeline check had not finished when this assessment was made, so it is not assessed');
 });
 
-test('the statement rests on its own runs when an unrelated later s4 failed, and on the failure when it had failed inside the window', () => {
-  const c = healthy('ECR-0417', [run(9, 's4_supply', 'failed', { createdUs: us(T0 + 2_000), finishedUs: CUTOFF + 2_000_000n })]);
-  const g = resolved(c);
+test('the statement rests on its own runs when an unrelated later s4 failed, and on the failure when it had failed before the snapshot', () => {
+  const snap = snapshotForRun(healthy(), 5n, 3n)!;
+  const c = healthy('ECR-0417', [run(9, 's4_supply', 'failed', { createdUs: snap + 2_000n, finishedUs: snap + 2_000_000n })]);
+  const g = resolved(c, T0 + 120_000, snap);
   assert.deepEqual(g.states, ['ready', 'ready']);
   assert.ok(!g.html.includes('The supply check'));
   const d = resolved(cache({

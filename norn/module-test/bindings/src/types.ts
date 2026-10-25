@@ -248,6 +248,7 @@ export const ImpactStatement = __t.object("ImpactStatement", {
   level: __t.u8(),
   prRevision: __t.u32(),
   checkRunId: __t.u64(),
+  snapshotUs: __t.u64(),
   changeClass: __t.string(),
   route: __t.string(),
   headline: __t.string(),

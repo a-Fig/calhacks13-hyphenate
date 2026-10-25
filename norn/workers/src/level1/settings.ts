@@ -1,5 +1,6 @@
 // Settings for the Level 1 dispatcher and publisher, from the environment. Everything has a default
 // that works on a laptop next to a local SpacetimeDB.
+import { SETTLE_WAIT_MS } from './siblings.ts';
 
 export interface Level1Settings {
   /** The runner role and the `role` of every agent_event row these jobs write. Norn's gate lets a job post statements only up to the level its role name starts with (`level1-`). */
@@ -24,6 +25,8 @@ export interface Level1Settings {
   webBaseUrl: string;
   /** Post a short comment on the ECR when a statement is written (off: comments cannot be taken back). */
   publishComment: boolean;
+  /** How long after the cost run finished the dispatcher waits for the timeline and supply checks to settle, at most (NORN_L1_SETTLE_MS). */
+  settleMs: number;
   /**
    * The research worker (norn/research, #148) runs next to this dispatcher: the first session for a revision waits
    * for the revision's research result. Off unless NORN_L1_WAIT_FOR_RESEARCH=1 (`npm run demo -- --research` sets it).
@@ -56,6 +59,7 @@ export function settingsFromEnv(env: NodeJS.ProcessEnv = process.env): Level1Set
     webBaseUrl: (env.NORN_WEB_URL || 'http://127.0.0.1:5173').replace(/\/+$/, ''),
     publishComment: env.NORN_PUBLISH_COMMENT === '1',
     waitForResearch: env.NORN_L1_WAIT_FOR_RESEARCH === '1',
+    settleMs: num(env.NORN_L1_SETTLE_MS, SETTLE_WAIT_MS),
     researchWaitMs: num(env.NORN_L1_RESEARCH_WAIT_MS, 600_000),
     researchEcrs: (env.NORN_L1_RESEARCH_ECRS ?? '').split(',').map(s => s.trim()).filter(Boolean),
   };

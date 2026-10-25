@@ -673,6 +673,9 @@ function sessionRunId(ctx: Ctx, pr: Pr, spawnedBy: string, noMore: string): bigi
     throw new Refusal(
       `This session assessed revision ${started.revision}; ${pr.plmEcrNumber} is now at revision ${pr.revision}. The ECR changed after the session read it (its text, change request, baseline or an assumption), so its numbers and answers are out of date. ${noMore}; Norn starts a new session on the current revision`
     );
+  // The snapshot is a database time the dispatcher read from its cache, so it cannot be ahead of this transaction.
+  if (started.snapshotUs !== undefined && started.snapshotUs > ctx.timestamp.microsSinceUnixEpoch)
+    throw new Refusal(`this session's credential names a snapshot time (${started.snapshotUs}) that has not happened yet. ${noMore}`);
   const nowRevision = currentRevision(ctx, pr.id)?.seq;
   // 'done' is not enough on its own: the run must also stand on the ECR's inputs now.
   const now = stageInfos(ctx, pr)[run.stage];
@@ -805,6 +808,8 @@ export const postImpactStatement = write(
 
     // A session started by a check run may post only while that run still stands (sessionRunId).
     let checkRunId = sessionRunId(ctx, pr, call.spawnedBy, 'Post nothing');
+    // What the session was told about the timeline and supply checks was frozen at this time: keep it on the statement.
+    const snapshotUs = checkRunId === 0n ? 0n : (parseSessionSpawn(call.spawnedBy)?.snapshotUs ?? 0n);
 
     // The newest result per key among runs that are still current ('done'; a stale run's are not).
     const current = new Map<string, { id: bigint; checkRunId: bigint; label: string; unit: string; p10: number; p50: number; p90: number }>();
@@ -850,6 +855,7 @@ export const postImpactStatement = write(
       level: a.level,
       prRevision: pr.revision,
       checkRunId,
+      snapshotUs,
       changeClass,
       route,
       headline,

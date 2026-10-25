@@ -22,6 +22,7 @@ export default __t.row({
   level: __t.u8(),
   prRevision: __t.u32().name("pr_revision"),
   checkRunId: __t.u64().name("check_run_id"),
+  snapshotUs: __t.u64().name("snapshot_us"),
   changeClass: __t.string().name("change_class"),
   route: __t.string(),
   headline: __t.string(),
