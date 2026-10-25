@@ -98,10 +98,21 @@ export interface TestAnswerIn {
 /** What the agent said, validated against the configuration, as it is stored with the decision. */
 export interface FastTrackRequest {
   answers: TestAnswerIn[];
-  /** The classes the agent proposes. '' for an axis it proposed none for. */
+  /** The classes the request is decided on. As the agent sent it, '' for an axis it proposed none for; after `resolveClasses`, the ones used. */
   classes: { company: string; regulatory: string };
+  /** Where each class came from, once resolved (`resolveClasses`). */
+  classSources?: { company: ClassSource; regulatory: ClassSource };
   triggers: TriggerId[];
 }
+
+/**
+ * Where a class in a fast-track request came from:
+ * - `statement`: Norn took it from the ECR's current impact statement (the agent left it out, or sent the same);
+ * - `agent_stricter`: the agent sent the axis's `whenUnsure` class, which is never more permissive than Norn's own;
+ * - `agent`: the agent stated it and Norn holds no class of its own for the axis to check it against (the FAA class);
+ * - `none`: no class; the axis's `whenUnsure` class applies.
+ */
+export type ClassSource = 'statement' | 'agent_stricter' | 'agent' | 'none';
 
 const MAX_EVIDENCE = 400;
 
@@ -150,6 +161,61 @@ export function readFastTrackRequest(
     if (!triggers.includes(trig as TriggerId)) triggers.push(trig as TriggerId);
   }
   return { ok: true, request: { answers, classes, triggers } };
+}
+
+// ---------------------------------------------------------------------------------------------
+// The classes a fast-track request is decided on
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Norn's own company class for the ECR's current revision: the class on its newest statement at the highest
+ * level, as a class id of the configuration ("Class II", "II" and "class ii" all read as `II`). Undefined when
+ * the revision has no statement, or the statement proposes none the configuration knows ("Unclassified").
+ */
+export function statementCompanyClass(
+  config: CompanyConfig,
+  statements: readonly { id: bigint; level: number; prRevision: number; changeClass: string }[],
+  revision: number,
+): string | undefined {
+  const own = statements.filter((s) => s.prRevision === revision).sort((a, b) => b.level - a.level || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  const said = own[0]?.changeClass.trim().toLowerCase().replace(/^class\s+/, '');
+  if (!said) return undefined;
+  return config.changeClasses.company.values.find((v) => v.id.toLowerCase() === said || v.label.toLowerCase().replace(/^class\s+/, '') === said)?.id;
+}
+
+/**
+ * The classes a request is decided on. The agent's word never makes a class more permissive than Norn's:
+ * - company: a class left out is Norn's own (the statement's); one sent must be that class or the axis's
+ *   `whenUnsure` class (stricter), and with no statement class only `whenUnsure` is accepted;
+ * - regulatory: Norn holds no FAA class of its own (the PLM has the originator's, which is not ingested), so
+ *   the agent's, if it sends one, stands and is labelled the agent's. Left out, the axis's `whenUnsure` applies.
+ * A class that would be more permissive is refused, with the reason in words.
+ */
+export function resolveClasses(
+  config: CompanyConfig,
+  given: { company: string; regulatory: string },
+  statementCompany: string | undefined,
+): { ok: true; classes: { company: string; regulatory: string }; sources: { company: ClassSource; regulatory: ClassSource } } | { ok: false; why: string } {
+  const comp = config.changeClasses.company;
+  const label = (id: string) => comp.values.find((v) => v.id === id)?.label ?? id;
+  let company = '';
+  let companySource: ClassSource = 'none';
+  if (given.company === '') {
+    if (statementCompany) [company, companySource] = [statementCompany, 'statement'];
+  } else if (statementCompany && given.company === statementCompany) {
+    [company, companySource] = [given.company, 'statement'];
+  } else if (given.company === comp.whenUnsure) {
+    [company, companySource] = [given.company, 'agent_stricter'];
+  } else {
+    return {
+      ok: false,
+      why: statementCompany
+        ? `you proposed ${label(given.company)}, but the ECR's current statement proposes ${label(statementCompany)}; Norn does not decide on a class more permissive than its own proposal`
+        : `the ECR's current statement proposes no company class, so Norn has nothing to check ${label(given.company)} against; Norn does not decide on a class it has not proposed`,
+    };
+  }
+  const reg = given.regulatory;
+  return { ok: true, classes: { company, regulatory: reg }, sources: { company: companySource, regulatory: reg === '' ? 'none' : 'agent' } };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -281,7 +347,7 @@ export interface FastTrackSignal {
   why: string;
   /** The tests the agent answers: those the ECR's class does not settle. */
   tests: { id: string; text: string; list: FastTrackTestList }[];
-  /** The classes (by id) that make the class-settled tests favourable; what a request proposes when the agent proposes none. */
+  /** The classes (by id) that make the class-settled tests favourable: a hint to the agent about what the tests need, never filled in for it. */
   propose: { companyClass?: string; regulatoryClass?: string };
 }
 
@@ -313,13 +379,14 @@ const FAST_TRACK = 'approve_fast_track_ecr';
  */
 export function fastTrackSignal(
   config: CompanyConfig,
-  input: { facts: EcrFacts; actor: ConfigActor; status: string; checksFinished: boolean; maxReportLevel: number },
+  input: { facts: EcrFacts; actor: ConfigActor; status: string; checksFinished: boolean; maxReportLevel: number; statementCompany?: string },
 ): FastTrackSignal {
   const tests = answerableTestsOf(config);
   const answers = Object.fromEntries(tests.map((t) => [t.id, t.list !== 'neverFastTrack']));
 
   // A class on each axis that lets the tests be met, if one does.
-  const companyIds = config.changeClasses.company.values.map((v) => v.id);
+  // The company class is Norn's own once a statement proposes one; before that the signal assumes the agent will propose the class the tests need.
+  const companyIds = input.statementCompany ? [input.statementCompany] : config.changeClasses.company.values.map((v) => v.id);
   const regulatoryIds = config.changeClasses.regulatory.values.map((v) => v.id);
   let classes: { company: string; regulatory: string } | undefined;
   for (const company of companyIds) {
@@ -336,7 +403,8 @@ export function fastTrackSignal(
 
   if (!classes) {
     const r = routeEcr(config, { ...input.facts, answers });
-    return out(false, `No choice of company and regulatory class lets the fast track apply. ${r.fastTrack.why}`);
+    const said = input.statementCompany ? config.changeClasses.company.values.find((v) => v.id === input.statementCompany)?.label : undefined;
+    return out(false, `${said ? `The ECR's current statement proposes ${said}, and no FAA class makes the fast track apply to it.` : 'No choice of company and regulatory class lets the fast track apply.'} ${r.fastTrack.why}`);
   }
   if (input.status !== 'review') return out(false, `The ECR is ${input.status}; the fast track decides ECRs in review.`);
   if (!input.checksFinished) return out(false, "The checks are still running: they have not all finished on the ECR's current inputs, so there are no numbers to decide on yet. Do not ask for the fast track on this revision; the ECR takes the normal route.");
@@ -354,7 +422,10 @@ export function fastTrackSignal(
   const d = decideAction(config, { action: FAST_TRACK, actor: input.actor, facts });
   if (d.outcome === 'approve' || d.outcome === 'approve_sampled') {
     const held = (d.limits ?? []).map((l) => l.text).join(' ');
-    return out(true, `Only your answers to the tests stand between this ECR and the fast track. ${held}${postFirst ? ` Post your Level ${postFirst} statement first.` : ''}`.trim());
+    const classNote = input.statementCompany
+      ? ' State the FAA class you can support with evidence; Norn takes the company class from your statement.'
+      : ` Your statement must propose ${config.changeClasses.company.values.find((v) => v.id === classes!.company)?.label ?? 'the change class the tests need'}, which is the company class the tests need (Norn takes the company class from it), and you state the FAA class with evidence.`;
+    return out(true, `Only your answers to the tests stand between this ECR and the fast track. ${held}${postFirst ? ` Post your Level ${postFirst} statement first.` : ''}${classNote}`.trim());
   }
   const failed = (d.limits ?? []).filter((l) => !l.held).map((l) => l.text);
   if (failed.length) return out(false, `Past a fast-track limit, which your answers cannot change. ${failed.join(' ')}`);

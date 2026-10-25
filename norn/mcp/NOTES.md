@@ -19,9 +19,9 @@ npm run key:ensure -w @norn/mcp       # once: adds NORN_MCP_SIGNING_KEY to the r
 npm run start -w @norn/mcp            # serves http://127.0.0.1:3917/mcp for the database "norn"
 NORN_DB=norn-mcp npm run start -w @norn/mcp      # or for another database
 npm run typecheck -w @norn/mcp
-npm run test:unit -w @norn/mcp        # 24 tests: tokens, strict signatures, levels, nornMcpFor and its helper, the key and mint scripts, Windows ACLs; the fast-track signal on Bowman's configuration and checks, the tool's argument checks and messages. No database, no model
+npm run test:unit -w @norn/mcp        # 27 tests: tokens, strict signatures, levels, nornMcpFor and its helper, the key and mint scripts, Windows ACLs; the fast-track signal on Bowman's configuration and checks, the tool's argument checks and messages. No database, no model
 npm run check:gate -w @norn/mcp       # 69 checks through real HTTP and MCP against the database norn-mcp. No model
-NORN_MCP_TEST_DB=norn-ftt-1 npm run check:fasttrack -w @norn/mcp   # 18 checks: the fast-track tool and signal on a scratch database, with Bowman's configuration and the real checks. No model
+NORN_MCP_TEST_DB=norn-ftt-1 npm run check:fasttrack -w @norn/mcp   # 31 checks: the fast-track tool and signal on a scratch database, with Bowman's configuration and the real checks. No model
 npm run e2e -w @norn/mcp              # one real Haiku session through the runner (uses the laptop's Claude login)
 npm run e2e -w @norn/mcp -- --statement    # and a second session that posts a Level 1 statement
 npm run probe:argv -w @norn/mcp       # two short Haiku sessions: is the token on the claude command line?
@@ -204,14 +204,14 @@ database can take a plain `db:publish`; this branch did not publish it.
 
 | What | How | Result |
 |---|---|---|
-| Tokens (strict signature and claims, expiry, kinds), `nornMcpFor` in both deliveries and the helper script, `maxLevelFor`, `.env` parsing, the key and mint scripts, connect-error text, the Windows ACL of the state directory | `test:unit` | 24 of 24 |
+| Tokens (strict signature and claims, expiry, kinds), `nornMcpFor` in both deliveries and the helper script, `maxLevelFor`, `.env` parsing, the key and mint scripts, connect-error text, the Windows ACL of the state directory | `test:unit` | 27 of 27 |
 | The edge: no token, wrong key, expired, edited payload, wrong host name, GET, unknown ECR in a token | `check:gate` | pass |
 | All ten tools through real HTTP and the MCP client; the comment's author, the action-log fields, the allow reason | `check:gate` | pass |
 | A write to another ECR is refused by the module and logged (`denied`, reason, actor, for whom); a tool answer, not a crash; nothing written | `check:gate`, `e2e` | pass |
 | Reducers outside the scoped set, baseline writes, a scope widened by its holder, a grant that has run out, an agent replacing a `given` assumption | `check:gate` | pass |
 | Review findings: approval withdrawal (#1), relabelled computation numbers in the tool and the module (#2), level caps for a level1 job, a person's agent and a role with none (#3), a refused second job leaving the principal alone and history keeping the on-behalf-of recorded at the time (#4), `fact` (#5), `rejected` rows for a forged number, a revision conflict and a closed ECR, and no such row for an unscoped caller (#6), plain-text ECR numbers in refusals (#11), the helper form of the entry (#10) | `check:gate`, one or more checks each | pass |
 | A person's agent token (`*`, external origin, on-behalf-of) | `check:gate` | pass |
-| The fast-track signal and tool on Bowman's configuration and the real checks, on a scratch database: ECR-0423 approved (not drawn), a drawn number held for the second check, ECR-0417 recommended to named roles, out of scope denied and logged, unfinished checks refused | `check:fasttrack` | 18 of 18 |
+| The fast-track signal and tool on Bowman's configuration and the real checks, on a scratch database: ECR-0423 approved (not drawn), a drawn number held for the second check, ECR-0417 recommended to named roles, out of scope denied and logged, unfinished checks refused, a Class I statement on a 12,000 USD supplier charge never approved (class left out, Class II sent, and Class II sent straight to the reducer) | `check:fasttrack` | 31 of 31 |
 | A real Haiku session through the runner with only Norn's tools, token delivered through the headers helper: reads ECR-0417 and its impact, posts one comment, tries one write to ECR-0418 | `e2e` | pass: 9.4 s, 5 turns; the agent made the refused attempt itself |
 | A second Haiku session that posts a Level 1 statement with two `computation` numbers and two assumptions | `e2e -- --statement` | pass: 11.4 s, 5 turns; every computation number equals its check result |
 | Token on the `claude` command line, `headers` vs `headersHelper` | `probe:argv` (two Haiku sessions) | on argv with `headers`, not with the helper; both connected and answered |
@@ -304,9 +304,19 @@ checks not finished, an unmeasured or over-limit cost, a slip past the limit, a 
 agent cannot write. When the limits need a Level N report that the job may still post, `why` says to post it first.
 
 `request_fast_track_approval` takes `{ ecr, answers: [{ testId, holds, evidence }], companyClass?, regulatoryClass?, triggers? }`.
-Arguments are checked against the configuration before anything is sent. A class left out is filled in with the one
-the tests need, and the answer says so (`classesFilledIn`): Bowman's tests need Class II and FAA minor, which the Level 1
-prompt does not pass. The reducer's refusals (not in review, checks not finished, no configuration) and the scope
+Arguments are checked against the configuration before anything is sent.
+
+The classes are never filled in with whichever class would let the fast track apply (a review reproduced an
+approval that way, on a Class I statement). The company class is Norn's own: the class on the ECR's current-revision
+statement (`statementCompanyClass`, newest statement at the highest level). Left out, it is that class; sent, it
+must equal it or be the axis's `whenUnsure` class (stricter); with no statement class only `whenUnsure` is accepted.
+The tool refuses in words ("State the change class and the regulatory class, with evidence") when Norn has none, and
+the module's gate (`resolveClasses` in `gate.ts`) denies the same request made straight to the reducer. Norn holds no
+FAA class of its own (the PLM has the originator's, which ingest does not carry), so the agent must state
+`regulatoryClass`, and the answer labels it the agent's. The answer's `classes` and `classesNote` say where each class
+came from (`statement`, `agent`, `agent_stricter`, `none`); the stored approval records the same (`classSources`).
+Residual: the statement is the agent's own judgment, so an agent that posts Class II over a Class I cost is not caught
+by this; the company's cost, slip and report-level limits still hold. The reducer's refusals (not in review, checks not finished, no configuration) and the scope
 refusal come back in words. Only the mirror's rows are read, so the signal assumes a `done` run is current, as `get_impact` does.
 
 The fast track decides ECRs in review. `ingest_ecr` opens an ECR the PLM reports in review (the ingest loop only takes

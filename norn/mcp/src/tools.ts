@@ -7,7 +7,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ActionLog, PullRequest } from '@norn/bindings/types';
 import { z } from 'zod';
 import { registerErpTools } from './erp.ts';
-import { companyConfigOf, explainRefusal, fastTrackField, outcomeOf, prepareRequest, recordOf, signalOf } from './fasttrack.ts';
+import { companyConfigOf, explainRefusal, fastTrackField, outcomeOf, prepareRequest, recordOf, statementClassOf } from './fasttrack.ts';
 import type { ActorHandle, Norn } from './norn.ts';
 import type { Claims } from './token.ts';
 import { affectedParts, assumptionView, bareResultKey, currentResult, currentResultKeys, ecrSummary, ecrView, effectiveAssumptions, historyOf, impactOf, partView, provenanceIndex } from './views.ts';
@@ -306,7 +306,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     'request_fast_track_approval',
     {
       description:
-        "Ask Norn to approve an ECR on the fast track, with your answers to the company's fast-track tests (get_impact fastTrack.tests; ask only when fastTrack.candidate is true). Answer every test, once, honestly, with evidence: a test you mark true without evidence is a false statement under your name. Norn's gate decides from the company's rules and the numbers, not from you: the answer says approved, held for a blind second check (not approved yet), recommended to a named role, or refused, each with the reasons. Call it once and report the outcome as it is. Optional companyClass / regulatoryClass (class ids, e.g. \"II\", \"minor\") are your proposal; if you leave one out, Norn uses the class the tests need and says so. Optional triggers: named conditions you saw (safety_part, new_supplier, conflicting_open_ecr, shared_supplier_exposure, linchpin_assumption_agent_estimated, sources_conflict, stale_data, checker_disagrees); any of them sends the ECR to a person. Refused if the ECR is outside your job, not in review, or its checks have not finished.",
+        "Ask Norn to approve an ECR on the fast track, with your answers to the company's fast-track tests (get_impact fastTrack.tests; ask only when fastTrack.candidate is true). Answer every test, once, honestly, with evidence: a test you mark true without evidence is a false statement under your name. Norn's gate decides from the company's rules and the numbers, not from you: the answer says approved, held for a blind second check (not approved yet), recommended to a named role, or refused, each with the reasons. Call it once and report the outcome as it is. Classes: leave companyClass out and Norn uses the change class on your current statement for this revision (post your Level 1 statement first, stating Class I or Class II with a reason; Norn never picks a class for you, and a class more permissive than your statement's is refused). Always state regulatoryClass (the FAA class, e.g. \"minor\" or \"major\") and say in your answer what you rest it on; Norn holds no FAA class of its own. The answer reports where each class came from. Optional triggers: named conditions you saw (safety_part, new_supplier, conflicting_open_ecr, shared_supplier_exposure, linchpin_assumption_agent_estimated, sources_conflict, stale_data, checker_disagrees); any of them sends the ECR to a person. Refused if the ECR is outside your job, not in review, or its checks have not finished.",
       inputSchema: {
         ecr: ECR,
         answers: z.array(Answer).min(1).max(30),
@@ -321,8 +321,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
       const loaded = companyConfigOf(norn);
       if (loaded.state === 'none') return fail('No company configuration is stored in Norn, so there is no fast track rule to apply. Nothing was sent.');
       if (loaded.state === 'unreadable') return fail(`Norn cannot read the company configuration (${loaded.why}), so it takes no fast-track decision. Nothing was sent.`);
-      const signal = signalOf(norn, pr, ctx.claims);
-      const prepared = prepareRequest(loaded.config, a, 'none' in signal ? {} : signal.propose);
+      const prepared = prepareRequest(loaded.config, a, statementClassOf(norn, pr, loaded.config));
       if (!prepared.ok) return fail(prepared.message);
       const { request } = prepared;
       const sent = await sendWrite(
@@ -332,7 +331,7 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
         message => explainRefusal(message, pr.plmEcrNumber)
       );
       if ('failed' in sent) return sent.failed;
-      return ok(outcomeOf(loaded.config, pr.plmEcrNumber, sent.row, recordOf(norn, pr, sent.row), prepared.filledIn));
+      return ok(outcomeOf(loaded.config, pr.plmEcrNumber, sent.row, recordOf(norn, pr, sent.row), request));
     })
   );
 

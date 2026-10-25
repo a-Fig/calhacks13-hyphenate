@@ -11,6 +11,9 @@ import {
   fastTrackSignal,
   readCompanyConfig,
   readFastTrackRequest,
+  resolveClasses,
+  statementCompanyClass,
+  type ClassSource,
   type FastTrackRequest,
   type FastTrackSignal,
   type GateDetail,
@@ -54,6 +57,11 @@ export function factsOf(norn: Norn, pr: PullRequest, config: CompanyConfig) {
   return factsFromRows({ ecrId: pr.plmEcrNumber, costRows: rowsOf(norn, pr, 's2_cost'), slipRows: rowsOf(norn, pr, 's3_timeline'), reportLevel }, config);
 }
 
+/** Norn's own company class for the ECR's current revision: the class on its statement (see statementCompanyClass). */
+export function statementClassOf(norn: Norn, pr: PullRequest, config: CompanyConfig): string | undefined {
+  return statementCompanyClass(config, [...norn.db.impactStatement.prId.filter(pr.id)], pr.revision);
+}
+
 export function actorOf(config: CompanyConfig, claims: Pick<Claims, 'actor' | 'onBehalfOf'>) {
   return configActor(config, { kind: 'agent', name: claims.actor, onBehalfOf: claims.onBehalfOf })!;
 }
@@ -74,6 +82,7 @@ export function signalOf(norn: Norn, pr: PullRequest, claims: Pick<Claims, 'kind
     status: pr.status,
     checksFinished: checksFinished(norn, pr),
     maxReportLevel: maxLevelFor(claims),
+    statementCompany: statementClassOf(norn, pr, loaded.config),
   });
 }
 
@@ -96,21 +105,53 @@ export interface FastTrackArgs {
 }
 
 /**
- * Checks the arguments against the configuration before anything is sent, and fills in the classes the agent
- * left out with the ones the tests need (said so in the answer). Returns the request as the module takes it,
- * or the reason it is not sent.
+ * Checks the arguments against the configuration before anything is sent, and settles the classes the way the
+ * module's gate will (resolveClasses): a company class left out is Norn's own, from the ECR's current statement;
+ * one the agent sends may not be more permissive than that. The FAA class has no Norn source, so the agent
+ * states it. Nothing is ever filled in with whichever class would let the fast track apply. Returns the request
+ * as the module takes it, or the reason it is not sent.
  */
 export function prepareRequest(
   config: CompanyConfig,
   args: FastTrackArgs,
-  propose: FastTrackSignal['propose'],
-): { ok: true; request: FastTrackRequest; filledIn: string[] } | { ok: false; message: string } {
-  const filledIn: string[] = [];
-  const company = args.companyClass?.trim() || (propose.companyClass ? (filledIn.push(`company class ${propose.companyClass}`), propose.companyClass) : '');
-  const regulatory = args.regulatoryClass?.trim() || (propose.regulatoryClass ? (filledIn.push(`FAA class ${propose.regulatoryClass}`), propose.regulatoryClass) : '');
+  statementCompany: string | undefined,
+): { ok: true; request: FastTrackRequest } | { ok: false; message: string } {
+  const sentNothing = (why: string) => ({ ok: false as const, message: `Nothing was sent to Norn: ${why}` });
+  const company = args.companyClass?.trim() ?? '';
+  const regulatory = args.regulatoryClass?.trim() ?? '';
   const r = readFastTrackRequest(config, { answers: args.answers, companyClass: company, regulatoryClass: regulatory, triggers: args.triggers ?? [] });
-  if (!r.ok) return { ok: false, message: `Nothing was sent to Norn: ${r.why}. Answer the tests get_impact lists under fastTrack.tests, by id, once each, with evidence.` };
-  return { ok: true, request: r.request, filledIn };
+  if (!r.ok) return sentNothing(`${r.why}. Answer the tests get_impact lists under fastTrack.tests, by id, once each, with evidence.`);
+  if (!company && !statementCompany)
+    return sentNothing(`Norn has no change class for this revision: the ECR's current statement proposes none. State the change class and the regulatory class, with evidence: post your Level 1 statement with the change class you can support and a one-line reason, then ask again with regulatoryClass.`);
+  if (!regulatory)
+    return sentNothing(`state the regulatory (FAA) class in regulatoryClass, with the evidence you rest it on in your answer. Norn holds no FAA class of its own for this ECR and will not assume one.`);
+  const classes = resolveClasses(config, r.request.classes, statementCompany);
+  if (!classes.ok) return sentNothing(`${classes.why}. Leave companyClass out to use the statement's, or post a statement that proposes the class you can support, with a one-line reason.`);
+  return { ok: true, request: { ...r.request, classes: classes.classes, classSources: classes.sources } };
+}
+
+const SOURCE_TEXT: Record<ClassSource, string> = {
+  statement: "Norn's own, from the ECR's current statement",
+  agent_stricter: "yours, and no more permissive than Norn's",
+  agent: 'yours; Norn holds no class of its own for this axis to check it against',
+  none: 'none was given, so the stricter default applied',
+};
+
+/** The classes a decision rests on and where each came from, for the agent's answer. */
+export function classReport(config: CompanyConfig, req: Pick<FastTrackRequest, 'classes' | 'classSources'> | undefined) {
+  if (!req?.classSources) return {};
+  const axis = (a: 'company' | 'regulatory') => {
+    const given = req.classes[a];
+    const id = given || config.changeClasses[a].whenUnsure;
+    const label = config.changeClasses[a].values.find(v => v.id === id)?.label ?? id;
+    return { id, label, source: req.classSources![a] };
+  };
+  const company = axis('company');
+  const regulatory = axis('regulatory');
+  return {
+    classes: { company, regulatory },
+    classesNote: `Decided on ${company.label} (${SOURCE_TEXT[company.source]}) and ${regulatory.label} (${SOURCE_TEXT[regulatory.source]}). Say so in your answer.`,
+  };
 }
 
 /** The reducer's own refusals, in words an agent can act on. Undefined for a message that is not one of them. */
@@ -146,11 +187,11 @@ export function outcomeOf(
   ecr: string,
   row: Pick<ActionLog, 'id' | 'outcome'>,
   rec: { approval?: Approval; recommendation?: Recommendation },
-  filledIn: string[],
+  request: Pick<FastTrackRequest, 'classes' | 'classSources'> | undefined,
 ) {
   const roleLabel = (id: string) => config.roles.find(r => r.id === id)?.label ?? id;
-  const classNote = filledIn.length ? { classesFilledIn: `You proposed no ${filledIn.length > 1 ? 'classes' : 'class'}, so Norn used the ${filledIn.length > 1 ? 'ones' : 'one'} the fast-track tests need: ${filledIn.join(', ')}. Say so in your answer.` } : {};
-  const common = { ecr, actionLogEntry: Number(row.id), ...classNote };
+  const classOf = (d?: GateDetail) => classReport(config, d?.request ?? request);
+  const common = { ecr, actionLogEntry: Number(row.id) };
   if (rec.approval) {
     const d = parse<GateDetail>(rec.approval.decisionJson);
     const drawn = d?.sample ? (d.sample.sampled ? 'drawn' : 'not drawn') : 'none';
@@ -162,6 +203,7 @@ export function outcomeOf(
       reasons: (d?.reasons ?? []).map(r => r.text),
       limits: (d?.limits ?? []).map(l => ({ limit: l.limit, held: l.held, text: l.text })),
       ...common,
+      ...classOf(d),
     };
   }
   if (rec.recommendation) {
@@ -180,9 +222,10 @@ export function outcomeOf(
         recipients: to,
         reasons,
         ...common,
+        ...classOf(d),
       };
     if (r.outcome === 'escalate')
-      return { decision: 'escalated', ecrStatus: 'review', summary: `${ecr} is NOT approved. Norn handed it${toText} with your work.`, recipients: to, reasons, ...common };
+      return { decision: 'escalated', ecrStatus: 'review', summary: `${ecr} is NOT approved. Norn handed it${toText} with your work.`, recipients: to, reasons, ...common, ...classOf(d) };
     return {
       decision: 'recommended',
       ecrStatus: 'review',
@@ -193,7 +236,8 @@ export function outcomeOf(
       recipients: to,
       reasons,
       ...common,
+      ...classOf(d),
     };
   }
-  return { decision: 'unconfirmed', summary: `Norn accepted the call but the decision is not visible yet. Call get_ecr_history for ${ecr} before asking again.`, ...common };
+  return { decision: 'unconfirmed', summary: `Norn accepted the call but the decision is not visible yet. Call get_ecr_history for ${ecr} before asking again.`, ...common, ...classReport(config, request) };
 }

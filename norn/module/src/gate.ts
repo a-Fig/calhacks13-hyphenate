@@ -38,6 +38,8 @@ import {
   judge,
   readCompanyConfig,
   readFastTrackRequest,
+  resolveClasses,
+  statementCompanyClass,
   tierVerdict,
   type ApprovedAt,
   factsFromRows,
@@ -119,7 +121,9 @@ export const gateRule: PolicyRule = (ctx, actor, reducer, args) => {
   if (reducer === 'request_fast_track_approval') {
     const r = readFastTrackRequest(loaded.config, { answers: args.answers, companyClass: args.companyClass, regulatoryClass: args.regulatoryClass, triggers: args.triggers });
     if (!r.ok) return { effect: 'deny', reason: `the fast-track request is refused: ${r.why}` };
-    request = r.request;
+    const classes = resolveClasses(loaded.config, r.request.classes, statementCompanyClass(loaded.config, [...ctx.db.impactStatement.prId.filter(pr.id)], pr.revision));
+    if (!classes.ok) return { effect: 'deny', reason: `the fast-track request is refused: ${classes.why}` };
+    request = { ...r.request, classes: classes.classes, classSources: classes.sources };
   }
   const v = judge(loaded.config, loaded.hash, { action, actor: who, facts: buildFacts(ctx, pr, loaded.config, request), request });
   return { effect: v.effect, reason: v.reason, downgradeTo: v.downgradeTo, detail: v.detail };
