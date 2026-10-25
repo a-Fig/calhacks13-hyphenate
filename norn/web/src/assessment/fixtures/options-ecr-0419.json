@@ -1,0 +1,212 @@
+{
+  "ecr": "ECR-0419",
+  "title": "Forward rotor magnet set BW-3120-340: SH grade to UH grade",
+  "seed": "norn-seed-1",
+  "draws": 10000,
+  "computedAt": "2026-10-25T09:07:17.761Z",
+  "basis": "Options are decisions on the ECR run through the same cost, timeline and supply checks with one seed. Ranked on the 12-month total at p50.",
+  "options": [
+    {
+      "id": "as-filed",
+      "label": "As filed",
+      "decisions": [],
+      "overrides": [],
+      "oneTime": {
+        "p10": 268939.95,
+        "p50": 306429.03,
+        "p90": 351096.52
+      },
+      "window12": {
+        "p10": 707240.94,
+        "p50": 767439.58,
+        "p90": 849305.88
+      },
+      "plan": {
+        "p10": 6541548.96,
+        "p50": 7097213.85,
+        "p90": 8178773.81
+      },
+      "cutIn": {
+        "serial": 30,
+        "date": "2027-10-14",
+        "placed": true
+      },
+      "weeksLate": -1.45,
+      "vsFiled": {
+        "oneTime": 0,
+        "window12": 0,
+        "plan": 0,
+        "weeksLate": 0
+      },
+      "asFiled": true,
+      "eligible": true,
+      "exclusions": [],
+      "notes": [
+        "Keeping the old design is allowed: NCR-0115 disposition: \"Use as is with a transition-thrust limit above 38 C ambient (software limit TL-212).\""
+      ]
+    },
+    {
+      "id": "bundle-ECR-0421",
+      "label": "Qualify with ECR-0421",
+      "decisions": [
+        {
+          "kind": "bundle",
+          "with": "ECR-0421",
+          "constraint": "CON-ORRIN-UH-SLOT"
+        }
+      ],
+      "overrides": [],
+      "oneTime": {
+        "p10": 268939.95,
+        "p50": 306429.03,
+        "p90": 351096.52
+      },
+      "window12": {
+        "p10": 578545.51,
+        "p50": 647447.9,
+        "p90": 733340.64
+      },
+      "plan": {
+        "p10": 6420547.1,
+        "p50": 6977222.17,
+        "p90": 8059094.35
+      },
+      "cutIn": {
+        "serial": 30,
+        "date": "2027-10-14",
+        "placed": true
+      },
+      "weeksLate": -1.45,
+      "vsFiled": {
+        "oneTime": 0,
+        "window12": -119991.68,
+        "plan": -119991.68,
+        "weeksLate": 0
+      },
+      "bundle": {
+        "peer": "ECR-0421",
+        "saving": {
+          "p10": 94001.84,
+          "p50": 119991.68,
+          "p90": 153512.76
+        },
+        "peerShiftWeeks": 13,
+        "note": "Qualify with ECR-0421 in one lot of CON-ORRIN-UH-SLOT. ECR-0421 then starts 13 weeks later than alone."
+      },
+      "asFiled": false,
+      "eligible": true,
+      "exclusions": [],
+      "notes": [
+        "Keeping the old design is allowed: NCR-0115 disposition: \"Use as is with a transition-thrust limit above 38 C ambient (software limit TL-212).\""
+      ]
+    },
+    {
+      "id": "disposition-scrap_all+bundle-ECR-0421",
+      "label": "Scrap all the old stock, Qualify with ECR-0421",
+      "decisions": [
+        {
+          "kind": "disposition",
+          "mode": "scrap_all"
+        },
+        {
+          "kind": "bundle",
+          "with": "ECR-0421",
+          "constraint": "CON-ORRIN-UH-SLOT"
+        }
+      ],
+      "overrides": [],
+      "oneTime": {
+        "p10": 692151.8,
+        "p50": 736645.15,
+        "p90": 787136.73
+      },
+      "window12": {
+        "p10": 1004860.24,
+        "p50": 1078037.85,
+        "p90": 1165685.37
+      },
+      "plan": {
+        "p10": 6851773.42,
+        "p50": 7408302.7,
+        "p90": 8492323.34
+      },
+      "cutIn": {
+        "serial": 30,
+        "date": "2027-10-14",
+        "placed": true
+      },
+      "weeksLate": -1.45,
+      "vsFiled": {
+        "oneTime": 430216.12,
+        "window12": 310598.27,
+        "plan": 311088.85,
+        "weeksLate": 0
+      },
+      "bundle": {
+        "peer": "ECR-0421",
+        "saving": {
+          "p10": 94001.84,
+          "p50": 119991.68,
+          "p90": 153512.76
+        },
+        "peerShiftWeeks": 13,
+        "note": "Qualify with ECR-0421 in one lot of CON-ORRIN-UH-SLOT. ECR-0421 then starts 13 weeks later than alone."
+      },
+      "asFiled": false,
+      "eligible": true,
+      "exclusions": [],
+      "notes": []
+    },
+    {
+      "id": "disposition-scrap_all",
+      "label": "Scrap all the old stock",
+      "decisions": [
+        {
+          "kind": "disposition",
+          "mode": "scrap_all"
+        }
+      ],
+      "overrides": [],
+      "oneTime": {
+        "p10": 692151.8,
+        "p50": 736645.15,
+        "p90": 787136.73
+      },
+      "window12": {
+        "p10": 1132981.09,
+        "p50": 1198029.53,
+        "p90": 1281735.06
+      },
+      "plan": {
+        "p10": 6972775.54,
+        "p50": 7528294.38,
+        "p90": 8612003.42
+      },
+      "cutIn": {
+        "serial": 30,
+        "date": "2027-10-14",
+        "placed": true
+      },
+      "weeksLate": -1.45,
+      "vsFiled": {
+        "oneTime": 430216.12,
+        "window12": 430589.95,
+        "plan": 431080.53,
+        "weeksLate": 0
+      },
+      "asFiled": false,
+      "eligible": true,
+      "exclusions": [],
+      "notes": []
+    }
+  ],
+  "recommended": "bundle-ECR-0421",
+  "recommendation": {
+    "text": "Recommended: Qualify with ECR-0421. Cost: \"Qualify with ECR-0421\" costs $119,992 less over 12 months than the ECR as filed ($647,448 against $767,440 at p50). Schedule: the change reaches the line about 1 week before the date stated. Risk: ECR-0421 starts 13 weeks later because the two share one qualification slot.",
+    "tradeoffs": [
+      "Cost: \"Qualify with ECR-0421\" costs $119,992 less over 12 months than the ECR as filed ($647,448 against $767,440 at p50).",
+      "Schedule: the change reaches the line about 1 week before the date stated.",
+      "Risk: ECR-0421 starts 13 weeks later because the two share one qualification slot."
+    ]
+  }
+}

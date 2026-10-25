@@ -1,0 +1,7 @@
+.nx-opt-table td, .nx-opt-table th { vertical-align: top; }
+.nx-opt-rec td { background: var(--bgColor-success-muted); }
+.nx-opt-rec td:first-child { box-shadow: inset 3px 0 0 var(--borderColor-success-emphasis); }
+.nx-opt-out td { color: var(--fgColor-muted); background: var(--bgColor-muted); }
+.nx-opt-why { font-size: 12px; margin-top: 4px; }
+.nx-opt-why blockquote { margin: 2px 0 0; padding-left: 8px; border-left: 2px solid var(--borderColor-default); }
+.nx-opt-sum { padding: 12px 16px; border-bottom: 1px solid var(--borderColor-muted); }
