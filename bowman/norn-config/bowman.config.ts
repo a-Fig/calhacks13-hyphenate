@@ -482,7 +482,7 @@ const config = {
       {
         action: 'draft_journal_entry',
         level: 'recommend',
-        why: 'Fern saves the journal entries in the ERP as drafts: the scrap write-off and the cancellation charge, with the ECO and its decision on each. The cost accountant checks and submits them; Fern cannot submit (Tyler, 2026-10-25, reversing #71).',
+        why: 'Fern saves the journal entries in the ERP as drafts: the scrap write-off, the stock finished at the supplier and the cancellation charge, with the ECO and its decision on each. The cost accountant checks and submits them; Fern cannot submit (Tyler, 2026-10-25, reversing #71).',
       },
       {
         action: 'post_journal_entry',
