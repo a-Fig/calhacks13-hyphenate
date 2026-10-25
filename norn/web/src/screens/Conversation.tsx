@@ -11,6 +11,7 @@ import { CheckStateIcon, LevelLabel, MockTag, Person, SavedRun, StaleNote } from
 import { Glyph, Mark, Num } from '../ui/Evidence.tsx';
 import { ago, dateTime, dayLabel, dateShort, range as rangeText, usdK } from '../ui/fmt.ts';
 import { Link } from '../router.tsx';
+import { ApprovalRows, ApproverItems, ErpPackageCard, RecommendationRow, ReleaseFoot } from './GateBox.tsx';
 import type { AgentRun, StatementView } from '../assessment/types.ts';
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
@@ -32,6 +33,7 @@ export function Conversation({ a }: { a: ImpactAssessment }) {
           </Timeline>
           <MergeBox a={a} />
           {a.erpPackage && <ErpCard pkg={a.erpPackage} mock={a.mock.includes('erp')} />}
+          {a.gate && <ErpPackageCard gate={a.gate} />}
         </div>
       </PageLayout.Content>
       <PageLayout.Pane position="end" width="small" padding="none">
@@ -234,6 +236,7 @@ function EventItem({ e, mock }: { e: ActivityEvent; mock: boolean }) {
             {mock && <> <MockTag title="Mock: a saved timeline entry, not an event in Norn" /></>}
             {e.level && <> <LevelLabel level={e.level} /></>}
             {e.reportedByAgent && <> <Label variant="attention" size="small">Reported by agent</Label></>}
+            {e.superseded && <> <Label variant="secondary" size="small">Superseded</Label></>}
             {' '}<span className="nx-fg-muted" title={dateTime(e.at)}>{e.state === 'running' && !mock ? 'now' : ago(e.at)}</span>
           </span>
         </div>
@@ -301,7 +304,7 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
         </ul>
       </MergeRow>
 
-      {decided ? (
+      {a.gate?.approvals.length ? <ApprovalRows gate={a.gate} released={a.ecr.status === 'ECO released'} /> : decided ? (
         <MergeRow
           icon={<GitMergeIcon size={24} className="nx-fg-done" />}
           title={a.ecr.status === 'ECO released' ? 'ECO released' : 'Approved'}
@@ -310,7 +313,7 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
       ) : (
         <MergeRow
           icon={<DotFillIcon size={24} className="nx-fg-attention" />}
-          title="Review required"
+          title={<>Review required <MockTag on={!!a.gate && a.mock.includes('route')} /></>}
           sub={`${ccb ? 'CCB approval needed' : 'Approval needed'} · ${done} of ${reviewers.length} approved`}
         >
           <div className="nx-merge-bar"><ProgressBar barSize="small" progress={reviewers.length ? (done / reviewers.length) * 100 : 0} aria-label="Approvals" /></div>
@@ -323,6 +326,8 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
         sub={a.statement ? a.statement.headline : a.recommendation.reasons[0]?.text}
       />
 
+      {a.gate?.recommendation && <RecommendationRow rec={a.gate.recommendation} />}
+
       {!decided && (
         <div className="nx-merge-foot">
           <Button variant="primary" disabled leadingVisual={PackageIcon}>Release ECO</Button>
@@ -331,6 +336,7 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
           </span>
         </div>
       )}
+      {a.gate && a.ecr.status === 'Approved' && <ReleaseFoot gate={a.gate} />}
     </section>
   );
 }
@@ -348,15 +354,15 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
   const steps = a.route.steps;
   const reviewers = steps.filter(s => s.role !== 'CCB' && s.state !== 'not_required');
   const done = reviewers.filter(s => s.state === 'approved').length;
-  const pct = reviewers.length ? (done / reviewers.length) * 100 : 100;
+  const pct = a.gate?.approvals.length ? (a.gate.approvals.some(x => x.state !== 'withdrawn') ? 100 : 0) : reviewers.length ? (done / reviewers.length) * 100 : 100;
   const people = [...new Map(events.map(x => [x.actor, x])).values()].slice(0, 8);
 
   return (
     <aside className="nx-side">
       <section>
-        <h3>Approvers <MockTag on={a.mock.includes('route')} /></h3>
+        <h3>Approvers <MockTag on={a.mock.includes('route') && !a.gate?.approvals.length} /></h3>
         <ul className="nx-side-list">
-          {steps.map((s, i) => (
+          {a.gate?.approvals.length ? <ApproverItems gate={a.gate} /> : steps.map((s, i) => (
             <li key={i}>
               {s.role === 'CCB'
                 ? <Person name="CCB" kind="team" size={20} />

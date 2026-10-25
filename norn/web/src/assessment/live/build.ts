@@ -14,6 +14,7 @@ import type {
 import { changedItems } from './changes.ts';
 import { dateTime, staleNote } from '../../ui/fmt.ts';
 import { personOf, SEATS } from './directory.ts';
+import { buildGate, type GateRows } from './gate.ts';
 
 // ---------------------------------------------------------------- the rows, as much of them as we read
 
@@ -34,7 +35,7 @@ export interface ActionRow { id: bigint; at: Ts; prId: bigint; reducer: string; 
 export interface AgentEventRow { id: bigint; jobId: string; seq: number; prId: bigint; ts: Ts; role: string; actor: string; onBehalfOf: string | undefined; eventType: string; payloadJson: string }
 export interface PrincipalRow { identity: Id; name: string; kind: string; origin: string; onBehalfOf: string | undefined }
 
-export interface Snapshot {
+export interface Snapshot extends GateRows {
   prs: PrRow[]; revisions: RevisionRow[]; runs: RunRow[]; results: ResultRow[]; statements: StatementRow[];
   comments: CommentRow[]; actions: ActionRow[]; events: AgentEventRow[]; principals: PrincipalRow[];
 }
@@ -428,7 +429,8 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
     if (!CHECK_STAGES[r.stage]) continue;
     events.push({ id: `run-pending:${r.id}`, at: iso(r.createdAt), actor: 'Norn', actorKind: 'norn', kind: 'ran_checks', text: `${r.status === 'running' ? 'is running' : 'queued'} the ${CHECK_STAGES[r.stage].name.toLowerCase()} check`, state: 'running' });
   }
-  events.push(...agentRuns(s, pr));
+  const gate = buildGate(s, pr);
+  events.push(...gate.events, ...agentRuns(s, pr));
   events.sort((a, b) => a.at.localeCompare(b.at));
 
   const revisions: Revision[] = s.revisions.filter(r => r.prId === pr.id).sort((a, b) => b.seq - a.seq).map(r => ({
@@ -474,6 +476,7 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
     revisions,
     linked,
     meeting: { label: needed ? `Needed by ${needed.toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'America/Los_Angeles' })}` : 'No date set', date: cr.neededBy ?? '' },
+    gate,
     mock,
     traces,
   };

@@ -22,8 +22,12 @@ const QUERIES = [
   'SELECT * FROM action_log',
   'SELECT * FROM agent_event',
   'SELECT * FROM principal',
+  'SELECT * FROM approval',
+  'SELECT * FROM recommendation',
+  'SELECT * FROM eco_release',
+  'SELECT * FROM erp_package',
 ];
-const TABLES = ['pullRequest', 'ecrRevision', 'checkRun', 'checkResult', 'impactStatement', 'comment', 'actionLog', 'agentEvent', 'principal'] as const;
+const TABLES = ['pullRequest', 'ecrRevision', 'checkRun', 'checkResult', 'impactStatement', 'comment', 'actionLog', 'agentEvent', 'principal', 'approval', 'recommendation', 'ecoRelease', 'erpPackage'] as const;
 type TableName = (typeof TABLES)[number];
 
 export function createLiveSource(): AssessmentSource {
@@ -43,6 +47,7 @@ export function createLiveSource(): AssessmentSource {
       prs: rowsOf(c, 'pullRequest'), revisions: rowsOf(c, 'ecrRevision'), runs: rowsOf(c, 'checkRun'), results: rowsOf(c, 'checkResult'),
       statements: rowsOf(c, 'impactStatement'), comments: rowsOf(c, 'comment'), actions: rowsOf(c, 'actionLog'),
       events: rowsOf(c, 'agentEvent'), principals: rowsOf(c, 'principal'),
+      approvals: rowsOf(c, 'approval'), recommendations: rowsOf(c, 'recommendation'), ecoReleases: rowsOf(c, 'ecoRelease'), erpPackages: rowsOf(c, 'erpPackage'),
     }) as unknown as Snapshot;
 
   const refresh = () => {
