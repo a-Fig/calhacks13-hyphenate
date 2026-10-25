@@ -69,7 +69,7 @@ async function sendWrite(ctx: ToolContext, reducer: string, args: Record<string,
     return failed(`Norn could not take this write right now (${r.error.kind}). Nothing was saved. Try once more; if it fails again, say so in your answer.`);
   }
   if (!r.row) return failed('Norn accepted the call but has not confirmed it yet. Call get_ecr_history before trying again, so you do not post it twice.');
-  if (r.row.outcome === 'rejected') return failed(`Norn rejected this: ${r.row.summary.replace(/^S+ rejected: /, '')}. Nothing was saved (entry ${r.row.id} in the action log).`);
+  if (r.row.outcome === 'rejected') return failed(`Norn rejected this: ${r.row.summary.replace(/^\S+ rejected: /, '')}. Nothing was saved (entry ${r.row.id} in the action log).`);
   if (r.row.outcome === 'denied')
     return failed(
       `Refused by Norn's policy gate: ${r.row.policy.replace(/^deny: /, '')}. The refusal is recorded in Norn's action log (entry ${r.row.id}). Do not retry or look for another way; report that you were refused.`
