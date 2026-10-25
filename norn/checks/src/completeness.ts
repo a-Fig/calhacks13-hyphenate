@@ -78,7 +78,7 @@ interface FactorSpec {
 }
 
 /** "None", "N/A": the usual way a form says there is nothing to enter. */
-const NOTHING = /^\s*(none|nil|n\/a|na|not applicable)\b/i;
+export const NOTHING = /^\s*(none|nil|n\/a|na|not applicable)\b/i;
 
 export const COST_FACTORS: readonly FactorSpec[] = [
   {

@@ -167,10 +167,20 @@ export function timelineCheck(baseline: Baseline, ecr: ChangeRequest, options: P
       ...(it.supplier ? { supplier: it.supplier } : {}), slot,
     });
   });
+  const taskIndex = new Map(sched.tasks.map((task, k) => [task.task.id, k]));
+  const constrains = (k: number, i: number) => {
+    const task = sched.tasks[k];
+    if (task.task.appliesTo === 'retrofit' || task.task.status === 'not_applicable' || task.task.status === 'unknown' || t.tasks[k][i] !== t.cutIn[i]) return false;
+    const after = Math.max(sched.filedDay, ...task.after.map(id => id === 'parts' ? t.parts[i] : id === 'decision' ? t.decision[i] : t.tasks[taskIndex.get(id)!][i]));
+    return t.tasks[k][i] > after;
+  };
+  const taskTies = new Uint16Array(d.n);
+  for (let i = 0; i < d.n; i++) for (let k = 0; k < sched.tasks.length; k++) if (constrains(k, i)) taskTies[i]++;
   sched.tasks.forEach((task, k) => {
     const day = book.stat(t.tasks[k], at.tasks[k][0], `${task.task.label}: completion evidence or latest dependency + duration in weeks × 7`, sched.uses);
     paths.push({ id: task.input, kind: 'prerequisite', label: task.task.label, day, date: isoRange(day),
-      criticalShare: share(i => task.task.appliesTo !== 'retrofit' && t.tasks[k][i] === t.cutIn[i]),
+      // Split ties between actual constraints; a zero-duration/N/A placeholder cannot set the date.
+      criticalShare: r4(Array.from({ length: d.n }, (_, i) => constrains(k, i) ? 1 / taskTies[i] : 0).reduce((sum, value) => sum + value, 0) / d.n),
       owner: task.task.owner, status: task.task.status, evidence: task.task.evidence, appliesTo: task.task.appliesTo,
       downtimeHoursPerUnit: task.task.downtimeHoursPerUnit });
   });

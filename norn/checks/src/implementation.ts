@@ -2,6 +2,7 @@ import { lognormalFromQuantiles, point } from './dist.ts';
 import { dayOf, dateOf } from './time.ts';
 import type { Book } from './plan.ts';
 import type { ChangeRequest, ImplementationTask } from './types.ts';
+import { NOTHING } from './completeness.ts';
 
 export interface PlannedTask {
   task: ImplementationTask;
@@ -33,7 +34,7 @@ export function implementationTasks(book: Book, ecr: ChangeRequest): { tasks: Pl
     visiting.delete(t.id); seen.add(t.id); ordered.push(t);
   };
   tasks.forEach(visit);
-  const noQualification = /^\s*(none|n\/a|not applicable)\b/i.test(ecr.testAndQualification ?? '');
+  const noQualification = NOTHING.test(ecr.testAndQualification ?? '');
   let complete = plan?.complete === true || (!plan && noQualification && !ecr.effectivity.retrofit);
   const warn = (ref: string, message: string) => {
     complete = false;

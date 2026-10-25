@@ -8,7 +8,7 @@ test('PLM task rows retain prerequisites, exact zero, completion evidence and do
   doc.test_and_qualification = 'Qualification required before release';
   doc.implementation_plan_complete = 1;
   doc.implementation_plan = [{ task_id: 'qual', label: 'Qualification', kind: 'qualification', applies_to: 'production', task_owner: 'Certification', status: 'planned', duration_basis: 'Exact', duration_weeks: 8, after_tasks: 'parts' },
-    { task_id: 'install', label: 'Install and test', kind: 'installation', applies_to: 'retrofit', task_owner: 'Maintenance', status: 'complete', duration_basis: 'Exact', duration_weeks: 0, after_tasks: 'qual', completed_on: '2026-10-01', evidence: 'Signed work card', downtime_assessed: 1, downtime_hours_per_unit: 0 }];
+    { task_id: 'install', label: 'Install and test', kind: 'installation', applies_to: 'retrofit', task_owner: 'Maintenance', status: 'complete', duration_basis: 'Exact', duration_assessed: 1, duration_weeks: 0, after_tasks: 'qual', completed_on: '2026-10-01', evidence: 'Signed work card', downtime_assessed: 1, downtime_hours_per_unit: 0 }];
   const { change } = mapEcr(settings, doc);
   assert.equal(change.testAndQualification, doc.test_and_qualification);
   assert.equal(change.implementationPlan!.complete, true);
@@ -36,4 +36,13 @@ test('explicit assessed zero and cost factors survive the PLM round trip; blanks
 test('invalid prerequisite and completeness documents fail with an ECR-specific error', () => {
   assert.throws(() => mapEcr(settings, { ...ecrDoc(), implementation_plan: '{' }), /ECR-0001.*implementation_plan/);
   assert.throws(() => mapEcr(settings, { ...ecrDoc(), cost_factors: [{ factor: 'q', status: 'approved' }] }), /ECR-0001.*cost_factors/);
+});
+
+test('an empty Exact duration stays unknown; an explicitly confirmed zero is preserved', () => {
+  const doc = ecrDoc();
+  doc.implementation_plan_complete = 1;
+  doc.implementation_plan = [{ task_id: 'q', label: 'Qualification', kind: 'qualification', applies_to: 'production', task_owner: 'Certification', status: 'planned', duration_basis: 'Exact', duration_weeks: 0 }];
+  assert.equal(mapEcr(settings, doc).change.implementationPlan!.tasks[0].durationWeeks, undefined);
+  doc.implementation_plan[0].duration_assessed = 1;
+  assert.equal(mapEcr(settings, doc).change.implementationPlan!.tasks[0].durationWeeks, 0);
 });

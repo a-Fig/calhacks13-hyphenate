@@ -55,6 +55,32 @@ test('completed retrofit work is not delayed by unrelated production material ar
   assert.ok(r.retrofit!.day.p50 < r.cutIn.day!.p50);
 });
 
+test('N/A, unknown and zero-duration tasks never claim to set the critical path', () => {
+  const e = ecr();
+  e.implementationPlan = { complete: false, tasks: [
+    { ...task(0), id: 'na', status: 'not_applicable', evidence: 'No new certification required' },
+    { ...task(0), id: 'unknown', status: 'unknown' },
+    { ...task(0), id: 'zero' },
+  ] };
+  const r = timelineCheck(bowman, e, { seed });
+  for (const path of r.paths.filter(p => p.kind === 'prerequisite')) assert.equal(path.criticalShare, 0);
+  assert.ok(r.paths.reduce((sum, p) => sum + p.criticalShare, 0) <= 1.0001);
+  e.implementationPlan.tasks = [{ ...task(8), id: 'a' }, { ...task(8), id: 'b' }];
+  const tied = timelineCheck(bowman, e, { seed });
+  assert.ok(tied.paths.reduce((sum, p) => sum + p.criticalShare, 0) <= 1.0001);
+  assert.equal(tied.paths.find(p => p.id.endsWith(':a'))!.criticalShare, 0.5);
+});
+
+test('the same explicit no-work spellings are accepted by cost completeness and readiness', () => {
+  for (const noWork of ['None', 'N/A', 'NA', 'nil', 'Not applicable']) {
+    const e = ecr();
+    e.testAndQualification = noWork;
+    delete e.effectivity.retrofit;
+    const r = timelineCheck(bowman, e, { seed });
+    assert.equal(r.readiness, 'implementation', noWork);
+  }
+});
+
 test('cost assessment keeps requested costs separate and reprices the median readiness scenario', () => {
   const e = structuredClone(bowman.ecrs.find(e => e.id === 'ECR-0417')!);
   const first = costAssessment(bowman, e, { seed, windowMonths: 6 });

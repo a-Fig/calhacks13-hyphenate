@@ -298,6 +298,7 @@ async function openEcrs() {
       implementation_plan: (e.implementationPlan?.tasks ?? []).map((t: any) => ({
         task_id: t.id, label: t.label, kind: t.kind, applies_to: t.appliesTo, task_owner: t.owner, status: t.status,
         duration_basis: typeof t.durationWeeks === 'number' ? 'Exact' : t.durationWeeks ? 'Range' : 'Unknown',
+        duration_assessed: t.durationWeeks === undefined ? 0 : 1,
         duration_weeks: typeof t.durationWeeks === 'number' ? t.durationWeeks : 0,
         duration_p10: t.durationWeeks?.p10, duration_p50: t.durationWeeks?.p50, duration_p90: t.durationWeeks?.p90,
         after_tasks: (t.after ?? []).join(', '), completed_on: t.completedOn ?? null, evidence: t.evidence ?? '',

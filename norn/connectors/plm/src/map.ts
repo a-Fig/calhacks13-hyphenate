@@ -385,7 +385,7 @@ function implementationPlan(value: unknown, complete?: unknown): ChangeRequest['
     if (!plan.length && !Number(complete)) return undefined;
     plan = { complete: Number(complete) === 1, tasks: plan.map((t: any) => clean({
       id: t.task_id, label: t.label, kind: t.kind, appliesTo: t.applies_to, owner: t.task_owner, status: t.status,
-      durationWeeks: t.duration_basis === 'Exact' ? Number(t.duration_weeks ?? 0) : t.duration_basis === 'Range' ? { p10: Number(t.duration_p10), p50: Number(t.duration_p50), p90: Number(t.duration_p90) } : undefined,
+      durationWeeks: taskDuration(t),
       after: t.after_tasks ? String(t.after_tasks).split(',').map(x => x.trim()).filter(Boolean) : undefined,
       completedOn: text(t.completed_on), evidence: text(t.evidence),
       downtimeHoursPerUnit: Number(t.downtime_assessed) === 1 ? Number(t.downtime_hours_per_unit ?? 0) : undefined,
@@ -400,6 +400,20 @@ function implementationPlan(value: unknown, complete?: unknown): ChangeRequest['
       || (task.after !== undefined && (!Array.isArray(task.after) || task.after.some((id: unknown) => typeof id !== 'string')))) throw new PlmMappingError('implementation_plan contains an invalid task');
   }
   return plan;
+}
+
+/** Frappe Float fields turn blank into zero. Zero needs explicit confirmation, just like zero costs. */
+function taskDuration(task: PlmDoc): number | { p10: number; p50: number; p90: number } | undefined {
+  const confirmed = Number(task.duration_assessed) === 1;
+  if (task.duration_basis === 'Exact') {
+    const weeks = Number(task.duration_weeks ?? 0);
+    return Number.isFinite(weeks) && (confirmed || weeks !== 0) ? weeks : undefined;
+  }
+  if (task.duration_basis === 'Range') {
+    const values = [task.duration_p10, task.duration_p50, task.duration_p90].map(v => Number(v ?? 0));
+    if (values.every(Number.isFinite) && (confirmed || values.some(v => v !== 0))) return { p10: values[0], p50: values[1], p90: values[2] };
+  }
+  return undefined;
 }
 
 function costFactors(value: unknown): ChangeRequest['costFactors'] {

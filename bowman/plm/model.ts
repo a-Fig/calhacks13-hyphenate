@@ -220,6 +220,7 @@ const implementationTask: DocTypeDef = {
     f('Select', 'status', 'Assessment', { options: opts(['planned', 'complete', 'not_applicable', 'unknown']), default: 'unknown', reqd: 1, in_list_view: 1, columns: 2 }),
     f('Data', 'task_owner', 'Responsible function', { reqd: 1, in_list_view: 1, columns: 2 }),
     f('Select', 'duration_basis', 'Duration estimate', { options: opts(['Unknown', 'Exact', 'Range']), default: 'Unknown' }),
+    f('Check', 'duration_assessed', 'Duration confirmed', { description: 'Confirms an intentional zero-week estimate; an empty duration remains unknown.' }),
     f('Float', 'duration_weeks', 'Weeks'),
     f('Float', 'duration_p10', 'Weeks P10'), f('Float', 'duration_p50', 'Weeks P50'), f('Float', 'duration_p90', 'Weeks P90'),
     f('Data', 'after_tasks', 'After', { description: 'Comma-separated task references; parts means materials in hand, decision means board decision. Default: parts.' }),
