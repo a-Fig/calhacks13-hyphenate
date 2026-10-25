@@ -244,13 +244,13 @@ export function gather(db: DbConnection['db'], pr: Row<'pullRequest'>): { statem
     if (f) formulas[r.key] = f;
   }
   const detailRow = run ? results.find(r => r.checkRunId === run.id && r.key === 'detail') : undefined;
-  const detail = detailRow ? jsonOr<{ codeVersion?: string; draws?: number }>(detailRow.detailJson, {}) : {};
+  const detail = detailRow ? jsonOr<{ codeVersion?: string; draws?: number; implementationScenario?: Provenance['implementationScenario'] }>(detailRow.detailJson, {}) : {};
   const p = provenanceOf(inputs);
   const crSeq = inputs.revision ?? cur?.seq ?? 0;
   return {
     statement: doc,
     ecr: { number: pr.plmEcrNumber, title: pr.title, revision: crSeq },
-    prov: { baseline: p.baseline, changeRequest: p.changeRequest, codeVersion: detail.codeVersion, draws: detail.draws, s2RunId: run ? Number(run.id) : undefined, formulas, mock: matched.some(r => r.mock), costCheck: run ? costCheckOf(results.filter(r => r.checkRunId === run.id)) : undefined,
+    prov: { baseline: p.baseline, changeRequest: p.changeRequest, codeVersion: detail.codeVersion, draws: detail.draws, implementationScenario: detail.implementationScenario, s2RunId: run ? Number(run.id) : undefined, formulas, mock: matched.some(r => r.mock), costCheck: run ? costCheckOf(results.filter(r => r.checkRunId === run.id)) : undefined,
       // The recommendation rule reads the statement's own run, so it is derived only for a statement that has one.
       ruleInput: run ? ruleInputOf(results.filter(r => r.checkRunId === run.id), failedChecksForRun(db, pr.id, run.id)) : undefined },
   };

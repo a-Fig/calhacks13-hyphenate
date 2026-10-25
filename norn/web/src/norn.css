@@ -333,3 +333,4 @@ button.nx-merge-head:hover { background: var(--bgColor-muted); }
 .nx-log-lines li.text .x { color: var(--fgColor-default); }
 .nx-log-lines li.err .x, .nx-log-lines li.err .i { color: var(--fgColor-danger); }
 .nx-log-lines li.end .x { font-weight: 600; }
+.nx-cost-sums li:first-child { border-top: 1px solid var(--borderColor-muted); }

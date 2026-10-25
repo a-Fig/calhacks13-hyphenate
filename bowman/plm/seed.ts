@@ -187,7 +187,7 @@ async function boms() {
 const firmnessOf = (q: any) => (/^budgetary/i.test(q.note ?? '') ? 'Budgetary' : 'Firm');
 const affected = (changes: any[]) => changes.map((c) => ({ part: c.item, change_type: OP[c.op], from_revision: c.fromRev ?? '', to_revision: c.toRev ?? '' }));
 const redlines = (changes: any[]) => changes.flatMap((c) => (c.changes ?? []).map((x: any) => ({ part: c.item, field: x.field, from_value: fv(x.from), to_value: fv(x.to) })));
-const money = (c: any) => ({ label: c.label, basis: COST_BASIS[c.basis], one_time: c.oneTime ?? 0, unit_cost: c.unitCost ?? 0, quantity: c.quantity ?? 0, note: c.note ?? '' });
+const money = (c: any) => ({ label: c.label, factor: c.factor ?? '', assessed_zero: c.oneTime === 0 && !c.unitCost ? 1 : 0, basis: COST_BASIS[c.basis], one_time: c.oneTime ?? 0, unit_cost: c.unitCost ?? 0, quantity: c.quantity ?? 0, note: c.note ?? '' });
 
 async function ncrs() {
   let made = 0;
@@ -294,6 +294,16 @@ async function openEcrs() {
       faa_rationale: e.faaRationale, classification_note: e.classificationNote ?? '',
       description: e.description, need: e.need, consequences_if_disapproved: e.consequencesIfDisapproved,
       alternatives_considered: e.alternativesConsidered, failure_data: e.failureData ?? '', test_and_qualification: e.testAndQualification,
+      implementation_plan_complete: e.implementationPlan?.complete ? 1 : 0,
+      implementation_plan: (e.implementationPlan?.tasks ?? []).map((t: any) => ({
+        task_id: t.id, label: t.label, kind: t.kind, applies_to: t.appliesTo, task_owner: t.owner, status: t.status,
+        duration_basis: typeof t.durationWeeks === 'number' ? 'Exact' : t.durationWeeks ? 'Range' : 'Unknown',
+        duration_weeks: typeof t.durationWeeks === 'number' ? t.durationWeeks : 0,
+        duration_p10: t.durationWeeks?.p10, duration_p50: t.durationWeeks?.p50, duration_p90: t.durationWeeks?.p90,
+        after_tasks: (t.after ?? []).join(', '), completed_on: t.completedOn ?? null, evidence: t.evidence ?? '',
+        downtime_assessed: t.downtimeHoursPerUnit === undefined ? 0 : 1, downtime_hours_per_unit: t.downtimeHoursPerUnit ?? 0,
+      })),
+      cost_factors: (e.costFactors ?? []).map((f: any) => ({ factor: f.factor, status: f.status, note: f.note ?? '' })),
       affected_items: affected(e.itemChanges), field_changes: redlines(e.itemChanges),
       bom_changes: e.bomChanges.map((b: any) => ({ op: BOMOP[b.op], parent_part: b.parent, child_part: b.child, qty_from: b.qtyFrom ?? null, qty_to: b.qtyTo ?? null })),
       supplier_quotes: quotes,

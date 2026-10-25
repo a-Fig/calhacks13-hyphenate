@@ -1,5 +1,6 @@
 // Norn's impact checks, as a pure library: S1 (BOM delta) and S2 (cost). No database, no I/O.
 export * from './types.ts';
+export { costAssessment } from './assessment.ts';
 export * from './dist.ts';
 export { applyOverlay, bomDelta, changedRows, explode, type BomDeltaResult, type HeadState } from './bom.ts';
 export { costCheck, COST_DEFAULTS, type CostCheckOptions, type CostCheckResult, type CostDefaults, type CostMeasure, type CostMeasureRequest, type CostRow, type Money } from './cost.ts';
@@ -12,3 +13,4 @@ export {
 export { PLAN_DEFAULTS, type PlanDefaults, type PlanOptions, type Stat } from './plan.ts';
 export { formatMoney, formatUsd, renderCostPage } from './format.ts';
 export { bomDeltaRows, costCheckRows, costMeasureKey, supplyCheckRows, timelineRows, type CheckResultRow } from './rows.ts';
+export { assessCostFactors, incompleteCostFactors, COST_FACTORS, type CostFactorAssessment, type CostFactorDeclaration, type CostFactorStatus } from './completeness.ts';

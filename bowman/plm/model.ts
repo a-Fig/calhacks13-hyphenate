@@ -186,6 +186,8 @@ const costLine: DocTypeDef = {
   istable: true,
   fields: finish([
     f('Data', 'label', 'Cost element', { reqd: 1, in_list_view: 1, columns: 3 }),
+    f('Data', 'factor', 'Impact factor', { description: 'Links this estimate to a factor such as qualification, retrofit or logistics_support.' }),
+    f('Check', 'assessed_zero', 'Assessed as zero cost', { description: 'Confirms a zero estimate; an empty amount is still unknown.' }),
     f('Select', 'basis', 'Basis', { options: opts(COST_BASIS), reqd: 1, default: 'Not provided', in_list_view: 1, columns: 2 }),
     f('Currency', 'one_time', 'One-time', { in_list_view: 1, columns: 1 }),
     f('Currency', 'unit_cost', 'Unit cost', { in_list_view: 1, columns: 1 }),
@@ -205,6 +207,35 @@ const ecoAffectedItem: DocTypeDef = {
     f('Select', 'change_type', 'Change', { options: opts(['Revise', 'Add', 'Remove']), reqd: 1, in_list_view: 1, columns: 1, default: 'Revise' }),
     f('Data', 'from_revision', 'Old rev', { in_list_view: 1, columns: 1 }),
     f('Data', 'to_revision', 'New rev', { in_list_view: 1, columns: 1 }),
+  ]),
+};
+
+const implementationTask: DocTypeDef = {
+  name: 'ECR Implementation Task', istable: true,
+  fields: finish([
+    f('Data', 'task_id', 'Task reference', { reqd: 1, in_list_view: 1, columns: 1 }),
+    f('Data', 'label', 'Prerequisite', { reqd: 1, in_list_view: 1, columns: 3 }),
+    f('Select', 'kind', 'Work', { options: opts(['qualification', 'certification', 'release', 'installation', 'test']), reqd: 1 }),
+    f('Select', 'applies_to', 'Applies to', { options: opts(['production', 'retrofit', 'both']), reqd: 1 }),
+    f('Select', 'status', 'Assessment', { options: opts(['planned', 'complete', 'not_applicable', 'unknown']), default: 'unknown', reqd: 1, in_list_view: 1, columns: 2 }),
+    f('Data', 'task_owner', 'Responsible function', { reqd: 1, in_list_view: 1, columns: 2 }),
+    f('Select', 'duration_basis', 'Duration estimate', { options: opts(['Unknown', 'Exact', 'Range']), default: 'Unknown' }),
+    f('Float', 'duration_weeks', 'Weeks'),
+    f('Float', 'duration_p10', 'Weeks P10'), f('Float', 'duration_p50', 'Weeks P50'), f('Float', 'duration_p90', 'Weeks P90'),
+    f('Data', 'after_tasks', 'After', { description: 'Comma-separated task references; parts means materials in hand, decision means board decision. Default: parts.' }),
+    f('Date', 'completed_on', 'Completed on'),
+    f('Small Text', 'evidence', 'Evidence or reason'),
+    f('Check', 'downtime_assessed', 'Aircraft downtime assessed'),
+    f('Float', 'downtime_hours_per_unit', 'Aircraft downtime (hours per unit)'),
+  ]),
+};
+
+const costFactor: DocTypeDef = {
+  name: 'ECR Cost Factor', istable: true,
+  fields: finish([
+    f('Data', 'factor', 'Impact factor', { reqd: 1, in_list_view: 1, columns: 3 }),
+    f('Select', 'status', 'Assessment', { options: opts(['assessed', 'not_applicable', 'unknown']), default: 'unknown', reqd: 1, in_list_view: 1, columns: 2 }),
+    f('Small Text', 'note', 'Basis or reason', { in_list_view: 1, columns: 5 }),
   ]),
 };
 
@@ -361,6 +392,9 @@ const ecr: DocTypeDef = {
     f('Text', 'alternatives_considered', 'Alternatives considered'),
     f('Text', 'failure_data', 'Failure data'),
     f('Text', 'test_and_qualification', 'Test and requalification expected'),
+    f('Table', 'implementation_plan', 'Implementation prerequisites', { options: 'ECR Implementation Task' }),
+    f('Check', 'implementation_plan_complete', 'All release and retrofit prerequisites assessed'),
+    f('Table', 'cost_factors', 'Cost completeness', { options: 'ECR Cost Factor' }),
 
     // ---- Impact assessment (Norn writes; permlevel 1)
     tab('Impact assessment'),
@@ -526,7 +560,7 @@ const eco: DocTypeDef = {
 /** Creation order matters: a DocType must exist before a Link or Table points at it. ECR and NCR link to each other, so NCR.linked_ecr is added in a second pass (setup.ts defers any Link to a DocType that does not exist yet). */
 export const DOCTYPES: DocTypeDef[] = [
   partRevision, bomLine, affectedItem, fieldChange, bomChange, supplierQuote, inventoryLine, costLine, ecoAffectedItem,
-  reviewFunction, ecrRouting,
+  reviewFunction, ecrRouting, implementationTask, costFactor,
   part, ebom, ncr, ecr, eco,
 ];
 

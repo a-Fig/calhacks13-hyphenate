@@ -4,9 +4,8 @@
 // The cut-in is the latest of those. The result is a range of dates, the first serial that can take
 // the change, and how late that is against the effectivity the ECR states.
 //
-// This is the earliest the change can reach the line on the facts the baseline and the ECR give. It
-// does not replace the effectivity the cost check uses (S2 reads the ECR's stated serial), so S2's
-// money does not move when S3 reports a later date.
+// Requested effectivity is retained separately. The worker publishes an additional cost scenario
+// at the forecast median serial; unknown release prerequisites keep this a material-readiness bound.
 
 import { type PlanOptions, type Stat, Book, evaluateSchedules, gatherSchedule, isoRange, mergePlanDefaults, r4, simulate, WEEK, type Convergence } from './plan.ts';
 import type { Draws } from './sim.ts';
@@ -21,7 +20,7 @@ export interface DateRange {
 
 export interface PathResult {
   id: string;
-  kind: 'decision' | 'parts' | 'stock';
+  kind: 'decision' | 'parts' | 'stock' | 'prerequisite';
   label: string;
   /** Day (since 1970-01-01) this step is done: the decision, the part in the building, or the old stock gone. Null for the old stock when it runs past the volume plan. */
   day: Stat | null;
@@ -30,6 +29,11 @@ export interface PathResult {
   criticalShare: number;
   supplier?: string;
   slot?: { constraint: string; opens: DateRange; shareInFirstSlot: number } | null;
+  owner?: string;
+  status?: string;
+  evidence?: string;
+  appliesTo?: string;
+  downtimeHoursPerUnit?: number;
 }
 
 export interface TimelineResult {
@@ -41,6 +45,9 @@ export interface TimelineResult {
   draws: number;
   correlation: number;
   filed: string;
+  readiness: 'implementation' | 'materials_only';
+  /** Separate from production cut-in; null when no retrofit execution has been assessed. */
+  retrofit: { day: Stat; date: DateRange } | null;
   /** The effectivity the ECR states, and the day it falls on. */
   stated: { basis: string; label: string; date: string | null; serial: number | null };
   decision: { day: Stat; date: DateRange };
@@ -95,6 +102,7 @@ export function timelineCheck(baseline: Baseline, ecr: ChangeRequest, options: P
       } else {
         m.decisionWeeks = new Float64Array(n).map((_, i) => (r.t.decision[i] - sched.filedDay) / WEEK);
       }
+      sched.tasks.forEach((task, i) => { m[`task:${task.task.id}`] = r.t.tasks[i]; });
       return m;
     },
   );
@@ -108,7 +116,7 @@ export function timelineCheck(baseline: Baseline, ecr: ChangeRequest, options: P
   const decision = book.stat(t.decision, dayAt(at.decision), 'filing date + weeks to the board\'s decision × 7', decisionUses);
   const cutDay = !placed ? null : book.stat(
     t.cutIn, dayAt(at.cutIn),
-    'the later of: the day every changed part is in (for each part, the day its order is placed + its weeks from order to parts in × 7; an order for a part with a qualification slot is placed at the first slot that opens after the decision), and the day old stock the proposal uses up has been built into aircraft',
+    'the later of: parts arriving, assessed production prerequisites completing, and old stock being used up; unassessed work is excluded and flagged',
     sched.uses,
   );
   const cutWeeks = !placed ? null : (() => {
@@ -138,7 +146,7 @@ export function timelineCheck(baseline: Baseline, ecr: ChangeRequest, options: P
   };
   paths.push({
     id: 'decision', kind: 'decision', label: `Board decision on ${ecr.id}`, day: decision, date: isoRange(decision),
-    criticalShare: share((i) => t.critical[i] < 0 && !t.floored[i]),
+    criticalShare: share((i) => t.critical[i] < 0 && !t.floored[i] && t.cutIn[i] === t.decision[i]),
   });
   sched.items.forEach((it, k) => {
     const lead = d.values.get(it.leadVar)!;
@@ -155,10 +163,19 @@ export function timelineCheck(baseline: Baseline, ecr: ChangeRequest, options: P
         })()
       : null;
     paths.push({
-      id: `parts:${it.item}`, kind: 'parts', label: `${it.item} in the building`, day, date: isoRange(day), criticalShare: share((i) => t.critical[i] === k && !t.floored[i]),
+      id: `parts:${it.item}`, kind: 'parts', label: `${it.item} in the building`, day, date: isoRange(day), criticalShare: share((i) => t.critical[i] === k && !t.floored[i] && t.cutIn[i] === t.parts[i]),
       ...(it.supplier ? { supplier: it.supplier } : {}), slot,
     });
   });
+  sched.tasks.forEach((task, k) => {
+    const day = book.stat(t.tasks[k], at.tasks[k][0], `${task.task.label}: completion evidence or latest dependency + duration in weeks × 7`, sched.uses);
+    paths.push({ id: task.input, kind: 'prerequisite', label: task.task.label, day, date: isoRange(day),
+      criticalShare: share(i => task.task.appliesTo !== 'retrofit' && t.tasks[k][i] === t.cutIn[i]),
+      owner: task.task.owner, status: task.task.status, evidence: task.task.evidence, appliesTo: task.task.appliesTo,
+      downtimeHoursPerUnit: task.task.downtimeHoursPerUnit });
+  });
+  const hasRetrofit = sched.tasks.some(task => task.task.appliesTo !== 'production');
+  const retrofitDay = hasRetrofit ? book.stat(t.retrofit, at.retrofit[0], 'latest assessed retrofit prerequisite completion', sched.uses) : null;
   if (sched.floor) {
     // The old stock is gone when the aircraft before the floor's serial are built: a fixed day, from the plan, not from the draws.
     // It is not the cut-in: a part arriving later than that sets the cut-in, and this step does not move with it.
@@ -194,6 +211,8 @@ export function timelineCheck(baseline: Baseline, ecr: ChangeRequest, options: P
     draws: sim.n,
     correlation: rho,
     filed: ecr.filedOn,
+    readiness: sched.implementationComplete ? 'implementation' : 'materials_only',
+    retrofit: retrofitDay ? { day: retrofitDay, date: isoRange(retrofitDay) } : null,
     stated: { basis: sched.stated.basis, label: sched.stated.label, date: statedDay === null ? null : dateOf(statedDay), serial: sched.stated.serial },
     decision: { day: decision, date: isoRange(decision) },
     cutIn: { placed, day: cutDay, date: cutDay ? isoRange(cutDay) : null, weeksFromFiling: cutWeeks, serial },

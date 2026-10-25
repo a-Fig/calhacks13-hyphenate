@@ -17,6 +17,7 @@ import type {
   SupplierId, Trace, TraceUse,
 } from './types.ts';
 import { lastBuiltSerial, serialsByMonth } from './volume.ts';
+import { implementationTasks, type PlannedTask } from './implementation.ts';
 
 // ---------------------------------------------------------------- defaults
 
@@ -292,6 +293,8 @@ export interface Schedule {
   program: ProgramId;
   filedDay: number;
   decisionVar: string;
+  tasks: PlannedTask[];
+  implementationComplete: boolean;
   items: SupplyItem[];
   table: SerialTable;
   firstUnbuilt: number;
@@ -518,7 +521,9 @@ export function gatherSchedule(book: Book, baseline: Baseline, ecr: ChangeReques
     book.flags.push({ kind: 'no_stated_effectivity', severity: 'info', ref: statedId, message: `${ecr.id} states no production effectivity by serial or date, so the feasible cut-in is shown without a deadline to miss.` });
   }
   book.input({ id: statedId, label: `${ecr.id} production effectivity`, source: 'given', value: stated.label, ref: `${where.changeRequest}: effectivity.production` });
-  return { ecr, program, filedDay: dayOf(ecr.filedOn), decisionVar, items, table, firstUnbuilt, floor, stated, qualification, uses: [...new Set(uses)] };
+  const implementation = implementationTasks(book, ecr);
+  for (const task of implementation.tasks) uses.push(task.input, task.duration);
+  return { ecr, program, filedDay: dayOf(ecr.filedOn), decisionVar, tasks: implementation.tasks, implementationComplete: implementation.complete, items, table, firstUnbuilt, floor, stated, qualification, uses: [...new Set(uses)] };
 }
 
 /**
@@ -570,6 +575,8 @@ export interface Timing {
   decision: Float64Array;
   /** Day every changed part is in. */
   parts: Float64Array;
+  tasks: Float64Array[];
+  retrofit: Float64Array;
   /** Day the change reaches the line: the parts are in and the old stock is used up. */
   cutIn: Float64Array;
   /** The first serial that takes the change. */
@@ -594,6 +601,7 @@ export function evaluateSchedules(scheds: Schedule[], d: Draws, contend: boolean
   const order = scheds.map((_, i) => i).sort((a, b) => byFiling(scheds[a], scheds[b]));
   const out: Timing[] = scheds.map((s) => ({
     decision: new Float64Array(d.n), parts: new Float64Array(d.n), cutIn: new Float64Array(d.n), serial: new Float64Array(d.n),
+    tasks: s.tasks.map(() => new Float64Array(d.n)), retrofit: new Float64Array(d.n),
     critical: new Int16Array(d.n).fill(-1), floored: new Uint8Array(d.n),
     placed: s.items.map(() => new Float64Array(d.n)), slotIndex: s.items.map(() => new Int16Array(d.n).fill(-1)),
   }));
@@ -633,9 +641,20 @@ export function evaluateSchedules(scheds: Schedule[], d: Draws, contend: boolean
       });
       t.parts[i] = parts;
       let cutIn = parts;
+      const completion = new Map<string, number>([['decision', decision], ['parts', parts]]);
+      let retrofit = parts;
+      s.tasks.forEach((task, k) => {
+        const starts = Math.max(s.filedDay, ...task.after.map(id => completion.get(id)!));
+        const finish = task.completedDay ?? (starts + WEEK * d.values.get(task.duration)![i]);
+        completion.set(task.task.id, finish);
+        t.tasks[k][i] = finish;
+        if (task.task.appliesTo !== 'retrofit') cutIn = Math.max(cutIn, finish);
+        if (task.task.appliesTo !== 'production') retrofit = Math.max(retrofit, finish);
+      });
+      t.retrofit[i] = retrofit;
       // Old stock used up: the change starts at the floor's serial. If that serial is past the plan, no
       // day can be placed: the cut-in is infinitely late (a stock-bound unit count of zero follows).
-      if (s.floor && (s.floor.beyondPlan || s.floor.day > parts)) {
+      if (s.floor && (s.floor.beyondPlan || s.floor.day > cutIn)) {
         cutIn = s.floor.beyondPlan ? Infinity : s.floor.day;
         t.floored[i] = 1;
       }

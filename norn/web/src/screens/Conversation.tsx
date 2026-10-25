@@ -130,12 +130,12 @@ function BotComment({ a }: { a: ImpactAssessment }) {
               </tr>
               {a.cutIn.estimate && (
                 <tr>
-                  <td>Rev C reaches the line <MockTag on={a.mock.includes('cutInEstimate')} /></td>
+                  <td>{a.cutIn.estimate.label ?? 'Reaches the line'} <MockTag on={a.mock.includes('cutInEstimate')} /></td>
                   <td className="num"><Num f={a.cutIn.estimate.figure} use="p50" /></td>
                   <td className="num nx-fg-muted">{rangeText(a.cutIn.estimate.figure, 'short')}</td>
                   <td>
                     {a.cutIn.estimate.likelihood && (
-                      <Mark ev="assumption" id={a.cutIn.estimate.figure.id}><b>{cap(a.cutIn.estimate.likelihood.word)}</b> {a.cutIn.estimate.likelihood.event}</Mark>
+                      <Mark ev={a.cutIn.estimate.figure.evidence} id={a.cutIn.estimate.figure.id}><b>{cap(a.cutIn.estimate.likelihood.word)}</b> {a.cutIn.estimate.likelihood.event}</Mark>
                     )}
                   </td>
                 </tr>
