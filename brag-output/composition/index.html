@@ -1,0 +1,498 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=block" rel="stylesheet">
+<script src="timeline.js"></script>
+<style>
+:root{--ink:#213d39;--teal:#14675f;--teal2:#35c2a9;--copper:#ad482c;--copper2:#e2734f;--cream:#f8f7f3;--fact:#3a74e0;--assume:#e0894f;--judge:#7c4dd6;--muted:#6b7a75}
+*{box-sizing:border-box}
+html,body{margin:0;background:#000}
+#stage{width:1920px;height:1080px;position:relative;overflow:hidden;font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.scene{position:absolute;inset:0;display:none;overflow:hidden}
+.dark{background:radial-gradient(1300px 800px at 50% 38%,#152422 0%,#0b1110 62%,#070b0a 100%);color:#eef3f1}
+.light{background:radial-gradient(1400px 900px at 50% 30%,#fdfcf9 0%,#f6f4ee 70%,#efece4 100%);color:var(--ink)}
+.a{position:absolute}
+.mono{font-family:'JetBrains Mono',monospace}
+.label{font-family:'JetBrains Mono',monospace;font-size:20px;letter-spacing:.14em;text-transform:uppercase;color:#7f9a95}
+.light .label{color:#7b8a84}
+.center{left:0;right:0;text-align:center}
+/* window */
+.win{position:absolute;width:1440px;border-radius:14px;overflow:hidden;background:#fff;box-shadow:0 40px 90px rgba(20,40,36,.22),0 8px 24px rgba(20,40,36,.12),0 0 0 1px rgba(20,40,36,.08)}
+.bar{height:44px;background:#efede7;display:flex;align-items:center;gap:9px;padding:0 18px;border-bottom:1px solid #e1ded5}
+.bar i{width:13px;height:13px;border-radius:50%;background:#d9d5ca;display:block}
+.bar span{margin-left:14px;font-size:15px;font-weight:600;color:#5d6b66}
+.vp{position:relative;width:1440px;height:900px;overflow:hidden;background:#fff}
+.layer{position:absolute;left:0;top:0;width:1600px;height:1000px;transform-origin:0 0}
+.layer img{position:absolute;left:0;top:0;width:1600px;height:1000px}
+.hl{position:absolute;border:3px solid var(--copper);border-radius:10px;box-shadow:0 0 0 6px rgba(173,72,44,.14),0 0 28px rgba(173,72,44,.25);opacity:0}
+.cursor{position:absolute;width:30px;height:30px;opacity:0;filter:drop-shadow(0 3px 5px rgba(0,0,0,.35))}
+.ripple{position:absolute;width:60px;height:60px;margin:-30px 0 0 -30px;border-radius:50%;border:3px solid var(--copper);opacity:0}
+.card{position:absolute;background:#fff;border-radius:18px;box-shadow:0 30px 70px rgba(10,30,26,.25),0 0 0 1px rgba(20,40,36,.08);overflow:hidden}
+.card img{display:block;width:100%}
+.chip{display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:999px;font-size:20px;font-weight:600;font-family:Inter}
+.chip.fact{background:rgba(58,116,224,.12);color:#2a5cc0}
+.chip.comp{background:rgba(20,103,95,.12);color:#14675f}
+.chip.assume{background:rgba(224,137,79,.16);color:#b45f22}
+.chip.judge{background:rgba(124,77,214,.12);color:#6a3cc4}
+.ecrnum{display:inline-flex;border:2px solid #b4c4bb;border-radius:8px;font-family:'JetBrains Mono',monospace;overflow:hidden;background:#f7faf7;color:var(--ink)}
+.ecrnum span{padding:4px 12px;border-right:2px solid #b4c4bb;font-size:22px;letter-spacing:.05em;display:flex;align-items:center}
+.ecrnum b{padding:4px 14px;font-size:30px}
+.wordmark{font-weight:800;letter-spacing:-.065em;color:var(--ink)}
+.wordmark em{font-style:normal;color:var(--copper)}
+/* s1 */
+#track{left:260px;width:1400px;top:560px;height:14px;border-radius:7px;background:rgba(255,255,255,.08)}
+#trackfill{left:0;top:0;height:14px;border-radius:7px;background:linear-gradient(90deg,#2a8f80,#35c2a9)}
+.tick{position:absolute;white-space:nowrap;top:30px;font-family:'JetBrains Mono';font-size:18px;color:#5f7570;transform:translateX(-50%)}
+#playhead{top:-26px;width:4px;height:66px;margin-left:-2px;background:#fff;border-radius:2px;box-shadow:0 0 18px rgba(255,255,255,.6)}
+#crack{top:-120px;width:120px;height:110px;margin-left:-60px;opacity:0}
+/* s2 */
+.seat{position:absolute;top:250px;width:360px;height:200px;border-radius:18px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.09);padding:28px 30px}
+.seat h3{margin:0 0 10px;font-size:34px;font-weight:700;letter-spacing:-.02em}
+.seat p{margin:0;font-size:22px;color:#93a9a4}
+.sheet{position:absolute;right:26px;top:26px;width:58px;height:46px;display:grid;grid-template-columns:repeat(4,1fr);gap:3px}
+.sheet i{background:rgba(53,194,169,.28);border-radius:2px}
+.day{position:absolute;width:40px;height:40px;border-radius:7px;background:#2c3b38;overflow:hidden}
+.day b{position:absolute;left:0;top:0;bottom:0;background:var(--teal2)}
+/* s5 */
+.tile{position:absolute;top:310px;width:520px;height:430px;border-radius:24px;background:#fff;box-shadow:0 30px 80px rgba(10,30,26,.18),0 0 0 1px rgba(20,40,36,.07);padding:40px 40px}
+.tile .big{font-size:112px;font-weight:800;letter-spacing:-.045em;line-height:1}
+.tile .what{font-size:34px;font-weight:600;margin-top:14px}
+.tile .sub{font-size:23px;color:var(--muted);margin-top:12px;line-height:1.35}
+.tile .chip{position:absolute;left:40px;bottom:34px}
+/* s7 */
+.axisl{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,255,255,.08)}
+.axist{position:absolute;bottom:-44px;font-family:'JetBrains Mono';font-size:18px;color:#6b827d;transform:translateX(-50%)}
+.rowlab{position:absolute;left:0;font-size:26px;font-weight:600;color:#cfe0dc}
+.rowlab small{display:block;font-size:20px;font-weight:500;color:#7f9a95;margin-top:4px}
+.bar2{position:absolute;height:64px;border-radius:10px}
+/* s8 */
+.node{position:absolute;border-radius:18px;padding:18px 24px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12)}
+.node .t{font-size:28px;font-weight:700}
+.node .s{font-size:20px;color:#8fa6a1;margin-top:6px}
+/* s10 */
+.col h4{font-family:'JetBrains Mono';font-size:22px;letter-spacing:.16em;margin:0 0 26px}
+.item{font-size:36px;font-weight:600;margin:0 0 22px;display:flex;align-items:center;gap:18px}
+.item i{width:34px;height:34px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:20px;font-weight:800}
+.seatchip{display:inline-block;padding:14px 28px;border-radius:999px;font-size:34px;font-weight:700;background:#fff;box-shadow:0 10px 30px rgba(10,30,26,.12),0 0 0 1px rgba(20,40,36,.08);margin:0 10px}
+#flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+#fade{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none}
+</style></head>
+<body><div id="stage">
+
+<!-- S1: the crack -->
+<div class="scene dark" id="s1">
+  <div class="a label center" id="s1lab" style="top:250px">NCR-0119 · Vesper V4 · 20-hour endurance vibration test</div>
+  <div class="a center" id="s1big" style="top:330px;font-size:120px;font-weight:800;letter-spacing:-.04em"><span id="s1h">0.0</span><span style="color:#5f7570;font-weight:600"> h</span></div>
+  <div class="a" id="track"><div class="a" id="trackfill"></div>
+    <div class="a" id="playhead"></div>
+    <svg class="a" id="crack" viewBox="0 0 120 110"><path id="crackp" d="M60 4 L52 30 L66 44 L48 66 L62 80 L54 106" fill="none" stroke="#e2734f" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="140" stroke-dashoffset="140"/></svg>
+  </div>
+  <div class="a center" id="s1crack" style="top:640px;font-size:44px;font-weight:700;color:var(--copper2);opacity:0">Crack at the lower fillet</div>
+  <div class="a center" id="s1ecr" style="top:420px;opacity:0">
+    <div class="ecrnum" style="transform:scale(1.25)"><span>ECR</span><b>0417</b></div>
+    <div style="font-size:54px;font-weight:700;letter-spacing:-.025em;margin-top:40px">Motor-controller mounting bracket, Rev B → Rev C</div>
+    <div style="font-size:28px;color:#8fa6a1;margin-top:18px">Filed by Jeff Hargrove, design engineer · Bowman Aviation</div>
+  </div>
+</div>
+
+<!-- S2: four people, 144 days -->
+<div class="scene dark" id="s2">
+  <div class="a label center" id="s2lab" style="top:96px">Before the board can decide</div>
+  <div class="a center" id="s2head" style="top:140px;font-size:60px;font-weight:800;letter-spacing:-.03em">Four people price the fix by hand</div>
+  <div id="seats">
+    <div class="seat" style="left:150px"><div class="sheet"></div><h3>Cost engineer</h3><p>the new unit cost</p></div>
+    <div class="seat" style="left:560px"><div class="sheet"></div><h3>Buyer</h3><p>supplier quotes, open orders</p></div>
+    <div class="seat" style="left:970px"><div class="sheet"></div><h3>Planner</h3><p>when it reaches the line</p></div>
+    <div class="seat" style="left:1380px"><div class="sheet"></div><h3>Cost accountant</h3><p>scrap, write-offs, the books</p></div>
+  </div>
+  <div class="a" id="s2count" style="left:150px;top:560px;opacity:0">
+    <div style="font-size:190px;font-weight:900;letter-spacing:-.06em;line-height:1"><span id="s2n">0</span></div>
+    <div style="font-size:40px;font-weight:600;color:#a9bcb8;margin-top:6px">days, on average, per change</div>
+  </div>
+  <div class="a" id="s2grid" style="left:760px;top:520px;width:1010px;height:400px"></div>
+  <div class="a" id="s2callout" style="left:760px;top:942px;opacity:0;font-size:30px;font-weight:700;color:var(--teal2)">↑ 2.5 hours of real work in all of it</div>
+  <div class="a mono" id="s2src" style="left:150px;bottom:44px;font-size:17px;color:#5f7570;opacity:0">Source: Ascom ECR study, Chalmers University, 2013</div>
+</div>
+
+<!-- S3: reveal -->
+<div class="scene light" id="s3">
+  <div class="a center wordmark" id="s3mark" style="top:280px;font-size:300px;line-height:1">fern<em>.</em></div>
+  <div class="a center" id="s3tag" style="top:690px;font-size:42px;font-weight:500;color:#4b5f59;padding:0 300px;line-height:1.35">Automated financial impact assessments for every engineering change happening in R&amp;D.</div>
+</div>
+
+<!-- S4: PLM to Fern to PLM -->
+<div class="scene light" id="s4">
+  <div class="win" id="w4" style="left:240px;top:68px">
+    <div class="bar"><i></i><i></i><i></i><span id="w4t">Bowman PLM · ECRs</span></div>
+    <div class="vp"><div class="layer" id="l4">
+      <img id="i4a" src="../work/shots/plm-app-ecr.png">
+      <img id="i4b" src="../work/shots/plm-app-ecr-ecr-0417.png" style="opacity:0">
+      <img id="i4c" src="../work/shots/plm-ecr-0417-impact.png" style="opacity:0">
+      <div class="hl" id="h4row" style="left:292px;top:180px;width:1280px;height:44px"></div>
+      <div class="hl" id="h4ban" style="left:286px;top:96px;width:1030px;height:52px"></div>
+      <div class="hl" id="h4rec" style="left:356px;top:390px;width:580px;height:96px"></div>
+      <div class="ripple" id="r4"></div>
+      <svg class="cursor" id="c4" viewBox="0 0 30 30"><path d="M4 2 L4 24 L10 18 L14 28 L18 26 L14 17 L22 17 Z" fill="#111" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>
+    </div></div>
+  </div>
+  <div class="a" id="p4" style="left:1250px;top:250px;width:560px;border-radius:22px;background:#0f1a18;color:#eef3f1;padding:34px 36px;box-shadow:0 40px 90px rgba(0,0,0,.35);opacity:0">
+    <div style="display:flex;align-items:baseline;gap:14px"><span class="wordmark" style="font-size:44px;color:#eef3f1">fern<em>.</em></span><span class="mono" style="font-size:18px;color:#7f9a95;letter-spacing:.1em">READING</span></div>
+    <div id="p4rows" style="margin-top:22px"></div>
+    <div style="margin-top:22px;padding-top:20px;border-top:1px solid rgba(255,255,255,.1);display:flex;justify-content:space-between;align-items:baseline">
+      <span style="font-size:22px;color:#8fa6a1">Level 1 assessment</span><span class="mono" id="p4clock" style="font-size:44px;font-weight:700">0:00</span>
+    </div>
+  </div>
+</div>
+
+<!-- S5: the numbers -->
+<div class="scene light" id="s5">
+  <div class="win" id="w5" style="left:240px;top:68px">
+    <div class="bar"><i></i><i></i><i></i><span>Bowman PLM · ECR-0417 · Impact assessment</span></div>
+    <div class="vp"><div class="layer" id="l5"><img src="../work/shots/plm-ecr-0417-impact.png"></div></div>
+  </div>
+  <div class="a" id="s5veil" style="inset:0;background:rgba(248,247,243,.78);backdrop-filter:blur(10px);opacity:0"></div>
+  <div class="a label center" id="s5lab" style="top:236px;opacity:0">ECR-0417 · Fern's Level 1 impact statement</div>
+  <div class="tile" id="t1" style="left:150px"><div class="big" style="color:var(--teal)">+$<span id="t1n">0</span></div><div class="what">per aircraft</div><div class="sub">Vesper V4 · p10 to p90:<br>$407 to $432</div><span class="chip comp">Computation</span></div>
+  <div class="tile" id="t2" style="left:700px"><div class="big" style="font-size:88px;color:var(--ink);white-space:nowrap;letter-spacing:-.05em">$142–156k</div><div class="what">one-time cost</div><div class="sub">p10 to p90</div><span class="chip comp">Computation</span></div>
+  <div class="tile" id="t3" style="left:1250px"><div class="big" style="color:var(--copper)">+13 wk</div><div class="what">late to the line</div><div class="sub">Cut-in 2027-02-16, S/N 15<br><span id="t3q" style="opacity:0">Supplier quotes 14 weeks</span></div><span class="chip fact" id="t3c" style="opacity:0">Fact · supplier quote</span></div>
+</div>
+
+<!-- S6: every number traced -->
+<div class="scene light" id="s6">
+  <div class="win" id="w6" style="left:240px;top:68px">
+    <div class="bar"><i></i><i></i><i></i><span>Fern · ECR-0417 · Impact · Cost</span></div>
+    <div class="vp"><div class="layer" id="l6"><img src="../work/shots/fern-0417-impact.png">
+      <div class="hl" id="h6ev" style="left:505px;top:404px;width:910px;height:112px"></div>
+      <div class="hl" id="h6row" style="left:505px;top:708px;width:910px;height:88px"></div>
+    </div></div>
+  </div>
+  <div class="a center" id="s6eq" style="top:250px;opacity:0">
+    <div style="display:flex;justify-content:center;align-items:center;gap:34px;font-size:96px;font-weight:800;letter-spacing:-.04em">
+      <span id="e1" style="color:var(--teal)">+$415.20</span><span style="color:#9aa7a2;font-weight:500">=</span>
+      <span id="e2" style="color:var(--fact)">12 brackets</span><span style="color:#9aa7a2;font-weight:500">×</span>
+      <span id="e3" style="color:var(--teal)">$34.60</span>
+    </div>
+    <div style="display:flex;justify-content:center;gap:24px;margin-top:22px"><span class="chip comp">Computation</span><span class="chip fact">Fact · the BOM</span><span class="chip comp">Computation · quote minus standard cost</span></div>
+  </div>
+  <div class="a" id="s6chk" style="left:460px;top:560px;width:1000px;border-radius:22px;background:#fff;box-shadow:0 30px 80px rgba(10,30,26,.18),0 0 0 1px rgba(20,40,36,.07);padding:34px 40px;opacity:0">
+    <div class="label" style="font-size:18px">Post check · before anything reaches the PLM</div>
+    <div style="display:flex;justify-content:space-between;margin-top:22px;font-size:34px"><span style="color:#6b7a75">Agent's draft</span><span class="mono" style="font-weight:700">+$415.<span id="s6bad" style="color:var(--ink)">21</span> per aircraft</span></div>
+    <div style="display:flex;justify-content:space-between;margin-top:12px;font-size:34px"><span style="color:#6b7a75">Stored check result</span><span class="mono" style="font-weight:700;color:var(--teal)">+$415.20 per aircraft</span></div>
+    <div id="s6rej" style="margin-top:24px;padding:16px 22px;border-radius:12px;background:#fbe9e3;color:#a33a1d;font-size:27px;font-weight:700;opacity:0">✕ Rejected: a computed number must match its check to the digit</div>
+  </div>
+</div>
+
+<!-- S7: act or ask -->
+<div class="scene dark" id="s7">
+  <div class="a label" id="s7lab" style="left:150px;top:110px">Bowman's rules decide who decides</div>
+  <div class="a" id="s7title" style="left:150px;top:160px;font-size:58px;font-weight:800;letter-spacing:-.03em">12-month cost at p90</div>
+  <div class="a" id="chart" style="left:700px;top:330px;width:1050px;height:560px">
+    <div class="axisl" style="left:0"></div><div class="axisl" style="left:262px"></div><div class="axisl" style="left:525px"></div><div class="axisl" style="left:787px"></div><div class="axisl" style="left:1050px"></div>
+    <div class="axist" style="left:0">$0</div><div class="axist" style="left:262px">$50k</div><div class="axist" style="left:525px">$100k</div><div class="axist" style="left:787px">$150k</div><div class="axist" style="left:1050px">$200k</div>
+    <div class="a" id="limit" style="left:787px;top:-40px;bottom:0;width:0;border-left:4px dashed var(--copper2)"></div>
+    <div class="a" id="limitlab" style="left:806px;top:-44px;font-size:22px;font-weight:600;color:var(--copper2)">$150,000 limit</div>
+    <div class="bar2" id="b23" style="left:0;top:90px;width:7px;background:var(--teal2)"></div>
+    <div class="bar2" id="b17" style="left:0;top:330px;width:0;background:linear-gradient(90deg,#2a8f80 0%,#35c2a9 76%,#e2734f 76.1%,#e2734f 100%)"></div>
+    <div class="a" id="b23lab" style="left:30px;top:96px;font-size:30px;font-weight:700;color:var(--teal2);opacity:0">$622 · Fern approves it, fast track</div>
+    <div class="a" id="b17val" style="top:342px;font-size:30px;font-weight:700;color:#fff;opacity:0">$164,556</div>
+    <div class="a" id="b17lab" style="left:0;top:420px;font-size:34px;font-weight:700;color:var(--copper2);opacity:0">→ Change Control Board · <span id="b17c" style="opacity:0">9 conditions</span></div>
+  </div>
+  <div class="rowlab a" id="r23" style="left:150px;top:418px">ECR-0423<small>Closeout panel, grey to charcoal<br>Class II · FAA minor</small></div>
+  <div class="rowlab a" id="r17" style="left:150px;top:658px">ECR-0417<small>Motor-controller bracket<br>Class I · urgent</small></div>
+  <div class="card" id="s7card" style="left:1180px;top:500px;width:520px;opacity:0;transform-origin:0 0;padding:6px 10px"><img src="../work/shots/c-0423-appr.png"></div><div class="a mono" id="s7cap" style="left:1180px;top:660px;font-size:17px;color:#6b827d;opacity:0">FERN · ECR-0423</div>
+</div>
+
+<!-- S8: changes collide -->
+<div class="scene dark" id="s8">
+  <div class="a label" style="left:150px;top:110px">Every open change, read together</div>
+  <svg class="a" id="s8svg" style="left:0;top:0" width="1920" height="1080">
+    <path id="pa" d="M560 360 C 700 360, 700 540, 830 540" fill="none" stroke="#35c2a9" stroke-width="4" stroke-dasharray="400" stroke-dashoffset="400"/>
+    <path id="pb" d="M560 720 C 700 720, 700 540, 830 540" fill="none" stroke="#e2734f" stroke-width="4" stroke-dasharray="400" stroke-dashoffset="400"/>
+  </svg>
+  <div class="node" id="na" style="left:150px;top:300px;width:410px"><div class="t">ECR-0419</div><div class="s">Forward rotor magnet set · Vesper</div></div>
+  <div class="node" id="nb" style="left:150px;top:660px;width:410px"><div class="t">ECR-0421</div><div class="s">Cruise motor magnets · Meridian</div><div class="s" id="nbslip" style="color:var(--copper2);font-weight:700;font-size:24px;opacity:0;white-space:nowrap">+13 weeks, behind ECR-0419</div></div>
+  <div class="node" id="no" style="left:830px;top:470px;width:330px;border-color:rgba(226,115,79,.5)"><div class="t">Orrin Magnetics</div><div class="s">qualifies one lot a quarter</div></div>
+  <div class="a" id="s8save" style="left:1240px;top:440px;opacity:0;font-size:30px;font-weight:600;color:#a9bcb8">One lot for both<div style="font-size:84px;font-weight:900;color:var(--teal2);letter-spacing:-.04em;margin-top:6px">≈ $180k</div><div style="font-size:26px;margin-top:4px">saved across the pair, median</div></div>
+  <div class="card" id="s8card" style="left:150px;top:818px;width:960px;opacity:0"><img src="../work/shots/c-sup-other.png"></div><div class="a mono" id="s8cap" style="left:1135px;top:900px;font-size:18px;color:#6b827d;opacity:0;line-height:1.6">FERN · ECR-0421 · SUPPLY RISK</div>
+</div>
+
+<!-- S9: the ERP -->
+<div class="scene light" id="s9">
+  <div class="a label" style="left:260px;top:86px">The board approves · ECO-0320 released</div>
+  <div class="card" id="s9a" style="left:260px;top:140px;width:1400px"><img src="../work/shots/c-eco-top.png"></div>
+  <div class="hl" id="h9" style="left:326px;top:604px;width:1307px;height:91px"></div>
+  <div class="card" id="s9b" style="left:520px;top:690px;width:1300px;opacity:0"><img src="../work/shots/c-journal1.png"></div>
+  <div class="hl" id="h9b" style="left:572px;top:750px;width:912px;height:44px"></div>
+  <div class="a" id="s9line" style="left:150px;top:960px;font-size:52px;font-weight:800;letter-spacing:-.03em;opacity:0;white-space:nowrap">Fern drafts. <span style="color:var(--copper)">A named person submits.</span></div>
+</div>
+
+<!-- S10: real and simulated -->
+<div class="scene dark" id="s10">
+  <div class="a label center" style="top:150px">What you just saw</div>
+  <div class="a col" id="cr" style="left:220px;top:340px;width:820px"><h4 style="color:var(--teal2)">REAL, RUNNING</h4>
+    <div class="item"><i style="background:rgba(53,194,169,.18);color:var(--teal2)">✓</i>ERPNext, Bowman's ERP</div>
+    <div class="item"><i style="background:rgba(53,194,169,.18);color:var(--teal2)">✓</i>Bowman's PLM, on Frappe</div>
+    <div class="item"><i style="background:rgba(53,194,169,.18);color:var(--teal2)">✓</i>Claude agents, through the Agent SDK</div>
+    <div class="item"><i style="background:rgba(53,194,169,.18);color:var(--teal2)">✓</i>SpacetimeDB: state and action log</div>
+  </div>
+  <div class="a col" id="cs" style="left:1140px;top:340px;width:620px"><h4 style="color:#8fa6a1">SIMULATED</h4>
+    <div class="item" style="color:#b9c7c3"><i style="background:rgba(255,255,255,.08);color:#b9c7c3">~</i>Bowman Aviation and its people</div>
+    <div class="item" style="color:#b9c7c3;font-size:30px"><i style="background:rgba(255,255,255,.08);color:#b9c7c3">~</i>737 of 806 records invented, 69 from public data</div>
+  </div>
+</div>
+
+<!-- S11: close -->
+<div class="scene light" id="s11">
+  <div class="a center wordmark" id="s11mark" style="top:200px;font-size:240px;line-height:1">fern<em>.</em></div>
+  <div class="a center" id="s11seats" style="top:530px"><span class="seatchip">Cost engineer</span><span class="seatchip">Cost accountant</span><span class="seatchip">Supply-chain analyst</span></div>
+  <div class="a center" id="s11tag" style="top:660px;font-size:40px;font-weight:500;color:#4b5f59">for every engineering change</div>
+  <div class="a center mono" id="s11cred" style="top:900px;font-size:22px;letter-spacing:.12em;color:#7b8a84">CAL HACKS 13.0 · HYPHENATE TRACK · TYLER DARISME &amp; ANKIT</div>
+  <div class="a center" id="s11fine" style="top:1030px;font-size:15px;color:#9aa7a2">Bowman Aviation is fictional. Music: Sascha Ende, ende.app (CC BY 4.0).</div>
+</div>
+
+<div id="flash"></div><div id="fade"></div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const P = (t, a, d) => clamp((t - a) / d);
+const eo = x => 1 - Math.pow(1 - x, 3);
+const eio = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const ex = x => x >= 1 ? 1 : 1 - Math.pow(2, -10 * x);
+const back = x => { const c1 = 1.5, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const L = (a, b, x) => a + (b - a) * x;
+const SC = Object.fromEntries(TL.scenes.map(s => [s.id, s]));
+const missing = [];
+function W(clip, word, n = 0) {
+  let k = 0;
+  for (const w of TL.words[clip]) if (w[0].startsWith(word)) { if (k === n) return w[1]; k++; }
+  missing.push(clip + ':' + word); return SC.s1.start;
+}
+// rise-in: opacity + y + blur, from time a over d
+function rise(el, t, a, d = .6, dy = 40) {
+  const x = ex(P(t, a, d));
+  el.style.opacity = x; el.style.transform = `translateY(${(1 - x) * dy}px)`; el.style.filter = x < 1 ? `blur(${(1 - x) * 8}px)` : 'none';
+  return x;
+}
+function pop(el, t, a, d = .55, s0 = .85) {
+  const x = P(t, a, d), y = back(x);
+  el.style.opacity = clamp(x * 2.2); el.style.transform = `scale(${L(s0, 1, y)})`;
+  return x;
+}
+function hl(el, t, a, b = 1e9) {
+  const x = eo(P(t, a, .35)) * (1 - P(t, b, .3));
+  el.style.opacity = x; el.style.transform = `scale(${L(1.06, 1, eo(P(t, a, .35)))})`;
+}
+// camera over a 1600x1000 screenshot inside a 1440x900 viewport
+function cam(layer, c) {
+  const k = .9 * c.z;
+  let tx = 720 - c.x * k, ty = 450 - c.y * k;
+  tx = clamp(tx, 1440 - 1600 * k, 0); ty = clamp(ty, 900 - 1000 * k, 0);
+  layer.style.transform = `translate(${tx}px,${ty}px) scale(${k})`;
+}
+function camTween(t, keys) { // keys: [[time, {x,y,z}], ...]
+  if (t <= keys[0][0]) return keys[0][1];
+  for (let i = 0; i < keys.length - 1; i++) {
+    const [t0, a] = keys[i], [t1, b] = keys[i + 1];
+    if (t < t1) { const x = eio(P(t, t0, t1 - t0)); return { x: L(a.x, b.x, x), y: L(a.y, b.y, x), z: L(a.z, b.z, x) }; }
+  }
+  return keys[keys.length - 1][1];
+}
+function winIn(el, t, a) { const x = ex(P(t, a, .8)); el.style.opacity = x; el.style.transform = `translateY(${(1 - x) * 70}px) scale(${L(.96, 1, x)})`; }
+
+// one-time DOM builds
+(function build() {
+  document.querySelectorAll('.sheet').forEach(s => { for (let i = 0; i < 12; i++) s.appendChild(document.createElement('i')); });
+  const g = $('s2grid');
+  for (let i = 0; i < 144; i++) {
+    const d = document.createElement('div'); d.className = 'day';
+    d.style.left = (i % 18) * 56 + 'px'; d.style.top = Math.floor(i / 18) * 50 + 'px';
+    d.innerHTML = i === 0 ? '<b style="width:10.4%"></b>' : '';
+    g.appendChild(d);
+  }
+  const rows = [['Change request', 'ECR-0417 · PLM'], ['Engineering BOM', 'PLM'], ['Costs', 'ERPNext'], ['Suppliers and quotes', 'ERPNext'], ['Stock on hand', 'ERPNext']];
+  $('p4rows').innerHTML = rows.map((r, i) => `<div id="p4r${i}" style="display:flex;align-items:center;gap:14px;padding:11px 0;font-size:25px;opacity:.25"><span id="p4k${i}" style="width:28px;height:28px;border-radius:50%;border:2px solid #35c2a9;display:flex;align-items:center;justify-content:center;font-size:16px;color:#0f1a18">✓</span><span style="font-weight:600">${r[0]}</span><span class="mono" style="margin-left:auto;font-size:17px;color:#7f9a95">${r[1]}</span></div>`).join('');
+})();
+
+const T = {}; // word times, resolved once
+function words() {
+  Object.assign(T, {
+    crack: W('v01', 'cracks'), files: W('v01', 'files'),
+    ce: W('v02', 'cost'), buyer: W('v02', 'buyer'), planner: W('v02', 'planner'), ca: W('v02', 'accountant'),
+    d144: W('v02', 'hundred'), twoh: W('v02', 'two'), real: W('v02', 'real'),
+    minute: W('v03', 'minute'),
+    jeff: W('v04', 'jeff'), reads: W('v04', 'reads'), costs: W('v04', 'costs'), suppliers: W('v04', 'suppliers'), stock: W('v04', 'stock'), posts: W('v04', 'posts'), impact: W('v04', 'impact'),
+    four: W('v05', 'four'), onetime: W('v05', 'one-time'), thirteen: W('v05', 'thirteen'), fourteen: W('v05', 'fourteen'),
+    code: W('v06', 'code'), shows: W('v06', 'shows'), agent: W('v06', 'agent'), digit: W('v06', 'digit'), rejects: W('v06', 'rejects'),
+    six: W('v07', 'six'), approves: W('v07', 'approves'), limit150: W('v07', 'hundred-and-fifty'), board7: W('v07', 'board'), nine: W('v07', 'nine'),
+    collide: W('v08', 'collide'), twoo: W('v08', 'two'), magnet: W('v08', 'magnet'), qualify: W('v08', 'qualify'), saves: W('v08', 'saves'),
+    drafts: W('v09', 'drafts'), named: W('v09', 'named'),
+    bowman10: W('v10', 'bowman'), erp10: W('v10', 'erp'), running: W('v10', 'running'),
+    fern11: W('v11', 'fern'), ce11: W('v11', 'cost'), ca11: W('v11', 'cost', 1), sca: W('v11', 'supply-chain'), every: W('v11', 'every'),
+  });
+}
+words();
+
+const R = {
+  s1(t, s) {
+    rise($('s1lab'), t, s.start + .2, .8, 20);
+    const h = 8.2 * eio(P(t, s.start + .9, T.crack - s.start - .9));
+    $('s1h').textContent = h.toFixed(1);
+    rise($('s1big'), t, s.start + .3, .8, 20);
+    $('trackfill').style.width = (h / 20 * 1400) + 'px';
+    $('playhead').style.left = (h / 20 * 1400) + 'px';
+    if (!$('track').dataset.ticks) { $('track').dataset.ticks = 1; for (const v of [0, 5, 10, 15, 20]) { const d = document.createElement('div'); d.className = 'tick'; d.style.left = (v / 20 * 1400) + 'px'; d.textContent = v + ' h'; $('track').appendChild(d); } }
+    $('track').style.opacity = clamp(P(t, s.start + .4, .6));
+    const cr = P(t, T.crack, .35);
+    $('crack').style.left = (8.2 / 20 * 1400) + 'px';
+    $('crack').style.opacity = cr > 0 ? 1 : 0;
+    $('crackp').style.strokeDashoffset = 140 * (1 - eo(cr));
+    $('playhead').style.background = cr > 0 ? '#e2734f' : '#fff';
+    const shake = t > T.crack && t < T.crack + .3 ? Math.sin(t * 90) * 8 * (1 - P(t, T.crack, .3)) : 0;
+    $('s1big').style.marginLeft = shake + 'px';
+    $('s1h').style.color = cr > 0 ? '#e2734f' : '#fff';
+    rise($('s1crack'), t, T.crack + .1, .5, 16);
+    // the ECR takes over
+    const o = eo(P(t, T.files - .25, .5));
+    for (const id of ['s1lab', 's1big', 's1crack']) { const e = $(id); e.style.opacity = Math.min(+e.style.opacity, 1 - o); }
+    $('track').style.opacity = Math.min(+$('track').style.opacity, 1 - o);
+    rise($('s1ecr'), t, T.files - .05, .7, 50);
+  },
+  s2(t, s) {
+    rise($('s2lab'), t, s.start + .05, .6, 16);
+    const seats = document.querySelectorAll('.seat'), at = [T.ce, T.buyer, T.planner, T.ca];
+    const up = eio(P(t, T.d144 - .4, .7));
+    rise($('s2head'), t, s.start + .15, .6, 20); $('s2head').style.opacity = Math.min(+$('s2head').style.opacity, 1 - up);
+    seats.forEach((el, i) => { const x = back(P(t, at[i] - .15, .55)); el.style.opacity = clamp(P(t, at[i] - .15, .3)) * L(1, .55, up); el.style.transform = `translateY(${(1 - x) * 60 - up * 60}px) scale(${L(1, .82, up)})`; });
+    $('s2lab').style.transform += ` translateY(${-up * 40}px)`;
+    rise($('s2count'), t, T.d144 - .3, .6, 30);
+    const n = Math.round(144 * eo(P(t, T.d144 - .1, 1.4)));
+    $('s2n').textContent = n;
+    const days = $('s2grid').children, dim = eo(P(t, T.twoh - .1, .6));
+    for (let i = 0; i < 144; i++) {
+      const on = P(t, T.d144 - .1 + i * .0095, .18);
+      days[i].style.opacity = on * (i === 0 ? 1 : L(1, .35, dim));
+      days[i].style.background = i === 0 ? '#3d5450' : `rgb(${L(44, 34, dim)},${L(59, 46, dim)},${L(56, 44, dim)})`;
+      days[i].style.transform = `scale(${L(.4, 1, eo(on))})`;
+    }
+    const b = days[0].firstChild; b.style.opacity = dim; b.style.boxShadow = `0 0 ${18 * dim}px #35c2a9`;
+    days[0].style.transform += ` scale(${L(1, 1.35, eo(P(t, T.twoh, .5)))})`; days[0].style.zIndex = 2;
+    rise($('s2callout'), t, T.twoh + .15, .6, 12);
+    rise($('s2src'), t, T.twoh + .3, .6, 0);
+  },
+  s3(t, s) {
+    const x = ex(P(t, s.start, .9));
+    const m = $('s3mark'); m.style.opacity = clamp(P(t, s.start, .25)); m.style.transform = `scale(${L(1.22, 1, x)})`; m.style.filter = x < 1 ? `blur(${(1 - x) * 18}px)` : 'none';
+    rise($('s3tag'), t, s.start + .55, .7, 18);
+    $('flash').style.opacity = Math.max(+$('flash').style.opacity || 0, 0) + (t >= s.start && t < s.start + .5 ? .85 * (1 - P(t, s.start, .5)) : 0);
+  },
+  s4(t, s) {
+    winIn($('w4'), t, s.start);
+    const swapB = T.jeff + .55, swapC = T.posts - .2;
+    $('i4b').style.opacity = eo(P(t, swapB, .4));
+    $('i4c').style.opacity = eo(P(t, swapC, .4));
+    $('w4t').textContent = t < swapB ? 'Bowman PLM · ECRs' : t < swapC ? 'Bowman PLM · ECR-0417 · Request' : 'Bowman PLM · ECR-0417 · Impact assessment';
+    cam($('l4'), camTween(t, [[s.start, { x: 800, y: 500, z: 1 }], [T.jeff - .9, { x: 800, y: 500, z: 1 }], [T.jeff + .1, { x: 760, y: 300, z: 1.25 }], [swapB, { x: 760, y: 300, z: 1.25 }], [swapB + .6, { x: 800, y: 500, z: 1 }], [swapC, { x: 800, y: 500, z: 1 }], [swapC + .8, { x: 820, y: 340, z: 1.3 }]]));
+    // cursor to the ECR-0417 row, click
+    const c = $('c4'), mv = eio(P(t, T.jeff - 1.2, 1.0));
+    c.style.left = L(1100, 610, mv) + 'px'; c.style.top = L(700, 196, mv) + 'px';
+    c.style.opacity = clamp(P(t, T.jeff - 1.3, .2)) * (1 - P(t, swapB + .3, .3));
+    c.style.transform = `scale(${t > T.jeff && t < T.jeff + .15 ? .85 : 1})`;
+    const r = $('r4'), rp = P(t, T.jeff, .5); r.style.left = '622px'; r.style.top = '210px'; r.style.opacity = rp > 0 && rp < 1 ? 1 - rp : 0; r.style.transform = `scale(${L(.3, 1.6, eo(rp))})`;
+    hl($('h4row'), t, T.jeff - .1, swapB);
+    // Fern reads
+    const pin = eo(P(t, T.reads - .3, .6)), pout = eio(P(t, swapC - .5, .5));
+    $('p4').style.opacity = pin * (1 - pout); $('p4').style.transform = `translateX(${(1 - pin) * 120 + pout * 120}px)`;
+    const at = [T.reads + .15, T.reads + .55, T.costs, T.suppliers, T.stock];
+    at.forEach((a, i) => { const x = P(t, a, .3); $('p4r' + i).style.opacity = L(.25, 1, x); const k = $('p4k' + i); k.style.background = x > .5 ? '#35c2a9' : 'transparent'; });
+    const secs = Math.round(53 * eo(P(t, T.stock + .3, swapC - T.stock - .6)));
+    $('p4clock').textContent = '0:' + String(secs).padStart(2, '0');
+    hl($('h4ban'), t, T.impact - .1);
+    hl($('h4rec'), t, T.impact + .9);
+  },
+  s5(t, s) {
+    cam($('l5'), camTween(t, [[s.start, { x: 820, y: 340, z: 1.3 }], [s.start + 1.6, { x: 800, y: 720, z: 1.45 }]]));
+    $('w5').style.opacity = 1;
+    const v = eo(P(t, T.four - .45, .5)); $('s5veil').style.opacity = v; $('s5lab').style.opacity = v;
+    pop($('t1'), t, T.four - .2); pop($('t2'), t, T.onetime - .2); pop($('t3'), t, T.thirteen - .2);
+    $('t1n').textContent = Math.round(415 * eo(P(t, T.four - .1, .9)));
+    $('t3q').style.opacity = eo(P(t, T.fourteen - .1, .4)); $('t3c').style.opacity = eo(P(t, T.fourteen - .1, .4));
+  },
+  s6(t, s) {
+    winIn($('w6'), t, s.start);
+    const back6 = eio(P(t, T.agent - .3, .6));
+    cam($('l6'), camTween(t, [[s.start, { x: 940, y: 640, z: 1.3 }], [T.shows, { x: 940, y: 640, z: 1.3 }], [T.shows + .7, { x: 960, y: 520, z: 1.4 }]]));
+    hl($('h6row'), t, s.start + .6, T.shows);
+    hl($('h6ev'), t, T.shows);
+    const w = $('w6'); w.style.filter = back6 > 0 ? `blur(${back6 * 10}px)` : 'none'; w.style.opacity = Math.min(+w.style.opacity, L(1, .18, back6));
+    rise($('s6eq'), t, T.agent - .1, .7, 30);
+    rise($('s6chk'), t, T.digit - .5, .6, 30);
+    $('s6bad').style.color = t > T.digit + .3 ? '#c2410c' : 'var(--ink)';
+    pop($('s6rej'), t, T.rejects - .1, .45, .9);
+  },
+  s7(t, s) {
+    rise($('s7lab'), t, s.start, .5, 12); rise($('s7title'), t, s.start + .1, .6, 20);
+    $('chart').style.opacity = eo(P(t, s.start + .2, .6));
+    rise($('r23'), t, T.six - .5, .5, 20); rise($('r17'), t, T.limit150 - .6, .5, 20);
+    const g23 = eo(P(t, T.six - .2, .5)); $('b23').style.opacity = g23; $('b23').style.transform = `scaleY(${g23})`;
+    rise($('b23lab'), t, T.approves - .1, .5, 10);
+    pop($('s7card'), t, T.approves + .1, .6, .9); rise($('s7cap'), t, T.approves + .3, .5, 0); $('s7cap').style.opacity = Math.min(+$('s7cap').style.opacity, 1 - eo(P(t, T.limit150 - .7, .35)));
+    $('s7card').style.opacity = Math.min(+$('s7card').style.opacity, 1 - eo(P(t, T.limit150 - .7, .35)));
+    const g17 = eio(P(t, T.limit150 - .3, 1.3)), w17 = 864 * g17; // $164,556 of $200k on 1050px
+    $('b17').style.width = w17 + 'px';
+    $('b17').style.background = w17 > 787 ? `linear-gradient(90deg,#2a8f80 0px,#35c2a9 787px,#e2734f 787px)` : 'linear-gradient(90deg,#2a8f80,#35c2a9)';
+    $('b17val').style.left = (w17 + 18) + 'px'; $('b17val').style.opacity = eo(P(t, T.limit150 + .9, .4));
+    $('limit').style.boxShadow = w17 > 787 ? `0 0 ${24 * (1 - P(t, T.limit150 + 1, .8))}px #e2734f` : 'none';
+    rise($('b17lab'), t, T.board7 - .1, .5, 12);
+    $('b17c').style.opacity = eo(P(t, T.nine - .1, .35));
+  },
+  s8(t, s) {
+    rise($('na'), t, s.start + .05, .5, 20); rise($('nb'), t, s.start + .25, .5, 20);
+    const col = eio(P(t, T.collide - .3, .7));
+    $('pa').style.strokeDashoffset = 400 * (1 - col); $('pb').style.strokeDashoffset = 400 * (1 - col);
+    pop($('no'), t, T.collide + .15, .5, .8);
+    const hit = P(t, T.collide + .35, .6); $('no').style.boxShadow = hit > 0 && hit < 1 ? `0 0 ${60 * (1 - hit)}px rgba(226,115,79,.8)` : 'none';
+    rise($('nbslip'), t, T.magnet + .2, .5, 8);
+    pop($('s8card'), t, T.twoo + .2, .6, .92); rise($('s8cap'), t, T.twoo + .5, .5, 0);
+    const m = eio(P(t, T.qualify - .1, .6));
+    $('na').style.transform += ` translateY(${m * 90}px)`; $('nb').style.transform += ` translateY(${-m * 90}px)`;
+    $('pa').setAttribute('d', `M560 ${L(360, 450, m)} C 700 ${L(360, 450, m)}, 700 540, 830 540`); $('pb').setAttribute('d', `M560 ${L(720, 630, m)} C 700 ${L(720, 630, m)}, 700 540, 830 540`);
+    $('pb').setAttribute('stroke', m > .5 ? '#35c2a9' : '#e2734f');
+    $('nbslip').style.opacity = Math.min(+$('nbslip').style.opacity, 1 - m);
+    rise($('s8save'), t, T.saves - .1, .6, 20);
+  },
+  s9(t, s) {
+    winIn($('s9a'), t, s.start);
+    hl($('h9'), t, T.drafts - .2, T.drafts + 1.2);
+    pop($('s9b'), t, T.drafts + 1.0, .6, .92);
+    hl($('h9b'), t, T.named - .2);
+    rise($('s9line'), t, T.named - .25, .6, 20);
+  },
+  s10(t, s) {
+    rise($('cs'), t, T.bowman10 - .1, .5, 16);
+    const items = $('cr').querySelectorAll('.item, h4');
+    items.forEach((el, i) => rise(el, t, T.erp10 - .3 + i * .28, .5, 14));
+  },
+  s11(t, s) {
+    const x = ex(P(t, s.start, .9));
+    const m = $('s11mark'); m.style.opacity = clamp(P(t, s.start, .3)); m.style.transform = `scale(${L(1.15, 1, x)})`; m.style.filter = x < 1 ? `blur(${(1 - x) * 14}px)` : 'none';
+    const chips = $('s11seats').children, at = [T.ce11, T.ca11, T.sca];
+    [...chips].forEach((c, i) => { const p = P(t, at[i] - .15, .5); c.style.opacity = clamp(p * 2); c.style.transform = `translateY(${(1 - back(p)) * 30}px)`; });
+    rise($('s11tag'), t, T.every - .2, .6, 14);
+    rise($('s11cred'), t, T.every + 1.4, .7, 0); rise($('s11fine'), t, T.every + 1.6, .7, 0);
+  },
+};
+
+window.seek = function (t) {
+  $('flash').style.opacity = 0;
+  for (const s of TL.scenes) {
+    const el = $(s.id), on = t >= s.start && t < s.end;
+    el.style.display = on ? 'block' : 'none';
+    if (on) R[s.id](t, s);
+  }
+  $('fade').style.opacity = clamp(P(t, TL.end - .9, .9));
+};
+window.ready = (async () => { await document.fonts.ready; await Promise.all([...document.images].map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; }))); return { missing, end: TL.end }; })();
+const q = new URLSearchParams(location.search); if (q.has('t')) window.ready.then(() => seek(+q.get('t')));
+</script>
+</body></html>

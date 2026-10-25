@@ -1,0 +1,3 @@
+An aircraft maker's engineering change waits months for a few hours of pricing work. Fern does it in about a minute: unit cost, one-time cost, cut-in date and supply risk, posted on the change request, every number traced to its source. Built at Cal Hacks 13.0 for the Hyphenate track.
+
+Music: Sascha Ende, ende.app (CC BY 4.0). Bowman Aviation is fictional; its ERPNext, PLM and Claude agents are real and running.
