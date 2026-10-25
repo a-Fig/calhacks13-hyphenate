@@ -99,7 +99,7 @@ try {
   const p0 = await newPr('check: a person reports before any configuration is stored', 'ECR-D0');
   await report(dana, 'ECR-D0', 'approved');
   await until(() => denied('Dana Okafor').length === 1 || undefined, 5000, 'the refusal when no configuration is stored');
-  check('with no company configuration stored, a person may not report a PLM decision', /no company configuration is stored, so Norn cannot tell who may report a PLM decision/.test(denied('Dana Okafor')[0]!.summary) && pr(p0.id).status === 'draft', denied('Dana Okafor')[0]?.summary);
+  check('with no company configuration stored, a person may not report a PLM decision', /no company configuration is stored, so Norn cannot tell who may report a PLM decision/.test(denied('Dana Okafor')[0]!.summary) && pr(p0.id).status === 'review', denied('Dana Okafor')[0]?.summary);
   await report(A, 'ECR-D0', 'rejected');
   await statusIs(p0.id, 'closed');
   check("Norn's own ingest may still report one with none stored", pr(p0.id).status === 'closed', pr(p0.id).status);
@@ -111,7 +111,7 @@ try {
   await report(A, 'ECR-D1', 'approved');
   await until(() => decisionLogs(p1.id).length === 1 || undefined, 5000, 'the log row for the approval');
   const l1 = decisionLogs(p1.id)[0]!;
-  check('an approval arriving before the checks have finished is logged with why, and moves nothing', pr(p1.id).status === 'draft' && l1.outcome === 'downgraded' && /did not follow it: its checks have not finished/.test(l1.summary) && approvals(p1.id).length === 0, `${pr(p1.id).status}; ${l1.summary}`);
+  check('an approval arriving before the checks have finished is logged with why, and moves nothing', pr(p1.id).status === 'review' && l1.outcome === 'downgraded' && /did not follow it: its checks have not finished/.test(l1.summary) && approvals(p1.id).length === 0, `${pr(p1.id).status}; ${l1.summary}`);
   check('the log says plainly who approved it in the PLM, and that the ingest only reported it', l1.summary.startsWith('approved in the PLM by Rafael Quintero (rafael.quintero@bowman-aviation.example) on 2026-10-25') && l1.summary.includes('reported by check-decision-ingest'), l1.summary);
   await report(A, 'ECR-D1', 'approved');
   await holds(() => false, 300);
@@ -132,7 +132,7 @@ try {
   const d2 = JSON.parse(a2[0]!.decisionJson) as { decidedBy: string; decidedOn: string; person: string; reasons: { text: string }[] };
   check('the approval keeps the PLM login, the PLM time and the company person', d2.decidedBy === RAFAEL && d2.decidedOn === DECIDED_ON && d2.person === 'EMP-01' && /Approved in the PLM by Rafael Quintero/.test(d2.reasons[0]!.text), a2[0]!.decisionJson.slice(0, 160));
   const l2 = decisionLogs(p2.id).filter(l => l.outcome === 'applied');
-  check('the log row reads: approved in the PLM by the approver, reported by the ingest, then the moves', l2.length === 1 && l2[0]!.actorName === 'check-decision-ingest' && /^approved in the PLM by Rafael Quintero .* reported by check-decision-ingest; draft -> review; review -> approved; approved -> merged; baseline v\d+ -> v\d+/.test(l2[0]!.summary), l2[0]?.summary);
+  check('the log row reads: approved in the PLM by the approver, reported by the ingest, then the moves', l2.length === 1 && l2[0]!.actorName === 'check-decision-ingest' && /^approved in the PLM by Rafael Quintero .* reported by check-decision-ingest; review -> approved; approved -> merged; baseline v\d+ -> v\d+/.test(l2[0]!.summary), l2[0]?.summary);
   const logsAfter = logs(() => true).length;
   await report(A, 'ECR-D2', 'approved');
   await holds(() => false, 300);
@@ -152,7 +152,7 @@ try {
   await report(A, 'ECR-D4', 'rejected', 'dana.okafor@bowman-aviation.example');
   await statusIs(p4.id, 'closed');
   const l4 = decisionLogs(p4.id);
-  check('a rejection in the PLM closes the ECR and says who rejected it', l4.length === 1 && l4[0]!.outcome === 'applied' && /^rejected in the PLM by Dana Okafor .* draft -> closed/.test(l4[0]!.summary) && approvals(p4.id).length === 0, l4[0]?.summary);
+  check('a rejection in the PLM closes the ECR and says who rejected it', l4.length === 1 && l4[0]!.outcome === 'applied' && /^rejected in the PLM by Dana Okafor .* review -> closed/.test(l4[0]!.summary) && approvals(p4.id).length === 0, l4[0]?.summary);
   const logs4 = logs(() => true).length;
   await report(A, 'ECR-D4', 'rejected', 'dana.okafor@bowman-aviation.example');
   await holds(() => false, 300);
@@ -170,11 +170,11 @@ try {
   const m0 = mainNow().version;
   await report(outsider, 'ECR-D5', 'approved');
   await until(() => denied('check-decision-outsider').length === 1 || undefined, 5000, 'the refusal of the outside agent');
-  check("an outside agent (a person's own) reporting an approval is refused, and the ECR stays as it was", /outside agent/.test(denied('check-decision-outsider')[0]!.summary) && pr(p5.id).status === 'draft' && approvals(p5.id).length === 0 && decisionLogs(p5.id).length === 0, denied('check-decision-outsider')[0]?.summary);
+  check("an outside agent (a person's own) reporting an approval is refused, and the ECR stays as it was", /outside agent/.test(denied('check-decision-outsider')[0]!.summary) && pr(p5.id).status === 'review' && approvals(p5.id).length === 0 && decisionLogs(p5.id).length === 0, denied('check-decision-outsider')[0]?.summary);
   await scoped.R.grantScope({ jobId: 'check-job', anyEcr: true, prIds: [], maxLevel: 1, expiresAt: Timestamp.fromDate(new Date(Date.now() + 3_600_000)) });
   await report(scoped, 'ECR-D5', 'approved');
   await until(() => denied('check-decision-job').length === 1 || undefined, 5000, "the refusal of the job-scoped agent");
-  check("one of Norn's own agents working under a job's scope is refused too", /job check-job/.test(denied('check-decision-job')[0]!.summary) && pr(p5.id).status === 'draft' && mainNow().version === m0, denied('check-decision-job')[0]?.summary);
+  check("one of Norn's own agents working under a job's scope is refused too", /job check-job/.test(denied('check-decision-job')[0]!.summary) && pr(p5.id).status === 'review' && mainNow().version === m0, denied('check-decision-job')[0]?.summary);
   await report(dana, 'ECR-D5', 'approved', RAFAEL);
   await statusIs(p5.id, 'merged');
   const l5 = decisionLogs(p5.id).at(-1)!;
@@ -198,7 +198,7 @@ try {
   await report(A, 'ECR-D7', 'approved', RAFAEL, edited);
   await until(() => decisionLogs(p7.id).length === 1 || undefined, 5000, 'the log row for the stale approval');
   const l7 = decisionLogs(p7.id)[0]!;
-  check('an approval of content Norn did not assess is not followed: logged with why, the ECR stays unreleased', pr(p7.id).status === 'draft' && approvals(p7.id).length === 0 && l7.outcome === 'downgraded' && /did not follow it: the ECR changed in the PLM after Norn assessed it/.test(l7.summary), `${pr(p7.id).status}; ${l7.summary}`);
+  check('an approval of content Norn did not assess is not followed: logged with why, the ECR stays unreleased', pr(p7.id).status === 'review' && approvals(p7.id).length === 0 && l7.outcome === 'downgraded' && /did not follow it: the ECR changed in the PLM after Norn assessed it/.test(l7.summary), `${pr(p7.id).status}; ${l7.summary}`);
   await report(A, 'ECR-D7', 'approved', RAFAEL, edited);
   await holds(() => false, 300);
   check('the same stale approval again adds no log row', decisionLogs(p7.id).length === 1, `${decisionLogs(p7.id).length} row(s)`);
@@ -217,10 +217,10 @@ try {
   await allCodeDone(p10.id);
   await report(A, 'ECR-D10', 'approved', RAFAEL, storedJson('ECR-D10'), { ...storedText('ECR-D10'), title: 'NEW: mandatory fleet grounding until replaced' });
   await until(() => decisionLogs(p10.id).length === 1 || undefined, 5000, 'the log row for the title edit');
-  check('an approval of a title Norn did not assess is not followed, and the log names the title', pr(p10.id).status === 'draft' && /changed in the PLM after Norn assessed it \(title;/.test(decisionLogs(p10.id)[0]!.summary), decisionLogs(p10.id)[0]?.summary);
+  check('an approval of a title Norn did not assess is not followed, and the log names the title', pr(p10.id).status === 'review' && /changed in the PLM after Norn assessed it \(title;/.test(decisionLogs(p10.id)[0]!.summary), decisionLogs(p10.id)[0]?.summary);
   await report(A, 'ECR-D10', 'approved', RAFAEL, storedJson('ECR-D10'), { ...storedText('ECR-D10'), description: 'a different text' });
   await until(() => decisionLogs(p10.id).length === 2 || undefined, 5000, 'the log row for the description edit');
-  check('a description Norn did not assess is not followed either', pr(p10.id).status === 'draft' && /\(description;/.test(decisionLogs(p10.id)[1]!.summary), decisionLogs(p10.id)[1]?.summary);
+  check('a description Norn did not assess is not followed either', pr(p10.id).status === 'review' && /\(description;/.test(decisionLogs(p10.id)[1]!.summary), decisionLogs(p10.id)[1]?.summary);
   await report(A, 'ECR-D10', 'approved');
   await statusIs(p10.id, 'merged');
   check('with the title and text Norn assessed, it is released', approvals(p10.id).at(-1)?.status === 'released', pr(p10.id).status);
@@ -231,7 +231,7 @@ try {
   const followed = followedFrom(plm => [...db.pullRequest.iter()].find(p => p.plmEcrNumber === plm)?.status, 2000);
   const d9: IngestItem = { plmEcrNumber: 'ECR-D9', title: p9.title, description: p9.description, changeRequest: JSON.parse(storedJson('ECR-D9')), sourceRef: 'check', eco: 'ECO-D9', decision: { decision: 'approved', decidedBy: RAFAEL, decidedOn: DECIDED_ON } };
   const firstTry = await recordDecided(R, d9, sentD9, () => {}, followed).then(() => undefined, e => e);
-  check('the ingest sees that Norn did not follow the approval, does not remember it as delivered, and still records the ECO number', firstTry instanceof DecisionNotFollowed && !sentD9.has('decision:ECR-D9') && sentD9.get('eco:ECR-D9') === 'ECO-D9' && pr(p9.id).status === 'draft', `${firstTry?.message}; ${pr(p9.id).status}`);
+  check('the ingest sees that Norn did not follow the approval, does not remember it as delivered, and still records the ECO number', firstTry instanceof DecisionNotFollowed && !sentD9.has('decision:ECR-D9') && sentD9.get('eco:ECR-D9') === 'ECO-D9' && pr(p9.id).status === 'review', `${firstTry?.message}; ${pr(p9.id).status}`);
   await allCodeDone(p9.id);
   await recordDecided(R, d9, sentD9, () => {}, followed);
   check('sent again once the checks have finished, the approval is followed and then remembered', pr(p9.id).status === 'merged' && sentD9.get('decision:ECR-D9') === 'approved', pr(p9.id).status);

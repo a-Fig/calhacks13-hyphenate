@@ -4,9 +4,10 @@
 // connection and the module's reducers, so the policy gate decides and the action log records the
 // result, refusals included. The tools take no identity: who is acting comes from the token.
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { PullRequest } from '@norn/bindings/types';
+import type { ActionLog, PullRequest } from '@norn/bindings/types';
 import { z } from 'zod';
 import { registerErpTools } from './erp.ts';
+import { companyConfigOf, explainRefusal, fastTrackField, outcomeOf, prepareRequest, recordOf, statementClassOf } from './fasttrack.ts';
 import type { ActorHandle, Norn } from './norn.ts';
 import type { Claims } from './token.ts';
 import { affectedParts, assumptionView, bareResultKey, currentResult, currentResultKeys, ecrSummary, ecrView, effectiveAssumptions, historyOf, impactOf, partView, provenanceIndex } from './views.ts';
@@ -78,19 +79,26 @@ function tool(ctx: ToolContext, name: string, body: (...args: any[]) => Promise<
  * Send one write through the actor's connection and report what the gate did. A refusal is not an
  * error to retry: it is the answer, and it is already in Norn's action log.
  */
-async function write(ctx: ToolContext, reducer: string, args: Record<string, unknown>, done: (entity: string) => Record<string, unknown>): Promise<ToolResult> {
+async function sendWrite(ctx: ToolContext, reducer: string, args: Record<string, unknown>, explain?: (message: string) => string | undefined): Promise<{ failed: ToolResult } | { row: ActionLog }> {
   const r = await ctx.norn.call(ctx.actor, ctx.claims, reducer, args);
+  const failed = (message: string) => ({ failed: fail(message) });
   if (r.error) {
-    if (r.error.kind === 'rejected') return fail(`Norn rejected this: ${r.error.message}`);
-    if (r.error.kind === 'unknown_result') return fail('Norn did not confirm whether this was saved. Call get_ecr_history before trying again, so you do not post it twice.');
-    return fail(`Norn could not take this write right now (${r.error.kind}). Nothing was saved. Try once more; if it fails again, say so in your answer.`);
+    if (r.error.kind === 'rejected') return failed(explain?.(r.error.message) ?? `Norn rejected this: ${r.error.message}`);
+    if (r.error.kind === 'unknown_result') return failed('Norn did not confirm whether this was saved. Call get_ecr_history before trying again, so you do not post it twice.');
+    return failed(`Norn could not take this write right now (${r.error.kind}). Nothing was saved. Try once more; if it fails again, say so in your answer.`);
   }
-  if (!r.row) return fail('Norn accepted the call but has not confirmed it yet. Call get_ecr_history before trying again, so you do not post it twice.');
-  if (r.row.outcome === 'rejected') return fail(`Norn rejected this: ${r.row.summary.replace(/^S+ rejected: /, '')}. Nothing was saved (entry ${r.row.id} in the action log).`);
+  if (!r.row) return failed('Norn accepted the call but has not confirmed it yet. Call get_ecr_history before trying again, so you do not post it twice.');
+  if (r.row.outcome === 'rejected') return failed(`Norn rejected this: ${r.row.summary.replace(/^\S+ rejected: /, '')}. Nothing was saved (entry ${r.row.id} in the action log).`);
   if (r.row.outcome === 'denied')
-    return fail(
+    return failed(
       `Refused by Norn's policy gate: ${r.row.policy.replace(/^deny: /, '')}. The refusal is recorded in Norn's action log (entry ${r.row.id}). Do not retry or look for another way; report that you were refused.`
     );
+  return { row: r.row };
+}
+
+async function write(ctx: ToolContext, reducer: string, args: Record<string, unknown>, done: (entity: string) => Record<string, unknown>): Promise<ToolResult> {
+  const r = await sendWrite(ctx, reducer, args);
+  if ('failed' in r) return r.failed;
   return ok({ saved: true, recordedAs: { actor: r.row.actorName, onBehalfOf: r.row.onBehalfOf ?? null, spawnedBy: r.row.spawnedBy }, allowedBecause: r.row.policy, actionLogEntry: Number(r.row.id), ...done(r.row.entity) });
 }
 
@@ -134,11 +142,14 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     'get_impact',
     {
       description:
-        'The latest check results for an ECR, by stage. Each number has p10/p50/p90, a unit and its trace: the formula, what it used, and the assumptions the run read with their sources. Evidence class: computation. state says no_results, partial, current or stale; stale numbers are out of date. mock: true means placeholder numbers, not real forecasts. Pass key to get one result with its full trace.',
+        'The latest check results for an ECR, by stage. Each number has p10/p50/p90, a unit and its trace: the formula, what it used, and the assumptions the run read with their sources. Evidence class: computation. state says no_results, partial, current or stale; stale numbers are out of date. mock: true means placeholder numbers, not real forecasts. Pass key to get one result with its full trace. fastTrack says whether to ask for the fast track: candidate is true when only your answers to fastTrack.tests stand between this ECR and it (why says so in a sentence); see request_fast_track_approval.',
       inputSchema: { ecr: ECR, key: z.string().optional().describe('A result key, to get its full trace.') },
       annotations: { readOnlyHint: true },
     },
-    tool(ctx, 'get_impact', async ({ ecr, key }: { ecr: string; key?: string }) => ok({ ecr: ecrOf(ctx, ecr).plmEcrNumber, ...impactOf(norn, ecrOf(ctx, ecr), { key }) }))
+    tool(ctx, 'get_impact', async ({ ecr, key }: { ecr: string; key?: string }) => {
+      const pr = ecrOf(ctx, ecr);
+      return ok({ ecr: pr.plmEcrNumber, ...impactOf(norn, pr, { key }), fastTrack: fastTrackField(norn, pr, ctx.claims) });
+    })
   );
 
   server.registerTool(
@@ -307,7 +318,45 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     })
   );
 
+  const Answer = z.object({
+    testId: z.string().min(1).max(80).describe('A test id from get_impact fastTrack.tests.'),
+    holds: z.boolean().describe("Whether the test's text is true of this ECR."),
+    evidence: z.string().min(1).max(400).describe('What you read that shows it: a short quote or pointer into get_ecr, get_impact or list_assumptions.'),
+  });
+  server.registerTool(
+    'request_fast_track_approval',
+    {
+      description:
+        "Ask Norn to approve an ECR on the fast track, with your answers to the company's fast-track tests (get_impact fastTrack.tests; ask only when fastTrack.candidate is true). Answer every test, once, honestly, with evidence: a test you mark true without evidence is a false statement under your name. Norn's gate decides from the company's rules and the numbers, not from you: the answer says approved, held for a blind second check (not approved yet), recommended to a named role, or refused, each with the reasons. Call it once and report the outcome as it is. Classes: leave companyClass out and Norn uses the change class on your current statement for this revision (post your Level 1 statement first, stating Class I or Class II with a reason; Norn never picks a class for you, and a class more permissive than your statement's is refused). Always state regulatoryClass (the FAA class, e.g. \"minor\" or \"major\") and say in your answer what you rest it on; Norn holds no FAA class of its own. The answer reports where each class came from. Optional triggers: named conditions you saw (safety_part, new_supplier, conflicting_open_ecr, shared_supplier_exposure, linchpin_assumption_agent_estimated, sources_conflict, stale_data, checker_disagrees); any of them sends the ECR to a person. Refused if the ECR is outside your job, not in review, or its checks have not finished.",
+      inputSchema: {
+        ecr: ECR,
+        answers: z.array(Answer).min(1).max(30),
+        companyClass: z.string().max(40).optional(),
+        regulatoryClass: z.string().max(40).optional(),
+        triggers: z.array(z.string().max(80)).max(10).optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    tool(ctx, 'request_fast_track_approval', async (a: { ecr: string; answers: { testId: string; holds: boolean; evidence: string }[]; companyClass?: string; regulatoryClass?: string; triggers?: string[] }) => {
+      const pr = ecrOf(ctx, a.ecr);
+      const loaded = companyConfigOf(norn);
+      if (loaded.state === 'none') return fail('No company configuration is stored in Norn, so there is no fast track rule to apply. Nothing was sent.');
+      if (loaded.state === 'unreadable') return fail(`Norn cannot read the company configuration (${loaded.why}), so it takes no fast-track decision. Nothing was sent.`);
+      const prepared = prepareRequest(loaded.config, a, statementClassOf(norn, pr, loaded.config));
+      if (!prepared.ok) return fail(prepared.message);
+      const { request } = prepared;
+      const sent = await sendWrite(
+        ctx,
+        'requestFastTrackApproval',
+        { prId: pr.id, answers: request.answers, companyClass: request.classes.company, regulatoryClass: request.classes.regulatory, triggers: request.triggers },
+        message => explainRefusal(message, pr.plmEcrNumber)
+      );
+      if ('failed' in sent) return sent.failed;
+      return ok(outcomeOf(loaded.config, pr.plmEcrNumber, sent.row, recordOf(norn, pr, sent.row), request));
+    })
+  );
+
   registerErpTools(server, ctx);
 }
 
-export const TOOL_NAMES = ['list_ecrs', 'get_ecr', 'get_impact', 'get_part', 'list_assumptions', 'get_ecr_history', 'add_comment', 'propose_assumption', 'post_impact_statement'] as const;
+export const TOOL_NAMES = ['list_ecrs', 'get_ecr', 'get_impact', 'get_part', 'list_assumptions', 'get_ecr_history', 'add_comment', 'propose_assumption', 'post_impact_statement', 'request_fast_track_approval'] as const;

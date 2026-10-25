@@ -10,8 +10,9 @@ import type { Identity } from 'spacetimedb';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const nornDir = resolve(here, '..', '..');
-/** The only database these tests use. */
-export const DB = 'norn-mcp';
+/** The database these tests rebuild and wipe: `norn-mcp`, or the scratch database named in NORN_MCP_TEST_DB. Never `norn`. */
+export const DB = process.env.NORN_MCP_TEST_DB ?? 'norn-mcp';
+if (DB === 'norn') throw new Error('these tests wipe their database; NORN_MCP_TEST_DB must not be norn');
 export const URI = process.env.NORN_URI ?? 'ws://127.0.0.1:3000';
 export const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -31,7 +32,7 @@ export function recorder() {
   };
 }
 
-function spacetimeBin(): string {
+export function spacetimeBin(): string {
   const local = process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'SpacetimeDB', 'spacetime.exe') : '';
   return local && existsSync(local) ? local : 'spacetime';
 }
@@ -42,8 +43,7 @@ const childEnv = { ...process.env, NORN_DB: DB, NORN_URI: URI };
 /** Publish the real module as `norn-mcp` (wiping it), seed it, and start the mock worker. */
 export async function resetDatabase(log: (m: string) => void = console.log): Promise<{ stopWorker: () => void }> {
   log(`publishing the module as '${DB}' (data wiped)`);
-  // The database name is a literal on purpose: this must never be able to reach `norn`.
-  execFileSync(spacetimeBin(), ['publish', 'norn-mcp', '--no-config', '--module-path', 'module', '--server', 'local', '--delete-data=always', '--yes'], { cwd: nornDir, stdio: 'ignore' });
+  execFileSync(spacetimeBin(), ['publish', DB, '--no-config', '--module-path', 'module', '--server', 'local', '--delete-data=always', '--yes'], { cwd: nornDir, stdio: 'ignore' });
   log('seeding ECR-0417, 0418 and 0419 through the reducers');
   execFileSync(process.execPath, [tsxCli, 'src/seed.ts'], { cwd: join(nornDir, 'workers'), env: childEnv, stdio: 'ignore' });
   log('starting the skeleton\'s mock worker (its results are labelled mock)');

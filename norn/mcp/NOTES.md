@@ -19,8 +19,9 @@ npm run key:ensure -w @norn/mcp       # once: adds NORN_MCP_SIGNING_KEY to the r
 npm run start -w @norn/mcp            # serves http://127.0.0.1:3917/mcp for the database "norn"
 NORN_DB=norn-mcp npm run start -w @norn/mcp      # or for another database
 npm run typecheck -w @norn/mcp
-npm run test:unit -w @norn/mcp        # 15 tests: tokens, strict signatures, levels, nornMcpFor and its helper, the key and mint scripts, Windows ACLs. No database, no model
+npm run test:unit -w @norn/mcp        # 27 tests: tokens, strict signatures, levels, nornMcpFor and its helper, the key and mint scripts, Windows ACLs; the fast-track signal on Bowman's configuration and checks, the tool's argument checks and messages. No database, no model
 npm run check:gate -w @norn/mcp       # 69 checks through real HTTP and MCP against the database norn-mcp. No model
+NORN_MCP_TEST_DB=norn-ftt-1 npm run check:fasttrack -w @norn/mcp   # 39 checks: the fast-track tool and signal on a scratch database, with Bowman's configuration and the real checks. No model
 npm run e2e -w @norn/mcp              # one real Haiku session through the runner (uses the laptop's Claude login)
 npm run e2e -w @norn/mcp -- --statement    # and a second session that posts a Level 1 statement
 npm run probe:argv -w @norn/mcp       # two short Haiku sessions: is the token on the claude command line?
@@ -28,7 +29,7 @@ npm run token:person -w @norn/mcp -- --person jeff --label laptop --ecr BWM-ECR-
 ```
 
 Environment: `NORN_URI` (default `ws://127.0.0.1:3000`), `NORN_DB` (`norn`), `NORN_MCP_PORT` (`3917`),
-`NORN_MCP_URL` (what `nornMcpFor` puts in a job; default the loopback URL), `NORN_MCP_STATE_DIR`
+`NORN_MCP_TEST_DB` (the database `check:gate`, `e2e` and `check:fasttrack` wipe; default `norn-mcp`, never `norn`), `NORN_MCP_URL` (what `nornMcpFor` puts in a job; default the loopback URL), `NORN_MCP_STATE_DIR`
 (`norn/mcp/.state`, untracked), `NORN_ENV_FILE` (a `.env` to use instead of the main checkout's).
 
 `check:gate`, `e2e` and `probe:argv` use the separate database `norn-mcp`. The first two rebuild it from
@@ -69,7 +70,7 @@ const spec: JobSpec = {
   Code honours it (checked on the CLI bundled with `@anthropic-ai/claude-agent-sdk` 0.3.310).
 - The token is minted for that job (default 30 minutes, at most 6 hours) from the identity you pass, so
   build the runner's `identity` and the token from the same object. `ecrs` are full PLM numbers.
-- The runner's `allowedTools` is the second lock: the server offers all nine tools, and the runner
+- The runner's `allowedTools` is the second lock: the server offers all ten tools, and the runner
   denies the ones a role does not list.
 - **Roles decide the highest statement level a job may post** (see below): `level1-writeup` posts
   Level 1, `level2-...` Level 2, `level3-...` Level 3; any other role posts none (it can still comment
@@ -91,6 +92,7 @@ ECR by its PLM number (a unique tail such as `ECR-0417` works too) and never nam
 | `get_ecr_history` | comments and actions, oldest first: who, for whom, spawned by, outcome; a refusal shows as `denied` (the policy gate) or `rejected` (the write was invalid) with its reason | fact |
 | `add_comment` | a comment under the agent's own name | writes |
 | `propose_assumption` | a number or triangular range with rationale and sources, recorded as `agent_estimated`; the ECR's checks re-run on it | writes |
+| `request_fast_track_approval` | Ask for the fast track with answers to the company's tests (`get_impact`'s `fastTrack.tests`). The module's gate decides; the answer is read back from its `approval` or `recommendation` row: approved, held for the blind second check (not approved), recommended to named roles, escalated, or refused, each with the gate's reasons | writes |
 | `post_impact_statement` | Level 1 to 3: class, route, headline, numbers (p10/p50/p90), drivers, assumptions, claims, each with an evidence class | writes |
 
 `post_impact_statement` keeps the agent from forging a number: a number with evidence `computation`
@@ -146,7 +148,7 @@ it expires except changing the key.
 3. `grant_scope` writes an `actor_scope` row for that identity: the job id, the ECRs (or any ECR), the
    highest statement level (`maxLevel`: from the role for a job, 2 for a person's agent) and an expiry.
    The module's `authorize()` reads it, and the rule in `module/src/scope.ts` runs on every write. A
-   scoped actor may only comment, record `agent_estimated` assumptions and post statements:
+   scoped actor may only comment, record `agent_estimated` assumptions, post statements and ask for the fast track (`request_fast_track_approval`, where the company's gate then decides):
    - only on ECRs in its scope, never on the baseline;
    - never replacing a `given` assumption (on the ECR or inherited from the baseline);
    - never changing an assumption of an `approved` ECR, because any assumption change re-checks the ECR
@@ -202,13 +204,14 @@ database can take a plain `db:publish`; this branch did not publish it.
 
 | What | How | Result |
 |---|---|---|
-| Tokens (strict signature and claims, expiry, kinds), `nornMcpFor` in both deliveries and the helper script, `maxLevelFor`, `.env` parsing, the key and mint scripts, connect-error text, the Windows ACL of the state directory | `test:unit` | 15 of 15 |
+| Tokens (strict signature and claims, expiry, kinds), `nornMcpFor` in both deliveries and the helper script, `maxLevelFor`, `.env` parsing, the key and mint scripts, connect-error text, the Windows ACL of the state directory | `test:unit` | 27 of 27 |
 | The edge: no token, wrong key, expired, edited payload, wrong host name, GET, unknown ECR in a token | `check:gate` | pass |
-| All nine tools through real HTTP and the MCP client; the comment's author, the action-log fields, the allow reason | `check:gate` | pass |
+| All ten tools through real HTTP and the MCP client; the comment's author, the action-log fields, the allow reason | `check:gate` | pass |
 | A write to another ECR is refused by the module and logged (`denied`, reason, actor, for whom); a tool answer, not a crash; nothing written | `check:gate`, `e2e` | pass |
 | Reducers outside the scoped set, baseline writes, a scope widened by its holder, a grant that has run out, an agent replacing a `given` assumption | `check:gate` | pass |
 | Review findings: approval withdrawal (#1), relabelled computation numbers in the tool and the module (#2), level caps for a level1 job, a person's agent and a role with none (#3), a refused second job leaving the principal alone and history keeping the on-behalf-of recorded at the time (#4), `fact` (#5), `rejected` rows for a forged number, a revision conflict and a closed ECR, and no such row for an unscoped caller (#6), plain-text ECR numbers in refusals (#11), the helper form of the entry (#10) | `check:gate`, one or more checks each | pass |
 | A person's agent token (`*`, external origin, on-behalf-of) | `check:gate` | pass |
+| The fast-track signal and tool on Bowman's configuration and the real checks, on a scratch database: ECR-0423 approved (not drawn), a drawn number held for the second check, ECR-0417 recommended to named roles, out of scope denied and logged, unfinished checks refused, a Class I statement on a 12,000 USD supplier charge never approved (class left out, Class II sent, and Class II sent straight to the reducer), a session that read revision A refused on revision B while the session B started is decided | `check:fasttrack` | 39 of 39 |
 | A real Haiku session through the runner with only Norn's tools, token delivered through the headers helper: reads ECR-0417 and its impact, posts one comment, tries one write to ECR-0418 | `e2e` | pass: 9.4 s, 5 turns; the agent made the refused attempt itself |
 | A second Haiku session that posts a Level 1 statement with two `computation` numbers and two assumptions | `e2e -- --statement` | pass: 11.4 s, 5 turns; every computation number equals its check result |
 | Token on the `claude` command line, `headers` vs `headersHelper` | `probe:argv` (two Haiku sessions) | on argv with `headers`, not with the helper; both connected and answered |
@@ -289,3 +292,43 @@ database can take a plain `db:publish`; this branch did not publish it.
   supersedes the older; a statement written against an older ECR revision shows `current: false`.
 - **Tools accept a unique tail of the ECR number** (`ECR-0417` finds `BWM-ECR-0417`); tokens must carry
   the full number.
+
+## The fast track (#124)
+
+`get_impact` carries `fastTrack: { candidate, why, tests: [{ id, text, list }] }`. It is `fastTrackSignal` in
+`module/src/gate-logic.ts`, run on the mirror's rows through `factsFromRows`, the function the module's gate builds its
+facts with, and then `decideAction` with the answers set as favourably as the tests allow and the classes that satisfy
+the class-settled tests. `candidate` is true when that is an approval or a draw for the second check, so only the
+agent's answers stand in the way. It is false, with the reason, with no stored configuration, an ECR not in review,
+checks not finished, an unmeasured or over-limit cost, a slip past the limit, a role that may not, or a report level the
+agent cannot write. When the limits need a Level N report that the job may still post, `why` says to post it first.
+
+`request_fast_track_approval` takes `{ ecr, answers: [{ testId, holds, evidence }], companyClass?, regulatoryClass?, triggers? }`.
+Arguments are checked against the configuration before anything is sent.
+
+The classes are never filled in with whichever class would let the fast track apply (a review reproduced an
+approval that way, on a Class I statement). The company class is Norn's own: the class on the ECR's current-revision
+statement (`statementCompanyClass`, newest statement at the highest level). Left out, it is that class; sent, it
+must equal it or be the axis's `whenUnsure` class (stricter); with no statement class only `whenUnsure` is accepted.
+The tool refuses in words ("State the change class and the regulatory class, with evidence") when Norn has none, and
+the module's gate (`resolveClasses` in `gate.ts`) denies the same request made straight to the reducer. Norn holds no
+FAA class of its own (the PLM has the originator's, which ingest does not carry), so the agent must state
+`regulatoryClass`, and the answer labels it the agent's. The answer's `classes` and `classesNote` say where each class
+came from (`statement`, `agent`, `agent_stricter`, `none`); the stored approval records the same (`classSources`).
+A stale session decides nothing. The signed `spawnedBy` of a Level 1 session names the check run that started it
+(`norn:check_run:N`); the module's `sessionRunId` (the guard `post_impact_statement` already used, now shared) refuses
+the request unless that run is still `done` on the ECR's current inputs, and says "This session assessed revision N;
+the ECR is now at revision M". A review reproduced a credential from revision A approving revision B without it. The
+refusal is logged as `rejected`, and the reducer sees the run, so no revision argument is added: a caller that
+can lie about `spawnedBy` could lie about a revision too. A call whose `spawnedBy` names no check run (a person, or a
+test client) has no session to check, here as for statements.
+Residual: the statement is the agent's own judgment, so an agent that posts Class II over a Class I cost is not caught
+by this; the company's cost, slip and report-level limits still hold. The reducer's refusals (not in review, checks not finished, no configuration) and the scope
+refusal come back in words. Only the mirror's rows are read, so the signal assumes a `done` run is current, as `get_impact` does.
+
+The fast track decides ECRs in review. `ingest_ecr` opens an ECR the PLM reports in review (the ingest loop only takes
+in filed ECRs: Submitted, In CM Review, CCB Review by default), so Norn shows the status the change control board sees.
+An ECR filed in Norn with `create_pr` is a draft, and a draft is never a candidate. ECRs ingested before this change
+stay as they were opened (drafts); `set_pr_status` moves them to review. When a check is still running, `fastTrack.why`
+says "The checks are still running" and the Level 1 job takes the normal route for that revision; dispatch waiting for
+the slower checks (#123) is what makes that rare.

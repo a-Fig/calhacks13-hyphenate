@@ -48,8 +48,11 @@ const jsonOr = <T>(s: string, d: T): T => {
   }
 };
 
-/** The tools a Level 1 session may use: read the ECR and its numbers, post one statement. Nothing else. */
-export const LEVEL1_TOOLS = nornTools('get_ecr', 'get_impact', 'list_assumptions', 'post_impact_statement');
+/**
+ * The tools a Level 1 session may use: read the ECR and its numbers, post one statement, and ask for the fast
+ * track (the system prompt only tells it to when get_impact's fastTrack.candidate is true). Nothing else.
+ */
+export const LEVEL1_TOOLS = nornTools('get_ecr', 'get_impact', 'list_assumptions', 'post_impact_statement', 'request_fast_track_approval');
 
 /** What `decide` needs to know about one ECR, from the client cache. */
 export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
@@ -75,6 +78,7 @@ export function factsOf(db: Db, pr: Pr, role: string): EcrFacts {
     status: pr.status,
     crSeq: cur?.seq ?? null,
     crCreatedMs: cur ? ms(cur.createdAt) : null,
+    ecrRevision: pr.revision,
     s2Done,
     // The revision of the run a statement was written from (the module records it), not of the moment it was posted.
     statements: [...db.impactStatement.prId.filter(pr.id)].map(s => ({ level: s.level, createdMs: ms(s.createdAt), crSeq: crSeqOfRun(db, s.checkRunId) })),
@@ -121,8 +125,8 @@ export function jobFactsOf(db: Db, pr: Pr, revision: number, s2RunId: number) {
   };
 }
 
-export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; prompt: string; settings: Level1Settings; signingKey?: string; mcpUrl?: string }): JobSpec {
-  const identity = { actor: actorFor(opts.jobId), onBehalfOf: null, spawnedBy: spawnedByFor(opts.s2RunId) };
+export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; ecrRevision: number; prompt: string; settings: Level1Settings; signingKey?: string; mcpUrl?: string }): JobSpec {
+  const identity = { actor: actorFor(opts.jobId), onBehalfOf: null, spawnedBy: spawnedByFor(opts.s2RunId, opts.ecrRevision) };
   return {
     id: opts.jobId,
     role: opts.settings.role,
@@ -133,9 +137,6 @@ export function jobSpecFor(opts: { jobId: string; ecr: string; s2RunId: number; 
     prompt: opts.prompt,
     identity,
     mcpServers: { [NORN_MCP_SERVER_NAME]: nornMcpFor(identity, { jobId: opts.jobId, role: opts.settings.role, ecrs: [opts.ecr], ttlSeconds: opts.settings.tokenTtlSeconds, signingKey: opts.signingKey, url: opts.mcpUrl }) },
-    // TODO(fast track): when the MCP tool `request_fast_track_approval` lands on main, add it here (nornTools(...,
-    // 'request_fast_track_approval')) so the agent can call it when get_impact's fastTrack.candidate is true. The
-    // system prompt already says when to call it. Until it is allowed, a candidate ECR's session cannot call it.
     allowedTools: LEVEL1_TOOLS,
   };
 }
@@ -176,12 +177,12 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   let again = false;
 
   async function startJob(pr: Pr, revision: number, attempt: number, s2RunId: number) {
-    const jobId = jobIdFor(pr.plmEcrNumber, revision, attempt);
+    const jobId = jobIdFor(pr.plmEcrNumber, revision, attempt, pr.revision);
     running.add(jobId);
     runIdOf.set(jobId, BigInt(s2RunId));
     try {
       const facts = jobFactsOf(conn.db, pr, revision, s2RunId);
-      const spec = jobSpecFor({ jobId, ecr: pr.plmEcrNumber, s2RunId, prompt: jobPrompt(facts), settings, signingKey });
+      const spec = jobSpecFor({ jobId, ecr: pr.plmEcrNumber, s2RunId, ecrRevision: pr.revision, prompt: jobPrompt(facts), settings, signingKey });
       log(`starting ${jobId} (${settings.model}) for ${pr.plmEcrNumber} revision ${revision}, attempt ${attempt}, on check run ${s2RunId}`);
       const r = await runner.run(spec);
       const stored = await writer.drain();

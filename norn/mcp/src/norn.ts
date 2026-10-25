@@ -50,6 +50,9 @@ const MIRROR_QUERIES = [
   'SELECT * FROM principal',
   'SELECT * FROM impact_statement',
   'SELECT * FROM main_version',
+  'SELECT * FROM norn_config',
+  'SELECT * FROM approval',
+  'SELECT * FROM recommendation',
 ];
 
 type Reducers = Record<string, (args: Record<string, unknown>) => Promise<void>>;

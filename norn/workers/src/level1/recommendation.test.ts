@@ -173,12 +173,13 @@ test('the system prompt states the three rules, never Reject, and the rule is a 
 });
 
 test("the fast-track instruction is built only when the tool is in the job's allowed tools", () => {
-  assert.ok(!LEVEL1_TOOLS.some(t => t.endsWith('request_fast_track_approval')), 'not allowed yet');
-  for (const prompt of [SYSTEM_PROMPT, systemPromptFor(LEVEL1_TOOLS)]) {
+  assert.ok(LEVEL1_TOOLS.some(t => t === 'mcp__norn__request_fast_track_approval'), 'the Level 1 job is allowed the tool');
+  const base = LEVEL1_TOOLS.filter(t => !t.endsWith('request_fast_track_approval'));
+  for (const prompt of [SYSTEM_PROMPT, systemPromptFor(base)]) {
     assert.ok(!prompt.includes('request_fast_track_approval') && !prompt.includes('Fast track.'), 'so the section is absent');
     assert.ok(prompt.includes('Do not use any other tool. Do not propose'));
   }
-  const on = systemPromptFor([...LEVEL1_TOOLS, 'mcp__norn__request_fast_track_approval']);
+  const on = systemPromptFor(LEVEL1_TOOLS);
   for (const w of ['fastTrack.candidate is true', 'request_fast_track_approval', 'exactly once', 'after you have posted the statement', 'never mark a test true without evidence', 'regulatoryClass', 'what you rest it on', 'do not call it']) assert.ok(on.toLowerCase().includes(w.toLowerCase()), w);
   assert.ok(on.includes('except request_fast_track_approval'));
 });
