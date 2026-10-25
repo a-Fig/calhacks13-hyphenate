@@ -8,7 +8,7 @@ The run is seeded (`norn-seed-1`, checks code `checks-0.4.0`) and reads only fil
 **34 of 36 expectations pass, 1 fail, 1 not built (the checks, run as the expectation describes, do not produce what it names).** The expectations come from the answer key the dataset carries for its planted scenarios (`bowman/data/scenarios.ts`) and from comments in `bowman/data/changes.ts`. The code was not changed to fit them. Failures stay in the table.
 
 - FAIL, S2: Earliest realistic cut-in is S/N 34 (December 2027), set by certification, not tooling. Expected cut-in serial P50 of 34 or later; got S/N 26 (P10 21, P90 33); the timeline models decision and parts lead times, not certification.
-- NOT BUILT, S4: Norn raises the conflicting_open_ecr trigger on its own when a second open ECR edits the same item. Expected a flag or conflict of kind conflicting_open_ecr from the BOM delta, cost, timeline or supply check, run on each ECR, with the other passed as an open peer to the check that takes peers; got none; run that way, those checks emit only these flag and conflict kinds: cross_check, disposition_tbd, effectivity_default, implementation_unestimated, likely_late, needs_estimate, read_from_quote, shared_supplier, single_source.
+- NOT BUILT, S4: Norn raises the conflicting_open_ecr trigger on its own when a second open ECR edits the same item. Expected a flag or conflict of kind conflicting_open_ecr from the BOM delta, cost, timeline or supply check, run on each ECR, with the other passed as an open peer to the check that takes peers; got none; run that way, those checks emit only these flag and conflict kinds: cross_check, disposition_tbd, effectivity_default, exposure_not_computed, implementation_unestimated, likely_late, needs_estimate, read_from_quote, shared_supplier, single_source.
 
 ## What is real
 
@@ -79,7 +79,7 @@ PASS means the check's output meets the expectation as written. A range is shown
 | The pump is shared with Meridian, so a decision moves both programs | vesper and meridian | ECR-0412: vesper, meridian; ECR-0415: vesper, meridian | PASS |
 | Each ECR alone applies cleanly to the baseline (a conflict between two ECRs is invisible to a single-ECR check) | no baseline conflict for either | ECR-0412: 0 conflicts; ECR-0415: 0 conflicts | PASS |
 | S1 (BOM delta) reports a conflict when either ECR is applied on a baseline that already contains the other (baseline built by this script) | stale_rev and stale_value in both orders | 0415 after 0412: stale_rev, stale_value; 0412 after 0415: stale_rev, stale_value | PASS |
-| Norn raises the conflicting_open_ecr trigger on its own when a second open ECR edits the same item | a flag or conflict of kind conflicting_open_ecr from the BOM delta, cost, timeline or supply check, run on each ECR, with the other passed as an open peer to the check that takes peers | none; run that way, those checks emit only these flag and conflict kinds: cross_check, disposition_tbd, effectivity_default, implementation_unestimated, likely_late, needs_estimate, read_from_quote, shared_supplier, single_source | NOT BUILT |
+| Norn raises the conflicting_open_ecr trigger on its own when a second open ECR edits the same item | a flag or conflict of kind conflicting_open_ecr from the BOM delta, cost, timeline or supply check, run on each ECR, with the other passed as an open peer to the check that takes peers | none; run that way, those checks emit only these flag and conflict kinds: cross_check, disposition_tbd, effectivity_default, exposure_not_computed, implementation_unestimated, likely_late, needs_estimate, read_from_quote, shared_supplier, single_source | NOT BUILT |
 
 ### S5: Different parts, one supplier (ECR-0419 and ECR-0421)
 
@@ -104,10 +104,10 @@ PASS means the check's output meets the expectation as written. A range is shown
 
 | What | Result |
 |---|---|
-| Bowman dataset validator (`bowman/data/check.ts`, as of 2026-10-24) | 9781 checks, 0 failed; exit code 0 |
+| Bowman dataset validator (`bowman/data/check.ts`, as of 2026-10-24) | 9816 checks, 0 failed; exit code 0 |
 | Provenance (records marked sourced / all records) | 69 / 806 |
 | Bowman's Norn configuration | loads and validates (`norn/config/src/load.ts`) |
-| Checks library tests (`norn/checks`) | 110 passed, 0 failed of 110 |
+| Checks library tests (`norn/checks`) | 129 passed, 0 failed of 129 |
 | Configuration and routing tests (`norn/config`) | 241 passed, 0 failed of 241 |
 | Everything else (workers, module, runner, web, PLM, ERP, live agents) | not run by this page: not verified here |
 
