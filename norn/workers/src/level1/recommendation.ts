@@ -10,7 +10,9 @@
 //     cost check) that failed or is blocked.
 //   Rule 2, Approve with conditions: the assessment stands but has stated gaps (a blank cost line counted
 //     as $0, an unestimated item, an undecided stock disposition, a price change with no quote, any other
-//     warning). The conditions name exactly those gaps.
+//     warning; a timeline or supply check that is not available or could not assess something, #120). The
+//     conditions name exactly those gaps. A late cut-in, a single source or a supplier conflict is a finding the
+//     timeline and supply checks report: it is shown in the statement and moves neither the rule nor the conditions.
 //   Rule 3, Approve: no blocker and no gap.
 //   Never Reject: that is a human call.
 //
@@ -36,6 +38,15 @@ export interface RuleLine {
   unitCost?: unknown;
 }
 
+/**
+ * What the rule reads of the timeline (s3) or supply (s4) check: whether its result is available as of the statement's
+ * snapshot (siblings.ts), and its flags. `ready` has stored rows; the rest say why it has none.
+ */
+export interface SiblingCheck {
+  state: 'ready' | 'failed' | 'blocked' | 'pending' | 'mock';
+  flags?: { kind: string; severity: string; message: string; ref?: string }[];
+}
+
 export interface RuleInput {
   /** The statement's s2_cost `detail` row, parsed. Undefined when the run has none: nothing can be assessed. */
   detail: RuleDetail | undefined;
@@ -43,6 +54,12 @@ export interface RuleInput {
   failedChecks?: string[];
   /** The stored cost-page lines, so an amount missing on a line's own basis is seen whatever the check flagged. */
   lines?: RuleLine[];
+  /**
+   * The timeline (s3) and supply (s4) checks as of the statement's snapshot. Absent for a caller that has none
+   * (the rule then says nothing about them); the dispatcher and the publisher always give them.
+   */
+  timeline?: SiblingCheck;
+  supply?: SiblingCheck;
 }
 
 export interface Derived {
@@ -71,6 +88,54 @@ const isRange = (x: unknown): boolean => {
 };
 const BLOCKING_KINDS = new Set(['conflict', 'not_converged']);
 const short = (s: string, n = 200) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * Warn flags of the timeline and supply checks that are results, not gaps: the check assessed the change and found
+ * that it is late, has one source, or fights another ECR for a supplier's slot or capacity. They are reported in the
+ * statement and move neither the recommendation nor the conditions. Every other warn flag of these checks says the
+ * check could not assess something (no date placed, a peer ECR unreadable, a price missing, an assumption not
+ * applied) and is a gap, as a warn flag of the cost check is.
+ */
+const FINDING_KINDS = new Set(['likely_late', 'single_source', 'slot_contention', 'capacity_exceeded']);
+
+const UNAVAILABLE: Record<Exclude<SiblingCheck['state'], 'ready'>, string> = {
+  failed: 'failed',
+  blocked: 'is blocked',
+  pending: 'had not finished when this assessment was made',
+  mock: 'has only placeholder numbers',
+};
+
+/** Short, fixed wording for a gap the timeline or supply check named, so the conditions stay short enough for a statement's claim (600 characters). */
+function siblingGap(f: { kind: string; message: string; ref?: string }): string {
+  const at = f.ref ? ` (${f.ref})` : '';
+  switch (f.kind) {
+    case 'stock_beyond_plan':
+      return `No cut-in date can be placed${at}: using up the old stock runs past the end of the volume plan`;
+    case 'cut_in_beyond_plan':
+      return 'The median cut-in falls after the end of the volume plan, so no serial is planned to take the change by then';
+    case 'beyond_published_slots':
+      return `${f.ref ?? 'A part'}: the order may wait for a supplier slot nobody has announced`;
+    case 'unreadable_peer':
+      return `Another open ECR${at} could not be read, so supplier conflicts with it are not checked`;
+    case 'no_price':
+      return `${f.ref ?? 'A part'}: no quote or item master price, so its spend is left out`;
+    default:
+      return short(f.message);
+  }
+}
+
+/** The conditions the timeline and supply checks add: the check's own absence, then each gap flag once. */
+function siblingConditions(name: string, c: SiblingCheck | undefined): string[] {
+  if (!c) return [];
+  if (c.state !== 'ready') return [`The ${name} check ${UNAVAILABLE[c.state]}, so it is not assessed`];
+  const out: string[] = [];
+  for (const f of c.flags ?? []) {
+    if (f.severity !== 'warn' || FINDING_KINDS.has(f.kind)) continue;
+    const text = siblingGap(f);
+    if (!out.includes(text)) out.push(text);
+  }
+  return out;
+}
 
 export function deriveRecommendation(input: RuleInput): Derived {
   const flags = input.detail?.flags ?? [];
@@ -105,6 +170,9 @@ export function deriveRecommendation(input: RuleInput): Derived {
     if (f.kind === 'needs_estimate' && f.ref && named.has(f.ref)) continue;
     conditions.push(short(f.message));
   }
+  // The timeline and supply checks: a check that is not available, or could not assess something, is a stated gap
+  // (never a blocker: the cost assessment stands, and sending it back would ask the engineer to fix Norn).
+  for (const c of [...siblingConditions('timeline', input.timeline), ...siblingConditions('supply', input.supply)]) if (!conditions.includes(c)) conditions.push(c);
 
   if (blockers.length) {
     return { recommendation: 'Send back', rule: 1, blockers, conditions, reasoning: `Rule 1 (cannot be assessed as filed): ${blockers.join('; ')}.` };
@@ -130,6 +198,10 @@ export interface RunRow {
   createdMs: number;
   startedMs: number | null;
   finishedMs: number | null;
+  /** The s1 run's input hash this run names as its upstream (`inputs.upstream.s1_bom_delta`), for the code stages that read s1. */
+  upstreamS1?: string;
+  /** The change-request revision the run's inputs name. */
+  revision?: number;
 }
 
 /**
@@ -160,7 +232,7 @@ export function failedChecksOf(runs: readonly RunRow[], run: RunRow, upstreamS1:
 }
 
 /** The rule's input from the stored result rows of one s2_cost run. */
-export function ruleInputOf(rows: readonly { key: string; label?: string; detailJson: string }[], failedChecks: string[]): RuleInput {
+export function ruleInputOf(rows: readonly { key: string; label?: string; detailJson: string }[], failedChecks: string[], siblings: { timeline?: SiblingCheck; supply?: SiblingCheck } = {}): RuleInput {
   const parse = (j: string): Record<string, unknown> | undefined => {
     try {
       const v = JSON.parse(j);
@@ -176,5 +248,5 @@ export function ruleInputOf(rows: readonly { key: string; label?: string; detail
     const d = parse(r.detailJson);
     if (d) lines.push({ id: r.key.slice('line:'.length), label: r.label ?? r.key, basis: typeof d.basis === 'string' ? d.basis : undefined, oneTime: d.oneTime, unitCost: d.unitCost });
   }
-  return { detail: row ? (parse(row.detailJson) as RuleDetail | undefined) : undefined, failedChecks, lines };
+  return { detail: row ? (parse(row.detailJson) as RuleDetail | undefined) : undefined, failedChecks, lines, ...siblings };
 }

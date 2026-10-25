@@ -8,6 +8,9 @@
 //     what was started, across restarts. No extra table.
 //   - the revision. The key is the change request's revision, not the ECR's own counter, which also
 //     moves when the ERP baseline or an assumption changes. A baseline-only re-check starts nothing.
+//   - the wait. The statement also carries the timeline and supply checks (s3, s4, #120), which finish within
+//     seconds of s2, so a session starts once they have settled, or at a cutoff (siblings.ts) at the latest: a
+//     hung or failed check never holds Level 1 back, and the statement says it is unavailable.
 //   - the attempt cap. A session that failed, or ended without a statement, may be tried again later,
 //     up to a limit, under a new job id (so the actor name and the events never collide).
 
@@ -31,7 +34,16 @@ export interface EcrFacts {
   /** When that revision was recorded. */
   crCreatedMs: number | null;
   /** s2_cost runs with status `done` (not stale, not cancelled), oldest first. */
-  s2Done: { id: number; inputsRevision: number | null; mock: boolean }[];
+  s2Done: {
+    id: number;
+    inputsRevision: number | null;
+    mock: boolean;
+    /**
+     * The timeline and supply checks of this run's snapshot (siblings.ts): `pending` while either has not settled,
+     * and the moment (`cutoffMs`) at which the dispatcher stops waiting for it. Absent: nothing to wait for.
+     */
+    siblings?: { pending: boolean; cutoffMs: number };
+  }[];
   /**
    * Impact statements of any level. `crSeq` is the change-request revision of the check run a
    * statement was written from (the module records the run), or null when it rests on no run.
@@ -127,6 +139,10 @@ export function decide(e: EcrFacts, o: DecideOptions): Decision {
   const run = [...e.s2Done].reverse().find(r => r.inputsRevision === rev);
   if (!run) return skip(`no finished s2_cost run on change-request revision ${rev} yet`);
   if (run.mock) return skip('the s2_cost run is mock compute');
+  // The timeline and supply checks (s3, s4) finish within seconds of the cost check, and the statement carries
+  // them, so wait for them, but only until the run's cutoff: a hung or failed check must not hold Level 1 back
+  // (the statement then says that check is unavailable).
+  if (run.siblings?.pending && o.nowMs < run.siblings.cutoffMs) return skip(`waiting for the timeline and supply checks until ${new Date(run.siblings.cutoffMs).toISOString()}`);
 
   // A statement written from this revision's check run is this revision's statement (any level: a
   // Level 2 or 3 supersedes Level 1). One written for an earlier revision, however late it was posted, is not.
