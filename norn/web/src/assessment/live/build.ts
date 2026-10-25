@@ -459,11 +459,11 @@ export function buildAssessment(s: Snapshot, pr: PrRow): ImpactAssessment | unde
   const whyOf = (e: unknown) => `Norn could not read the check's output (${e instanceof Error ? e.message : String(e)})`;
   let timeRead: TimelineRead | undefined, timeWhy: string | undefined;
   if (timePick.run && !timeMock) {
-    try { timeRead = readTimeline(timePick.rows.map(toStage), traces, srcOf(timePick, 'Time to the line (S3)', 'Norn timeline check'), timePick.stale); } catch (e) { timeWhy = whyOf(e); }
+    try { timeRead = readTimeline(timePick.rows.map(toStage), traces, srcOf(timePick, 'Time to the line (S3)', 'Norn timeline check'), pr.plmEcrNumber, timePick.stale); } catch (e) { timeWhy = whyOf(e); }
   }
   let supplyRead: SupplyRead | undefined, supplyWhy: string | undefined;
   if (supplyPick.run && !supplyMock) {
-    try { supplyRead = readSupply(supplyPick.rows.map(toStage), traces, srcOf(supplyPick, 'Supply risk (S4)', 'Norn supply check'), supplyPick.stale); } catch (e) { supplyWhy = whyOf(e); }
+    try { supplyRead = readSupply(supplyPick.rows.map(toStage), traces, srcOf(supplyPick, 'Supply risk (S4)', 'Norn supply check'), pr.plmEcrNumber, supplyPick.stale); } catch (e) { supplyWhy = whyOf(e); }
   }
   const mockTime = timeMock ? timePick.rows.find(r => r.key === 'effectivity_weeks') : undefined;
   const mockMiss = supplyMock ? supplyPick.rows.find(r => r.key === 'p_miss_effectivity') : undefined;
