@@ -47,7 +47,7 @@ export function refusalLines(c: Extract<StartupConfig, { kind: 'invalid' }>): st
   return [
     `${COMPANY_CONFIG_ENV}=${c.file}: ${n} ${n === 1 ? 'problem' : 'problems'}`,
     ...c.issues.map((i) => `  ${formatIssue(i)}`),
-    'Norn did not start: fix the file, or unset the variable to keep the stored configuration.',
+    'Fern did not start: fix the file, or unset the variable to keep the stored configuration.',
   ];
 }
 
@@ -95,7 +95,7 @@ export async function applyStartupConfig(
     const text = stored(COMPANY_CONFIG_KEY);
     log(
       text === undefined
-        ? `WARNING: ${COMPANY_CONFIG_ENV} is not set and no company config is stored; Norn runs on the module's built-in defaults`
+        ? `WARNING: ${COMPANY_CONFIG_ENV} is not set and no company config is stored; Fern runs on the module's built-in defaults`
         : `WARNING: ${COMPANY_CONFIG_ENV} is not set; keeping the stored company config (${configHash(text)}, ${kb(Buffer.byteLength(text))})`
     );
     return { stored: [] };

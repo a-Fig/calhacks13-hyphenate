@@ -1,6 +1,7 @@
 export { Runner } from './runner.ts';
 export type { JobHandle, RunnerOptions } from './runner.ts';
 export { runJob } from './run-job.ts';
+export { buildJobHooks, toolInputGuardHook } from './hooks.ts';
 export type { QueryFn, QueryLike, RunJobOptions } from './run-job.ts';
 export { jsonlFileSink, memorySink, teeSink, readJsonl } from './sinks.ts';
 export type { ClosableSink } from './sinks.ts';

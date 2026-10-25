@@ -1,7 +1,7 @@
-# Norn's company configuration
+# Fern's company configuration
 
-The schema, validator and loader for the one file that tunes Norn to a company. Written 2026-10-24.
-Norn is general, so nothing here names a company. A company's file lives with the company (Bowman's
+The schema, validator and loader for the one file that tunes Fern to a company. Written 2026-10-24.
+Fern is general, so nothing here names a company. A company's file lives with the company (Bowman's
 is `bowman/norn-config/bowman.config.ts`) and default-exports an object of type `CompanyConfig`, or
 is a `.json` file holding it.
 
@@ -9,7 +9,7 @@ is a `.json` file holding it.
 cd norn/config
 npm test                                                   # the schema, the rules between fields, the loader, the stored form
 npm run check                                              # validates Bowman's file and prints a summary
-node src/cli.ts <file> --json                              # the { key, value } pairs Norn's set_config takes
+node src/cli.ts <file> --json                              # the { key, value } pairs Fern's set_config takes
 ```
 
 ## At start-up
@@ -88,7 +88,7 @@ route kept from an earlier cost cannot be reused. It never throws on a bad id or
 | `reportLevel` | the level of the report the decision rests on | a `minReportLevel` limit is not met |
 | `classes` | set on the ECR, or proposed by the classifier | the axis's `whenUnsure` class |
 | `answers` | yes or no per test id in `neverFastTrack`, `requireAll`, `requireOneOf` | the test is unanswered |
-| `triggers` | the named conditions Norn detected (`TRIGGERS`) | none detected |
+| `triggers` | the named conditions Fern detected (`TRIGGERS`) | none detected |
 | `ownerId` | the person who owns the changed item | an approver who must own the change is refused |
 | `approvedBy` | `'fast_track'`, or the id of the approving body | the ECR is not approved; an id that is not a configured body is denied |
 
@@ -112,7 +112,7 @@ The four ERP actions are `recommend` in the configuration, so they are always a 
 
 ## Design calls
 
-- **Norn acts only on an exact cost measure.** The configuration defines the measure per draw of the forecast.
+- **Fern acts only on an exact cost measure.** The configuration defines the measure per draw of the forecast.
   `costCheck` gives p10, p50 and p90 of signed totals, not the draws. A quantile of the parts does not give the quantile
   of the whole: spend and saving that both have a p90 of 100,000 can have a larger-of p90 of 200,000, and a forecast
   with p10, p50 and p90 of 297, 12,165 and 24,033 can have a p90 of 26,703 in size. So any outcome of `approve` or
@@ -120,7 +120,7 @@ The four ERP actions are `recommend` in the configuration, so they are always a 
   action whose outcome rests on the cost: a rule with a `limits.maxCost` (the fast track, `release_eco`), `carriesOutApproval`,
   and `approve_ecr_at_tier` including a person's. `post_impact_statement`, `set_company_class` and any other rule
   without a cost limit decide as before, with no cost at all.
-  - **Until the checks emit `measured`, Norn acts on nothing whose outcome rests on the cost.** That is the reason for the
+  - **Until the checks emit `measured`, Fern acts on nothing whose outcome rests on the cost.** That is the reason for the
     follow-up that makes `costCheck` produce it.
   - **`measured` is an `ExactCostMeasure`:** `source: 'exact'`, `horizonMonths`, `savingsOffset`, `p50` and `p90`. It
     counts only if the first three match the configuration and the forecast's `windowMonths` is the horizon. In each
@@ -134,13 +134,13 @@ The four ERP actions are `recommend` in the configuration, so they are always a 
     +200,000 of tooling and a 190,000 credit net to 10,000). `costForecastFromCheck` sets `gross` only when every cost
     component, read separately and not through a row total, has one sign. With `savingsOffset` true a range across
     zero is unmeasured at p90. An estimate can be too low whichever side of zero it falls on, because the tails beyond
-    p10 and p90 are not known. The decision for an estimate says so: "Norn acts only on an exact measure".
+    p10 and p90 are not known. The decision for an estimate says so: "Fern acts only on an exact measure".
 - **The horizon must match**, for `measured` too. A forecast over a different number of months than `horizonMonths` is
   not used, so the cost is unmeasured.
 - **Unmeasured cost goes to the top tier** and fails every `maxCost` limit.
 - **Missing facts count against the actor.** An unanswered test, an unforecast slip and a missing report level are not
   satisfied. The configuration has `whenUnsure` for classes only; the same caution is applied elsewhere.
-- **A class is not parsed from its trigger text.** Class triggers are prose, so Norn cannot test them here. The class
+- **A class is not parsed from its trigger text.** Class triggers are prose, so Fern cannot test them here. The class
   comes from the facts (set by a person, or proposed by the classifier, #33).
 - **Eligibility covers all three fast-track lists**, not only `neverFastTrack`: `requireAll` must hold and one of
   `requireOneOf` must hold.

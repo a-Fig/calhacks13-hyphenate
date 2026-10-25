@@ -63,7 +63,7 @@ const hostStatus = await new Promise<number>((res, rej) => {
   r.end('{}');
 });
 check('a request for another host name: 403', hostStatus === 403);
-check('a token names an ECR Norn does not have: 403', (await post({ authorization: `Bearer ${signToken({ kind: 'job', jobId: `ghost-${stamp}`, role: 'r', actor: `agent:norn/ghost/${stamp}`, onBehalfOf: null, spawnedBy: 'norn', ecrs: ['BWM-ECR-9999'], ttlSeconds: 60 }, key)}` })).status === 403);
+check('a token names an ECR Fern does not have: 403', (await post({ authorization: `Bearer ${signToken({ kind: 'job', jobId: `ghost-${stamp}`, role: 'r', actor: `agent:norn/ghost/${stamp}`, onBehalfOf: null, spawnedBy: 'norn', ecrs: ['BWM-ECR-9999'], ttlSeconds: 60 }, key)}` })).status === 403);
 check('a person_agent token needs a person; "*" is for person agents only', (() => {
   try { signToken({ kind: 'person_agent', jobId: 'p', role: 'r', actor: 'a', onBehalfOf: null, spawnedBy: 's', ecrs: [], ttlSeconds: 60 }, key); return false; } catch { /* expected */ }
   try { signToken({ kind: 'job', jobId: 'p', role: 'r', actor: 'a', onBehalfOf: null, spawnedBy: 's', ecrs: ['*'], ttlSeconds: 60 }, key); return false; } catch { return true; }
@@ -81,7 +81,7 @@ const actorA = `agent:norn/gate/${stamp}`;
 const entryA = entryFor(actorA, ['BWM-ECR-0417'], { onBehalfOf: 'person:jeff' });
 const A = await connect(entryA);
 const tools = (await A.listTools()).tools;
-check('nine tools are offered, each with a description', tools.length === 9 && tools.every(t => (t.description ?? '').length > 40), tools.map(t => t.name).join(', '));
+check('ten tools are offered, each with a description', tools.length === 10 && tools.every(t => (t.description ?? '').length > 40), tools.map(t => t.name).join(', '));
 
 const list = await call(A, 'list_ecrs', {});
 check('list_ecrs lists the three ECRs', list.json?.ecrs?.length === 3, list.json?.ecrs?.map((e: any) => `${e.ecr}:${e.impactState}`).join(' '));
@@ -99,6 +99,54 @@ const asm = await call(A, 'list_assumptions', { ecr: 'BWM-ECR-0417' });
 const bySource = Object.fromEntries((asm.json?.assumptions ?? []).map((a: any) => [a.key, a.source]));
 check('list_assumptions: baseline plus the ECR\'s own, each with its source', bySource.tooling_cost_usd === 'given' && bySource.scrap_rate === 'default' && bySource.requalification_weeks === 'agent_estimated' && bySource.titanium_price_usd_per_kg === 'given', JSON.stringify(bySource));
 
+// ---- an ask-norn credential: five read tools, this ECR only -----------------------------------------
+{
+  const Q = await connect(entryFor(`agent:norn/ask/${stamp}`, ['BWM-ECR-0417'], { role: 'ask-norn', jobId: `ask-${stamp}` }));
+  const offered = (await Q.listTools()).tools.map(t => t.name).sort();
+  check('ask-norn: offered exactly get_ecr, get_ecr_history, get_impact, get_part and list_assumptions', offered.join(',') === 'get_ecr,get_ecr_history,get_impact,get_part,list_assumptions', offered.join(', '));
+  const own = await call(Q, 'get_ecr', { ecr: 'BWM-ECR-0417' });
+  const ownImpact = await call(Q, 'get_impact', { ecr: 'ECR-0417' });
+  const ownAsm = await call(Q, 'list_assumptions', { ecr: 'BWM-ECR-0417' });
+  const ownHistory = await call(Q, 'get_ecr_history', { ecr: 'BWM-ECR-0417' });
+  check('ask-norn: reads its own ECR (get_ecr, get_impact, list_assumptions, get_ecr_history)', own.json?.ecr === 'BWM-ECR-0417' && ownImpact.json?.state === 'current' && ownAsm.json?.assumptions?.length > 0 && ownHistory.json?.ecr === 'BWM-ECR-0417');
+  const others = [
+    await call(Q, 'get_ecr', { ecr: 'BWM-ECR-0418' }),
+    await call(Q, 'get_impact', { ecr: 'BWM-ECR-0418' }),
+    await call(Q, 'list_assumptions', { ecr: 'BWM-ECR-0418' }),
+    await call(Q, 'get_ecr_history', { ecr: 'ECR-0418' }),
+  ];
+  check('ask-norn: every read of another ECR is refused, and the refusal does not name the others', others.every(r => r.isError && /can read only BWM-ECR-0417/.test(r.text) && !r.text.includes('0419')), others.map(r => r.text.slice(0, 50)).join(' | '));
+  // The seeded ECRs name no part number, so on the seed every part is outside the scoped ECR; the path for a part that is on it is in test/roles-unit.ts.
+  const ownParts: string[] = own.json?.affectedParts?.map((p: any) => p.partNumber) ?? [];
+  const everyPart = [...norn.db.part.iter()].map(p => p.partNumber);
+  const seen = await Promise.all(everyPart.map(async n => ({ n, r: await call(Q, 'get_part', { part: n }), viaLevel1: await call(A, 'get_part', { part: n }) })));
+  check(
+    'ask-norn: get_part answers for a part on its ECR and refuses every other, while a level1-writeup credential still reads all of them',
+    seen.length > 0 && seen.every(s => !s.viaLevel1.isError && (ownParts.includes(s.n) ? !s.r.isError && s.r.json?.namedInEcrs?.every((e: string) => e === 'BWM-ECR-0417') : s.r.isError && /can read only parts on the change request or BOM delta of BWM-ECR-0417/.test(s.r.text))),
+    `${seen.length} parts, ${ownParts.length} on the ECR`
+  );
+  const commentsBefore = [...norn.db.comment.iter()].length;
+  const assumptionsBefore = [...norn.db.assumption.iter()].length;
+  const attempts = await Promise.all(
+    [
+      ['list_ecrs', {}],
+      ['add_comment', { ecr: 'BWM-ECR-0417', body: `ask-norn must not write ${stamp}` }],
+      ['propose_assumption', { ecr: 'BWM-ECR-0417', key: 'scrap_rate', value: 0.5, rationale: 'x', sources: ['x'] }],
+      ['request_fast_track_approval', { ecr: 'BWM-ECR-0417', answers: [{ testId: 't', holds: true, evidence: 'x' }] }],
+    ].map(async ([name, args]) => {
+      try {
+        const r = (await Q.callTool({ name: name as string, arguments: args as Record<string, unknown> })) as { isError?: boolean };
+        return !!r.isError;
+      } catch {
+        return true; // the server answered with an error: the tool is not there
+      }
+    })
+  );
+  await sleep(300);
+  check('ask-norn: list_ecrs and the write tools are refused, and nothing was written', attempts.every(Boolean) && [...norn.db.comment.iter()].length === commentsBefore && [...norn.db.assumption.iter()].length === assumptionsBefore, attempts.join(','));
+  await Q.close();
+}
+
 // a comment inside the scope
 const c1 = await call(A, 'add_comment', { ecr: 'BWM-ECR-0417', body: `gate check ${stamp}: reading the impact numbers` });
 const row1 = c1.json ? logRow(c1.json.actionLogEntry) : undefined;
@@ -115,7 +163,7 @@ const before418 = commentsOn418();
 const c2 = await call(A, 'add_comment', { ecr: 'BWM-ECR-0418', body: `gate check ${stamp}: this must be refused` });
 await sleep(300);
 const denied = [...norn.db.actionLog.prId.filter(ecr418.id)].find(l => l.actorName === actorA && l.outcome === 'denied');
-check('add_comment on another ECR returns a clear refusal, not a crash', c2.isError && c2.text.includes('Refused by Norn\'s policy gate') && c2.text.includes('outside the scope') && c2.text.includes('BWM-ECR-0418'), c2.text.slice(0, 160));
+check('add_comment on another ECR returns a clear refusal, not a crash', c2.isError && c2.text.includes('Refused by Fern\'s policy gate') && c2.text.includes('outside the scope') && c2.text.includes('BWM-ECR-0418'), c2.text.slice(0, 160));
 check('...nothing was written to that ECR', commentsOn418() === before418);
 check('...and the refusal is in the action log: denied, with the reason, the actor and who it was for', !!denied && denied.reducer === 'add_comment' && denied.policy.startsWith('deny: outside the scope of job ') && denied.onBehalfOf === 'person:jeff' && denied.spawnedBy === 'norn', denied?.policy);
 check('...and the refusal is visible in that ECR\'s history', (await call(A, 'get_ecr_history', { ecr: 'BWM-ECR-0418' })).json?.entries?.some((e: any) => e.outcome === 'denied' && e.by === actorA && e.policy));
@@ -151,7 +199,7 @@ const stored = [...norn.db.impactStatement.prId.filter(ecr417.id)][0];
 const wanted = [...norn.db.checkResult.prId.filter(ecr417.id)].find(r => r.key === resultKey)!;
 check('post_impact_statement stores a structured statement', !s1.isError && s1.json?.saved === true && stored?.level === 1 && stored.changeClass === 'Class I' && stored.numbers.length === 2 && stored.drivers.length === 1 && stored.claims.length === 1, s1.text.slice(0, 200));
 check('...a computation number is copied from the check result, to the digit', stored?.numbers[0]?.p10 === wanted.p10 && stored.numbers[0].p50 === wanted.p50 && stored.numbers[0].p90 === wanted.p90 && stored.numbers[0].evidence === 'computation');
-check('...assumption sources are the real ones, filled in by Norn', stored?.assumptions.find(a => a.key === 'requalification_weeks')?.source === 'agent_estimated' && stored.assumptions.find(a => a.key === 'tooling_cost_usd')?.source === 'given');
+check('...assumption sources are the real ones, filled in by Fern', stored?.assumptions.find(a => a.key === 'requalification_weeks')?.source === 'agent_estimated' && stored.assumptions.find(a => a.key === 'tooling_cost_usd')?.source === 'given');
 const g2 = await call(A, 'get_ecr', { ecr: 'BWM-ECR-0417' });
 check('get_ecr shows the statement, and that it is current for this revision', g2.json?.statements?.[0]?.level === 1 && g2.json.statements[0].current === true && g2.json.statements[0].postedBy?.name === actorA);
 const sBad = await call(A, 'post_impact_statement', { ...stmtArgs, numbers: [{ key: 'x', evidence: 'computation', resultKey: 'no_such_result' }] });
@@ -160,7 +208,7 @@ check('...and it lists the result keys that do exist', sBad.text.includes('Curre
 const sPref = await call(A, 'post_impact_statement', { ...stmtArgs, numbers: [{ key: 'unit_cost', evidence: 'computation', resultKey: 's2_cost.unit_cost_delta' }], assumptions: [] });
 check('a result key written with its stage in front (s2_cost.unit_cost_delta) is accepted', !sPref.isError && sPref.json?.saved === true, sPref.text.slice(0, 120));
 const sOut = await call(A, 'post_impact_statement', { ...stmtArgs, ecr: 'BWM-ECR-0418', assumptions: [], numbers: [{ key: 'j', evidence: 'judgment', p10: 1, p50: 2, p90: 3 }] });
-check('a statement on another ECR is refused by the gate and logged', sOut.isError && sOut.text.includes('Refused by Norn') && [...norn.db.actionLog.prId.filter(ecr418.id)].some(l => l.reducer === 'post_impact_statement' && l.outcome === 'denied'));
+check('a statement on another ECR is refused by the gate and logged', sOut.isError && sOut.text.includes('Refused by Fern') && [...norn.db.actionLog.prId.filter(ecr418.id)].some(l => l.reducer === 'post_impact_statement' && l.outcome === 'denied'));
 
 const raw = await rawClient();
 await raw.R.registerActor({ meta: meta('reg'), kind: 'agent', name: `gate-raw-${stamp}`, origin: 'norn', onBehalfOf: undefined });

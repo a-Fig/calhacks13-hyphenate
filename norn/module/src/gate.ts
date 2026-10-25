@@ -38,10 +38,11 @@ import {
   judge,
   readCompanyConfig,
   readFastTrackRequest,
+  resolveClasses,
+  statementCompanyClass,
   tierVerdict,
   type ApprovedAt,
-  costFromRows,
-  slipFromRows,
+  factsFromRows,
   type FastTrackRequest,
   type GateDetail,
   type LoadedConfig,
@@ -86,29 +87,17 @@ function currentRows(ctx: Ctx, pr: Pr, stage: string): ResultRow[] {
   return best ? [...ctx.db.checkResult.checkRunId.filter(best.id)] : [];
 }
 
-// What the gate knows about the ECR, built from the tables on its current inputs. Not here, on purpose:
-// the owner of the changed item (an agent's say-so is not evidence), and detected triggers (nothing in
-// the module detects them yet; an agent's fast-track request lists the ones it saw, labelled as its own).
+// What the gate knows about the ECR, built from the tables on its current inputs. The construction itself is
+// gate-logic.ts's factsFromRows, which the MCP server's fast-track signal uses too.
 export function buildFacts(ctx: Ctx, pr: Pr, config: CompanyConfig, request?: FastTrackRequest): EcrFacts {
-  const cost = costFromRows(currentRows(ctx, pr, 's2_cost'), config);
-  const slip = slipFromRows(currentRows(ctx, pr, 's3_timeline'));
-  let level = 0;
-  for (const s of ctx.db.impactStatement.prId.filter(pr.id)) if (s.prRevision === pr.revision && s.level > level) level = s.level;
+  let reportLevel = 0;
+  for (const s of ctx.db.impactStatement.prId.filter(pr.id)) if (s.prRevision === pr.revision && s.level > reportLevel) reportLevel = s.level;
   const approved = standingApproval(ctx, pr.id);
-  const facts: EcrFacts = { ecrId: pr.plmEcrNumber };
-  if (cost) facts.cost = cost;
-  if (slip !== undefined) facts.slipP90Days = slip;
-  if (level >= 1 && level <= 3) facts.reportLevel = level as 1 | 2 | 3;
-  if (approved?.bodyId) facts.approvedBy = approved.bodyId;
-  if (request) {
-    facts.classes = {
-      ...(request.classes.company ? { company: request.classes.company } : {}),
-      ...(request.classes.regulatory ? { regulatory: request.classes.regulatory } : {}),
-    };
-    facts.answers = Object.fromEntries(request.answers.map(a => [a.testId, a.holds]));
-    facts.triggers = request.triggers;
-  }
-  return facts;
+  return factsFromRows(
+    { ecrId: pr.plmEcrNumber, costRows: currentRows(ctx, pr, 's2_cost'), slipRows: currentRows(ctx, pr, 's3_timeline'), reportLevel, ...(approved?.bodyId ? { approvedBy: approved.bodyId } : {}) },
+    config,
+    request,
+  );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -122,7 +111,7 @@ export const gateRule: PolicyRule = (ctx, actor, reducer, args) => {
   const loaded = companyConfig(ctx);
   if (loaded.state === 'none') return { effect: 'allow', reason: NO_CONFIG };
   if (!action) return { effect: 'allow', reason: `${reducer} is not gated by the company's configuration` };
-  if (loaded.state === 'unreadable') return { effect: 'deny', reason: `${loaded.why}; Norn takes no ${action} decision on a configuration it cannot read` };
+  if (loaded.state === 'unreadable') return { effect: 'deny', reason: `${loaded.why}; Fern takes no ${action} decision on a configuration it cannot read` };
   const who = configActor(loaded.config, actor);
   if (!who) return { effect: 'deny', reason: `${actor.name} has not registered as a person or an agent, so the company's rules cannot be applied to it` };
   const pr = typeof args.prId === 'bigint' ? ctx.db.pullRequest.id.find(args.prId) : undefined;
@@ -132,7 +121,9 @@ export const gateRule: PolicyRule = (ctx, actor, reducer, args) => {
   if (reducer === 'request_fast_track_approval') {
     const r = readFastTrackRequest(loaded.config, { answers: args.answers, companyClass: args.companyClass, regulatoryClass: args.regulatoryClass, triggers: args.triggers });
     if (!r.ok) return { effect: 'deny', reason: `the fast-track request is refused: ${r.why}` };
-    request = r.request;
+    const classes = resolveClasses(loaded.config, r.request.classes, statementCompanyClass(loaded.config, [...ctx.db.impactStatement.prId.filter(pr.id)], pr.revision));
+    if (!classes.ok) return { effect: 'deny', reason: `the fast-track request is refused: ${classes.why}` };
+    request = { ...r.request, classes: classes.classes, classSources: classes.sources };
   }
   const v = judge(loaded.config, loaded.hash, { action, actor: who, facts: buildFacts(ctx, pr, loaded.config, request), request });
   return { effect: v.effect, reason: v.reason, downgradeTo: v.downgradeTo, detail: v.detail };

@@ -49,7 +49,7 @@ test('a failed or blocked check, or no cost detail at all, is Send back', () => 
 
 // ---- the checks' state is read as of the statement's own run, never the ECR's latest runs -------------
 
-const run = (id: number, stage: string, status: string, inputHash = `h${id}`, finishedMs: number | null = id * 1000 + 100): RunRow => ({ id: BigInt(id), stage, status, inputHash, createdMs: id * 1000, startedMs: id * 1000, finishedMs });
+const run = (id: number, stage: string, status: string, inputHash = `h${id}`, finishedMs: number | null = id * 1000 + 100): RunRow => ({ id: BigInt(id), stage, status, inputHash, createdUs: BigInt(id) * 1_000_000n, startedUs: BigInt(id) * 1_000_000n, finishedUs: finishedMs === null ? null : BigInt(finishedMs) * 1000n });
 
 test("a failure after the statement's run does not change it: a later extraction failure leaves Approve as it was", () => {
   const s2 = run(3, 's2_cost', 'done');
@@ -83,7 +83,7 @@ test('inputs that change and revert: a later failed s1 run with the same hash is
   const d = (failed: string[]) => deriveRecommendation(ruleInputOf(storedRows('ECR-0423'), failed));
   assert.equal(d(failedChecksOf(reverted, s2, 'S1')).recommendation, 'Approve');
   // while the newest such run, if it had failed by then, still counts
-  assert.deepEqual(failedChecksOf([run(1, 's1_bom_delta', 'done', 'S1'), { ...run(2, 's1_bom_delta', 'failed', 'S1'), finishedMs: 2100 }, s2], s2, 'S1'), ['s1_bom_delta']);
+  assert.deepEqual(failedChecksOf([run(1, 's1_bom_delta', 'done', 'S1'), { ...run(2, 's1_bom_delta', 'failed', 'S1'), finishedUs: 2_100_000n }, s2], s2, 'S1'), ['s1_bom_delta']);
 });
 
 test("failedChecksForRun reads the cache the same way: a later s0 failure on the ECR is not this statement's", () => {
@@ -161,7 +161,7 @@ const factsFor = (ecr: string, rows = storedRows(ecr)): JobFacts => {
 
 test("the job prompt gives the rule's recommendation, its number and the three blank lines as conditions", () => {
   const p = jobPrompt(factsFor('ECR-0417'));
-  assert.ok(p.includes('Norn\'s rule gives "Approve with conditions" (rule 2)'));
+  assert.ok(p.includes('Fern\'s rule gives "Approve with conditions" (rule 2)'));
   for (const label of ['Re-inspection and test after retrofit', 'Spares, maintenance manual task update, training', 'Delay cost of holding']) assert.ok(p.includes(label), label);
   assert.ok(!p.includes('and your recommendation in a few words'), 'the headline does not carry the recommendation');
   assert.ok(jobPrompt(factsFor('ECR-0423')).includes('"Approve" (rule 3)'));
@@ -173,13 +173,14 @@ test('the system prompt states the three rules, never Reject, and the rule is a 
 });
 
 test("the fast-track instruction is built only when the tool is in the job's allowed tools", () => {
-  assert.ok(!LEVEL1_TOOLS.some(t => t.endsWith('request_fast_track_approval')), 'not allowed yet');
-  for (const prompt of [SYSTEM_PROMPT, systemPromptFor(LEVEL1_TOOLS)]) {
+  assert.ok(LEVEL1_TOOLS.some(t => t === 'mcp__norn__request_fast_track_approval'), 'the Level 1 job is allowed the tool');
+  const base = LEVEL1_TOOLS.filter(t => !t.endsWith('request_fast_track_approval'));
+  for (const prompt of [SYSTEM_PROMPT, systemPromptFor(base)]) {
     assert.ok(!prompt.includes('request_fast_track_approval') && !prompt.includes('Fast track.'), 'so the section is absent');
     assert.ok(prompt.includes('Do not use any other tool. Do not propose'));
   }
-  const on = systemPromptFor([...LEVEL1_TOOLS, 'mcp__norn__request_fast_track_approval']);
-  for (const w of ['fastTrack.candidate is true', 'request_fast_track_approval', 'exactly once', 'after you have posted the statement', 'never mark a test true without evidence', 'do not call it']) assert.ok(on.toLowerCase().includes(w.toLowerCase()), w);
+  const on = systemPromptFor(LEVEL1_TOOLS);
+  for (const w of ['fastTrack.candidate is true', 'request_fast_track_approval', 'exactly once', 'after you have posted the statement', 'never mark a test true without evidence', 'regulatoryClass', 'what you rest it on', 'do not call it']) assert.ok(on.toLowerCase().includes(w.toLowerCase()), w);
   assert.ok(on.includes('except request_fast_track_approval'));
 });
 
@@ -191,7 +192,7 @@ const statement = (rec: string | null): StatementDoc => ({
   prRevision: 3,
   createdAtIso: '2026-10-24T20:42:11.000Z',
   changeClass: 'Class I',
-  route: "Pending Norn's routing",
+  route: "Pending Fern's routing",
   headline: 'ECR-0417 adds money.',
   numbers: [],
   drivers: [],
@@ -237,7 +238,7 @@ test('an override leaves one comment on the ECR, and a second sweep or a restart
   const deps = { existing: () => [...comments], add: async (b: string) => void comments.push(b) };
   assert.equal(await recordOverride(deps, 12, f), true);
   assert.equal(comments.length, 1);
-  assert.ok(comments[0]!.startsWith('Norn\'s rule set the recommendation to Approve with conditions; the Level 1 agent wrote "Send back" (rule 2, statement 12).'), comments[0]);
+  assert.ok(comments[0]!.startsWith('Fern\'s rule set the recommendation to Approve with conditions; the Level 1 agent wrote "Send back" (rule 2, statement 12).'), comments[0]);
   assert.equal(await recordOverride(deps, 12, f), false, 'the same statement and outcome');
   assert.equal(comments.length, 1);
   assert.equal(await recordOverride(deps, 13, f), true, 'a new statement is a new record');

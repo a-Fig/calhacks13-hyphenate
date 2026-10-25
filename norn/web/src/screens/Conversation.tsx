@@ -94,9 +94,9 @@ function BotComment({ a }: { a: ImpactAssessment }) {
   const report = [...a.activity].reverse().find(e => e.kind === 'report');
   return (
     <Timeline.Item className="nx-t-comment">
-      <div className="nx-av-col"><Person name="Norn" kind="norn" size={40} /></div>
+      <div className="nx-av-col"><Person name="Fern" kind="norn" size={40} /></div>
       <Timeline.Body className="nx-t-body">
-        <CommentBox name="Norn" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? a.activity[a.activity.length - 1]?.at ?? ''} edited={a.source !== 'live'} right={a.level ? <LevelLabel level={a.level} long /> : undefined}>
+        <CommentBox name="Fern" kind="norn" time={a.activity.find(e => e.kind === 'report')?.at ?? a.activity[a.activity.length - 1]?.at ?? ''} edited={a.source !== 'live'} right={a.level ? <LevelLabel level={a.level} long /> : undefined}>
           <h3 className="nx-h3">Impact assessment <SavedRun source={a.source} /></h3>
           {a.ecr.staleCost && <p className="nx-small"><StaleNote state={a.ecr.staleCost} /></p>}
           <div className="nx-table-scroll" role="region" aria-label="Impact assessment numbers" tabIndex={0}>
@@ -238,7 +238,7 @@ function EventItem({ e, mock }: { e: ActivityEvent; mock: boolean }) {
             <b>{e.actor}</b>
             {forWho(e) && <span className="nx-fg-muted"> for {forWho(e)}</span>}
             {' '}{e.text}
-            {mock && <> <MockTag title="Mock: a saved timeline entry, not an event in Norn" /></>}
+            {mock && <> <MockTag title="Mock: a saved timeline entry, not an event in Fern" /></>}
             {e.level && <> <LevelLabel level={e.level} /></>}
             {e.reportedByAgent && <> <Label variant="attention" size="small">Reported by agent</Label></>}
             {e.superseded && <> <Label variant="secondary" size="small">Superseded</Label></>}
@@ -327,7 +327,7 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
 
       <MergeRow
         icon={waiting ? <ClockIcon size={24} className="nx-fg-attention" /> : <ShieldCheckIcon size={24} className="nx-fg-success" />}
-        title={noStatement ? 'Waiting for Norn\u2019s impact statement' : <><Mark ev="judgment" id={a.recommendation.traceId}>{a.recommendation.headline}</Mark> <MockTag on={a.mock.includes('recommendation')} /></>}
+        title={noStatement ? 'Waiting for Fern\u2019s impact statement' : <><Mark ev="judgment" id={a.recommendation.traceId}>{a.recommendation.headline}</Mark> <MockTag on={a.mock.includes('recommendation')} /></>}
         sub={a.statement ? a.statement.headline : a.recommendation.reasons[0]?.text}
       />
 
@@ -371,7 +371,7 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
             <li key={i}>
               {s.role === 'CCB'
                 ? <BoardIcon size={20} />
-                : <Person name={s.person ?? s.role} kind={s.person === 'Norn' ? 'norn' : 'person'} size={20} />}
+                : <Person name={s.person ?? s.role} kind={s.person === 'Fern' ? 'norn' : 'person'} size={20} />}
               <span className="nx-side-name">{s.role === 'CCB' ? 'Change Control Board' : s.person}</span>
               <span className="nx-side-trail"><StepIcon state={s.state} /></span>
             </li>
@@ -477,7 +477,7 @@ function StatementComment({ a }: { a: ImpactAssessment }) {
   const st = a.statement!;
   return (
     <Timeline.Item className="nx-t-comment">
-      <div className="nx-av-col"><Person name="Norn" kind="norn" size={40} /></div>
+      <div className="nx-av-col"><Person name="Fern" kind="norn" size={40} /></div>
       <Timeline.Body className="nx-t-body">
         <CommentBox name={st.author} kind="norn" time={st.at} right={<LevelLabel level={st.level} long />}>
           <h3 className="nx-h3">
@@ -518,7 +518,7 @@ function StatementComment({ a }: { a: ImpactAssessment }) {
           )}
           {st.claims.length > 0 && (
             <>
-              <h4 className="nx-h4">What Norn concludes</h4>
+              <h4 className="nx-h4">What Fern concludes</h4>
               <ul className="nx-reasons">
                 {st.claims.map((c, i) => (
                   <li key={i}><Mark ev={c.evidence} id={c.traceId!}>{c.text}</Mark></li>

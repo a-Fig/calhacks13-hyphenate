@@ -20,7 +20,7 @@ export function App() {
   return (
     <>
       <header>
-        <h1>NORN</h1>
+        <h1>FERN</h1>
         <span data-testid="conn" data-status={status}>{status}{error ? `: ${error}` : ''}</span>
         <span>
           Production baseline <b data-testid="baseline">v{main?.version ?? '–'}</b>

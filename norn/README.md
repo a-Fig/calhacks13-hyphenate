@@ -1,17 +1,17 @@
-# Norn
+# Fern
 
-Our product. Norn forecasts what an engineering change will do to production and to the books,
+Our product. Fern forecasts what an engineering change will do to production and to the books,
 lets agents act on that forecast within the limits a company sets, and keeps a record of every
-step that anyone can dig into. Written 2026-10-24. Where Norn sits among Bowman's systems is
+step that anyone can dig into. Written 2026-10-24. Where Fern sits among Bowman's systems is
 `docs/PLAN.md`; the engine's design is `ARCHITECTURE.md` in this folder.
 
-Norn is general. Everything specific to one company comes from that company's configuration, so
+Fern is general. Everything specific to one company comes from that company's configuration, so
 Bowman's is in `bowman/norn-config/`, not here. Code in this folder shouldn't need to name Bowman.
 
 ## Responsibilities
 
 - **Mirror the production baseline.** Read parts, BOMs and change records from the PLM, and costs,
-  suppliers, stock and history from the ERP. Norn keeps a working copy; the PLM and ERP stay the
+  suppliers, stock and history from the ERP. Fern keeps a working copy; the PLM and ERP stay the
   systems of record.
 - **Hold proposed changes.** Each ECR is an overlay of edits on a version of the baseline, revised
   as people and agents correct it (`ARCHITECTURE.md` §2, §4).
@@ -27,7 +27,7 @@ Bowman's is in `bowman/norn-config/`, not here. Code in this folder shouldn't ne
 - **Keep the audit trail.** Every claim carries its evidence class and its sources, and can be
   traced to the data, rule or person behind it.
 
-Not Norn's job: designing parts, running MRP, keeping the ledger, or replacing the PLM or ERP.
+Not Fern's job: designing parts, running MRP, keeping the ledger, or replacing the PLM or ERP.
 
 ## Parts
 
@@ -37,10 +37,11 @@ Folders are created as code lands.
 |---|---|---|
 | State layer | `module/` | The SpacetimeDB module: the tables, the narrow write API, the action log and the policy gate |
 | Workers | `workers/` | Compute checks: BOM delta, cost, timeline, supply simulation |
-| Agent runner | `runner/` | Starts and steers Norn's agents as Claude Code sessions through the Agent SDK: extraction, classification, research, review, narration, post check. Streams every step into the action log |
-| Connectors | `connectors/` | Read the PLM and ERPNext over their REST APIs and webhooks, and post Norn's results to the PLM. ERPNext is read only |
-| Web | `web/` | Norn's own screens: an ECR's impact assessment, the "why" behind any number, the backlog roll-up, the audit trail |
-| MCP server | `mcp/` | The tools every agent works through: Norn's own agents, and a person's own agent connecting with credentials to act on their behalf |
+| Agent runner | `runner/` | Starts and steers Fern's agents as Claude Code sessions through the Agent SDK: extraction, classification, research, review, narration, post check. Streams every step into the action log |
+| Research agent | `research/` | Picks the assumptions worth researching, builds the cost-engineer agent's job (web research through Bright Data), checks its proposals in code (quote on the page, bounds, no leaked identifiers), and re-runs the checks with the ones that pass. Offline replay from a recording |
+| Connectors | `connectors/` | Read the PLM and ERPNext over their REST APIs and webhooks, and post Fern's results to the PLM. ERPNext is read only |
+| Web | `web/` | Fern's own screens: an ECR's impact assessment, the "why" behind any number, the backlog roll-up, the audit trail |
+| MCP server | `mcp/` | The tools every agent works through: Fern's own agents, and a person's own agent connecting with credentials to act on their behalf |
 
 ## Interfaces
 
@@ -49,10 +50,10 @@ Folders are created as code lands.
 - **Out to the PLM:** the impact statement, class and route on the ECR, through the same API a
   real PLM integration would use.
 - **ERPNext:** REST reads only: items, BOMs, prices, stock, orders and history, and the reads that
-  build the ERP change package on a released ECO (#72). Norn never writes to the ERP (#71). Its API
+  build the ERP change package on a released ECO (#72). Fern never writes to the ERP (#71). Its API
   user is read-only (`bowman/erp/`).
 - **Agents:** MCP, with each agent's identity, the person it acts for, and what spawned it.
-- **Configuration:** one company config file, named by `NORN_COMPANY_CONFIG`, validated against Norn's config schema when the worker starts and stored through `set_config` (`config/README.md`).
+- **Configuration:** one company config file, named by `NORN_COMPANY_CONFIG`, validated against Fern's config schema when the worker starts and stored through `set_config` (`config/README.md`).
 
 ## Stack
 

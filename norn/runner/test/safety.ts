@@ -4,13 +4,13 @@
 import assert from 'node:assert/strict';
 import { rm } from 'node:fs/promises';
 import { describe, it } from 'node:test';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { overageStopError } from '../src/classify.ts';
 import { defaultConfig, resolveJob } from '../src/config.ts';
 import { MessageTranslator } from '../src/events.ts';
 import { checkFetchUrl, isNonPublicAddress, webFetchGuard } from '../src/fetch-guard.ts';
 import { ProcessTracker } from '../src/process.ts';
-import { promptRecorder } from '../src/hooks.ts';
+import { buildJobHooks, promptRecorder, toolInputGuardHook } from '../src/hooks.ts';
 import { JobEmitter } from '../src/events.ts';
 import { Runner } from '../src/runner.ts';
 import { runJob } from '../src/run-job.ts';
@@ -156,6 +156,105 @@ describe('WebFetch guard', () => {
   });
 });
 
+describe('job tool-input guards', () => {
+  type Out = { hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string } };
+  const pre = (hook: ReturnType<typeof toolInputGuardHook>, tool: string, input: unknown, id = 'tu1') =>
+    hook({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input } as never, id, { signal: new AbortController().signal }) as Promise<Out>;
+
+  it('denies a call its guard refuses, reports it, and leaves other tools and allowed calls alone', async () => {
+    const denied: [string | undefined, string][] = [];
+    const seen: unknown[] = [];
+    const hook = toolInputGuardHook(
+      { mcp__x__search: (input) => { seen.push(input); return (input as { q: string }).q.includes('secret') ? { allow: false, reason: 'the query leaks' } : { allow: true }; } },
+      (id, reason) => denied.push([id, reason]),
+    );
+    const bad = await pre(hook, 'mcp__x__search', { q: 'a secret thing' });
+    assert.equal(bad.hookSpecificOutput?.permissionDecision, 'deny');
+    assert.match(bad.hookSpecificOutput?.permissionDecisionReason ?? '', /mcp__x__search refused by Fern: the query leaks/);
+    assert.deepEqual(denied, [['tu1', 'mcp__x__search refused by Fern: the query leaks']]);
+    assert.deepEqual(await pre(hook, 'mcp__x__search', { q: 'fine' }), {});
+    assert.deepEqual(await pre(hook, 'mcp__x__other', { q: 'a secret thing' }), {});
+    assert.deepEqual(await pre(hook, 'toString', { q: 'a secret thing' }), {});
+    assert.deepEqual(seen, [{ q: 'a secret thing' }, { q: 'fine' }]);
+    assert.equal(denied.length, 1);
+  });
+
+  it('fails closed: a guard that throws, or answers with nothing usable, denies', async () => {
+    const hook = toolInputGuardHook(
+      { a: () => { throw new Error('boom'); }, b: (() => undefined) as never, c: (() => ({ allow: 'yes' })) as never },
+      () => {},
+    );
+    for (const tool of ['a', 'b', 'c']) assert.equal((await pre(hook, tool, {})).hookSpecificOutput?.permissionDecision, 'deny', tool);
+    assert.match((await pre(hook, 'a', {})).hookSpecificOutput?.permissionDecisionReason ?? '', /the check failed: boom/);
+  });
+
+  it('a job without guards gets the WebFetch guard alone; a job with guards gets one hook that runs its guards first', () => {
+    const ctx = { emitter: new JobEmitter('j', 'r', { actor: 'a', onBehalfOf: null, spawnedBy: 'norn' }, () => {}), jobPrompt: 'p', maxChars: 100, onFetchDenied: () => {} };
+    const plain = buildJobHooks(ctx);
+    assert.deepEqual(plain.PreToolUse!.map((m) => m.matcher), ['WebFetch']);
+    const guarded = buildJobHooks({ ...ctx, toolInputGuards: { t: () => ({ allow: true }) } });
+    assert.equal(guarded.PreToolUse!.length, 1, 'one hook, because hooks that match one call may run side by side');
+    assert.equal(guarded.PreToolUse![0]!.hooks.length, 1);
+  });
+
+  it('runs the job\'s guards before the guard that resolves the host, and resolves only when they allow the call', async () => {
+    const asked: string[] = [];
+    const resolve = async (host: string) => (asked.push(host), ['93.184.216.34']);
+    const hooks = buildJobHooks({
+      emitter: new JobEmitter('j', 'r', { actor: 'a', onBehalfOf: null, spawnedBy: 'norn' }, () => {}), jobPrompt: 'p', maxChars: 100, onFetchDenied: () => {},
+      toolInputGuards: { WebFetch: (i) => (/secret/i.test(JSON.stringify(i)) ? { allow: false, reason: 'carries an identifier' } : { allow: true }) },
+      resolve,
+    });
+    const run = async (url: string) => {
+      const out = (await hooks.PreToolUse![0]!.hooks[0]!({ hook_event_name: 'PreToolUse', tool_name: 'WebFetch', tool_input: { url, prompt: 'x' } } as never, 't', { signal: new AbortController().signal })) as { hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string } };
+      return out.hookSpecificOutput;
+    };
+    const denied = await run('https://secret-name.example/p');
+    assert.equal(denied?.permissionDecision, 'deny');
+    assert.match(denied?.permissionDecisionReason ?? '', /carries an identifier/);
+    assert.deepEqual(asked, [], 'the host name was not looked up');
+    assert.equal(await run('https://ok.example/p'), undefined);
+    assert.deepEqual(asked, ['ok.example']);
+  });
+
+  it('runJob gives the session the guards of its spec, and a denied call is logged as a hook denial', async () => {
+    const root = await tmpRoot();
+    const sink = memorySink();
+    let hooks: Options['hooks'];
+    const spec = baseSpec({ allowedTools: ['mcp__x__search'], toolInputGuards: { mcp__x__search: (i) => ((i as { q: string }).q === 'leak' ? { allow: false, reason: 'leaks' } : { allow: true }) } });
+    const res = await runJob(spec, {
+      sink, config: { workRoot: root },
+      queryFn: ({ options }) => {
+        hooks = options?.hooks;
+        return stream([
+          init,
+          assistant([{ type: 'tool_use', id: 'tu9', name: 'mcp__x__search', input: { q: 'leak' } }]),
+          toolResult('tu9', 'refused', true),
+          resultOk(),
+        ]);
+      },
+    });
+    assert.equal(res.status, 'succeeded');
+    const matchers = hooks!.PreToolUse!;
+    const run = async (q: string) => {
+      for (const m of matchers) for (const h of m.hooks) {
+        const out = (await h({ hook_event_name: 'PreToolUse', tool_name: 'mcp__x__search', tool_input: { q } } as never, 'tu9', { signal: new AbortController().signal })) as Out;
+        if (out.hookSpecificOutput?.permissionDecision === 'deny') return 'deny';
+      }
+      return 'allow';
+    };
+    assert.equal(await run('leak'), 'deny');
+    assert.equal(await run('ok'), 'allow');
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('rejects a spec whose guard is not a function', () => {
+    assert.throws(() => resolveJob(baseSpec({ toolInputGuards: { t: 'nope' as never } }), defaultConfig()), /toolInputGuards entry/);
+    assert.throws(() => resolveJob(baseSpec({ toolInputGuards: [] as never }), defaultConfig()), /toolInputGuards must be an object/);
+    assert.doesNotThrow(() => resolveJob(baseSpec({ toolInputGuards: { t: () => ({ allow: true }) } }), defaultConfig()));
+  });
+});
+
 describe('log completeness', () => {
   it('flags truncated assistant text and result text', () => {
     const t = new MessageTranslator(5);
@@ -184,8 +283,8 @@ describe('log completeness', () => {
   it('precedes a hook-denied result with a permission_denied event', () => {
     const t = new MessageTranslator(1000);
     t.translate(assistant([{ type: 'tool_use', id: 'w1', name: 'WebFetch', input: { url: 'http://127.0.0.1/' } }]));
-    t.noteHookDenial('w1', 'WebFetch refused by Norn: 127.0.0.1 is not a public internet address');
-    const out = t.translate(toolResult('w1', 'WebFetch refused by Norn: ...', true));
+    t.noteHookDenial('w1', 'WebFetch refused by Fern: 127.0.0.1 is not a public internet address');
+    const out = t.translate(toolResult('w1', 'WebFetch refused by Fern: ...', true));
     assert.deepEqual(out.map((b) => b.type), ['permission_denied', 'tool_result']);
     assert.ok(out[0]!.type === 'permission_denied' && out[0]!.reasonType === 'hook' && out[0]!.tool === 'WebFetch');
   });

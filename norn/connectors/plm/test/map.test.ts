@@ -209,7 +209,7 @@ test('the ECO that released the request is carried on the change and the record'
   assert.deepEqual([record.eco, record.ecoReleasedOn], ['ECO-0319', '2026-10-30']);
 });
 
-test('what Norn has posted is read back under the PLM field names', () => {
+test('what Fern has posted is read back under the PLM field names', () => {
   const doc = ecrDoc();
   Object.assign(doc, { impact_report_level: '1', impact_recommendation: 'Approve', impact_statement: '<p>x</p>', impact_approval_route: '' });
   assert.deepEqual(mapEcr(settings, doc).record.impact, { impact_report_level: '1', impact_recommendation: 'Approve', impact_statement: '<p>x</p>' });
@@ -250,4 +250,14 @@ test('an error from the PLM names the status and the path, and never the token',
   globalThis.fetch = (async () => new Response(JSON.stringify({ exc_type: 'DoesNotExistError', _server_messages: JSON.stringify([JSON.stringify({ message: 'ECR <b>ECR-9</b> not found' })]) }), { status: 404 })) as typeof fetch;
   await assert.rejects(readChangeRequest(opts, 'ECR-9'), (e: any) => e.name === 'PlmError' && e.status === 404
     && e.message.includes('/api/resource/ECR/ECR-9') && e.message.includes('not found') && !e.message.includes('test-secret') && !e.message.includes('test-key'));
+});
+
+test('the priority is in the change request itself, not only the record: the timeline check decides an urgent change faster', () => {
+  const urgent = mapEcr(settings, ecrDoc());
+  assert.equal(urgent.record.priority, 'urgent');
+  assert.equal(urgent.change.priority, 'urgent', 'Rush in the PLM');
+  const routine = mapEcr(settings, { ...ecrDoc(), priority: 'Normal' });
+  assert.equal(routine.change.priority, 'routine');
+  const emergency = mapEcr(settings, { ...ecrDoc(), priority: 'Critical' });
+  assert.equal(emergency.change.priority, 'emergency');
 });

@@ -22,8 +22,8 @@ export interface CheckResultRow {
   detailJson: string;
 }
 
-const moneyRow = (key: string, label: string, m: Money, extra: object = {}): CheckResultRow => ({
-  key, label, unit: 'USD', p10: m.p10, p50: m.p50, p90: m.p90,
+const moneyRow = (key: string, label: string, m: Money, extra: object = {}, unit = 'USD'): CheckResultRow => ({
+  key, label, unit, p10: m.p10, p50: m.p50, p90: m.p90,
   detailJson: JSON.stringify({ point: m.point, mean: m.mean, trace: m.trace, ...extra }),
 });
 
@@ -39,6 +39,9 @@ export function bomDeltaRows(r: BomDeltaResult): CheckResultRow[] {
     countRow('conflicts', 'Conflicts with the baseline', 'conflicts', r.conflicts.length, { conflicts: r.conflicts, trace: r.trace }),
   ];
 }
+
+/** A copy without the traces: the rows of these numbers carry theirs, and the detail row stays small. */
+const withoutTraces = <T>(x: T): T | null => (x === null || x === undefined ? null : JSON.parse(JSON.stringify(x, (k, v) => (k === 'trace' ? undefined : v))));
 
 export function costCheckRows(r: CostCheckResult): CheckResultRow[] {
   const h = r.headline;
@@ -72,6 +75,27 @@ export function costCheckRows(r: CostCheckResult): CheckResultRow[] {
       detailJson: JSON.stringify({ ...m, note: 'p10 repeats p50: the measure is summarised at p50 and p90 only' }),
     });
   }
+  // The schedule exposure and the change against the budget and the runway. The exposure is in none of the totals above.
+  if (r.exposure) {
+    out.push(moneyRow('delay_weeks', `Weeks late against the stated effectivity (${r.exposure.stated}), floored at 0`, r.exposure.weeksLate, { perWeekUsd: r.exposure.perWeekUsd }, 'weeks'));
+    out.push(moneyRow('schedule_exposure', 'Schedule exposure (not in totals): weeks late x the cost of a week of delay', r.exposure.cost, { weeksLate: r.exposure.weeksLate, perWeekUsd: r.exposure.perWeekUsd, note: 'A worst case: the line holds for every late week. In no total, budget, runway or approval figure.' }));
+  }
+  const f = r.finance;
+  if (f) {
+    const period = { label: f.period.label, from: f.period.from, to: f.period.to };
+    out.push(moneyRow(`period_cost:${f.program}`, `Cost of the change in ${f.period.label}, ${f.program}`, f.periodCost, { period }));
+    if (f.budget.share) {
+      out.push(moneyRow(`budget_share:${f.program}`, `Share of the remaining ${f.program} budget, ${f.period.label}`, f.budget.share, { period, ...f.budget, share: undefined }, 'fraction'));
+    }
+    out.push(countRow(`p_over_budget:${f.program}`, `Chance the change costs more than the remaining ${f.program} budget, ${f.period.label}`, 'probability', f.budget.probabilityOver, { period, remainingUsd: f.budget.remainingUsd, trace: f.periodCost.trace }));
+    out.push(moneyRow('runway_days', 'Days of runway the change uses', f.runway.daysUsed, { period, cashOnHandUsd: f.runway.cashOnHandUsd, monthlyBurnUsd: f.runway.monthlyBurnUsd, burnPerDayUsd: f.runway.burnPerDayUsd, runwayDaysNow: f.runway.runwayDaysNow, periodCost: f.runway.periodCost }, 'days'));
+    const x = f.withExposure;
+    if (x) {
+      out.push(moneyRow(`period_cost_with_exposure:${f.program}`, `Cost of the change in ${f.period.label}, ${f.program}, including schedule exposure`, x.periodCost, { period }));
+      if (x.budgetShare) out.push(moneyRow(`budget_share_with_exposure:${f.program}`, `Share of the remaining ${f.program} budget, including schedule exposure`, x.budgetShare, { period, probabilityOver: x.probabilityOver }, 'fraction'));
+      out.push(moneyRow('runway_days_with_exposure', 'Days of runway the change uses, including schedule exposure', x.daysUsed, { period }, 'days'));
+    }
+  }
   // Everything a trace points at, and what the card needs besides the numbers, in one row.
   out.push({
     key: 'detail', label: 'Inputs, flags and supporting results', unit: 'json', p10: 0, p50: 0, p90: 0,
@@ -79,6 +103,7 @@ export function costCheckRows(r: CostCheckResult): CheckResultRow[] {
       codeVersion: r.codeVersion, seed: r.seed, draws: r.draws, correlation: r.correlation, window: r.window, bomDelta: r.bomDelta,
       inputs: r.inputs, flags: r.flags, drivers: r.drivers, convergence: r.convergence, effectivity: r.effectivity,
       inventory: r.inventory, unitCost: r.unitCost, piecePrices: r.piecePrices, measures: r.measures,
+      finance: withoutTraces(r.finance), exposure: withoutTraces(r.exposure), financeConvergence: r.financeConvergence,
     }),
   });
   return out;

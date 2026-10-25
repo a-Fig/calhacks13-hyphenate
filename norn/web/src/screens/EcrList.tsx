@@ -171,7 +171,7 @@ export function EcrList() {
                     {e.reviewers && e.reviewers.length > 0 && (
                       <AvatarStack alignRight>
                         {e.reviewers.slice(0, 3).map(r => (
-                          <Person key={r.name} name={r.name} kind={r.name === 'Norn' ? 'norn' : 'person'} size={20} />
+                          <Person key={r.name} name={r.name} kind={r.name === 'Fern' ? 'norn' : 'person'} size={20} />
                         ))}
                       </AvatarStack>
                     )}

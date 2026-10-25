@@ -8,14 +8,27 @@
 //     what was started, across restarts. No extra table.
 //   - the revision. The key is the change request's revision, not the ECR's own counter, which also
 //     moves when the ERP baseline or an assumption changes. A baseline-only re-check starts nothing.
+//   - the wait. The statement also carries the timeline and supply checks (s3, s4, #120), which finish within
+//     seconds of s2, so a session starts once they have settled, or at a cutoff (siblings.ts) at the latest: a
+//     hung or failed check never holds Level 1 back, and the statement says it is unavailable.
 //   - the attempt cap. A session that failed, or ended without a statement, may be tried again later,
 //     up to a limit, under a new job id (so the actor name and the events never collide).
+//
+// With the research worker in the stack (`DecideOptions.research`), the first session for a revision
+// also waits for that revision's `research_result` (research/src/live/plan.ts), because research writes
+// assumptions, the cost check re-runs on them, and a statement written before that rests on numbers that
+// are about to be replaced. The statement is keyed on the change-request revision, which the re-run keeps,
+// so an early statement would block the later one for good. The wait is bounded (see `researchWait`).
+
+import { SIBLING_CACHE_GRACE_US } from './siblings.ts';
 
 /** One session, as the stored events describe it. */
 export interface JobRecord {
   jobId: string;
   revision: number;
   attempt: number;
+  /** The ECR's own revision (`pull_request.revision`) the session was started on; absent in older job ids. */
+  ecrRevision?: number;
   firstEventMs: number;
   lastEventMs: number;
   /** Set once a job_finished event exists. */
@@ -30,8 +43,37 @@ export interface EcrFacts {
   crSeq: number | null;
   /** When that revision was recorded. */
   crCreatedMs: number | null;
+  /**
+   * The ECR's own revision counter (`pull_request.revision`), which a text edit moves while the change request,
+   * and so `crSeq`, stays. A session signed for an earlier one is refused by the module, so the attempt cap counts
+   * only the sessions started on this one (and older job ids, which do not say).
+   */
+  ecrRevision?: number;
   /** s2_cost runs with status `done` (not stale, not cancelled), oldest first. */
-  s2Done: { id: number; inputsRevision: number | null; mock: boolean }[];
+  s2Done: {
+    id: number;
+    inputsRevision: number | null;
+    mock: boolean;
+    /** When the run finished; null or absent when the cache has no time for it. */
+    finishedMs?: number | null;
+    /**
+     * The timeline and supply checks of this run's snapshot (siblings.ts): `pending` while either has not settled,
+     * and the moment (`cutoffUs`, microseconds) after which the dispatcher stops waiting for it. Absent: nothing to wait for.
+     */
+    siblings?: { pending: boolean; cutoffUs: bigint };
+  }[];
+  /**
+   * Change-request revisions of this ECR for which the research worker has stored a `research_result`
+   * (its run is over and its assumptions, if any, are recorded). Only read when `DecideOptions.research` is set.
+   */
+  researched?: number[];
+  /**
+   * When the first s2_cost run on the current change-request revision finished, counting runs since made stale (each
+   * research or baseline change re-runs the check, and the wait must not start over with every one). Null or absent: unknown.
+   */
+  firstS2FinishedMs?: number | null;
+  /** When this process first saw a finished cost run on the current revision; the dispatcher's own clock, which a server timestamp cannot stretch. */
+  firstS2SeenMs?: number;
   /**
    * Impact statements of any level. `crSeq` is the change-request revision of the check run a
    * statement was written from (the module records the run), or null when it rests on no run.
@@ -48,15 +90,24 @@ export interface DecideOptions {
   orphanMs: number;
   /** Job ids this process has started and not seen finish, including ones with no events stored yet. */
   running: ReadonlySet<string>;
+  /**
+   * Set when the research worker runs next to this dispatcher: the first session for a revision waits for
+   * the revision's research result, for at most `waitMs` after the first cost run on the revision finished. Absent: no waiting,
+   * exactly the behaviour before research existed.
+   */
+  research?: { waitMs: number; /** Only these ECRs are researched (the worker's own limit); absent or empty: all. */ ecrs?: readonly string[] };
 }
 
 export type Decision = { action: 'dispatch'; revision: number; attempt: number; s2RunId: number } | { action: 'skip'; reason: string };
 
 const OPEN = ['draft', 'review'];
 
-/** `l1-<ecr>-r<revision>-a<attempt>`: letters, digits, `.`, `_` and `-` only, and short enough for an actor name (64 characters). */
-export function jobIdFor(ecrNumber: string, revision: number, attempt: number): string {
-  const tail = `-r${revision}-a${attempt}`;
+/**
+ * `l1-<ecr>-r<revision>-e<ecrRevision>-a<attempt>` (`-e` left out when not given): letters, digits, `.`, `_` and `-`
+ * only, and short enough for an actor name (64 characters).
+ */
+export function jobIdFor(ecrNumber: string, revision: number, attempt: number, ecrRevision?: number): string {
+  const tail = `-r${revision}${ecrRevision === undefined ? '' : `-e${ecrRevision}`}-a${attempt}`;
   const slug = ecrNumber.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 46 - 3 - tail.length);
   return `l1-${slug}${tail}`;
 }
@@ -64,7 +115,7 @@ export function jobIdFor(ecrNumber: string, revision: number, attempt: number): 
 /** Whether a job id is one of this ECR's sessions (the id carries the ECR's number, made filename-safe). */
 export function jobIsFor(jobId: string, ecrNumber: string): boolean {
   const p = parseJobId(jobId);
-  return !!p && jobId === jobIdFor(ecrNumber, p.revision, p.attempt);
+  return !!p && jobId === jobIdFor(ecrNumber, p.revision, p.attempt, p.ecrRevision);
 }
 
 /**
@@ -77,16 +128,47 @@ export function statementIsFor(s: { crSeq: number | null }, rev: number): boolea
   return s.crSeq === rev;
 }
 
-export function parseJobId(jobId: string): { revision: number; attempt: number } | null {
-  const m = /^l1-.+-r(\d+)-a(\d+)$/.exec(jobId);
-  return m ? { revision: Number(m[1]), attempt: Number(m[2]) } : null;
+/**
+ * The change-request revision a research job id names (`research-<ECR>-r<revision>-<digest>-a<attempt>`,
+ * research/src/live/plan.ts `jobIdFor`), or null for any other id. The research package's tests run its own
+ * `jobIdFor` through this, so the two cannot drift apart.
+ */
+export function researchRevisionOfJobId(jobId: string, ecrNumber: string): number | null {
+  const m = /^research-(.+)-r(\d+)-[0-9a-f]{8}-a\d+$/.exec(jobId);
+  return m && m[1] === ecrNumber ? Number(m[2]) : null;
+}
+
+/**
+ * Why the first session for this revision should wait for research, or null when it should go ahead: research
+ * is not part of the stack (or not for this ECR), its result for this revision is stored, or `waitMs` has
+ * passed since the cost run finished (research failed, ran out of budget, or has nothing to say: never block
+ * the statement for ever).
+ */
+export function researchWait(e: Pick<EcrFacts, 'number' | 'crCreatedMs' | 'researched' | 'firstS2FinishedMs' | 'firstS2SeenMs'>, run: { finishedMs?: number | null }, rev: number, o: Pick<DecideOptions, 'nowMs' | 'research'>): string | null {
+  const r = o.research;
+  if (!r) return null;
+  if (r.ecrs?.length && !r.ecrs.includes(e.number)) return null;
+  if (e.researched?.includes(rev)) return null;
+  // From the FIRST finished cost run on this revision, not the newest: reruns (research's own, a baseline change) would
+  // otherwise keep moving the end. Never later than this process's own first sight of a finished run, and never in the
+  // future, so a server clock ahead of ours cannot stretch the wait.
+  const since = Math.min(e.firstS2FinishedMs ?? run.finishedMs ?? e.crCreatedMs ?? o.nowMs, e.firstS2SeenMs ?? o.nowMs, o.nowMs);
+  const releaseAt = since + r.waitMs;
+  if (o.nowMs >= releaseAt) return null;
+  return `waiting for the research on revision ${rev} (a statement written now would rest on numbers research is about to replace); goes ahead without it at ${new Date(releaseAt).toISOString()}`;
+}
+
+export function parseJobId(jobId: string): { revision: number; attempt: number; ecrRevision?: number } | null {
+  const m = /^l1-.+-r(\d+)(?:-e(\d+))?-a(\d+)$/.exec(jobId);
+  if (!m) return null;
+  return m[2] === undefined ? { revision: Number(m[1]), attempt: Number(m[3]) } : { revision: Number(m[1]), attempt: Number(m[3]), ecrRevision: Number(m[2]) };
 }
 
 /** The actor name a session writes under (the runner identity and the MCP token carry the same). */
 export const actorFor = (jobId: string) => `agent:norn/level1/${jobId}`;
 
-/** What started the session: Norn, automatically, because a cost check finished. The MCP token takes no spaces in this field. */
-export const spawnedByFor = (checkRunId: number) => `norn:check_run:${checkRunId}`;
+/** What started the session: Norn, automatically, because a cost check finished, on the ECR's own revision counter (`pull_request.revision`, which a text edit bumps too). The MCP token takes no spaces in this field. */
+export const spawnedByFor = (checkRunId: number, revision: number) => `norn:check_run:${checkRunId}:revision:${revision}`;
 
 export interface EventRow {
   jobId: string;
@@ -102,7 +184,7 @@ export function jobsFromEvents(rows: Iterable<EventRow>): JobRecord[] {
     const id = parseJobId(e.jobId);
     if (!id) continue;
     let j = jobs.get(e.jobId);
-    if (!j) jobs.set(e.jobId, (j = { jobId: e.jobId, revision: id.revision, attempt: id.attempt, firstEventMs: e.tsMs, lastEventMs: e.tsMs }));
+    if (!j) jobs.set(e.jobId, (j = { jobId: e.jobId, revision: id.revision, attempt: id.attempt, ...(id.ecrRevision === undefined ? {} : { ecrRevision: id.ecrRevision }), firstEventMs: e.tsMs, lastEventMs: e.tsMs }));
     j.firstEventMs = Math.min(j.firstEventMs, e.tsMs);
     j.lastEventMs = Math.max(j.lastEventMs, e.tsMs);
     if (e.eventType === 'job_finished') {
@@ -127,6 +209,10 @@ export function decide(e: EcrFacts, o: DecideOptions): Decision {
   const run = [...e.s2Done].reverse().find(r => r.inputsRevision === rev);
   if (!run) return skip(`no finished s2_cost run on change-request revision ${rev} yet`);
   if (run.mock) return skip('the s2_cost run is mock compute');
+  // The timeline and supply checks (s3, s4) finish within seconds of the cost check, and the statement carries
+  // them, so wait for them, but only until the run's cutoff plus a short grace has strictly passed (siblings.ts says why): a hung or failed check must not hold Level 1 back
+  // (the statement then says that check is unavailable).
+  if (run.siblings?.pending && BigInt(o.nowMs) * 1000n <= run.siblings.cutoffUs + SIBLING_CACHE_GRACE_US) return skip(`waiting for the timeline and supply checks until ${new Date(Number((run.siblings.cutoffUs + SIBLING_CACHE_GRACE_US) / 1000n)).toISOString()}`);
 
   // A statement written from this revision's check run is this revision's statement (any level: a
   // Level 2 or 3 supersedes Level 1). One written for an earlier revision, however late it was posted, is not.
@@ -138,8 +224,17 @@ export function decide(e: EcrFacts, o: DecideOptions): Decision {
   const live = (j: JobRecord) => !j.finished && (o.running.has(j.jobId) || o.nowMs - j.lastEventMs < o.orphanMs);
   if (runningHere.length || mine.some(live)) return skip(`a session is running for revision ${rev}`);
 
+  // Research first, for the revision's first session only: once one has started, a retry is not held up again.
+  if (!mine.length) {
+    const wait = researchWait(e, run, rev, o);
+    if (wait) return skip(wait);
+  }
+
+  // Attempt numbers keep counting up, so job ids never repeat; the cap counts the sessions that could still be
+  // accepted: those started on the ECR's current revision, and older ids that do not name one.
   const attempts = Math.max(0, ...mine.map(j => j.attempt), ...runningHere.map(x => x.p.attempt));
-  if (attempts >= o.maxAttempts) return skip(`revision ${rev} has used its ${o.maxAttempts} attempt(s) without a statement`);
+  const used = e.ecrRevision === undefined ? mine.length : mine.filter(j => j.ecrRevision === undefined || j.ecrRevision === e.ecrRevision).length;
+  if (used >= o.maxAttempts) return skip(`revision ${rev} has used its ${o.maxAttempts} attempt(s) without a statement`);
 
   // A retry waits: out of usage until the window resets, otherwise a fixed delay.
   const last = mine.at(-1);

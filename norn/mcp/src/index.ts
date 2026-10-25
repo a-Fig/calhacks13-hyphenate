@@ -6,3 +6,4 @@ export { loadSigningKey } from './env.ts';
 export { Norn, ActorError } from './norn.ts';
 export { startServer } from './server.ts';
 export type { RunningServer, ServerOptions } from './server.ts';
+export { ASK_NORN_ROLE, ASK_NORN_TOOLS, toolsForRole, readsOnlyOwnEcrs } from './roles.ts';

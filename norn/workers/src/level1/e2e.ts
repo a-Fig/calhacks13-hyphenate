@@ -123,11 +123,13 @@ try {
   const A = await connect({ kind: 'agent', name: 'level1-e2e', origin: 'norn', spawnedBy: 'Norn' }, { persistToken: false, quiet: true });
   await subscribe(A.conn, ['SELECT * FROM pull_request', 'SELECT * FROM check_run', 'SELECT * FROM impact_statement', 'SELECT * FROM agent_event', 'SELECT * FROM check_result', 'SELECT * FROM ecr_revision', 'SELECT * FROM principal']);
   const db = A.conn.db;
-  db.pullRequest.onInsert((_c, r) => r.plmEcrNumber === ECR && mark('ECR in Norn'));
+  db.pullRequest.onInsert((_c, r) => r.plmEcrNumber === ECR && mark('ECR in Fern'));
   db.checkRun.onUpdate((_c, _o, r) => {
     if (r.status !== 'done') return;
     if (r.stage === 's1_bom_delta') mark('s1 BOM delta done');
     if (r.stage === 's2_cost') mark('s2 cost done');
+    if (r.stage === 's3_timeline') mark('s3 timeline done');
+    if (r.stage === 's4_supply') mark('s4 supply done');
   });
   db.agentEvent.onInsert((_c, e) => {
     if (!e.role.startsWith('level1-')) return;
@@ -136,7 +138,7 @@ try {
     if (e.eventType === 'tool_call') mark('first tool call');
     if (e.eventType === 'job_finished') mark('session finished');
   });
-  db.impactStatement.onInsert(() => mark('statement in Norn'));
+  db.impactStatement.onInsert(() => mark('statement in Fern'));
 
   // ---- ingest from the real PLM ------------------------------------------------------------------------
   say(`starting the PLM ingest for ${ECR}`);
@@ -215,13 +217,13 @@ try {
   }
 
   // ---- the report ---------------------------------------------------------------------------------------------------
-  const t0 = marks.get('ECR in Norn')!;
-  console.log('\n==== timings (from the ECR reaching Norn) ====');
+  const t0 = marks.get('ECR in Fern')!;
+  console.log('\n==== timings (from the ECR reaching Fern) ====');
   for (const [name, t] of [...marks.entries()].sort((a, b) => a[1] - b[1])) console.log(`${((t - t0) / 1000).toFixed(2).padStart(8)} s  ${name}`);
   const t = (n: string) => marks.get(n);
   const span = (a: string, b: string) => (t(a) !== undefined && t(b) !== undefined ? `${((t(b)! - t(a)!) / 1000).toFixed(1)} s` : 'n/a');
-  console.log(`\nECR in Norn to s2 done: ${span('ECR in Norn', 's2 cost done')}; s2 done to session started: ${span('s2 cost done', 'session started')}; session: ${span('session started', 'session finished')}; statement in Norn to PLM: ${span('statement in Norn', 'statement in PLM')}`);
-  console.log(`ECR in Norn to statement in PLM: ${span('ECR in Norn', 'statement in PLM')}`);
+  console.log(`\nECR in Fern to s2 done: ${span('ECR in Fern', 's2 cost done')}; s2 done to session started: ${span('s2 cost done', 'session started')}; session: ${span('session started', 'session finished')}; statement in Fern to PLM: ${span('statement in Fern', 'statement in PLM')}`);
+  console.log(`ECR in Fern to statement in PLM: ${span('ECR in Fern', 'statement in PLM')}`);
   console.log(`\nsession: ${model}, ${finP.status ?? '?'} in ${finP.durationMs ? (finP.durationMs / 1000).toFixed(1) : '?'} s, ${finP.numTurns ?? '?'} turns, tools: ${toolCalls.join(', ')}; usage ${JSON.stringify(resP.usage ?? {})}`);
   console.log(`actor ${principal?.name ?? '(see action_log)'}; statement id ${st.id}, Level ${st.level}, written at ECR revision ${st.prRevision}`);
   console.log('\n==== idempotency ====');

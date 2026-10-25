@@ -1,4 +1,6 @@
-# Norn: notes for whoever works here
+# Fern: notes for whoever works here
+
+**The product is named Fern** (renamed from Norn on 2026-10-25). The code, folders and identifiers still say `norn`: `norn/`, `@norn/*`, `NORN_*`, the `norn` database. Only what a person reads was renamed; `scripts/rename-fern.mjs` did it and can be re-run.
 
 Our Cal Hacks 13.0 entry for the Hyphenate track, "The Hyphenated Enterprise: Autonomous Systems
 for Finance". This file is the map: what we're building, why, and where each piece lives. How the
@@ -11,24 +13,24 @@ reaches the line, and how exposed the supply chain is. Today a cost engineer, a 
 and a cost accountant each work that out by hand, and a change can wait months for a decision that
 needs a few hours of real work (`docs/IN-PRACTICE.md`).
 
-Norn does that assessment. It reads the change from the company's PLM and the costs, suppliers,
+Fern does that assessment. It reads the change from the company's PLM and the costs, suppliers,
 stock and history from its ERP. It returns the unit cost, the one-time cost, the cut-in date and
 the supply risk as ranges, and posts them where engineers and finance already work. Its agents
 approve the small changes the company trusts them with, and bring everything else to the right
 person with the work done. Every number can be traced to the data, rule or person behind it.
 
-Norn is a general platform, tuned to each company by configuration. Inside, it works like GitHub
+Fern is a general platform, tuned to each company by configuration. Inside, it works like GitHub
 for the production definition: the baseline is `main`, a proposed change is a branch, the impact
-checks are CI. That framing is ours alone; outside the team, it's Norn, ECRs, ECOs and impact
+checks are CI. That framing is ours alone; outside the team, it's Fern, ECRs, ECOs and impact
 assessments.
 
 ## The goal this weekend
 
-A live demo of Norn deployed at **Bowman Aviation**, a fictional Archer-like maker of electric
-aircraft that runs real software: an engineer files a change in Bowman's PLM, Norn's assessment
+A live demo of Fern deployed at **Bowman Aviation**, a fictional Archer-like maker of electric
+aircraft that runs real software: an engineer files a change in Bowman's PLM, Fern's assessment
 appears on it, the board decides, and the released change order carries the ERP change package
-for finance to enter, with any number traceable on request. Norn never writes to the ERP (#71). Hyphenate's judges ask "would you hire it?", and what's real, what's simulated, and
-how we know (`docs/hyphenate-track.md`). The seats Norn fills are the cost engineer, cost
+for finance to enter, with any number traceable on request. Fern never writes to the ERP (#71). Hyphenate's judges ask "would you hire it?", and what's real, what's simulated, and
+how we know (`docs/hyphenate-track.md`). The seats Fern fills are the cost engineer, cost
 accountant and supply-chain analyst who write the impact assessment for the Change Control Board.
 The Devpost deadline is Sun Oct 25, 09:00 PT (`README.md`).
 
@@ -36,8 +38,8 @@ The Devpost deadline is Sun Oct 25, 09:00 PT (`README.md`).
 
 | What | Folder | What it is |
 |---|---|---|
-| **Norn** | `norn/` | Our product. General: nothing in it should need to name Bowman. Design: `norn/ARCHITECTURE.md` |
-| **Bowman's configuration of Norn** | `bowman/norn-config/` | Vocabulary, the ECR form, change classes, approval matrix, roles and agent autonomy limits |
+| **Fern** | `norn/` | Our product. General: nothing in it should need to name Bowman. Design: `norn/ARCHITECTURE.md` |
+| **Bowman's configuration of Fern** | `bowman/norn-config/` | Vocabulary, the ECR form, change classes, approval matrix, roles and agent autonomy limits |
 | **Bowman's PLM** | `bowman/plm/` | Where Bowman's engineers file changes; stands in for Teamcenter. Scenery: we never pitch it or say we built a PLM (Tyler, #19) |
 | **ERPNext** | `bowman/erp/` | Real open-source ERP, set up as Bowman's; stands in for SAP. Runs on Tyler's home server |
 | **Bowman's data** | `bowman/data/` | The one dataset both systems are seeded from: parts, BOMs, suppliers, costs, people, history, the demo's changes |
@@ -67,7 +69,8 @@ issues, grouped into those milestones and labelled by folder (`area: norn` and s
 
 ## Commands
 
-None yet (2026-10-24). When the first runnable piece lands, add one fenced block here with every
-command, each line commented.
+```
+node norn/checks/proof.ts   # runs the checks on the planted scenarios and rewrites docs/PROOF.md (about 40 s, offline)
+```
 
 @docs/WORKFLOW.md

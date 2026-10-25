@@ -117,6 +117,49 @@ export interface SupplierConstraint {
   bundle?: { withinWeeks: number; secondQualificationDiscount?: number; priceBreak?: number };
 }
 
+/** Where a figure came from and why it is that size, as the company's data states it. Shown in the trace. */
+export interface FigureNote {
+  basis: string;
+  ref?: string;
+  note?: string;
+}
+
+/** A program's budget for the current period. The change's cost is measured against what is left of it. */
+export interface ProgramBudget {
+  program: ProgramId;
+  /** The budget period as calendar months, both ends included. */
+  period: { label: string; from: MonthStr; to: MonthStr };
+  budgetUsd: number;
+  /** Spent from the start of the period to `asOf`. */
+  spentToDateUsd: number;
+  asOf: DateStr;
+  prov?: FigureNote;
+}
+
+/** What a week of delay costs the program: the cost basis for a change that reaches the line later than the ECR states. */
+export interface DelayCost {
+  program: ProgramId;
+  perWeekUsd: Range3;
+  /** What the weekly figure covers. */
+  basis?: string;
+  prov?: FigureNote;
+}
+
+/** Cash and burn for the whole company, for the days of runway a change uses. */
+export interface CompanyCash {
+  cashOnHandUsd: number;
+  /** Average monthly cash out, all programs and overhead, net of any revenue. */
+  monthlyBurnUsd: number;
+  asOf: DateStr;
+  prov?: FigureNote;
+}
+
+export interface Finance {
+  budgets: ProgramBudget[];
+  delayCosts: DelayCost[];
+  cash: CompanyCash;
+}
+
 export interface Baseline {
   programs: Program[];
   workCenters: WorkCenter[];
@@ -128,6 +171,12 @@ export interface Baseline {
   builtAircraft: BuiltUnit[];
   /** Supplier limits the supply check looks for conflicts between open changes in. Optional: the ERP does not hold them. */
   supplierConstraints?: SupplierConstraint[];
+  /**
+   * Budgets, cash and the cost of delay. Optional: the ERP does not hold them, so a baseline carries them only when the
+   * company's data or configuration supplies them. Without them the cost check leaves the delay line blank and reports
+   * no budget or runway impact.
+   */
+  finance?: Finance;
 }
 
 // ---------------------------------------------------------------- one change request (an ECR)

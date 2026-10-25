@@ -287,7 +287,7 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
   const newCost = new Map(release.items.map((i) => [i.item, r2(i.standardCost)]));
   const label = (item: ItemCode) => { const rev = release.items.find((i) => i.item === item)?.rev; return rev ? `${item} Rev ${rev}` : item; };
   const trace: LineTrace = { eco, ecr: release.ecr, decisionId: release.decision.id, decisionUrl: release.decision.url };
-  const traceText = `${eco} (${release.ecr}); Norn decision ${release.decision.id}: ${release.decision.url}`;
+  const traceText = `${eco} (${release.ecr}); Fern decision ${release.decision.id}: ${release.decision.url}`;
   type LineInit = Omit<ChangeLine, 'trace' | 'tables' | 'note' | 'found' | 'document'> & { tables?: ErpTable[]; note?: string; found?: DocRef; document?: DocRef };
   const add = (l: LineInit) => lines.push({ ...l, tables: l.tables ?? [], trace });
 
@@ -318,7 +318,7 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
         field('price_list_rate', 'Rate', rate, { money: true }), field('valid_from', 'Valid From', effectiveDate),
         ...(from?.uom ? [field('uom', 'UOM', from.uom)] : []), ...(from?.currency ? [field('currency', 'Currency', from.currency)] : []),
         field('note', 'Note', sentence(`${traceText}. ${code}${rev ? ` Rev ${rev}` : ''} standard cost ${money(rate)} from ${effectiveDate}${was ? `, was ${money(was)}` : ''}.`)),
-        field(t.price.eco, 'Released by ECO', eco), ...(t.price.decision ? [field(t.price.decision, 'Norn decision', release.decision.url)] : []),
+        field(t.price.eco, 'Released by ECO', eco), ...(t.price.decision ? [field(t.price.decision, 'Fern decision', release.decision.url)] : []),
       ],
       amounts: { to: rate, ...(was === undefined ? {} : { from: was, change: r2(rate - was) }) },
       status: state.status, ...(state.found ? { found: ref('Item Price', state.found.name) } : {}), ...(state.note ? { note: state.note } : {}),
@@ -508,7 +508,7 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
       const asked: [string, string, unknown][] = [
         ['rm_cost_as_per', 'Rate Of Materials Based On', BOM_COSTING.rm_cost_as_per], ['buying_price_list', 'Price List', BOM_COSTING.buying_price_list],
         ...(t.bom.releasedOn ? [[t.bom.releasedOn, 'Released on', effectiveDate] as [string, string, unknown]] : []),
-        ...(t.bom.decision ? [[t.bom.decision, 'Norn decision', release.decision.url] as [string, string, unknown]] : []),
+        ...(t.bom.decision ? [[t.bom.decision, 'Fern decision', release.decision.url] as [string, string, unknown]] : []),
       ];
       for (const [name, label, want] of asked) {
         const got = String(tagged[name] ?? '').slice(0, name === t.bom.releasedOn ? 10 : undefined);
@@ -558,7 +558,7 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
         field('is_active', 'Is Active', 1), field('is_default', 'Is Default', 1),
         field('rm_cost_as_per', 'Rate Of Materials Based On', 'Price List'), field('buying_price_list', 'Price List', opts.standardCostPriceList),
         field(t.bom.eco, 'Released by ECO', eco), ...(t.bom.releasedOn ? [field(t.bom.releasedOn, 'Released on', effectiveDate)] : []),
-        ...(t.bom.decision ? [field(t.bom.decision, 'Norn decision', release.decision.url)] : []),
+        ...(t.bom.decision ? [field(t.bom.decision, 'Fern decision', release.decision.url)] : []),
       ],
       tables: [{ table: 'items', label: 'Items', rows }],
       amounts,
@@ -663,7 +663,7 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
         fields: [
           field('voucher_type', 'Entry Type', 'Journal Entry'), field('company', 'Company', opts.company), field('posting_date', 'Posting Date', posting),
           field(t.je.eco, 'Released by ECO', eco), field(t.je.entry, 'ECO entry', j.key),
-          ...(t.je.decision ? [field(t.je.decision, 'Norn decision', release.decision.url)] : []),
+          ...(t.je.decision ? [field(t.je.decision, 'Fern decision', release.decision.url)] : []),
         ],
         tables: [{ table: 'accounts', label: 'Accounting Entries', rows: j.lines.flatMap((l) => [entryRow(l.debit, 'debit', l.amount, l.memo), entryRow(l.credit, 'credit', l.amount, l.memo)]) }],
         amounts: { debit: total, credit: total },
@@ -726,13 +726,13 @@ export function formatErpChangePackage(pkg: ErpChangePackage): string {
   const out: string[] = [
     `# ERP change package for ${r.eco}`,
     '',
-    `${r.eco} came from ${r.ecr} and Norn decision ${r.decision.id} (${r.decision.url}). New standard costs apply from ${r.effectiveDate}; journal entries are dated ${r.postingDate ?? r.effectiveDate}.`,
+    `${r.eco} came from ${r.ecr} and Fern decision ${r.decision.id} (${r.decision.url}). New standard costs apply from ${r.effectiveDate}; journal entries are dated ${r.postingDate ?? r.effectiveDate}.`,
     '',
     `ERPNext was read at ${pkg.readAt}: ${k.entered} of ${plural(k.total, 'line')} entered, ${k.toEnter} to enter, ${k.conflict} in conflict.`,
   ];
   if (pkg.problems.length) out.push('', '## Problems', '', 'The package cannot be followed as it stands until these are fixed.', '', ...pkg.problems.map((p) => `- ${p}`));
   if (!pkg.lines.length) out.push('', 'Nothing to enter.');
-  else out.push('', `Enter the lines in this order. Type the ECO number into the ECO field of each document you create: Norn finds it by that on its next read of ERPNext.`);
+  else out.push('', `Enter the lines in this order. Type the ECO number into the ECO field of each document you create: Fern finds it by that on its next read of ERPNext.`);
 
   pkg.lines.forEach((l, i) => {
     const where = l.mode === 'new' ? `a new ${l.doctype}` : l.mode === 'tool' ? `the ${l.doctype}` : `${l.doctype} ${l.document!.name}`;
@@ -752,7 +752,7 @@ export function formatErpChangePackage(pkg: ErpChangePackage): string {
     }
     const amounts = Object.entries(l.amounts);
     if (amounts.length) out.push('', `Amounts: ${amounts.map(([key, v]) => `${words(key)} ${money(v)}`).join(', ')}.`);
-    out.push('', `Trace: ${l.trace.eco}, ${l.trace.ecr}, Norn decision ${l.trace.decisionId} (${l.trace.decisionUrl}).`);
+    out.push('', `Trace: ${l.trace.eco}, ${l.trace.ecr}, Fern decision ${l.trace.decisionId} (${l.trace.decisionUrl}).`);
   });
 
   if (pkg.effects.length) {

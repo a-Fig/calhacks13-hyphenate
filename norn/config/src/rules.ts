@@ -77,7 +77,7 @@ export const rules: Rule[] = [
         })
       );
       for (const kind of REQUIRED_FIELD_KINDS) {
-        if (!found.has(kind)) issues.push({ path: 'ecrForm.sections', message: `expected a field of kind ${JSON.stringify(kind)}, because Norn's checks read it, got none` });
+        if (!found.has(kind)) issues.push({ path: 'ecrForm.sections', message: `expected a field of kind ${JSON.stringify(kind)}, because Fern's checks read it, got none` });
       }
     },
   },
@@ -219,7 +219,7 @@ export const rules: Rule[] = [
         // The refusals here replace the checks on limits, fallbacks and carrying out an approval below, which would only repeat them.
         const erp = ERP_ACTIONS.includes(rule.action);
         if (erp) {
-          const because = `Norn never writes to the ERP (#71), so ${rule.action} can only be recommended, in the ERP change package for a person to enter (#72)`;
+          const because = `Fern never writes to the ERP (#71), so ${rule.action} can only be recommended, in the ERP change package for a person to enter (#72)`;
           if (rule.level !== 'recommend') {
             issues.push({ path: `${path}.level`, message: `expected "recommend", because ${because}, got ${JSON.stringify(rule.level)}` });
           }

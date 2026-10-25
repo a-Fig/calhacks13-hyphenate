@@ -104,7 +104,7 @@ Detail on how these fit together, and who does what, is in `CHANGE-CONTROL.md`.
 - **Assumption source.** Each assumption is `given` (a stated fact), `default` (a category
   default) or `agent_estimated` (proposed by an agent, with a rationale).
 
-## How Norn marks evidence
+## How Fern marks evidence
 
 The audit trail (#25) is described in `research/trust-patterns-human.md`.
 
@@ -127,7 +127,7 @@ The audit trail (#25) is described in `research/trust-patterns-human.md`.
 
   Clicking a mark shows exactly where the value came from. No universal tick-mark standard exists;
   each audit firm defines a legend, and so do we.
-- **Likelihood words** (Tyler, 2026-10-24: standard). Norn uses the intelligence community's fixed
+- **Likelihood words** (Tyler, 2026-10-24: standard). Fern uses the intelligence community's fixed
   scale (ODNI ICD 203). Each word has a fixed range:
 
   | Word | Probability |
@@ -146,15 +146,15 @@ The audit trail (#25) is described in `research/trust-patterns-human.md`.
 ## Overloaded words
 
 - **Agent.** One of three things:
-  - Norn's own agents (extraction, research, review, the narration of the impact statement);
-  - a person's own agent connected to Norn, acting on their behalf (#34);
+  - Fern's own agents (extraction, research, review, the narration of the impact statement);
+  - a person's own agent connected to Fern, acting on their behalf (#34);
   - a coding agent working on this repo.
-- **Norn.** Our product's name (Tyler, 2026-10-24). The Norns of Norse myth know the past, the
-  present and the future. Norn reads a company's history to forecast what a change will do.
+- **Fern.** Our product's name. It was Norn until 2026-10-25 (Tyler); the code still uses `norn`.
+  Fern reads a company's history to forecast what a change will do.
   Orrery was second. The candidates are in `research/naming.md`.
 - **Bowman.** Our fictional, Archer-like electric-aircraft maker (`bowman/README.md`).
-- **Level 1, 2, 3.** How far Norn's report on an ECR has got: Level 1 is the provisional impact
-  screen, Level 3 is Norn's final verdict after adversarial review (#26). Not the CCB's cost tiers.
+- **Level 1, 2, 3.** How far Fern's report on an ECR has got: Level 1 is the provisional impact
+  screen, Level 3 is Fern's final verdict after adversarial review (#26). Not the CCB's cost tiers.
 
 The accounting basics (double-entry, general ledger, journal entry and so on) are already defined in
 `hyphenate-track.md`, under "Key concepts".

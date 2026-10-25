@@ -364,7 +364,7 @@ export interface AgentRun {
   lines: { at: string; kind: 'start' | 'text' | 'tool' | 'result' | 'end'; text: string; error?: boolean }[];
 }
 
-export type SourceSystem = 'PLM' | 'ERP' | 'Quote' | 'Norn' | 'Policy' | 'History';
+export type SourceSystem = 'PLM' | 'ERP' | 'Quote' | 'Fern' | 'Policy' | 'History';
 
 export interface TraceSource {
   system: SourceSystem;

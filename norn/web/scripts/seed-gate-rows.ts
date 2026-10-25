@@ -119,7 +119,7 @@ const answers = [
 const fastTrack = (prId: bigint) => A.R.requestFastTrackApproval({ prId, answers, companyClass: 'II', regulatoryClass: 'minor', triggers: [] });
 const statement = (who: Client, prId: bigint) =>
   who.R.postImpactStatement({
-    prId, level: 1, changeClass: 'Class II, FAA minor', route: 'Fast track', headline: 'Norn read the cost check and the change request; the figures below are the check’s own.',
+    prId, level: 1, changeClass: 'Class II, FAA minor', route: 'Fast track', headline: 'Fern read the cost check and the change request; the figures below are the check’s own.',
     numbers: [{ key: 'open_questions', label: 'Open questions for the board', unit: '', p10: 0, p50: 0, p90: 0, evidence: 'judgment', resultKey: '' }], drivers: [], assumptions: [], claims: [{ text: 'Same supplier, no tooling, no change to form, fit or function.', evidence: 'judgment' }],
   });
 
@@ -134,7 +134,7 @@ try {
   const p431 = await until(() => byNumber('ECR-0431'), 5000, 'ECR-0431');
   for (const p of [p423, p417, p431]) await settledOn(p.id);
   for (const p of [p423, p417, p431]) {
-    await R.setPrStatus({ prId: p.id, status: 'review' });
+    // ingest_ecr opened them in review already.
     await statement(A, p.id);
   }
 

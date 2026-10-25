@@ -21,14 +21,14 @@ const traces: Record<string, Trace> = {
     summary: 'Class II and FAA minor: a colour change in a non-structural panel. The supplier’s flame-test certificate covers the new masterbatch, and the panel is not a flame barrier.',
     value: { text: 'Class II · FAA minor' },
     sources: [{ system: 'PLM', ref: 'ECR-0423 classification' }, { system: 'Policy', ref: 'Never-fast-track list', detail: 'None of the five exclusions applies' }],
-    inputs: [], assumptions: [], producedBy: { check: 'Change class (#33)', actor: 'Norn router', note: 'Mock' },
+    inputs: [], assumptions: [], producedBy: { check: 'Change class (#33)', actor: 'Fern router', note: 'Mock' },
   },
   rec: {
-    id: 'rec', title: 'Norn’s decision', evidence: 'judgment',
-    summary: 'Bowman lets Norn approve a change that is Class II, FAA minor, from the same supplier, with no tooling and under the dollar limit. This one meets all of it. Convening the board would cost more than the saving.',
-    value: { text: 'Approved', range: 'Fast track, within Norn’s limits' },
-    sources: [{ system: 'Policy', ref: 'Bowman fast-track criteria' }, { system: 'Norn', ref: 'Policy gate', detail: 'Allowed: within autonomy limits' }],
-    inputs: [], assumptions: [], producedBy: { check: 'Policy gate (#43)', actor: 'Norn', onBehalfOf: 'Bowman’s fast-track rule' },
+    id: 'rec', title: 'Fern’s decision', evidence: 'judgment',
+    summary: 'Bowman lets Fern approve a change that is Class II, FAA minor, from the same supplier, with no tooling and under the dollar limit. This one meets all of it. Convening the board would cost more than the saving.',
+    value: { text: 'Approved', range: 'Fast track, within Fern’s limits' },
+    sources: [{ system: 'Policy', ref: 'Bowman fast-track criteria' }, { system: 'Fern', ref: 'Policy gate', detail: 'Allowed: within autonomy limits' }],
+    inputs: [], assumptions: [], producedBy: { check: 'Policy gate (#43)', actor: 'Fern', onBehalfOf: 'Bowman’s fast-track rule' },
   },
 };
 
@@ -36,19 +36,19 @@ const checks: Check[] = [
   { id: 'bom', name: 'BOM delta', state: 'passed', summary: '1 item revised, no BOM line changes', by: 'Reader' },
   { id: 'cost', name: 'Cost', state: 'passed', summary: `Net ${usd(net.point ?? net.p50, { plus: true, cents: true })} in the first 12 months, a saving`, by: 'Cost check' },
   { id: 'timeline', name: 'Time to the line', state: 'passed', summary: `The grey stock is used up first: the change starts at S/N ${v.cutIn.serial}, ${monthLabel(v.cutIn.month)} (default)`, by: 'Cost check' },
-  { id: 'supply', name: 'Supply risk', state: 'passed', summary: 'Same supplier, same mould', by: 'Norn supply agent' },
-  { id: 'class', name: 'Classification', state: 'passed', summary: 'Class II, FAA minor: fast track', by: 'Norn router' },
+  { id: 'supply', name: 'Supply risk', state: 'passed', summary: 'Same supplier, same mould', by: 'Fern supply agent' },
+  { id: 'class', name: 'Classification', state: 'passed', summary: 'Class II, FAA minor: fast track', by: 'Fern router' },
 ];
 
 const activity: ActivityEvent[] = [
   { id: 'c1', at: '2026-10-22T10:19:00-07:00', actor: 'Ayesha Karimi', actorKind: 'person', kind: 'filed', text: 'filed the ECR' },
-  { id: 'c2', at: '2026-10-22T10:20:00-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'ran_checks', text: 'ran the impact checks', detail: 'All passed.' },
-  { id: 'c3', at: '2026-10-22T10:20:30-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'label', text: 'added the labels Class II, FAA minor, Fast track and Vesper' },
-  { id: 'c4', at: '2026-10-22T10:21:00-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'report', text: 'posted the impact statement, Level 1', level: 1 },
-  { id: 'c5', at: '2026-10-22T10:30:00-07:00', actor: 'Norn blind checker', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'research', text: 'formed its own estimate without seeing the answer', detail: 'Same sign, same size.' },
-  { id: 'c6', at: '2026-10-22T10:44:00-07:00', actor: 'Norn', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'report', text: 'posted Level 3: Norn’s final verdict', detail: 'Checked the never-fast-track list: clear.', level: 3 },
-  { id: 'c7', at: '2026-10-23T13:10:00-07:00', actor: 'Norn', actorKind: 'norn', onBehalfOf: 'Bowman’s fast-track rule', kind: 'approved', text: 'approved these changes', detail: 'Policy gate: allowed, within limits. No CCB.' },
-  { id: 'c8', at: '2026-10-23T13:12:00-07:00', actor: 'Norn', actorKind: 'norn', onBehalfOf: 'Bowman’s fast-track rule', kind: 'policy', text: 'prepared the ERP change package for ECO release', detail: 'Three lines for a person to enter in ERPNext.' },
+  { id: 'c2', at: '2026-10-22T10:20:00-07:00', actor: 'Fern', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'ran_checks', text: 'ran the impact checks', detail: 'All passed.' },
+  { id: 'c3', at: '2026-10-22T10:20:30-07:00', actor: 'Fern', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'label', text: 'added the labels Class II, FAA minor, Fast track and Vesper' },
+  { id: 'c4', at: '2026-10-22T10:21:00-07:00', actor: 'Fern', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'report', text: 'posted the impact statement, Level 1', level: 1 },
+  { id: 'c5', at: '2026-10-22T10:30:00-07:00', actor: 'Fern blind checker', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'research', text: 'formed its own estimate without seeing the answer', detail: 'Same sign, same size.' },
+  { id: 'c6', at: '2026-10-22T10:44:00-07:00', actor: 'Fern', actorKind: 'norn', spawnedBy: 'Norn, for Ayesha Karimi', kind: 'report', text: 'posted Level 3: Fern’s final verdict', detail: 'Checked the never-fast-track list: clear.', level: 3 },
+  { id: 'c7', at: '2026-10-23T13:10:00-07:00', actor: 'Fern', actorKind: 'norn', onBehalfOf: 'Bowman’s fast-track rule', kind: 'approved', text: 'approved these changes', detail: 'Policy gate: allowed, within limits. No CCB.' },
+  { id: 'c8', at: '2026-10-23T13:12:00-07:00', actor: 'Fern', actorKind: 'norn', onBehalfOf: 'Bowman’s fast-track rule', kind: 'policy', text: 'prepared the ERP change package for ECO release', detail: 'Three lines for a person to enter in ERPNext.' },
 ];
 
 /** What Norn hands over when the ECO is released. A person enters it in the ERP; Norn never does. */
@@ -86,8 +86,8 @@ export const ecr0423Summary: EcrSummary = {
   program: 'Vesper', partNumber: 'BW-9440-030', companyClass: 'II', faa: 'minor', priority: 'Routine', status: 'ECO released',
   cost: { p10: net.p10 ?? net.p50, p50: net.p50, p90: net.p90 ?? net.p50, point: net.point, from: list.from }, level: 3,
   lastActivity: '2026-10-23T13:12:00-07:00', lastActivityBy: 'ECO released',
-  originator: 'Ayesha Karimi', filedOn: '2026-10-22', flag: 'Fast track: Norn approved within its limits', hasAssessment: true,
-  reviewers: [{ name: 'Norn', state: 'approved' }], checks: 'passed', comments: 8, change: 'BW-9440-030 from grey to charcoal',
+  originator: 'Ayesha Karimi', filedOn: '2026-10-22', flag: 'Fast track: Fern approved within its limits', hasAssessment: true,
+  reviewers: [{ name: 'Fern', state: 'approved' }], checks: 'passed', comments: 8, change: 'BW-9440-030 from grey to charcoal',
 };
 
 export const ecr0423: ImpactAssessment = {
@@ -98,12 +98,12 @@ export const ecr0423: ImpactAssessment = {
   route: {
     tier: 'Fast track: Class II, FAA minor, same supplier, no tooling. No CCB.',
     steps: [
-      { role: 'Within Norn’s limits', person: 'Norn', state: 'approved', when: 'Oct 23' },
+      { role: 'Within Fern’s limits', person: 'Fern', state: 'approved', when: 'Oct 23' },
       { role: 'CCB', state: 'not_required' },
     ],
   },
   recommendation: {
-    verdict: 'approve', headline: 'Norn approved within its limits', traceId: 'rec',
+    verdict: 'approve', headline: 'Fern approved within its limits', traceId: 'rec',
     reasons: [
       { text: 'Class II and FAA minor, same supplier, no tooling', evidence: 'fact', traceId: 'class' },
       { text: 'None of the never-fast-track cases applies', evidence: 'judgment', traceId: 'rec' },

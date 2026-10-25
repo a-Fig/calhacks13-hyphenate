@@ -52,6 +52,7 @@ import RecordAssumptionReducer from "./record_assumption_reducer";
 import RecordBaselineReducer from "./record_baseline_reducer";
 import RecordEcoReleaseReducer from "./record_eco_release_reducer";
 import RecordErpPackageReducer from "./record_erp_package_reducer";
+import RecordPlmDecisionReducer from "./record_plm_decision_reducer";
 import RegisterActorReducer from "./register_actor_reducer";
 import ReleasePublicationReducer from "./release_publication_reducer";
 import ReportProgressReducer from "./report_progress_reducer";
@@ -408,6 +409,7 @@ const reducersSchema = __reducers(
   __reducerSchema("record_baseline", RecordBaselineReducer),
   __reducerSchema("record_eco_release", RecordEcoReleaseReducer),
   __reducerSchema("record_erp_package", RecordErpPackageReducer),
+  __reducerSchema("record_plm_decision", RecordPlmDecisionReducer),
   __reducerSchema("register_actor", RegisterActorReducer),
   __reducerSchema("release_publication", ReleasePublicationReducer),
   __reducerSchema("report_progress", ReportProgressReducer),

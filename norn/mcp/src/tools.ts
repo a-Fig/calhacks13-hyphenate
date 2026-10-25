@@ -4,18 +4,39 @@
 // connection and the module's reducers, so the policy gate decides and the action log records the
 // result, refusals included. The tools take no identity: who is acting comes from the token.
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { PullRequest } from '@norn/bindings/types';
+import type { ActionLog, PullRequest } from '@norn/bindings/types';
 import { z } from 'zod';
 import { registerErpTools } from './erp.ts';
+import { companyConfigOf, explainRefusal, fastTrackField, outcomeOf, prepareRequest, recordOf, statementClassOf } from './fasttrack.ts';
 import type { ActorHandle, Norn } from './norn.ts';
+import { readsOnlyOwnEcrs, toolsForRole } from './roles.ts';
 import type { Claims } from './token.ts';
 import { affectedParts, assumptionView, bareResultKey, currentResult, currentResultKeys, ecrSummary, ecrView, effectiveAssumptions, historyOf, impactOf, partView, provenanceIndex } from './views.ts';
+
+/**
+ * A check on a statement's own words before it is saved (post_impact_statement). It returns why the statement may not be
+ * posted, which goes back to the agent like any other refusal of the tool, or undefined. The server knows nothing of the
+ * rules behind it: whoever starts the server supplies it (main.ts).
+ */
+/** Every piece of the statement the agent wrote that a page displays, not only the prose fields (#123). */
+export interface StatementProse {
+  headline: string;
+  changeClass?: string;
+  route?: string;
+  numbers?: { key?: string; label?: string; unit?: string; evidence?: string; p10?: number; p50?: number; p90?: number }[];
+  drivers: { text: string }[];
+  assumptions?: { key?: string; note?: string }[];
+  claims: { text: string }[];
+}
+
+export type StatementGuard = (pr: PullRequest, spawnedBy: string, statement: StatementProse) => string | undefined;
 
 export interface ToolContext {
   norn: Norn;
   claims: Claims;
   actor: ActorHandle;
   log: (message: string) => void;
+  statementGuard?: StatementGuard;
 }
 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean };
@@ -30,8 +51,23 @@ const ECR = z.string().min(1).describe('The ECR number as list_ecrs shows it, e.
 
 class ToolFailure extends Error {}
 
+/**
+ * The ECRs this credential may read, lowercased, or null when it may read any (every role but the
+ * ones in roles.ts, whose `ecrs` limit writes only). A restricted role's `ecrs` are matched exactly,
+ * so a '*' in them grants nothing.
+ */
+function readScope(ctx: ToolContext): Set<string> | null {
+  return readsOnlyOwnEcrs(ctx.claims.role) ? new Set(ctx.claims.ecrs.map(e => e.toLowerCase())) : null;
+}
+
 function ecrOf(ctx: ToolContext, ref: string): PullRequest {
   const { pr, known } = ctx.norn.findEcr(ref);
+  const scope = readScope(ctx);
+  if (scope) {
+    // Same words whether the ECR does not exist or is someone else's, and no list of the other ECRs.
+    if (!pr || !scope.has(pr.plmEcrNumber.toLowerCase())) throw new ToolFailure(`This credential can read only ${ctx.claims.ecrs.join(', ') || 'no ECR'}. It cannot read '${ref.slice(0, 60)}'.`);
+    return pr;
+  }
   if (!pr) throw new ToolFailure(`No single ECR matches '${ref}'. ECRs: ${known.join(', ') || 'none'}.`);
   return pr;
 }
@@ -47,7 +83,7 @@ function tool(ctx: ToolContext, name: string, body: (...args: any[]) => Promise<
       if (e instanceof ToolFailure) result = fail(e.message);
       else {
         ctx.log(`tool ${name} failed: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
-        result = fail('Norn hit an internal error handling this call. Nothing was reported as done. Say so in your answer.');
+        result = fail('Fern hit an internal error handling this call. Nothing was reported as done. Say so in your answer.');
       }
     }
     ctx.log(`tool ${name} actor=${ctx.claims.actor} job=${ctx.claims.jobId} ${result.isError ? 'error' : 'ok'} ${Date.now() - t0}ms`);
@@ -59,31 +95,52 @@ function tool(ctx: ToolContext, name: string, body: (...args: any[]) => Promise<
  * Send one write through the actor's connection and report what the gate did. A refusal is not an
  * error to retry: it is the answer, and it is already in Norn's action log.
  */
-async function write(ctx: ToolContext, reducer: string, args: Record<string, unknown>, done: (entity: string) => Record<string, unknown>): Promise<ToolResult> {
+async function sendWrite(ctx: ToolContext, reducer: string, args: Record<string, unknown>, explain?: (message: string) => string | undefined): Promise<{ failed: ToolResult } | { row: ActionLog }> {
   const r = await ctx.norn.call(ctx.actor, ctx.claims, reducer, args);
+  const failed = (message: string) => ({ failed: fail(message) });
   if (r.error) {
-    if (r.error.kind === 'rejected') return fail(`Norn rejected this: ${r.error.message}`);
-    if (r.error.kind === 'unknown_result') return fail('Norn did not confirm whether this was saved. Call get_ecr_history before trying again, so you do not post it twice.');
-    return fail(`Norn could not take this write right now (${r.error.kind}). Nothing was saved. Try once more; if it fails again, say so in your answer.`);
+    if (r.error.kind === 'rejected') return failed(explain?.(r.error.message) ?? `Fern rejected this: ${r.error.message}`);
+    if (r.error.kind === 'unknown_result') return failed('Fern did not confirm whether this was saved. Call get_ecr_history before trying again, so you do not post it twice.');
+    return failed(`Fern could not take this write right now (${r.error.kind}). Nothing was saved. Try once more; if it fails again, say so in your answer.`);
   }
-  if (!r.row) return fail('Norn accepted the call but has not confirmed it yet. Call get_ecr_history before trying again, so you do not post it twice.');
-  if (r.row.outcome === 'rejected') return fail(`Norn rejected this: ${r.row.summary.replace(/^S+ rejected: /, '')}. Nothing was saved (entry ${r.row.id} in the action log).`);
+  if (!r.row) return failed('Fern accepted the call but has not confirmed it yet. Call get_ecr_history before trying again, so you do not post it twice.');
+  if (r.row.outcome === 'rejected') return failed(`Fern rejected this: ${r.row.summary.replace(/^\S+ rejected: /, '')}. Nothing was saved (entry ${r.row.id} in the action log).`);
   if (r.row.outcome === 'denied')
-    return fail(
-      `Refused by Norn's policy gate: ${r.row.policy.replace(/^deny: /, '')}. The refusal is recorded in Norn's action log (entry ${r.row.id}). Do not retry or look for another way; report that you were refused.`
+    return failed(
+      `Refused by Fern's policy gate: ${r.row.policy.replace(/^deny: /, '')}. The refusal is recorded in Fern's action log (entry ${r.row.id}). Do not retry or look for another way; report that you were refused.`
     );
+  return { row: r.row };
+}
+
+async function write(ctx: ToolContext, reducer: string, args: Record<string, unknown>, done: (entity: string) => Record<string, unknown>): Promise<ToolResult> {
+  const r = await sendWrite(ctx, reducer, args);
+  if ('failed' in r) return r.failed;
   return ok({ saved: true, recordedAs: { actor: r.row.actorName, onBehalfOf: r.row.onBehalfOf ?? null, spawnedBy: r.row.spawnedBy }, allowedBecause: r.row.policy, actionLogEntry: Number(r.row.id), ...done(r.row.entity) });
 }
 
 export const INSTRUCTIONS = [
-  "Norn's tools for engineering change requests (ECRs) at Bowman.",
+  "Fern's tools for engineering change requests (ECRs) at Bowman.",
   'Numbers come from checks that code ran; read them with get_impact and quote them as they are. If a result says mock, it is placeholder data and you must say so.',
-  'Label what you write by evidence class: assumption, computation (copied from a check result) or judgment (your conclusion). You cannot label your own claim a fact; facts are what Norn holds from its sources.',
+  'Label what you write by evidence class: assumption, computation (copied from a check result) or judgment (your conclusion). You cannot label your own claim a fact; facts are what Fern holds from its sources.',
   'You act under your own name for the person named in your credential, and only on the ECRs your job names. A refusal is final; report it.',
 ].join(' ');
 
+/** A view of the server that registers only the named tools; the rest are never offered and are refused as unknown. */
+function onlyTools(server: McpServer, allowed: ReadonlySet<string>): McpServer {
+  return new Proxy(server, {
+    get(target, prop) {
+      if (prop === 'registerTool') return (name: string, ...rest: unknown[]) => (allowed.has(name) ? (target.registerTool as (...a: unknown[]) => unknown).call(target, name, ...rest) : undefined);
+      const v = Reflect.get(target, prop, target);
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+  });
+}
+
 export function registerTools(server: McpServer, ctx: ToolContext): void {
   const { norn } = ctx;
+  // A restricted role (roles.ts) is offered only its own tools. Every other role gets all of them, as before.
+  const allowed = toolsForRole(ctx.claims.role);
+  if (allowed) server = onlyTools(server, allowed);
 
   // ---- reads ----------------------------------------------------------------------------------
 
@@ -115,24 +172,36 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     'get_impact',
     {
       description:
-        'The latest check results for an ECR, by stage. Each number has p10/p50/p90, a unit and its trace: the formula, what it used, and the assumptions the run read with their sources. Evidence class: computation. state says no_results, partial, current or stale; stale numbers are out of date. mock: true means placeholder numbers, not real forecasts. Pass key to get one result with its full trace.',
+        'The latest check results for an ECR, by stage. Each number has p10/p50/p90, a unit and its trace: the formula, what it used, and the assumptions the run read with their sources. Evidence class: computation. state says no_results, partial, current or stale; stale numbers are out of date. mock: true means placeholder numbers, not real forecasts. Pass key to get one result with its full trace. fastTrack says whether to ask for the fast track: candidate is true when only your answers to fastTrack.tests stand between this ECR and it (why says so in a sentence); see request_fast_track_approval.',
       inputSchema: { ecr: ECR, key: z.string().optional().describe('A result key, to get its full trace.') },
       annotations: { readOnlyHint: true },
     },
-    tool(ctx, 'get_impact', async ({ ecr, key }: { ecr: string; key?: string }) => ok({ ecr: ecrOf(ctx, ecr).plmEcrNumber, ...impactOf(norn, ecrOf(ctx, ecr), { key }) }))
+    tool(ctx, 'get_impact', async ({ ecr, key }: { ecr: string; key?: string }) => {
+      const pr = ecrOf(ctx, ecr);
+      return ok({ ecr: pr.plmEcrNumber, ...impactOf(norn, pr, { key }), fastTrack: fastTrackField(norn, pr, ctx.claims) });
+    })
   );
 
   server.registerTool(
     'get_part',
     {
-      description: 'Read one part by part number: name, category and spec, and the ECRs whose text names it. Evidence class: fact (as held in Norn; the ERP connector is not wired in yet).',
+      description: 'Read one part by part number: name, category and spec, and the ECRs whose text names it. Evidence class: fact (as held in Fern; the ERP connector is not wired in yet).',
       inputSchema: { part: z.string().min(1).describe('The part number, e.g. "BWM-1042-01".') },
       annotations: { readOnlyHint: true },
     },
     tool(ctx, 'get_part', async ({ part }: { part: string }) => {
       const want = part.trim().toLowerCase();
       const p = [...norn.db.part.iter()].find(x => x.partNumber.toLowerCase() === want);
-      if (!p) return fail(`No part '${part}' in Norn. Part numbers: ${[...norn.db.part.iter()].map(x => x.partNumber).sort().join(', ') || 'none'}.`);
+      const scope = readScope(ctx);
+      if (scope) {
+        // Only a part on the change request or BOM delta of an ECR this credential names; the same words
+        // for a part that does not exist, no list of other parts, and no other ECR's number in the answer.
+        const mine = [...norn.db.pullRequest.iter()].filter(pr => scope.has(pr.plmEcrNumber.toLowerCase()));
+        const on = p ? mine.filter(pr => affectedParts(norn, pr).some(a => a.partNumber === p.partNumber)) : [];
+        if (!p || on.length === 0) return fail(`This credential can read only parts on the change request or BOM delta of ${ctx.claims.ecrs.join(', ') || 'no ECR'}. '${part.slice(0, 60)}' is not one of them.`);
+        return ok({ ...partView(p), namedInEcrs: on.map(pr => pr.plmEcrNumber) });
+      }
+      if (!p) return fail(`No part '${part}' in Fern. Part numbers: ${[...norn.db.part.iter()].map(x => x.partNumber).sort().join(', ') || 'none'}.`);
       const ecrs = [...norn.db.pullRequest.iter()].filter(pr => affectedParts(norn, pr).some(a => a.partNumber === p.partNumber)).map(pr => pr.plmEcrNumber);
       return ok({ ...partView(p), namedInEcrs: ecrs });
     })
@@ -226,10 +295,10 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     'post_impact_statement',
     {
       description:
-        'Post a structured impact statement (level 1 to 3) on an ECR: change class, proposed approval route, a headline, headline numbers with p10/p50/p90, drivers, the assumptions it rests on, and claims, each with an evidence class. A number with evidence "computation" must name the key of a result from get_impact (e.g. "unit_cost_delta") and is copied from that result, with its label and unit: do not type them. You cannot post evidence "fact". Any other number needs p10, p50 and p90. Assumption sources are filled in from Norn\'s record. Use fixed likelihood words in prose (almost no chance, very unlikely, unlikely, roughly even, likely, very likely, almost certain).',
+        'Post a structured impact statement (level 1 to 3) on an ECR: change class, proposed approval route, a headline, headline numbers with p10/p50/p90, drivers, the assumptions it rests on, and claims, each with an evidence class. A number with evidence "computation" must name the key of a result from get_impact (e.g. "unit_cost_delta") and is copied from that result, with its label and unit: do not type them. You cannot post evidence "fact". Any other number needs p10, p50 and p90. Assumption sources are filled in from Fern\'s record. Use fixed likelihood words in prose (almost no chance, very unlikely, unlikely, roughly even, likely, very likely, almost certain).',
       inputSchema: {
         ecr: ECR,
-        level: z.number().int().min(1).max(3).describe('1 = impact screen, 2 = researched, 3 = Norn\'s final verdict.'),
+        level: z.number().int().min(1).max(3).describe('1 = impact screen, 2 = researched, 3 = Fern\'s final verdict.'),
         changeClass: z.string().min(1).max(80).describe('The change class, e.g. "Class I".'),
         route: z.string().min(1).max(200).describe('The proposed approval route, e.g. "CCB".'),
         headline: z.string().min(1).max(600).describe('One or two plain sentences.'),
@@ -256,6 +325,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     },
     tool(ctx, 'post_impact_statement', async (a: any) => {
       const pr = ecrOf(ctx, a.ecr);
+      const refused = ctx.statementGuard?.(pr, ctx.claims.spawnedBy, { headline: a.headline, changeClass: a.changeClass, route: a.route, numbers: a.numbers, drivers: a.drivers, assumptions: a.assumptions, claims: a.claims });
+      if (refused) throw new ToolFailure(refused);
       const numbers = (a.numbers as any[]).map(n => {
         if (n.evidence === 'computation') {
           if (!n.resultKey) throw new ToolFailure(`Number '${n.key}' is a computation, so it needs resultKey (a key from get_impact).`);
@@ -286,7 +357,45 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
     })
   );
 
+  const Answer = z.object({
+    testId: z.string().min(1).max(80).describe('A test id from get_impact fastTrack.tests.'),
+    holds: z.boolean().describe("Whether the test's text is true of this ECR."),
+    evidence: z.string().min(1).max(400).describe('What you read that shows it: a short quote or pointer into get_ecr, get_impact or list_assumptions.'),
+  });
+  server.registerTool(
+    'request_fast_track_approval',
+    {
+      description:
+        "Ask Fern to approve an ECR on the fast track, with your answers to the company's fast-track tests (get_impact fastTrack.tests; ask only when fastTrack.candidate is true). Answer every test, once, honestly, with evidence: a test you mark true without evidence is a false statement under your name. Fern's gate decides from the company's rules and the numbers, not from you: the answer says approved, held for a blind second check (not approved yet), recommended to a named role, or refused, each with the reasons. Call it once and report the outcome as it is. Classes: leave companyClass out and Fern uses the change class on your current statement for this revision (post your Level 1 statement first, stating Class I or Class II with a reason; Fern never picks a class for you, and a class more permissive than your statement's is refused). Always state regulatoryClass (the FAA class, e.g. \"minor\" or \"major\") and say in your answer what you rest it on; Fern holds no FAA class of its own. The answer reports where each class came from. Optional triggers: named conditions you saw (safety_part, new_supplier, conflicting_open_ecr, shared_supplier_exposure, linchpin_assumption_agent_estimated, sources_conflict, stale_data, checker_disagrees); any of them sends the ECR to a person. Refused if the ECR is outside your job, not in review, or its checks have not finished.",
+      inputSchema: {
+        ecr: ECR,
+        answers: z.array(Answer).min(1).max(30),
+        companyClass: z.string().max(40).optional(),
+        regulatoryClass: z.string().max(40).optional(),
+        triggers: z.array(z.string().max(80)).max(10).optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    tool(ctx, 'request_fast_track_approval', async (a: { ecr: string; answers: { testId: string; holds: boolean; evidence: string }[]; companyClass?: string; regulatoryClass?: string; triggers?: string[] }) => {
+      const pr = ecrOf(ctx, a.ecr);
+      const loaded = companyConfigOf(norn);
+      if (loaded.state === 'none') return fail('No company configuration is stored in Fern, so there is no fast track rule to apply. Nothing was sent.');
+      if (loaded.state === 'unreadable') return fail(`Fern cannot read the company configuration (${loaded.why}), so it takes no fast-track decision. Nothing was sent.`);
+      const prepared = prepareRequest(loaded.config, a, statementClassOf(norn, pr, loaded.config));
+      if (!prepared.ok) return fail(prepared.message);
+      const { request } = prepared;
+      const sent = await sendWrite(
+        ctx,
+        'requestFastTrackApproval',
+        { prId: pr.id, answers: request.answers, companyClass: request.classes.company, regulatoryClass: request.classes.regulatory, triggers: request.triggers },
+        message => explainRefusal(message, pr.plmEcrNumber)
+      );
+      if ('failed' in sent) return sent.failed;
+      return ok(outcomeOf(loaded.config, pr.plmEcrNumber, sent.row, recordOf(norn, pr, sent.row), request));
+    })
+  );
+
   registerErpTools(server, ctx);
 }
 
-export const TOOL_NAMES = ['list_ecrs', 'get_ecr', 'get_impact', 'get_part', 'list_assumptions', 'get_ecr_history', 'add_comment', 'propose_assumption', 'post_impact_statement'] as const;
+export const TOOL_NAMES = ['list_ecrs', 'get_ecr', 'get_impact', 'get_part', 'list_assumptions', 'get_ecr_history', 'add_comment', 'propose_assumption', 'post_impact_statement', 'request_fast_track_approval'] as const;

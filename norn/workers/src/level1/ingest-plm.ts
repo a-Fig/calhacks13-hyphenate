@@ -18,7 +18,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PlmMappingError, listEcrs, readChangeRequest, watchEcrs, type EcrListing, type PlmOptions } from '../../../connectors/plm/src/index.ts';
+import { PlmMappingError, listEcrs, readChangeRequest, watchEcrs, type EcrListing, type PlmOptions, type ReadResult } from '../../../connectors/plm/src/index.ts';
 import { classify, withRetry, type Client } from '../connect.ts';
 // ingest.ts hands these in: it is the entry module, and importing it back from here would deadlock its top-level await.
 import type { IngestItem, PlmDecisionItem, ingestOnce as IngestOnce, itemOf as ItemOf } from '../ingest.ts';
@@ -66,6 +66,35 @@ export const wanted = (o: PlmIngestOptions, e: Pick<EcrListing, 'name' | 'workfl
 export const startupWanted = (o: PlmIngestOptions, e: Pick<EcrListing, 'name' | 'workflowState'>) =>
   wanted(o, e) && !DECIDED_STATES.includes(e.workflowState);
 
+/**
+ * The change request Norn stores for an ECR: the structure the checks read, plus what the PLM's form says about who filed
+ * it, where it is routed, when it is needed and why (#146). These sit on the PLM record, not in the checks' change request,
+ * and the dataset and the stub feed carry them in the change request under the same names, so the ECR page reads them from
+ * one place either way. The originator stays the PLM login the form names; the screens find the person.
+ * The title and description travel beside the change request, as before.
+ */
+export function storedChangeRequest(r: Pick<ReadResult, 'change' | 'record'>): Record<string, unknown> {
+  const { record: e } = r;
+  const filed: Record<string, unknown> = {
+    // The priority is the change request's own (connectors/plm map.ts sets it there for the timeline check), so it is not repeated here.
+    originator: e.originator || undefined,
+    justificationCode: e.justificationCode || undefined,
+    companyClass: e.companyClass,
+    faaClass: e.faaClass,
+    originatingNcr: e.originatingNcr,
+    neededBy: e.dates.neededBy,
+    routedTo: e.routedTo,
+    need: e.text.need || undefined,
+    consequencesIfDisapproved: e.text.consequencesIfDisapproved,
+    alternativesConsidered: e.text.alternativesConsidered,
+    failureData: e.text.failureData,
+    faaRationale: e.text.faaRationale,
+    classificationNote: e.text.classificationNote,
+  };
+  for (const k of Object.keys(filed)) if (filed[k] === undefined) delete filed[k];
+  return { ...(r.change as unknown as Record<string, unknown>), ...filed };
+}
+
 /** One ECR as the PLM has it now, as an ingest item. */
 export async function readItem(opts: PlmOptions, name: string, itemOf: typeof ItemOf): Promise<IngestItem> {
   const r = await readChangeRequest(opts, name);
@@ -75,7 +104,7 @@ export async function readItem(opts: PlmOptions, name: string, itemOf: typeof It
   const decidedBy = r.record.ecoReleasedBy ?? r.record.modifiedBy;
   const decision = decided && decidedBy ? { decision: decided, decidedBy, decidedOn: r.record.dates.decidedOn ?? r.record.dates.modified } : undefined;
   // The PLM's own title and text, as filed; the change request carries the structure the checks read.
-  return { ...itemOf(r.change as Record<string, any>, r.modified), title: r.record.title || name, description: r.record.text.description, ...(decision ? { decision } : {}) };
+  return { ...itemOf(storedChangeRequest(r), r.modified), title: r.record.title || name, description: r.record.text.description, ...(decision ? { decision } : {}) };
 }
 
 /** The module took the decision but did not act on it (checks not done, baseline moved, the ECR edited in the PLM, ...): it is tried again until it does. */
@@ -122,14 +151,14 @@ export async function recordDecision(R: Pick<Client['R'], 'recordPlmDecision'>, 
     return;
   }
   if (followed && !(await followed(item.plmEcrNumber, d.decision))) {
-    const note = `${item.plmEcrNumber} ${d.decision} in the PLM by ${d.decidedBy}, but Norn has not followed it (the reason is in the ECR's log)`;
+    const note = `${item.plmEcrNumber} ${d.decision} in the PLM by ${d.decidedBy}, but Fern has not followed it (the reason is in the ECR's log)`;
     if (!unfollowedLogged.has(key)) log(note);
     unfollowedLogged.add(key);
     throw new DecisionNotFollowed(note);
   }
   unfollowedLogged.delete(key);
   sent.set(key, d.decision);
-  log(`${item.plmEcrNumber} ${d.decision} in the PLM by ${d.decidedBy}, reported to Norn and followed`);
+  log(`${item.plmEcrNumber} ${d.decision} in the PLM by ${d.decidedBy}, reported to Fern and followed`);
 }
 const unfollowedLogged = new Set<string>();
 

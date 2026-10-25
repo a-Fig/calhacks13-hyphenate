@@ -50,6 +50,9 @@ const MIRROR_QUERIES = [
   'SELECT * FROM principal',
   'SELECT * FROM impact_statement',
   'SELECT * FROM main_version',
+  'SELECT * FROM norn_config',
+  'SELECT * FROM approval',
+  'SELECT * FROM recommendation',
 ];
 
 type Reducers = Record<string, (args: Record<string, unknown>) => Promise<void>>;
@@ -250,7 +253,7 @@ export class Norn {
     try {
       h = await p;
     } catch (e) {
-      throw new ActorError(503, `could not connect to Norn's database: ${e instanceof Error ? e.message : connectErrorText(e, this.opts.uri, this.opts.database)}`);
+      throw new ActorError(503, `could not connect to Fern's database: ${e instanceof Error ? e.message : connectErrorText(e, this.opts.uri, this.opts.database)}`);
     }
     await h.exclusive(async () => {
       await this.register(h, claims);
@@ -268,7 +271,7 @@ export class Norn {
       onBehalfOf: claims.onBehalfOf ?? undefined,
     });
     if (r.error || r.row?.outcome !== 'applied')
-      throw new ActorError(409, `could not register ${claims.actor} in Norn: ${r.error?.message ?? r.row?.policy.replace(/^deny: /, '') ?? 'no confirmation from the database'}`);
+      throw new ActorError(409, `could not register ${claims.actor} in Fern: ${r.error?.message ?? r.row?.policy.replace(/^deny: /, '') ?? 'no confirmation from the database'}`);
     h.registeredFor = { onBehalfOf: claims.onBehalfOf };
   }
 
@@ -279,7 +282,7 @@ export class Norn {
       for (const ref of claims.ecrs) {
         const { pr, known } = this.findEcr(ref);
         if (!pr || pr.plmEcrNumber.toLowerCase() !== ref.toLowerCase())
-          throw new ActorError(403, `the token names ECR '${ref}', which Norn does not have (tokens carry the full PLM number; Norn has: ${known.join(', ') || 'none'})`);
+          throw new ActorError(403, `the token names ECR '${ref}', which Fern does not have (tokens carry the full PLM number; Fern has: ${known.join(', ') || 'none'})`);
         prIds.push(pr.id);
       }
     }
@@ -289,8 +292,8 @@ export class Norn {
     const sig = JSON.stringify([claims.jobId, anyEcr, prIds.map(String).sort(), maxLevel]);
     if (h.grant && h.grant.sig === sig && (h.grant.until >= claims.exp * 1000 || h.grant.until - Date.now() > 30 * 60_000)) return;
     const r = await this.call(h, claims, 'grantScope', { jobId: claims.jobId, anyEcr, prIds, maxLevel, expiresAt: Timestamp.fromDate(new Date(until)) });
-    if (r.error) throw new ActorError(409, `Norn did not accept the job's scope: ${r.error.message}`);
-    if (r.row?.outcome !== 'applied') throw new ActorError(409, `Norn did not accept the job's scope: ${r.row ? r.row.policy.replace(/^deny: /, '') : 'no confirmation from the database'}`);
+    if (r.error) throw new ActorError(409, `Fern did not accept the job's scope: ${r.error.message}`);
+    if (r.row?.outcome !== 'applied') throw new ActorError(409, `Fern did not accept the job's scope: ${r.row ? r.row.policy.replace(/^deny: /, '') : 'no confirmation from the database'}`);
     h.grant = { sig, until };
   }
 }

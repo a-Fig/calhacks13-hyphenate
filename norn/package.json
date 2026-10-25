@@ -13,7 +13,8 @@
     "mcp",
     "checks",
     "connectors/erpnext",
-    "runner"
+    "runner",
+    "research"
   ],
   "engines": {
     "node": ">=22.12"

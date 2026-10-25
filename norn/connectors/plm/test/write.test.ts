@@ -62,7 +62,7 @@ test('postComment posts a Comment about the ECR, and refuses empty text or a pat
 });
 
 test('a refusal from the PLM comes back as an error with the status, not the token', async () => {
-  stub(() => ({ status: 403, body: { exc_type: 'PermissionError', _server_messages: JSON.stringify([JSON.stringify({ message: 'Norn may write only the impact assessment fields' })]) } }));
+  stub(() => ({ status: 403, body: { exc_type: 'PermissionError', _server_messages: JSON.stringify([JSON.stringify({ message: 'Fern may write only the impact assessment fields' })]) } }));
   await assert.rejects(writeImpact(opts, 'ECR-0417', { impact_report_level: '1' }), (e: any) => e.name === 'PlmError' && e.status === 403
     && e.message.includes('impact assessment') && !e.message.includes('test-secret'));
 });

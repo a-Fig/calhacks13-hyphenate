@@ -29,11 +29,12 @@ import { randomUUID } from 'node:crypto';
 import { provenanceOf } from '../impact.ts';
 import { alreadyPublished, statementToPlmFields, type Formatted, type Provenance, type StatementDoc } from './format.ts';
 import { ruleInputOf } from './recommendation.ts';
+import { tableNumbers } from './timeline-supply.ts';
 import { plmFromConnector, plmOptionsFromEnv, type PlmApi } from './plm.ts';
 import { costCheckOf, storedCompanyConfig, type EcrRef } from './routing.ts';
 import { statementIsFor } from './plan.ts';
 import { settingsFromEnv } from './settings.ts';
-import { crSeqOfRun, failedChecksForRun, jsonOr, runInputs } from './source.ts';
+import { crSeqOfRun, failedChecksForRun, jsonOr, ruleSiblingsOf, runInputs, siblingsForRun } from './source.ts';
 
 /** How long a claim stands if its holder dies before releasing it. Longer than one PLM write. */
 const LEASE_MS = 60_000;
@@ -98,7 +99,7 @@ export async function publishDetailed(d: PublishDeps, ecrNumber: string, f: Form
     try {
       await d.override.record(p);
     } catch (e) {
-      d.log(`${ecrNumber}: could not record the override in Norn: ${(e as Error).message}`);
+      d.log(`${ecrNumber}: could not record the override in Fern: ${(e as Error).message}`);
     }
   };
   if (prov.mock) return mock();
@@ -134,7 +135,7 @@ export async function publishDetailed(d: PublishDeps, ecrNumber: string, f: Form
     if (!alreadyPublished(after, target.f)) d.log(`${ecrNumber}: the PLM stored the statement but its answer differs from what was sent (it may have rewritten the text)`);
     if (d.comment) {
       const rec = target.f.recommendation ? ` Recommendation: ${target.f.recommendation}.` : '';
-      await d.plm.postComment(ecrNumber, `<p>Norn posted a Level ${target.f.fields.impact_report_level} impact statement on this ECR.${rec} See the Impact assessment tab.</p>`);
+      await d.plm.postComment(ecrNumber, `<p>Fern posted a Level ${target.f.fields.impact_report_level} impact statement on this ECR.${rec} See the Impact assessment tab.</p>`);
     }
     await record(target.f);
     return { result: 'written', f: target.f };
@@ -151,7 +152,7 @@ export const statementIdOf = (f: Formatted): number => Number(f.ref.split('.')[0
 
 export function overrideComment(statementId: number, o: NonNullable<Formatted['overridden']>): string {
   const agent = o.agent ? `"${o.agent}"` : 'none';
-  return `Norn's rule set the recommendation to ${o.derived.recommendation}; the Level 1 agent wrote ${agent} (rule ${o.derived.rule}, statement ${statementId}). ${o.derived.reasoning}`;
+  return `Fern's rule set the recommendation to ${o.derived.recommendation}; the Level 1 agent wrote ${agent} (rule ${o.derived.rule}, statement ${statementId}). ${o.derived.reasoning}`;
 }
 
 export interface OverrideDeps {
@@ -231,17 +232,25 @@ export function gather(db: DbConnection['db'], pr: Row<'pullRequest'>): { statem
   const results = [...db.checkResult.prId.filter(pr.id)];
   // The results behind the computation numbers (for the formulas and the mock flag): the same key
   // and digits, in the statement's own run first, else the newest such result.
+  // The timeline and supply checks the statement rests on (siblings.ts): the runs bound to its own s2 run, never a newer one.
+  const siblings = run ? siblingsForRun(db, pr.id, run.id) : undefined;
+  const ownRuns = new Set([run?.id, siblings?.timeline.runId === undefined ? undefined : BigInt(siblings.timeline.runId), siblings?.supply.runId === undefined ? undefined : BigInt(siblings.supply.runId)].filter((x): x is bigint => x !== undefined));
   const matched = doc.numbers
     .filter(n => n.evidence === 'computation' && n.resultKey)
     .map(n => {
       const same = results.filter(r => r.key === n.resultKey && r.p10 === n.p10 && r.p50 === n.p50 && r.p90 === n.p90);
-      return same.find(r => run && r.checkRunId === run.id) ?? same.sort((x, y) => Number(y.id - x.id))[0];
+      return same.find(r => ownRuns.has(r.checkRunId)) ?? same.sort((x, y) => Number(y.id - x.id))[0];
     })
     .filter((r): r is NonNullable<typeof r> => !!r);
   const formulas: Record<string, string> = {};
   for (const r of matched) {
     const f = jsonOr<{ trace?: { formula?: string } }>(r.detailJson, {}).trace?.formula;
     if (f) formulas[r.key] = f;
+  }
+  // The timeline and supply table's rows are the bound runs' own, so their formulas are too.
+  for (const r of [...(siblings?.timeline.rows ?? []), ...(siblings?.supply.rows ?? [])]) {
+    const f = jsonOr<{ trace?: { formula?: string } }>(r.detailJson, {}).trace?.formula;
+    if (f && formulas[r.key] === undefined) formulas[r.key] = f;
   }
   const detailRow = run ? results.find(r => r.checkRunId === run.id && r.key === 'detail') : undefined;
   const detail = detailRow ? jsonOr<{ codeVersion?: string; draws?: number; implementationScenario?: Provenance['implementationScenario'] }>(detailRow.detailJson, {}) : {};
@@ -250,9 +259,9 @@ export function gather(db: DbConnection['db'], pr: Row<'pullRequest'>): { statem
   return {
     statement: doc,
     ecr: { number: pr.plmEcrNumber, title: pr.title, revision: crSeq },
-    prov: { baseline: p.baseline, changeRequest: p.changeRequest, codeVersion: detail.codeVersion, draws: detail.draws, implementationScenario: detail.implementationScenario, s2RunId: run ? Number(run.id) : undefined, formulas, mock: matched.some(r => r.mock), costCheck: run ? costCheckOf(results.filter(r => r.checkRunId === run.id)) : undefined,
+    prov: { baseline: p.baseline, changeRequest: p.changeRequest, codeVersion: detail.codeVersion, draws: detail.draws, implementationScenario: detail.implementationScenario, s2RunId: run ? Number(run.id) : undefined, timelineRunId: siblings?.timeline.runId, supplyRunId: siblings?.supply.runId, timelineSupplyNumbers: siblings ? tableNumbers(siblings.timeline, siblings.supply) : undefined, formulas, mock: matched.some(r => r.mock), costCheck: run ? costCheckOf(results.filter(r => r.checkRunId === run.id)) : undefined,
       // The recommendation rule reads the statement's own run, so it is derived only for a statement that has one.
-      ruleInput: run ? ruleInputOf(results.filter(r => r.checkRunId === run.id), failedChecksForRun(db, pr.id, run.id)) : undefined },
+      ruleInput: run ? ruleInputOf(results.filter(r => r.checkRunId === run.id), failedChecksForRun(db, pr.id, run.id), ruleSiblingsOf(siblings, pr.plmEcrNumber)) : undefined },
   };
 }
 
@@ -336,7 +345,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
             const override = {
               recorded: (p: Formatted) => !p.overridden || cached().includes(overrideComment(statementIdOf(p), p.overridden)),
               record: async (p: Formatted) => {
-                if (await recordOverride(overrideDeps, statementIdOf(p), p)) log(`${pr.plmEcrNumber}: recorded in Norn that the rule's recommendation replaced the agent's (statement ${statementIdOf(p)})`);
+                if (await recordOverride(overrideDeps, statementIdOf(p), p)) log(`${pr.plmEcrNumber}: recorded in Fern that the rule's recommendation replaced the agent's (statement ${statementIdOf(p)})`);
               },
             };
             const out = await publishDetailed({ plm, lease: leaseFor(pr.id), comment: settings.publishComment, override, log }, pr.plmEcrNumber, f, g.prov, latest);

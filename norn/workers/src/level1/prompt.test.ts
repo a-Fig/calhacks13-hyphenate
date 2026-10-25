@@ -74,7 +74,7 @@ test('the job prompt gives the exact keys, the route text and the sources, and d
 
 test('when routing has decided, the prompt says to use it as given', () => {
   const p = jobPrompt(facts({ routing: { class: 'Class II', route: 'Fast track' } }));
-  assert.ok(p.includes('"Class II" (decided by Norn\'s routing') && p.includes('"Fast track" (decided by Norn\'s routing'));
+  assert.ok(p.includes('"Class II" (decided by Fern\'s routing') && p.includes('"Fast track" (decided by Fern\'s routing'));
   assert.ok(!p.includes('Proposed change class: '));
 });
 

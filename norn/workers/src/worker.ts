@@ -43,7 +43,7 @@ const baselines = new BaselineStore(await baselineSourceFromEnv(), r =>
 );
 const HANDLERS: Record<string, (ctx: RunCtx) => Promise<Result[]>> = { ...MOCK_HANDLERS, ...impactHandlers(conn, baselines) };
 log(
-  `connected as ${identity.toHexString().slice(0, 12)}; stages ${handled.join(',')}; s1 to s4 are Norn's impact checks on ECRs with a change request, ` +
+  `connected as ${identity.toHexString().slice(0, 12)}; stages ${handled.join(',')}; s1 to s4 are Fern's impact checks on ECRs with a change request, ` +
     `baseline from ${baselines.source?.describe ?? 'nowhere (no source configured: those runs will fail)'}; everything else is MOCK compute`
 );
 
@@ -61,7 +61,7 @@ await subscribe(conn, [
 ]);
 // Store the config if it differs from what the module holds (norn_config is in the cache now).
 await applyStartupConfig(client, startupConfig, log).catch(e => {
-  console.error(`[${name}] Norn did not start: ${e instanceof Error ? e.message : String(e)}`);
+  console.error(`[${name}] Fern did not start: ${e instanceof Error ? e.message : String(e)}`);
   client.close();
   process.exit(1);
 });

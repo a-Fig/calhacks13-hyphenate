@@ -41,9 +41,9 @@ const spec: JobSpec = {
   model: CHEAP_MODEL,
   maxTurns: 8,
   timeoutMs: 240_000,
-  systemPrompt: 'You are a Norn agent working on engineering change requests (ECRs) at Bowman Aviation, a fictional company. You work only through Norn\'s tools. Be brief and say only what the tools returned.',
+  systemPrompt: 'You are a Fern agent working on engineering change requests (ECRs) at Bowman Aviation, a fictional company. You work only through Fern\'s tools. Be brief and say only what the tools returned.',
   prompt: [
-    'Do these steps in order, using only Norn\'s tools.',
+    'Do these steps in order, using only Fern\'s tools.',
     '1. Read ECR BWM-ECR-0417 with get_ecr.',
     '2. Read its impact with get_impact.',
     '3. Post one short comment on BWM-ECR-0417 with add_comment: at most three sentences. Give the ECR\'s status, the state of its impact results (current, partial, stale or no results), and the p50 of the per-unit cost change with its unit. Say whether the numbers are mock.',
@@ -69,7 +69,7 @@ console.log(`agent's last words: ${result.result ?? '(none)'}`);
 const calls = mem.events.filter(e => e.type === 'tool_call') as Extract<(typeof mem.events)[number], { type: 'tool_call' }>[];
 const started = mem.events.find(e => e.type === 'job_started') as any;
 check('the job succeeded on a Haiku model', result.status === 'succeeded' && /haiku/i.test(started?.model ?? ''), `${result.status}; ${started?.model}`);
-check('the agent used only Norn\'s tools', calls.length > 0 && calls.every(c => c.tool.startsWith(`mcp__${NORN_MCP_SERVER_NAME}__`)), calls.map(c => c.tool.replace('mcp__norn__', '')).join(', '));
+check('the agent used only Fern\'s tools', calls.length > 0 && calls.every(c => c.tool.startsWith(`mcp__${NORN_MCP_SERVER_NAME}__`)), calls.map(c => c.tool.replace('mcp__norn__', '')).join(', '));
 check('...it read the ECR and its impact before commenting', ['get_ecr', 'get_impact'].every(t => calls.some(c => c.tool.endsWith(t))));
 check('the runner\'s log does not contain the token or the signing key', (() => {
   const text = readFileSync(logFile, 'utf8');
@@ -79,7 +79,7 @@ check('the runner\'s log does not contain the token or the signing key', (() => 
 // ---- what Norn recorded -------------------------------------------------------------------------------
 await sleep(500);
 const principal = [...norn.db.principal.iter()].find(p => p.name === identity.actor);
-check('Norn has one principal for the agent: kind agent, origin norn, acting for person:jeff', !!principal && principal.kind === 'agent' && principal.origin === 'norn' && principal.onBehalfOf === 'person:jeff', `${principal?.kind}/${principal?.origin}/${principal?.onBehalfOf}`);
+check('Fern has one principal for the agent: kind agent, origin norn, acting for person:jeff', !!principal && principal.kind === 'agent' && principal.origin === 'norn' && principal.onBehalfOf === 'person:jeff', `${principal?.kind}/${principal?.origin}/${principal?.onBehalfOf}`);
 const comments = [...norn.db.comment.prId.filter(ecr417.id)];
 check('exactly one comment on ECR-0417, and its author is the agent\'s own principal', comments.length === 1 && !!principal && comments[0]!.author.isEqual(principal.identity), `${comments.length} comment(s)`);
 console.log(`  the comment: "${comments[0]?.body}"`);
@@ -134,7 +134,7 @@ running a second ${CHEAP_MODEL} session as ${id2.actor}, acting for nobody (job 
     timeoutMs: 240_000,
     systemPrompt: spec.systemPrompt,
     prompt: [
-      "Do these steps in order, using only Norn's tools.",
+      "Do these steps in order, using only Fern's tools.",
       '1. Read ECR BWM-ECR-0417 with get_ecr, its impact with get_impact, and its assumptions with list_assumptions.',
       '2. Post a Level 1 impact statement on BWM-ECR-0417 with post_impact_statement.',
       '   - Change class "Class I", route "CCB". The headline is one sentence and says the numbers are mock.',
@@ -161,7 +161,7 @@ running a second ${CHEAP_MODEL} session as ${id2.actor}, acting for nobody (job 
   const s0 = st[0];
   check('...it is Level 1 with class, route, headline, numbers, drivers, assumptions and claims', !!s0 && s0.level === 1 && !!s0.changeClass && !!s0.route && !!s0.headline && s0.numbers.length >= 2 && s0.drivers.length >= 1 && s0.assumptions.length >= 1 && s0.claims.length >= 1, s0 ? `${s0.changeClass} / ${s0.route}; ${s0.numbers.length} numbers, ${s0.drivers.length} drivers, ${s0.assumptions.length} assumptions, ${s0.claims.length} claims` : '');
   check('...every number marked computation is exactly a check result', !!s0 && s0.numbers.filter(n => n.evidence === 'computation').length >= 2 && s0.numbers.filter(n => n.evidence === 'computation').every(sameAsResult));
-  check('...every assumption carries the source Norn holds for it', !!s0 && s0.assumptions.every(a => assumptionsNow.find(x => x.key === a.key)?.source === a.source), s0?.assumptions.map(a => `${a.key}:${a.source}`).join(' '));
+  check('...every assumption carries the source Fern holds for it', !!s0 && s0.assumptions.every(a => assumptionsNow.find(x => x.key === a.key)?.source === a.source), s0?.assumptions.map(a => `${a.key}:${a.source}`).join(' '));
   console.log('  headline: ' + s0?.headline);
   for (const n of s0?.numbers ?? []) console.log(`  number ${n.key} [${n.evidence}] ${n.p10.toFixed(2)} / ${n.p50.toFixed(2)} / ${n.p90.toFixed(2)} ${n.unit}`);
   const row2 = [...norn.db.actionLog.iter()].find(l => l.actorName === id2.actor && l.reducer === 'post_impact_statement');

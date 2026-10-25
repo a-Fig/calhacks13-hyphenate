@@ -9,6 +9,7 @@ import { WhyContext } from '../ui/Evidence.tsx';
 import { WhyPanel } from '../ui/WhyPanel.tsx';
 import { dayLabel } from '../ui/fmt.ts';
 import { Link, navigate } from '../router.tsx';
+import { AskNorn } from './AskNorn.tsx';
 import { Changes } from './Changes.tsx';
 import { Conversation } from './Conversation.tsx';
 import { Impact } from './Impact.tsx';
@@ -44,7 +45,7 @@ class PageBoundary extends Component<{ id: string; children: ReactNode }, { erro
       <>
         <main className="nx-container nx-tabbody">
           <Flash variant="danger">
-            <b>Norn could not draw {this.props.id}.</b> The data for this ECR is not in a shape the page can show. {this.state.error.message}
+            <b>Fern could not draw {this.props.id}.</b> The data for this ECR is not in a shape the page can show. {this.state.error.message}
           </Flash>
         </main>
       </>
@@ -110,6 +111,7 @@ function AssessmentView({ a, tab, check }: { a: ImpactAssessment; tab: Tab; chec
         {tab === 'impact' && <Impact a={a} check={check} />}
         {tab === 'changes' && <Changes a={a} />}
         {tab === 'revisions' && <Revisions a={a} />}
+        {(tab === 'conversation' || tab === 'impact') && <AskNorn a={a} />}
       </main>
 
       {stack.length > 0 && (
@@ -148,9 +150,9 @@ function SummaryOnly({ e }: { e: NonNullable<ReturnType<typeof useAssessment>['s
         ) : e.costNote ? (
           <p className="nx-fg-muted">{e.costNote}</p>
         ) : e.checks === 'running' ? (
-          <p className="nx-fg-muted"><Spinner size="small" /> Norn&rsquo;s impact checks are queued or running for this ECR. The page fills in when the cost check finishes.</p>
+          <p className="nx-fg-muted"><Spinner size="small" /> Fern&rsquo;s impact checks are queued or running for this ECR. The page fills in when the cost check finishes.</p>
         ) : (
-          <p className="nx-fg-muted">Norn has no impact checks for this ECR yet.</p>
+          <p className="nx-fg-muted">Fern has no impact checks for this ECR yet.</p>
         )}
       </main>
     </>

@@ -1,0 +1,23 @@
+{
+  "name": "@norn/research",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Norn's research agent: picks the assumptions worth researching, builds the cost-engineer agent's job, checks its proposals in code, and re-runs the checks with the ones that pass.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --test-reporter=spec \"test/*.test.ts\"",
+    "typecheck": "tsc -p . && tsc -p tsconfig.worker.json",
+    "replay": "node src/cli.ts --replay recordings/ecr-0417.recording.json",
+    "worker": "tsx src/worker.ts",
+    "worker:replay": "tsx src/worker.ts --replay recordings/ecr-0417.recording.json",
+    "check:module": "tsx src/check-module.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

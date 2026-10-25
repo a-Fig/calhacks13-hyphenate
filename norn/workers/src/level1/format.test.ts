@@ -86,7 +86,7 @@ test('the HTML leads with the bottom line and holds the table of numbers with ra
   // sources: where each number comes from
   assert.ok(html.includes('ERPNext baseline 2c02958e, as of 2026-10-24'));
   assert.ok(html.includes('change request rev 1 from the PLM'));
-  assert.ok(html.includes("Norn's check one_time_total: Σ every row that is not production recurring"));
+  assert.ok(html.includes("Fern's check one_time_total: Σ every row that is not production recurring"));
   assert.ok(html.includes('The ERP was only read.'));
   assert.ok(html.includes('href="http://127.0.0.1:5173/ecr/ECR-0417"'));
   // the claims are shown once: the recommendation and the class proposal are not repeated under "Also noted"
@@ -110,7 +110,7 @@ test('the class is written only when the statement has one the PLM accepts, and 
   const two = statementToPlmFields(statement({ changeClass: 'Class II' }), ecr, prov(), opts);
   assert.equal(two.fields.impact_change_class, 'Class II');
   const html = two.fields.impact_statement as string;
-  assert.ok(html.includes("proposed by Norn's Level 1 agent; the CM analyst decides"));
+  assert.ok(html.includes("proposed by Fern's Level 1 agent; the CM analyst decides"));
   assert.ok(!statementToPlmFields(statement({ changeClass: 'Class 1' }), ecr, prov(), opts).fields.impact_change_class, 'a class the PLM would refuse is not sent');
 });
 
@@ -192,10 +192,10 @@ test('the statement written to the PLM carries the routed body and the route the
   assert.equal(f.fields.impact_approval_route, told.route);
   const html = f.fields.impact_statement as string;
   assert.ok(html.includes('Approval route: Change Control Board') && !html.includes('not yet decided'));
-  assert.ok(html.includes("proposed by Norn's Level 1 agent"), 'no class was routed, so the class is still the agent proposal');
+  assert.ok(html.includes("proposed by Fern's Level 1 agent"), 'no class was routed, so the class is still the agent proposal');
   const classed = statementToPlmFields(statement({ changeClass: 'Class II' }), { ...ecr, classes: { company: 'I' } }, prov({ costCheck: a.costCheck }), { ...opts, config });
   assert.equal(classed.fields.impact_change_class, 'Class I');
-  assert.ok(!(classed.fields.impact_statement as string).includes("proposed by Norn's Level 1 agent"));
+  assert.ok(!(classed.fields.impact_statement as string).includes("proposed by Fern's Level 1 agent"));
 });
 
 test('the route fits the PLM field, dropping the other bodies before the reason', () => {

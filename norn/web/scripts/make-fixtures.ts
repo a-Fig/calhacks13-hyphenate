@@ -31,19 +31,19 @@ save('ecr-0417.l1.json', costCheckRows(run('ECR-0417')));
 const estimates: AssumptionOverride[] = [
   {
     id: rowId('ECR-0417', 'other', 'Delay cost of holding S/N 011-014 at the controller-install station'),
-    source: 'agent_estimated', dist: lognormal(147_000, 0.3), by: 'Norn planner agent',
+    source: 'agent_estimated', dist: lognormal(147_000, 0.3), by: 'Fern planner agent',
     rationale:
       'Controller installation is held on every aircraft that reaches the station before Rev C arrives (first lot about 14 weeks after the order, so about 25 Feb 2027). ' +
       'About 36 aircraft-weeks, each carrying 85% of the $2.8M standard cost at 9% a year: about $147,000.',
   },
   {
     id: rowId('ECR-0417', 'retrofit', 'Re-inspection and test after retrofit'),
-    source: 'agent_estimated', dist: lognormal(6_600, 0.25), by: 'Norn cost agent',
+    source: 'agent_estimated', dist: lognormal(6_600, 0.25), by: 'Fern cost agent',
     rationale: 'Six hours per aircraft on ten aircraft at $110, half the 12 hour installation time.',
   },
   {
     id: rowId('ECR-0417', 'logisticsSupport', 'Spares, maintenance manual task update, training'),
-    source: 'agent_estimated', dist: lognormal(1_900, 0.25), by: 'Norn cost agent',
+    source: 'agent_estimated', dist: lognormal(1_900, 0.25), by: 'Fern cost agent',
     rationale: 'Maintenance manual task 24-31 changes the torque table: 20 hours of technical publications at $95. No aircraft is delivered, so no spares or training.',
   },
 ];

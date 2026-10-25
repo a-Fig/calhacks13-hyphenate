@@ -564,7 +564,7 @@ describe('sampling', () => {
 });
 
 describe('every action has an answer, and every answer has its reasons', () => {
-  it('decides each action for Norn\'s own agent on each demo ECR, with a rule and no em dash', () => {
+  it('decides each action for Fern\'s own agent on each demo ECR, with a rule and no em dash', () => {
     for (const action of ACTION_IDS) {
       for (const id of DEMO) {
         const d = decideAction(config, { action, actor: NORN, facts: { ...factsFor(id), approvedBy: 'ccb' } });
@@ -615,7 +615,7 @@ describe('when the facts cannot show an action is within its limits, it does not
     const d = fastTrack(withCost(small));
     assert.equal(d.actsNow, false);
     assert.equal(d.outcome, 'recommend');
-    assert.match(flat(d), /Norn acts only on an exact measure/);
+    assert.match(flat(d), /Fern acts only on an exact measure/);
     assert.match(flat(d), /only a lower bound/);
   });
 
@@ -683,11 +683,11 @@ describe('when the facts cannot show an action is within its limits, it does not
 
 // Regression tests for the second review. No estimate from summary quantiles authorizes anything: Norn acts only on
 // the exact measure, computed per draw by the checks.
-describe('Norn acts only on an exact cost measure', () => {
+describe('Fern acts only on an exact cost measure', () => {
   const r3 = (n: number) => ({ p10: n, p50: n, p90: n });
   const NORN_: Actor = { kind: 'agent' };
   const fastTrack = (facts: EcrFacts) => decideAction(config, { action: 'approve_fast_track_ecr', actor: NORN_, facts });
-  const MEASURE_REASON = /Norn acts only on an exact measure/;
+  const MEASURE_REASON = /Fern acts only on an exact measure/;
 
   it('ECR-0423 on the fast track: an exact measure within the limit acts, the check\'s estimate recommends', () => {
     const exact = fastTrack(factsFor('ECR-0423'));

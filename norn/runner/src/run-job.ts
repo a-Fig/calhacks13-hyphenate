@@ -114,6 +114,7 @@ export async function runJob(spec: JobSpec, opts: RunJobOptions): Promise<JobRes
           jobPrompt: job.prompt,
           maxChars: config.maxEventFieldChars,
           onFetchDenied: (id, reason) => translator.noteHookDenial(id, reason),
+          toolInputGuards: job.toolInputGuards,
         }),
       }),
       ...opts.sdkOptionsOverride,

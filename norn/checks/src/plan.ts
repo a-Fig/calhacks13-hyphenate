@@ -8,7 +8,7 @@
 // every number carries a trace; a run that misses the convergence tolerance doubles its draws.
 
 import { applyOverlay, type HeadState } from './bom.ts';
-import { COST_DEFAULTS } from './cost.ts';
+import { COST_DEFAULTS } from './defaults.ts';
 import { type Dist, lognormal, lognormalFromQuantiles, pert, pointOf } from './dist.ts';
 import { type Draws, type Variable, drawAll, summarize, type Summary } from './sim.ts';
 import { type SerialTable, addMonthsToDay, dateOf, dayOf, dayOfSerial, serialAtDay, serialTable } from './time.ts';
@@ -63,15 +63,15 @@ export const mergePlanDefaults = (d?: Partial<PlanDefaults>): PlanDefaults => ({
 
 const DEFAULT_WHY: Record<string, string> = {
   'decisionWeeks:routine':
-    'Weeks from filing to the board\'s decision, PERT(3, 4, 7). Set from the nine board decisions in Bowman\'s change history: 3.0 to 6.4 weeks, median 4.1 (Norn default).',
+    'Weeks from filing to the board\'s decision, PERT(3, 4, 7). Set from the nine board decisions in Bowman\'s change history: 3.0 to 6.4 weeks, median 4.1 (Fern default).',
   'decisionWeeks:urgent':
-    'An urgent change is decided faster: PERT(1.5, 3, 5), about one week under a routine one (Norn default; the history has no urgent label to check it against).',
-  'quotedLeadSigma:firm': 'A firm quote\'s lead time with no range in the baseline: log-space spread 0.15 (Norn default).',
-  'quotedLeadSigma:budgetary': 'A budgetary quote\'s lead time with no range in the baseline: log-space spread 0.25 (Norn default).',
-  unsourcedLeadSigma: 'A part with no quote and no sourcing record: the median lead time of every sourced part, log-space spread 0.25 (Norn default).',
+    'An urgent change is decided faster: PERT(1.5, 3, 5), about one week under a routine one (Fern default; the history has no urgent label to check it against).',
+  'quotedLeadSigma:firm': 'A firm quote\'s lead time with no range in the baseline: log-space spread 0.15 (Fern default).',
+  'quotedLeadSigma:budgetary': 'A budgetary quote\'s lead time with no range in the baseline: log-space spread 0.25 (Fern default).',
+  unsourcedLeadSigma: 'A part with no quote and no sourcing record: the median lead time of every sourced part, log-space spread 0.25 (Fern default).',
   rawMaterialShare:
-    'The share of a part\'s price that a raw-material price break applies to, PERT(40%, 60%, 80%). Nobody has stated it, so it needs an estimate (Norn default).',
-  slotCadenceMonths: 'The constraint does not say how often a qualification slot opens: one per quarter (Norn default).',
+    'The share of a part\'s price that a raw-material price break applies to, PERT(40%, 60%, 80%). Nobody has stated it, so it needs an estimate (Fern default).',
+  slotCadenceMonths: 'The constraint does not say how often a qualification slot opens: one per quarter (Fern default).',
   newItemPrice: 'A part with no sourcing record: forward price p10 0.95 and p90 1.08 times its quoted price (the cost check\'s default).',
   budgetaryQuoteSpread: 'A budgetary quote ("plus or minus 20%"): log-space spread 0.15 on top of the market range (the cost check\'s default).',
 };
@@ -157,6 +157,11 @@ export class Book {
     });
     this.vars.set(v.id, { id: v.id, dist, groups: v.groups ?? [] });
     return v.id;
+  }
+
+  /** Whether an assumption with this id was applied, or recorded and refused, by an input of this book. */
+  wasUsed(id: string): boolean {
+    return this.used.has(id);
   }
 
   /** Assumptions that matched nothing, as flags. */
