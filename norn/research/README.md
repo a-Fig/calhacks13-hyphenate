@@ -28,8 +28,12 @@ node src/cli.ts --live ECR-0417 --save-recording recordings/live-0417.json
    no spread to move, so its swing is unmeasured and it ranks after every measured input, in the
    cost page's block order. Each target is a generic question under an opaque key (T1, T2): no part
    number, supplier, person, program or company name.
-2. **Agent job** (`src/job.ts`). A `norn/runner` job, role `researcher`, with Bright Data's MCP
-   server as its only tools and a strict JSON reply: `proposals` (target, `value` or `dist`, unit,
+2. **Agent job** (`src/job.ts`). A `norn/runner` job, role `researcher`. The agent searches and reads with
+   Claude Code's own `WebSearch` and `WebFetch` first; Bright Data's MCP server (`search_engine`,
+   `scrape_as_markdown`) is the fallback, for when those fail, come back empty or blocked, or the source is a
+   site they cannot read (LinkedIn, TikTok, YouTube and similar). The prompt names that order, and asks for
+   each `queries` entry to start with the tool used for it. Its calls to all four tools count against the same
+   turn budget (`NORN_RESEARCH_MAX_TURNS`). The reply is strict JSON: `proposals` (target, `value` or `dist`, unit,
    source URL, the date the source states for itself, exact quote, retrieval date, confidence,
    rationale, queries) and `unresolved`. Every search and page fetch the agent makes is checked for
    company identifiers by the runner before it is sent (see "Before a call is sent").
@@ -121,12 +125,16 @@ hook (`toolInputGuardHook` in `../runner/src/hooks.ts`) calls it with the argume
 and the call is made only if the guard allows it. A guard that throws or answers with anything but
 `{ allow: true }` denies. Tools with no guard, and every other job, behave as before.
 
-`researchToolGuards` (`src/job.ts`) supplies the guards for the two Bright Data tools:
+`researchToolGuards` (`src/job.ts`) supplies the guards for all four tools, the same two shapes:
 
-- `mcp__brightdata__search_engine`: every string in the arguments, object keys included, goes through
-  the leak check, and a call with no `query` is refused;
-- `mcp__brightdata__scrape_as_markdown`: the URL (host, path, query, fragment) and every other string
-  go through the leak check, and a call with no URL is refused.
+- `WebSearch` and `mcp__brightdata__search_engine`: every string in the arguments, object keys included
+  (WebSearch's domain lists too), goes through the leak check, and a call with no `query` is refused;
+- `WebFetch` and `mcp__brightdata__scrape_as_markdown`: the URL (host, path, query, fragment) and every other
+  string (WebFetch's `prompt` too) go through the leak check, and a call with no URL is refused.
+
+The runner's own `WebFetch` guard (the public-address check, `../runner/src/fetch-guard.ts`) is unchanged, but it
+runs after the identifier guards, in the same hook (`buildJobHooks`): it resolves the host, and a lookup tells the name
+server what is being fetched, so a host name that carries an identifier is refused without ever being looked up.
 
 Every string is checked as written and after decoding: percent-escapes decoded until stable (at most
 3 passes, so `%48%61%6C%64%65%6E` and a double-encoded name are read as Halden), `+` read as a space,
@@ -134,7 +142,7 @@ and then the folding described under "Leak check". Arguments nested deeper than 
 more than 500 strings (a cyclic object too), are refused outright, since what is not walked is not
 checked.
 
-A refused call is never sent to Bright Data. The reason sent back to the agent names the kind of
+A refused call is never sent. The reason sent back to the agent names the kind of
 identifier (supplier, item...), not the text. A source URL in a proposal is checked the same way
 before the guardrails' own page fetch, and a proposal whose URL leaks is rejected without a fetch.
 In a live run the CLI prints how many calls were checked and how many were refused.
@@ -185,6 +193,9 @@ recording.
 
 ## Not verified
 
+- Web first (WebSearch, WebFetch, the plain page fetch) has been tested with fake fetchers and the hook the runner
+  runs, not against a real site or a real session. How often the agent falls back, and whether a plain fetch of
+  a real page gets past bot checks, is not known.
 - A live run: no Bright Data token, Claude login or route to Bright Data here. The job spec is
   accepted by the runner's validation (tested), the fetcher is tested against a fake `fetch`, and
   neither has met the real service.
@@ -217,11 +228,19 @@ and stores what passes the guardrails. It changes nothing in the other workers.
    else read from the ERP, read only; nothing is recorded in Norn from here), plus the ERP's company
    name and the ECR's change request. Supplier display names are not in the baseline, so a supplier is
    known by its id.
-4. **The agent job.** `buildResearchJob` with the budgets below, through `norn/runner`, with Bright
-   Data's MCP server as its only tools. The runner's events go to `agent_event` (role `researcher`),
+4. **The agent job.** `buildResearchJob` with the budgets below, through `norn/runner`, with
+   WebSearch and WebFetch first and Bright Data's MCP server as the fallback. The runner's events go to `agent_event` (role `researcher`),
    so the run shows on the ECR page's agent timeline.
-5. **Guardrails**, with pages fetched again through Bright Data. This comes after the runner's timeout, not inside
-   it: each page check has its own 60 s limit (the fetches run side by side), and the baseline read before the job is
+5. **Guardrails**, with pages fetched again, a plain HTTPS fetch first (`plainFetcher`, `src/pages.ts`: https only, a
+   20 s timeout, HTML turned into text). Before the request, and again for every redirect's `Location`, the address goes
+   through the identifier check (a leak is refused before any lookup or request, the proposal is rejected, and Bright Data
+   is not asked to follow it), then is resolved once and checked to be public, and the connection is pinned to the address
+   that was checked (`pinnedLookup`, with the host name still on the certificate check), so a name that answers differently
+   the second time (DNS rebinding) cannot reach a private address
+   and Bright Data's scrape only when that fails or returns an empty or blocked page (`webFirstFetcher`). The
+   verdict, the report (`read by a plain HTTPS fetch` or `read through Bright Data`) and the stored
+   `research_result` (`verifiedVia`) say which one read each page. This comes after the runner's timeout, not inside
+   it: each page check has its own limit (20 s plain, then 60 s for Bright Data; the fetches run side by side), and the baseline read before the job is
    not limited by either. A run can therefore take about 6 minutes from start to finish with the default 5-minute
    runner timeout, longer when the ERP is slow.
 6. **Recording** (`src/live/assumptions.ts`, `src/live/outcome.ts`). Each accepted proposal becomes one
@@ -345,8 +364,8 @@ worker's steps on a recording with no database: every line starts with `RECORDED
   that follows (the new `s2_cost` run names the assumptions).
 - The assumptions: `SELECT * FROM assumption WHERE source = 'agent_estimated'`; the action log for
   `record_assumption` rows with outcome `denied` or `rejected`.
-- A first run costs one Claude session (up to `NORN_RESEARCH_MAX_TURNS` turns) and its Bright Data
-  calls. A `usage_limit` pauses the worker until the limit resets; an `auth` error stops it.
+- A first run costs one Claude session (up to `NORN_RESEARCH_MAX_TURNS` turns, every tool call counting) and
+  whatever Bright Data calls the agent's fallback and the page checks needed (none, when the plain web works). A `usage_limit` pauses the worker until the limit resets; an `auth` error stops it.
 
 **Rolling back.** The module has no reducer that deletes an assumption, and this PR does not add one.
 - Stop the worker. It records nothing else.

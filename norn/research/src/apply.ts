@@ -8,7 +8,7 @@
 // supplied inputs only.
 
 import { quantileOf, type AssumptionOverride, type CostCheckResult, type Range3, type TimelineResult } from '../../checks/src/index.ts';
-import type { Flag, Reason, Status, Target, Verdict } from './types.ts';
+import type { Flag, PageVia, Reason, Status, Target, Verdict } from './types.ts';
 
 export interface CheckRun {
   cost: CostCheckResult;
@@ -45,7 +45,7 @@ export interface ProposalLine {
   /** What the proposal stands for, as quantiles (set whenever it was well-formed). */
   proposed?: Range3;
   /** The page the quote was found on. Set only when the quote verified. */
-  source?: { url: string; retrievedAt: string };
+  source?: { url: string; retrievedAt: string; via?: PageVia };
   /** The rationale the check will carry, for accepted proposals. */
   rationale?: string;
 }

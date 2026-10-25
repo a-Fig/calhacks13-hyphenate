@@ -32,7 +32,7 @@ import type { ChangeRequest } from '../../checks/src/index.ts';
 import { AGENT_NAME, reviewProposals } from './guardrails.ts';
 import { AgentOutputError, buildResearchJob, DEFAULT_TOKEN_ENV, parseAgentOutput } from './job.ts';
 import { collectIdentifiers, type IdentifierSource } from './leak.ts';
-import { brightDataFetcher } from './pages.ts';
+import { brightDataFetcher, plainFetcher, urlLeakCheck, webFirstFetcher } from './pages.ts';
 import { loadRecording } from './recording.ts';
 import type { Company } from './run.ts';
 import { callResult, type AssumptionRow, type LogRow } from './live/assumptions.ts';
@@ -255,7 +255,7 @@ async function researchOne(pr: Pr, d: Extract<Decision, { action: 'research' }>)
     }
 
     const today = new Date().toISOString().slice(0, 10);
-    const verdicts = await reviewProposals(output.proposals, targets, brightDataFetcher({ today }), { today, identifiers });
+    const verdicts = await reviewProposals(output.proposals, targets, webFirstFetcher(plainFetcher({ today, leakCheck: urlLeakCheck(identifiers) }), brightDataFetcher({ today })), { today, identifiers });
 
     // The ECR may have moved on while the agent worked: then these numbers are for a forecast that no longer exists.
     // This look only saves the calls. What makes it safe is `expectedCrRev` on each call, which the module checks in the

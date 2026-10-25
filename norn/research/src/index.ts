@@ -9,6 +9,6 @@ export { quotedValues, quoteStates } from './quotevalue.ts';
 export { normalizeForQuote, quoteInPage } from './text.ts';
 export { applyAndReport, headlines, type ApplyInput, type Change, type CheckRun, type Mode, type ResearchReport, type RunChecks } from './apply.ts';
 export { renderReport } from './report.ts';
-export { recordedFetcher, brightDataFetcher, type RecordedPage } from './pages.ts';
+export { recordedFetcher, brightDataFetcher, plainFetcher, urlLeakCheck, webFirstFetcher, type RecordedPage } from './pages.ts';
 export { loadRecording, type Recording } from './recording.ts';
 export { prepare, finish, contextFromEcr, type Company, type ResearchRun } from './run.ts';

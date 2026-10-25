@@ -13,7 +13,7 @@ const spec = () => buildResearchJob(prep.targets, { jobId: 'research-test', ecr:
 describe('the research job', () => {
   it('is accepted by the runner and allows only Bright Data\'s two read tools', () => {
     const job = resolveJob(spec(), defaultConfig());
-    assert.deepEqual(job.allowedTools, ['mcp__brightdata__search_engine', 'mcp__brightdata__scrape_as_markdown']);
+    assert.deepEqual(job.allowedTools, ['WebSearch', 'WebFetch', 'mcp__brightdata__search_engine', 'mcp__brightdata__scrape_as_markdown']);
     assert.equal(job.role, 'researcher');
     assert.deepEqual(Object.keys(job.mcpServers!), ['brightdata']);
   });
@@ -67,7 +67,7 @@ describe('the Bright Data page fetcher', () => {
   it('posts the request the MCP tool makes, with the token as a bearer header, and returns the text', async () => {
     let seen: { url: string; init: RequestInit } | undefined;
     const f = brightDataFetcher({ env: { BRIGHT_DATA_API_TOKEN: TOKEN }, today: '2026-10-25', fetchImpl: (async (url: string, init: RequestInit) => { seen = { url, init }; return new Response('page text'); }) as typeof fetch });
-    assert.deepEqual(await f('https://example.test/p'), { ok: true, text: 'page text', retrievedAt: '2026-10-25' });
+    assert.deepEqual(await f('https://example.test/p'), { ok: true, text: 'page text', retrievedAt: '2026-10-25', via: 'brightdata' });
     assert.equal(seen!.url, 'https://api.brightdata.com/request');
     assert.equal((seen!.init.headers as Record<string, string>).authorization, `Bearer ${TOKEN}`);
     assert.deepEqual(JSON.parse(seen!.init.body as string), { url: 'https://example.test/p', zone: 'mcp_unlocker', format: 'raw', data_format: 'markdown' });
