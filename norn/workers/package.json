@@ -22,6 +22,8 @@
     "test:level1": "tsx --test src/level1/*.test.ts",
     "check:config": "tsx src/checks-config.ts",
     "check:gate": "tsx src/checks-gate.ts",
+    "ask": "tsx src/ask/server.ts",
+    "test:ask": "tsx --test src/ask/*.test.ts",
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {

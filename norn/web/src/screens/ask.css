@@ -1,0 +1,28 @@
+/* Ask Norn (AskNorn.tsx): a GitHub comment box to ask in, and answers as comments. Primer tokens only. */
+.nx-ask { margin-top: 24px; max-width: 100%; }
+.nx-ask-head-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.nx-ask-form { display: flex; flex-direction: column; gap: 8px; }
+.nx-ask-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.nx-ask-hint { font-size: 12px; color: var(--fgColor-muted); }
+.nx-ask-thread { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+.nx-ask-q { font-size: 14px; color: var(--fgColor-muted); display: flex; gap: 6px; align-items: baseline; }
+.nx-ask-q b { color: var(--fgColor-default); font-weight: 600; }
+.nx-ask-answer { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.nx-ask-unverified {
+  background: var(--bgColor-danger-muted); color: var(--fgColor-danger); border-radius: 4px; padding: 0 3px;
+  text-decoration: underline wavy var(--borderColor-danger-emphasis); text-underline-offset: 3px;
+}
+.nx-ask-cites { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--borderColor-muted); }
+.nx-ask-chip {
+  appearance: none; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 10px;
+  border: 1px solid var(--borderColor-default); border-radius: 2em; background: var(--bgColor-muted);
+  color: var(--fgColor-default); font: inherit; font-size: 12px; line-height: 20px;
+}
+button.nx-ask-chip { cursor: pointer; }
+button.nx-ask-chip:hover { border-color: var(--borderColor-accent-emphasis); background: var(--bgColor-accent-muted); }
+button.nx-ask-chip:focus-visible { outline: 2px solid var(--fgColor-accent); outline-offset: 1px; }
+.nx-ask-chip b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.nx-ask-chip.unverified { border-color: var(--borderColor-danger-emphasis); background: var(--bgColor-danger-muted); color: var(--fgColor-danger); }
+.nx-ask-flash { margin-top: 12px; display: block; }
+.nx-ask-busy { display: flex; align-items: center; gap: 8px; color: var(--fgColor-muted); font-size: 14px; }
+.nx-ask-recorded { margin-left: 4px; }
