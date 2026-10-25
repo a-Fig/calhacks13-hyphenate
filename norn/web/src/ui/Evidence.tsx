@@ -1,5 +1,4 @@
 import { createContext, useContext, type ReactNode } from 'react';
-import { Label } from '@primer/react';
 import { Tooltip } from '@primer/react/next';
 import type { Evidence, Figure } from '../assessment/types.ts';
 import { fig as figText } from './fmt.ts';
@@ -19,9 +18,9 @@ export const WhyContext = createContext<{ open: (traceId: string) => void; curre
 });
 export const useWhy = () => useContext(WhyContext);
 
-/** A small neutral text badge naming the evidence class. Neutral variant so it is not read as risk or severity. */
+/** A small badge naming the evidence class, in the same hue as the class's highlight everywhere else. */
 export function EvidenceLabel({ ev }: { ev: Evidence }) {
-  return <Label variant="secondary" size="small" className="nx-evidence-label">{EV[ev].label}</Label>;
+  return <span className={`nx-evidence-label nx-ev-${ev}`}>{EV[ev].label}</span>;
 }
 
 /** Highlight the value or passage itself, without adding words to the report. */

@@ -3,7 +3,7 @@ import { ArrowLeftIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { ActionList, Dialog, IconButton, Label } from '@primer/react';
 import type { ImpactAssessment, Origin } from '../assessment/types.ts';
 import { Person } from './Bits.tsx';
-import { EV, EvidenceLabel } from './Evidence.tsx';
+import { EV, EvidenceLabel, Highlight } from './Evidence.tsx';
 import { ago, fig as figText, range as rangeText } from './fmt.ts';
 import { figureIndex } from './trace.ts';
 
@@ -91,7 +91,7 @@ export function WhyPanel({
                     <ActionList.LeadingVisual><EvidenceLabel ev={i.evidence} /></ActionList.LeadingVisual>
                     {i.label}
                     <ActionList.TrailingVisual>
-                      <span className="num nx-trail">{i.display}{target && <ChevronRightIcon size={14} />}</span>
+                      <span className="num nx-trail">{i.display && <Highlight ev={i.evidence}>{i.display}</Highlight>}{target && <ChevronRightIcon size={14} />}</span>
                     </ActionList.TrailingVisual>
                   </ActionList.Item>
                 );
@@ -111,7 +111,7 @@ export function WhyPanel({
                   <ActionList.Description variant="block">
                     <Label variant={s.origin === 'agent_estimated' ? 'attention' : 'secondary'} size="small">{ORIGIN[s.origin]}</Label> {s.source}
                   </ActionList.Description>
-                  <ActionList.TrailingVisual><span className="num nx-trail">{s.display}</span></ActionList.TrailingVisual>
+                  <ActionList.TrailingVisual><span className="num nx-trail">{s.display && <Highlight ev="assumption">{s.display}</Highlight>}</span></ActionList.TrailingVisual>
                 </ActionList.Item>
               ))}
             </ActionList>

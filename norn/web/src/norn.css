@@ -45,7 +45,11 @@ body { margin: 0; }
   font: inherit; color: inherit; text-align: inherit; line-height: inherit; border-radius: 3px;
   max-width: 100%;
 }
-.nx-evidence-label { flex: none; vertical-align: baseline; }
+.nx-evidence-label {
+  flex: none; display: inline-block; vertical-align: baseline; padding: 0 6px; border-radius: 999px;
+  font-size: 12px; font-weight: 500; line-height: 18px; white-space: nowrap;
+  color: var(--c); background: var(--ev-bg); border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+}
 .nx-mark:hover .nx-highlight, .nx-mark.open .nx-highlight { filter: brightness(0.94); }
 .nx-mark:focus-visible { outline: 2px solid var(--fgColor-accent); outline-offset: 1px; }
 
@@ -288,7 +292,7 @@ button.nx-merge-head:hover { background: var(--bgColor-muted); }
 .nx-why-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .nx-why-class { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
 .nx-why { padding: 0 4px 16px; }
-.nx-why-value { padding: 16px; border: 1px solid var(--borderColor-default); border-left: 3px solid var(--c); border-radius: 6px; background: var(--bgColor-muted); }
+.nx-why-value { padding: 16px; border: 1px solid var(--borderColor-default); border-left: 3px solid var(--c); border-radius: 6px; background: var(--ev-bg); }
 .nx-why-value .v { font-size: 28px; font-weight: 600; line-height: 1.2; }
 .nx-why-value .r { margin-top: 2px; color: var(--fgColor-muted); }
 .nx-why-sum { margin: 16px 0 0; color: var(--fgColor-default); }
