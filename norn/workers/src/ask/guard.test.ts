@@ -112,3 +112,60 @@ test('the agent output is parsed, with or without a fence', () => {
   assert.equal(parseAgentAnswer('{"answer":""}'), null);
   assert.equal(parseAgentAnswer(null), null);
 });
+
+// ---- Review fixes (PR #149): each case is a probe that used to pass wrongly or fail wrongly.
+
+const signed: ToolResultText[] = [
+  {
+    tool: 'mcp__norn__get_impact',
+    content: JSON.stringify({
+      results: [
+        { key: 's2_cost.unit_delta:vesper', label: 'Unit cost change, Vesper', unit: 'usd', p50: -9.2 },
+        { key: 'scrap_recovery', label: 'Scrap recovery share', value: 0.015 },
+        { key: 's2_cost.one_time_total', label: 'One-time total', unit: 'usd', p50: 148521 },
+        { key: 's2_cost.line:inventory', label: 'Inventory disposition', unit: 'usd', p50: 60439 },
+        { key: 'detail', label: 'detail', value: Array.from({ length: 400 }, (_, i) => ({ id: `in:x:${i}`, v: i + 0.5 })) },
+      ],
+    }),
+  },
+];
+const g2 = (answer: string, cites: [string, string, string][]) =>
+  guardAnswer({ answer, citations: cites.map(([label, refId, value]) => ({ label, refId, value })) }, signed);
+
+test('a saving stated as a cost is not found, and the right direction is', () => {
+  const unit: [string, string, string] = ['Unit cost change, Vesper', 's2_cost.unit_delta:vesper', '-9.2'];
+  assert.deepEqual(g2('It adds $9.20 per unit.', [unit]).unverifiedNumbers, ['9.20']);
+  assert.deepEqual(g2('It saves $9.20 per unit.', [unit]).unverifiedNumbers, []);
+  assert.deepEqual(g2('The unit cost changes by -$9.20.', [unit]).unverifiedNumbers, []);
+});
+
+test('a percent matches a share only times 100', () => {
+  const share: [string, string, string] = ['Scrap recovery share', 'scrap_recovery', '0.015'];
+  assert.deepEqual(g2('Scrap recovery is 0.015%.', [share]).unverifiedNumbers, ['0.015%']);
+  assert.deepEqual(g2('Scrap recovery is 1.5%.', [share]).unverifiedNumbers, []);
+});
+
+test('an empty citation value is not verified', () => {
+  const r = g2('See the total.', [['One-time total', 's2_cost.one_time_total', '']]);
+  assert.equal(r.citations[0]!.verified, false);
+});
+
+test('citing the whole detail row is too broad to count as evidence', () => {
+  const r = g2('The rate is 37.5.', [['detail', 'detail', '37.5']]);
+  assert.equal(r.citations[0]!.verified, false);
+  assert.deepEqual(r.unverifiedNumbers, ['37.5']);
+});
+
+test('a number is checked against the citation its sentence names', () => {
+  const cites: [string, string, string][] = [
+    ['One-time total', 's2_cost.one_time_total', '148,521'],
+    ['Inventory disposition', 's2_cost.line:inventory', '60,439'],
+  ];
+  assert.deepEqual(g2('The one-time cost is $60,439.', cites).unverifiedNumbers, ['60,439']);
+  assert.deepEqual(g2('The one-time cost is $148,521. Inventory disposition is $60,439.', cites).unverifiedNumbers, []);
+});
+
+test('dates and serial numbers are not read as quantities', () => {
+  const r = g2('The cut-in is 2026-11-05 at S/N 011-014, and the total is $148,521.', [['One-time total', 's2_cost.one_time_total', '148,521']]);
+  assert.deepEqual(r.unverifiedNumbers, []);
+});
