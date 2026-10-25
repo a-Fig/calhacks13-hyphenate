@@ -7,7 +7,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { classify, connect, withRetry, type Client } from './connect.ts';
+import { classify, connect, subscribe, withRetry, type Client } from './connect.ts';
 import { sleep } from './sim.ts';
 
 export type IngestItem = {
@@ -18,7 +18,10 @@ export type IngestItem = {
   sourceRef: string;
   /** The change order the PLM released for the ECR, once it has (#72). */
   eco?: string;
+  /** What the PLM decided, once its board has: who decided and when, as the PLM records them (`record_plm_decision`). */
+  decision?: PlmDecisionItem;
 };
+export type PlmDecisionItem = { decision: 'approved' | 'rejected'; decidedBy: string; decidedOn: string };
 export type IngestSource = { name: string; list: () => Promise<IngestItem[]> };
 
 /** JSON with object keys sorted, so the same content always gives the same text and digest. */
@@ -115,10 +118,14 @@ export function sourceFromEnv(env: NodeJS.ProcessEnv = process.env): IngestSourc
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const name = process.env.WORKER_NAME ?? 'ingest';
   const log = (m: string) => console.log(`${new Date().toISOString().slice(11, 23)} [${name}] ${m}`);
-  const { R } = await connect({ kind: 'agent', name, origin: 'norn', spawnedBy: 'Norn' });
+  const client = await connect({ kind: 'agent', name, origin: 'norn', spawnedBy: 'Norn' });
+  const { R } = client;
   if ((process.env.NORN_INGEST_SOURCE ?? 'plm') === 'plm') {
-    const { runPlmIngest } = await import('./level1/ingest-plm.ts');
-    await runPlmIngest(R, log, { ingestOnce, itemOf }); // never returns
+    const { runPlmIngest, followedFrom } = await import('./level1/ingest-plm.ts');
+    // A decision the PLM took is only mirrored if Norn acted on it; the ECR table says whether it did.
+    await subscribe(client.conn, ['SELECT * FROM pull_request']);
+    const followed = followedFrom(plm => [...client.conn.db.pullRequest.iter()].find(p => p.plmEcrNumber === plm)?.status);
+    await runPlmIngest(R, log, { ingestOnce, itemOf, followed }); // never returns
   }
   const source = sourceFromEnv();
   const pollMs = Number(process.env.NORN_INGEST_POLL_MS ?? 5000);

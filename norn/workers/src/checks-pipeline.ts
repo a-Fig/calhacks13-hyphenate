@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bowman } from '../../../bowman/data/index.ts';
-import { bomDelta, bomDeltaRows, costCheck, costCheckRows, supplyCheck, supplyCheckRows, timelineCheck, timelineRows, type AssumptionOverride, type Baseline, type ChangeRequest } from '../../checks/src/index.ts';
+import { bomDelta, bomDeltaRows, costAssessment, supplyCheck, supplyCheckRows, timelineCheck, timelineRows, type AssumptionOverride, type Baseline, type ChangeRequest } from '../../checks/src/index.ts';
 import { slug } from '../../checks/src/cost.ts';
 import { hashOf } from '../../connectors/erpnext/src/index.ts';
 import { DB, connect, subscribe } from './connect.ts';
@@ -105,7 +105,7 @@ const assumptionsNamed = (runInputs: string): AssumptionOverride[] =>
     .map(a => toOverride(db.assumption.id.find(BigInt(a.id))!))
     .filter((o): o is AssumptionOverride => typeof o !== 'string');
 const expectS2 = (runInputs: string, e: object, b: Baseline) =>
-  costCheckRows(costCheck(b, JSON.parse(JSON.stringify(e)), { seed: SEED, assumptions: assumptionsNamed(runInputs), provenance: provenanceOf(JSON.parse(runInputs) as Inputs) }));
+  costAssessment(b, JSON.parse(JSON.stringify(e)), { seed: SEED, assumptions: assumptionsNamed(runInputs), provenance: provenanceOf(JSON.parse(runInputs) as Inputs) }).rows;
 const expectS1 = (e: object, b: Baseline) => bomDeltaRows(bomDelta(b, JSON.parse(JSON.stringify(e))));
 const expectS3 = (runInputs: string, e: object, b: Baseline) =>
   timelineRows(timelineCheck(b, JSON.parse(JSON.stringify(e)), { seed: SEED, assumptions: assumptionsNamed(runInputs), provenance: provenanceOf(JSON.parse(runInputs) as Inputs) }));

@@ -6,6 +6,18 @@ import { bowmanConfig, storedRows } from './routing-fixture.ts';
 import { ROUTE_MAX, ROUTE_PENDING, costCheckOf, costForecastOf, routeFor, storedCompanyConfig } from './routing.ts';
 
 const num = (key: string, label: string, p10: number, p50: number, p90: number) => ({ key, label, unit: 'USD', p10, p50, p90, evidence: 'computation', resultKey: key });
+
+test('the PLM statement separates requested costs from a conditional readiness scenario', async () => {
+  const { bowman } = await import('../../../../bowman/data/index.ts');
+  const { costAssessment } = await import('../../../checks/src/assessment.ts');
+  const assessment = costAssessment(bowman, bowman.ecrs.find(e => e.id === 'ECR-0417')!, { seed: 'norn-seed-1' });
+  const formatted = statementToPlmFields(statement(), { number: 'ECR-0417', title: 'Bracket', revision: 1 }, prov({ implementationScenario: assessment.implementationScenario }), { nornBaseUrl: 'http://localhost:5173' });
+  const html = String(formatted.fields.impact_statement);
+  assert.match(html, /Primary costs assume requested serial 11/);
+  assert.match(html, /Material-readiness scenario at median S\/N/);
+  assert.match(html, /Material readiness only/);
+  assert.match(html, /excludes unestimated delay and support costs/);
+});
 const statement = (over: Partial<StatementDoc> = {}): StatementDoc => ({
   id: 12,
   level: 1,

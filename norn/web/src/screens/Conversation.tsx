@@ -130,12 +130,12 @@ function BotComment({ a }: { a: ImpactAssessment }) {
               </tr>
               {a.cutIn.estimate && (
                 <tr>
-                  <td>Rev C reaches the line <MockTag on={a.mock.includes('cutInEstimate')} /></td>
+                  <td>{a.cutIn.estimate.label ?? 'Reaches the line'} <MockTag on={a.mock.includes('cutInEstimate')} /></td>
                   <td className="num"><Num f={a.cutIn.estimate.figure} use="p50" /></td>
                   <td className="num nx-fg-muted">{rangeText(a.cutIn.estimate.figure, 'short')}</td>
                   <td>
                     {a.cutIn.estimate.likelihood && (
-                      <Mark ev="assumption" id={a.cutIn.estimate.figure.id}><b>{cap(a.cutIn.estimate.likelihood.word)}</b> {a.cutIn.estimate.likelihood.event}</Mark>
+                      <Mark ev={a.cutIn.estimate.figure.evidence} id={a.cutIn.estimate.figure.id}><b>{cap(a.cutIn.estimate.likelihood.word)}</b> {a.cutIn.estimate.likelihood.event}</Mark>
                     )}
                   </td>
                 </tr>
@@ -308,9 +308,9 @@ function MergeBox({ a }: { a: ImpactAssessment }) {
 
       {a.gate?.approvals.length ? <ApprovalRows gate={a.gate} released={a.ecr.status === 'ECO released'} /> : decided ? (
         <MergeRow
-          icon={a.ecr.status === 'ECO released' ? <ReleaseIcon size={24} className="nx-fg-done" /> : <CheckCircleFillIcon size={24} className="nx-fg-success" />}
-          title={a.ecr.status === 'ECO released' ? 'ECO released' : 'Approved'}
-          sub={ccb && ccb.state === 'not_required' ? 'Within Norn’s limits, no CCB needed' : 'The CCB approved this ECR'}
+          icon={<ClockIcon size={24} className="nx-fg-attention" />}
+          title={a.ecr.status === 'ECO released' ? 'Marked released' : 'Marked approved'}
+          sub="The request status has changed, but no approval decision is recorded"
         />
       ) : (
         <MergeRow
@@ -356,7 +356,7 @@ function Sidebar({ a, events }: { a: ImpactAssessment; events: ActivityEvent[] }
   const steps = a.route.steps;
   const reviewers = steps.filter(s => s.role !== 'CCB' && s.state !== 'not_required');
   const done = reviewers.filter(s => s.state === 'approved').length;
-  const pct = a.gate?.approvals.length ? (a.gate.approvals.some(x => x.state !== 'withdrawn') ? 100 : 0) : reviewers.length ? (done / reviewers.length) * 100 : undefined;
+  const pct = a.gate?.approvals.length ? (a.gate.approvals.some(x => x.state !== 'withdrawn' && x.state !== 'pending_recheck') ? 100 : 0) : reviewers.length ? (done / reviewers.length) * 100 : undefined;
   const people = [...new Map(events.map(x => [x.actor, x])).values()].slice(0, 8);
 
   return (

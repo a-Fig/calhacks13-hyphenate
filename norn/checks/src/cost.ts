@@ -18,6 +18,7 @@ import {
   type Flag, type InputRecord, type ItemCode, type MonthStr, type Program, type ProgramId, type Source,
   type StockLocation, type StockRow, type Trace, type TraceUse, CHECKS_CODE_VERSION, COST_BLOCKS,
 } from './types.ts';
+import { assessCostFactors, rowKeys, slug } from './completeness.ts';
 import { addMonths, firstSerialFrom, lastBuiltSerial, monthOfSerial, serialsByMonth, unitsAfterCutIn } from './volume.ts';
 
 // ---------------------------------------------------------------- defaults
@@ -228,17 +229,7 @@ const FIELD: Record<StockLocation, keyof StockRow> = {
   stores: 'stores', wip: 'wip', finished_goods: 'finishedGoods', supplier_finished: 'supplierFinished', on_order: 'onOrder', in_field: 'inField',
 };
 const LOCATIONS = Object.keys(FIELD) as StockLocation[];
-/** 'NC programming (Halden)' -> 'nc-programming-halden'. Whole words, at most 48 characters. */
-export function slug(label: string): string {
-  const words = label.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-  let out = '';
-  for (const w of words) {
-    const next = out ? `${out}-${w}` : w;
-    if (next.length > 48) break;
-    out = next;
-  }
-  return out || (words[0] ?? 'row').slice(0, 48);
-}
+export { slug };
 const addDays = (d: string, n: number) => {
   const t = new Date(d + 'T00:00:00Z');
   t.setUTCDate(t.getUTCDate() + n);
@@ -563,13 +554,10 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
   const quoteSupplier = [...new Set(ecr.supplierQuotes.map((q) => q.supplier))];
 
   for (const block of COST_BLOCKS) {
-    const taken = new Set<string>();
+    const keys = rowKeys(ecr.costPage[block]);
     ecr.costPage[block].forEach((row: CostPageRow, i: number) => {
       // Ids survive rows being added or reordered: the PLM's row id, else a slug of the label.
-      const stem = row.id ?? slug(row.label);
-      let key = stem;
-      for (let k = 2; taken.has(key); k++) key = `${stem}-${k}`;
-      taken.add(key);
+      const key = keys[i].key;
       const ref = `${ecr.id} costPage.${block}[${i}]`;
       const id = `cost:${ecr.id}:${block}:${key}`;
       const rowInput = `row:${ecr.id}:${block}:${key}`;
@@ -661,6 +649,28 @@ export function costCheck(baseline: Baseline, ecr: ChangeRequest, options: CostC
         formula: unit ? 'unit cost × quantity, each at its stated value with an estimate spread' : 'stated one-time cost with an estimate spread',
         uses, ref, note: row.note,
       });
+    });
+  }
+
+  // Applicable costs the cost page leaves out entirely (completeness.ts). A blank row is already a gap above;
+  // an omitted one is added as the same kind of blank row, so it reads as unestimated, not as an assessed $0.
+  for (const f of assessCostFactors(ecr)) {
+    const factorInput = input({
+      id: `factor:${ecr.id}:${f.key}`, label: `${f.label}: ${f.status.replace('_', ' ')}`, source: f.basis === 'declared' ? 'given' : 'default',
+      value: f.status, ref: f.ref, rationale: f.reason,
+    });
+    if (f.status !== 'unknown' || f.rowIds.length) continue; // assessed, not applicable, or its own blank row is flagged
+    const id = `cost:${ecr.id}:${f.block}:${f.key}`;
+    const v = variable({
+      id, label: `${f.label} (not on the cost page)`, dist: point(0), source: 'default', ref: f.ref, needsEstimate: true,
+      rationale: `Applicable, but ${f.reason}. Counted as $0 until an agent or a person estimates it.`,
+    });
+    const rec = reg.get(v)!;
+    if (rec.needsEstimate) flags.push({ kind: 'needs_estimate', severity: 'warn', message: `"${f.label}" is not on the cost page and is counted as $0 until estimated: ${f.reason}.`, ref: id });
+    rows.push({
+      id, block: f.block, label: f.label, recurring: false, basis: rec.source, oneTime: [{ coef: 1, vars: [v] }], unit: null, quantity: null,
+      formula: rec.needsEstimate ? 'omitted from the cost page: $0, to be estimated' : 'estimate recorded for a cost the page left out',
+      uses: [factorInput, v], needsEstimate: rec.needsEstimate, ref: f.ref, note: f.reason,
     });
   }
 

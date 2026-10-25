@@ -43,6 +43,20 @@ traces name.
 
 ## Timeline and supply (S3 and S4)
 
+The worker uses `costAssessment` to keep requested-effectivity costs and a separately priced
+median-readiness scenario together. The latter starts no earlier than the request and uses its
+own cost window and quantities. Its ranges are conditional on that serial, not a joint simulation
+of cost and implementation dates. Unknown delay, qualification and support costs remain gaps.
+
+`implementationPlan` carries qualification, certification, release, installation and test tasks.
+Each has an owner, production/retrofit scope, dependencies, and either a duration (fixed weeks or
+P10/P50/P90), completion date with evidence, or an explicit unknown/not-applicable assessment.
+Dependencies refer to task ids, `parts` (materials in hand), or `decision`; cycles are refused.
+Retrofit tasks also carry aircraft downtime per unit. The plan's `complete` declaration says all
+applicable work was considered. Until that is established, dates are labeled material readiness;
+unassessed work is never silently treated as an established implementation date. Retrofit completion
+has a separate milestone from production cut-in. These fields survive the PLM connector round trip.
+
 Both read the ECR's own program, from the same model (`src/plan.ts`), and follow S2's conventions:
 per-input draws keyed by the seed and the input's id, correlation 0.3 inside a group, a second-seed
 convergence check on every continuous result they compute (cut-in weeks, weeks late, spend, capacity
@@ -126,6 +140,10 @@ for, and S4 reports the shared supplier without a shift.
   steps and are not.
 - The cumulative units a plan completes are interpolated through each month, so the serial that
   takes the change is the one planned to complete on or after the cut-in day, not a rounded month.
+
+## Cost completeness (`completeness.ts`)
+
+The cost check prices the rows that exist, so a cost the cost page leaves off entirely used to read as an assessed $0. `assessCostFactors(ecr)` (pure, no draws) gives each factor the DD 1692 Block 50 page must account for one status: `assessed` (a row covers it, an explicit $0 included), `not_applicable` (with its reason) or `unknown` (applicable, no estimate). A row covers a factor when it carries `factor: '<key>'` or the ECR's `costFactors` names it; labels are never guessed. Factors: `qualification` (applicable when `testAndQualification` is anything but an explicit None/N/A, blank included), `retrofit_installation` and `retrofit_test` (applicable when the effectivity states a retrofit that is not `tbd`; parts rows cover neither), and any other key an ECR declares in `costFactors`. A declared `not_applicable` needs a `note`. An unknown factor with no row of its own becomes a blank $0 row with the usual `needs_estimate` flag, input and `needsEstimate`, so the recommendation rule, the web report and the PLM statement see it as they see a blank row; an assumption with the row's id fills it. Every factor is also an input `factor:<ecr>:<key>` whose value is its status.
 
 ## Ranges
 
