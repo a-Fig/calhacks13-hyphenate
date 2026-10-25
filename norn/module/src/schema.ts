@@ -434,9 +434,10 @@ const ecoRelease = table(
 );
 
 // The ERP change package on a released ECO (#72): every line a person enters in the ERP to carry the
-// change out, with the values, traced to the ECO and the assessment. Norn never writes to the ERP
-// (#71). A worker builds it from the ECR's assessment and the ERP as read, and checks it again on each
-// new ERP read, so every line's status (entered, to enter, conflict) follows what people have entered.
+// change out, with the values, traced to the ECO and the assessment. Fern saves the BOM versions and
+// journal entries as drafts and people submit them (Tyler, 2026-10-25, reversing #71). A worker builds it
+// from the ECR's assessment and the ERP as read, and checks it again on each new ERP read, so every line's
+// status (entered, drafted, to enter, conflict) follows what is in the ERP.
 const erpPackage = table(
   { name: 'erp_package', public: true },
   {

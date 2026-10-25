@@ -5,7 +5,8 @@
 //   ReleaseFoot       the disabled release button and why
 //   ApproverItems     the sidebar's approvers
 //   ErpPackageCard    the ERP change package, replacing the saved-mode mock card in live mode
-// Norn never writes to the ERP: every line says who enters it, and the ERP read says whether it was.
+// Fern drafts, people submit (Tyler, 2026-10-25, reversing #71): every line says who enters or submits it, a line Fern
+// drafted links to its draft in the ERP, and the ERP read says whether it was submitted.
 import { useState, type ReactNode } from 'react';
 import {
   AlertFillIcon, CheckCircleFillIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, DotFillIcon, GitMergeIcon, PackageIcon,
@@ -153,7 +154,7 @@ export function ApproverItems({ gate }: { gate: GateView }) {
 
 // ---------------------------------------------------------------- the ERP change package
 
-const LINE_VARIANT = { entered: 'success', to_enter: 'attention', conflict: 'danger' } as const;
+const LINE_VARIANT = { entered: 'success', drafted: 'accent', to_enter: 'attention', conflict: 'danger' } as const;
 
 function PackageLine({ l }: { l: PackageLineView }) {
   const [open, setOpen] = useState(l.status === 'conflict');
@@ -167,6 +168,11 @@ function PackageLine({ l }: { l: PackageLineView }) {
         <Label variant={LINE_VARIANT[l.status]}>{l.statusText}</Label>
       </div>
       <div className="nx-pkg-body">
+        {l.draft && (
+          <p className="nx-pkg-draft" data-draft={l.draft.name}>
+            <a href={l.draft.url} target="_blank" rel="noreferrer"><b>{l.draft.doctype} {l.draft.name}</b></a>: Draft in ERPNext, waiting for {l.draft.waitingFor} to submit.
+          </p>
+        )}
         {l.instruction && <p>{l.instruction}</p>}
         {l.note && <p className="nx-fg-muted nx-small">{l.note}</p>}
         {hasMore && (
@@ -204,7 +210,7 @@ const HEALTH: Record<PackageBuilt['health'], { variant: 'danger' | 'warning' | '
   nothing: { variant: 'default', icon: <CheckIcon size={16} /> },
 };
 
-/** What Norn hands over when an ECO is released, from the module's own erp_package row. Norn writes nothing to the ERP. */
+/** What Fern hands over when an ECO is released, from the module's own erp_package row, with links to Fern's drafts in the ERP. */
 export function ErpPackageCard({ gate }: { gate: GateView }) {
   const p = gate.package;
   if (p.state === 'missing') {
@@ -251,7 +257,7 @@ export function ErpPackageCard({ gate }: { gate: GateView }) {
         <PackageIcon size={16} />
         <b>ERP change package</b>
         <MockTag on={!!p.mock} title={p.mock} />
-        <span className="nx-fg-muted">{p.ecoNumber} &middot; lines for a person to enter in {p.system}. Fern does not write to it.</span>
+        <span className="nx-fg-muted">{p.ecoNumber} &middot; lines for people to enter or submit in {p.system}. Fern saves drafts; it cannot submit.</span>
         <span className="nx-sp" />
         <Label variant={p.counts.problems || p.counts.conflicts ? 'danger' : p.counts.entered === p.counts.lines && p.counts.lines ? 'success' : 'secondary'}>
           {p.counts.entered} of {p.counts.lines} entered
@@ -264,6 +270,7 @@ export function ErpPackageCard({ gate }: { gate: GateView }) {
       <div className="nx-pkg-counts">
         <span><b>{p.counts.lines}</b> lines</span>
         <span><b>{p.counts.entered}</b> entered</span>
+        <span><b>{p.counts.drafted}</b> drafted, to submit</span>
         <span><b>{p.counts.toEnter}</b> to enter</span>
         <span className={p.counts.conflicts ? 'nx-fg-danger' : ''}><b>{p.counts.conflicts}</b> in conflict</span>
         <span className={p.counts.problems ? 'nx-fg-danger' : ''}><b>{p.counts.problems}</b> {p.counts.problems === 1 ? 'problem' : 'problems'}</span>

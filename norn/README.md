@@ -49,9 +49,11 @@ Folders are created as code lands.
   records.
 - **Out to the PLM:** the impact statement, class and route on the ECR, through the same API a
   real PLM integration would use.
-- **ERPNext:** REST reads only: items, BOMs, prices, stock, orders and history, and the reads that
-  build the ERP change package on a released ECO (#72). Fern never writes to the ERP (#71). Its API
-  user is read-only (`bowman/erp/`).
+- **ERPNext:** REST reads of items, BOMs, prices, stock, orders and history, and the reads that
+  build the ERP change package on a released ECO (#72). On a released ECO Fern also creates the new
+  BOMs and journal entries as unsubmitted drafts (Tyler, 2026-10-25, reversing #71). Its API user can
+  create, read and write BOM and Journal Entry, only read everything else, and cannot submit, cancel
+  or delete (`bowman/erp/`). People submit.
 - **Agents:** MCP, with each agent's identity, the person it acts for, and what spawned it.
 - **Configuration:** one company config file, named by `NORN_COMPANY_CONFIG`, validated against Fern's config schema when the worker starts and stored through `set_config` (`config/README.md`).
 

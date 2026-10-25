@@ -1,5 +1,7 @@
 // The ERP change package of a released ECO: every line a person enters in ERPNext to carry the change out, with the
-// exact values, traced to the ECO and to Norn's decision. Norn never writes to the ERP (issue #71), so this file only reads.
+// exact values, traced to the ECO and to Fern's decision. This file only reads. Since Tyler's call of 2026-10-25 (reversing
+// #71) Fern also saves the BOM versions and journal entries as unsubmitted drafts (draft.ts); a person submits them, and the
+// read here tells a draft (`drafted`) from a submitted document (`entered`).
 //
 //   buildErpChangePackage(conn, settings, release)  reads ERPNext and returns the package: the lines in order, each with
 //                                                   a status from that read (entered, to enter, or conflict)
@@ -72,8 +74,11 @@ export interface EcoRelease {
 
 export type LineKind = 'standard-cost-close' | 'standard-cost' | 'bom' | 'bom-replace' | 'bom-retire' | 'journal-entry';
 
-/** `to-enter`: nothing for this line in ERPNext yet (or only a draft). `entered`: found, and it matches. `conflict`: found, and it differs. */
-export type LineStatus = 'to-enter' | 'entered' | 'conflict';
+/**
+ * `to-enter`: nothing for this line in ERPNext yet. `drafted`: a draft (docstatus 0) is there and matches, waiting for a person
+ * to submit it. `entered`: submitted, and it matches. `conflict`: found, and it differs.
+ */
+export type LineStatus = 'to-enter' | 'drafted' | 'entered' | 'conflict';
 
 /**
  * How the person gets to the form: `new` opens an empty one, `edit` changes `document`, `duplicate` starts from
@@ -115,6 +120,8 @@ export interface ChangeLine {
   title: string;
   /** The seat that enters it. */
   enteredBy: 'cost accountant' | 'manufacturing engineer';
+  /** The person in that seat, from the settings (changePackage.people), when the company names one. */
+  person?: string;
   /** The ERPNext doctype to open. */
   doctype: string;
   mode: LineMode;
@@ -156,7 +163,7 @@ export interface ErpChangePackage {
   readAt: string;
   /** In the order to enter them. */
   lines: ChangeLine[];
-  counts: { total: number; entered: number; toEnter: number; conflict: number };
+  counts: { total: number; entered: number; toEnter: number; conflict: number; drafted: number };
   /** Estimated change in each program's unit cost. */
   effects: ProgramEffect[];
   /** Worth reading; the lines can still be entered. */
@@ -289,7 +296,8 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
   const trace: LineTrace = { eco, ecr: release.ecr, decisionId: release.decision.id, decisionUrl: release.decision.url };
   const traceText = `${eco} (${release.ecr}); Fern decision ${release.decision.id}: ${release.decision.url}`;
   type LineInit = Omit<ChangeLine, 'trace' | 'tables' | 'note' | 'found' | 'document'> & { tables?: ErpTable[]; note?: string; found?: DocRef; document?: DocRef };
-  const add = (l: LineInit) => lines.push({ ...l, tables: l.tables ?? [], trace });
+  const people = opts.changePackage?.people ?? {};
+  const add = (l: LineInit) => lines.push({ ...l, ...(people[l.enteredBy] ? { person: people[l.enteredBy] } : {}), tables: l.tables ?? [], trace });
 
   if (effectiveDate > today(opts.timeZone)) warnings.push(`the effective date ${effectiveDate} is after today: ERPNext costs a new BOM at the price valid today, so the new BOMs show the old cost until then`);
 
@@ -562,7 +570,7 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
       ],
       tables: [{ table: 'items', label: 'Items', rows }],
       amounts,
-      status: lineDiffs.length ? 'conflict' : tagged?.docstatus === 1 ? 'entered' : 'to-enter',
+      status: lineDiffs.length ? 'conflict' : tagged?.docstatus === 1 ? 'entered' : tagged ? 'drafted' : 'to-enter',
       ...(tagged ? { found: ref('BOM', tagged.name) } : {}),
       ...(tagged && lineDiffs.length ? { note: `${tagged.name} ${lineDiffs.join(' and ')}` } : tagged && tagged.docstatus !== 1 ? { note: `${tagged.name} is saved but not submitted; submit it` } : supersededBy ? { note: `${tagged!.name} is superseded by ${supersededBy}; nothing to undo` } : {}),
     });
@@ -667,7 +675,7 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
         ],
         tables: [{ table: 'accounts', label: 'Accounting Entries', rows: j.lines.flatMap((l) => [entryRow(l.debit, 'debit', l.amount, l.memo), entryRow(l.credit, 'credit', l.amount, l.memo)]) }],
         amounts: { debit: total, credit: total },
-        status: duplicate || diffs.length || rowDiffs.length ? 'conflict' : have?.docstatus === 1 ? 'entered' : 'to-enter',
+        status: duplicate || diffs.length || rowDiffs.length ? 'conflict' : have?.docstatus === 1 ? 'entered' : have ? 'drafted' : 'to-enter',
         ...(have ? { found: ref('Journal Entry', have.name) } : {}),
         ...(have && (duplicate || diffs.length || rowDiffs.length)
           ? { note: [duplicate, ...(diffs.length || rowDiffs.length ? [`${have.name} ${[...(diffs.length ? [`is ${diffs.join(' and ')}`] : []), ...rowDiffs].join(' and ')}`] : [])].filter(Boolean).join('; ') }
@@ -699,14 +707,14 @@ export async function buildErpChangePackage(conn: ErpnextConnection, opts: Erpne
   const count = (s: LineStatus) => lines.filter((l) => l.status === s).length;
   return {
     version: 1, release, erpUrl: conn.url.replace(/\/+$/, ''), readAt: new Date().toISOString(), lines,
-    counts: { total: lines.length, entered: count('entered'), toEnter: count('to-enter'), conflict: count('conflict') },
+    counts: { total: lines.length, entered: count('entered'), toEnter: count('to-enter'), conflict: count('conflict'), drafted: count('drafted') },
     effects, warnings, problems,
   };
 }
 
 // ---- render ------------------------------------------------------------------------------------------------------
 
-const STATUS: Record<LineStatus, string> = { 'to-enter': 'To enter', entered: 'Entered', conflict: 'Conflict' };
+const STATUS: Record<LineStatus, string> = { 'to-enter': 'To enter', drafted: 'Drafted, to submit', entered: 'Entered', conflict: 'Conflict' };
 const words = (key: string) => key.replace(/([A-Z])/g, ' $1').toLowerCase();
 const cell = (v: string) => v.replace(/\|/g, '\\|');
 
@@ -728,15 +736,16 @@ export function formatErpChangePackage(pkg: ErpChangePackage): string {
     '',
     `${r.eco} came from ${r.ecr} and Fern decision ${r.decision.id} (${r.decision.url}). New standard costs apply from ${r.effectiveDate}; journal entries are dated ${r.postingDate ?? r.effectiveDate}.`,
     '',
-    `ERPNext was read at ${pkg.readAt}: ${k.entered} of ${plural(k.total, 'line')} entered, ${k.toEnter} to enter, ${k.conflict} in conflict.`,
+    `ERPNext was read at ${pkg.readAt}: ${k.entered} of ${plural(k.total, 'line')} entered, ${k.drafted ? `${k.drafted} drafted and waiting to be submitted, ` : ''}${k.toEnter} to enter, ${k.conflict} in conflict.`,
   ];
   if (pkg.problems.length) out.push('', '## Problems', '', 'The package cannot be followed as it stands until these are fixed.', '', ...pkg.problems.map((p) => `- ${p}`));
   if (!pkg.lines.length) out.push('', 'Nothing to enter.');
   else out.push('', `Enter the lines in this order. Type the ECO number into the ECO field of each document you create: Fern finds it by that on its next read of ERPNext.`);
 
   pkg.lines.forEach((l, i) => {
-    const where = l.mode === 'new' ? `a new ${l.doctype}` : l.mode === 'tool' ? `the ${l.doctype}` : `${l.doctype} ${l.document!.name}`;
-    out.push('', `## ${i + 1}. ${l.title}`, '', `${STATUS[l.status]}. ${l.enteredBy[0].toUpperCase()}${l.enteredBy.slice(1)}. Open ${where}: ${pkg.erpUrl}${l.path}`, '', l.instruction);
+    const where = l.status === 'drafted' && l.found ? `the draft ${l.found.doctype} ${l.found.name}, check it and submit it` : l.mode === 'new' ? `a new ${l.doctype}` : l.mode === 'tool' ? `the ${l.doctype}` : `${l.doctype} ${l.document!.name}`;
+    const path = l.status === 'drafted' && l.found ? `/app/${l.found.doctype.toLowerCase().replace(/\s+/g, '-')}/${enc(l.found.name)}` : l.path;
+    out.push('', `## ${i + 1}. ${l.title}`, '', `${STATUS[l.status]}. ${l.enteredBy[0].toUpperCase()}${l.enteredBy.slice(1)}${l.person ? ` (${l.person})` : ''}. Open ${where}: ${pkg.erpUrl}${path}`, '', l.instruction);
     if (l.note) out.push('', `Note: ${l.note}.`);
     if (l.found && l.status !== 'to-enter') out.push('', `Found in ERPNext: ${l.found.doctype} ${l.found.name}.`);
     if (l.fields.length) out.push('', '| Field | Value |', '|---|---|', ...l.fields.map((f) => `| ${cell(f.label)} (${f.field}) | ${cell(shown(f, pkg))} |`));

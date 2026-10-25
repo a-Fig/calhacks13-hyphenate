@@ -82,11 +82,15 @@ export interface PackageSettings {
   accounts: Record<string, string>;
   /** Cost center for the profit-and-loss rows. Default: ERPNext fills the company's default. */
   costCenter?: string;
+  /** Who sits in each seat that enters package lines ('cost accountant', 'manufacturing engineer'), named on the page next to a draft. */
+  people?: Record<string, string>;
+  /** Save the BOM versions and journal entries as unsubmitted drafts in ERPNext (draft.ts). Default true; false keeps Fern read-only. */
+  drafts?: boolean;
 }
 
 /**
  * Where a company keeps its supplier constraints (qualification slots, annual capacity) in ERPNext: a custom doctype with
- * one row per constraint and a child table of the items it covers. Norn reads them; it never writes them.
+ * one row per constraint and a child table of the items it covers. Fern reads them; it never writes them.
  * Each field name is the ERPNext fieldname on `doctype`. Leave an optional one out and the constraint just doesn't carry it.
  */
 export interface SupplierConstraintSource {

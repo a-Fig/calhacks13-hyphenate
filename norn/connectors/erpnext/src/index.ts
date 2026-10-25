@@ -1,6 +1,7 @@
-// Norn's ERPNext connector. It only reads: the production baseline, the history reads, and the ERP change package of a
-// released ECO (what a person enters in ERPNext, checked against what is there). Everything company-specific is in the
-// options; see options.ts.
+// Fern's ERPNext connector. It reads the production baseline, the history and the ERP change package of a released ECO
+// (what a person enters in ERPNext, checked against what is there). Its one write is draft.ts: since Tyler's call of
+// 2026-10-25 (reversing #71) it saves the package's BOM versions and journal entries as unsubmitted drafts, which a person
+// submits. Everything company-specific is in the options; see options.ts.
 import type { ItemCode } from './baseline.ts';
 import type { ErpnextOptions } from './options.ts';
 import { bomVersions, openOrders, priceHistory, realisedLeadTimes } from './history.ts';
@@ -22,6 +23,8 @@ export { diffSupplierConstraints, expectedSupplierConstraints } from './compare.
 export type { ReferenceConstraint } from './compare.ts';
 export { bomVersions, openOrders, priceHistory, realisedLeadTimes } from './history.ts';
 export { buildErpChangePackage, formatErpChangePackage } from './package.ts';
+export { deskUrl, draftErpChangePackage, planDrafts } from './draft.ts';
+export type { DraftPlan, DraftResult, PlannedDraft } from './draft.ts';
 
 /** The five reads and the ERP change package, bound to one set of options. */
 export function connect(opts: ErpnextOptions) {

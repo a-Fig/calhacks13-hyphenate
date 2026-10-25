@@ -1,5 +1,5 @@
 // One-time (idempotent) setup of Bowman's ERPNext over REST: company, fiscal years, item groups,
-// the Standard Cost price list, the Norn Agent role (read-only) and the Norn API user.
+// the Standard Cost price list, the Norn Agent role (reads; drafts BOMs and journal entries; never submits) and the Norn API user.
 //
 //   node bowman/erp/bootstrap.mjs            (tunnel to 127.0.0.1:8081 must be open; see NOTES.md)
 //
@@ -16,12 +16,15 @@ const ABBR = "BWA";
 const NORN_USER = "norn@bowman.example";
 const NORN_ROLE = "Norn Agent";
 
-// What the Norn Agent role may do: read, and nothing else. Norn never writes to the ERP (issue #71): a released ECO
-// carries an ERP change package, and a person enters its lines in ERPNext (norn/connectors/erpnext/src/package.ts).
-// Keep in step with NOTES.md.
+// What the Norn Agent role may do. Fern drafts, people submit (Tyler, 2026-10-25, reversing #71, under which the role
+// was read-only): on a released ECO Fern saves the new BOM versions and the journal entries as unsubmitted drafts
+// (norn/connectors/erpnext/src/draft.ts), so it may create, read and write BOM and Journal Entry. It may not submit,
+// cancel or delete anything: a person submits each draft, and ERPNext refuses Fern's submit (prove-no-submit.ts).
+// Every other doctype is read-only. Keep in step with NOTES.md.
+const DRAFT = ["read", "write", "create"];
 export const GRANTS = {
   Item: ["read"],
-  BOM: ["read"],
+  BOM: DRAFT,
   "Item Price": ["read"],
   Supplier: ["read"],
   "Supplier Quotation": ["read"],
@@ -29,7 +32,7 @@ export const GRANTS = {
   Bin: ["read"],
   "Stock Ledger Entry": ["read"],
   "GL Entry": ["read"],
-  "Journal Entry": ["read"],
+  "Journal Entry": DRAFT,
   Version: ["read"],
   Company: ["read"],
   Warehouse: ["read"],
@@ -37,7 +40,7 @@ export const GRANTS = {
   Account: ["read"], // to check the accounts a change package names
   "Purchase Receipt": ["read"], // receipt date minus PO date is the realised lead time (research section 5)
 };
-// Every permission type that changes data. A role that holds any of these on a doctype is turned back to read-only.
+// Every permission type that changes data. Any of these the role holds beyond GRANTS (at permission level 0) is turned off.
 const WRITE_PTYPES = ["write", "create", "submit", "cancel", "amend", "delete"];
 
 const log = (...a) => console.log(...a);
@@ -124,7 +127,8 @@ async function main() {
   }
   log(`Role "${NORN_ROLE}": permissions applied for ${Object.keys(GRANTS).length} doctypes`);
   // Earlier versions of this script granted write, create and submit on BOM, Item Price, Journal Entry and BOM Update Log.
-  // Adding grants never takes one away, so turn off every data-changing permission the role still holds (read is left as is).
+  // Adding grants never takes one away, so turn off every data-changing permission the role holds that GRANTS does not give
+  // (read is left as is). Submit, cancel, amend and delete are never in GRANTS, so they always go.
   const held = (await erp.get("/api/resource/Custom DocPerm", {
     filters: [["role", "=", NORN_ROLE]],
     fields: ["parent", "permlevel", ...WRITE_PTYPES],
@@ -132,7 +136,8 @@ async function main() {
   })).body.data;
   let revoked = 0;
   for (const row of held) {
-    for (const ptype of WRITE_PTYPES.filter((k) => row[k])) {
+    const allowed = row.permlevel === 0 ? GRANTS[row.parent] ?? [] : [];
+    for (const ptype of WRITE_PTYPES.filter((k) => row[k] && !allowed.includes(k))) {
       await erp.post(`${pm}.update`, { doctype: row.parent, role: NORN_ROLE, permlevel: row.permlevel, ptype, value: "0" });
       log(`  ${row.parent}: ${ptype} turned off`);
       revoked++;

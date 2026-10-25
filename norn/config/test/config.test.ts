@@ -427,7 +427,7 @@ describe('a malformed file is rejected with the path of the bad field', () => {
 
   describe('the actions that would change the ERP can only be recommended (#71)', () => {
     const ERP = ['write_bom', 'update_standard_cost', 'draft_journal_entry', 'post_journal_entry'];
-    const cite = 'because Fern never writes to the ERP (#71)';
+    const cite = 'because Fern only drafts in the ERP and cannot submit (#71, reversed 2026-10-25)';
 
     it('refuses any level but recommend', () => {
       for (const action of ERP) {
@@ -475,7 +475,7 @@ describe('a malformed file is rejected with the path of the bad field', () => {
         ['level', 'limits', 'otherwise', 'carriesOutApproval'].map((k) => 'autonomy.actions[' + at + '].' + k).sort(),
         found.join('\n')
       );
-      assert.ok(found.every((p) => p.includes('(#71)') && p.includes('(#72)')), found.join('\n'));
+      assert.ok(found.every((p) => p.includes('#71') && p.includes('(#72)')), found.join('\n'));
     });
 
     it('needs a role to receive each recommendation, and a person in it', () => {

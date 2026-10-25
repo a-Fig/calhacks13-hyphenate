@@ -29,7 +29,7 @@ assessments.
 A live demo of Fern deployed at **Bowman Aviation**, a fictional Archer-like maker of electric
 aircraft that runs real software: an engineer files a change in Bowman's PLM, Fern's assessment
 appears on it, the board decides, and the released change order carries the ERP change package
-for finance to enter, with any number traceable on request. Fern never writes to the ERP (#71). Hyphenate's judges ask "would you hire it?", and what's real, what's simulated, and
+for finance to enter, with any number traceable on request. Fern creates the new BOMs and journal entries in ERPNext as unsubmitted drafts, and a named person submits them; Fern cannot submit (Tyler, 2026-10-25, reversing #71). Hyphenate's judges ask "would you hire it?", and what's real, what's simulated, and
 how we know (`docs/hyphenate-track.md`). The seats Fern fills are the cost engineer, cost
 accountant and supply-chain analyst who write the impact assessment for the Change Control Board.
 The Devpost deadline is Sun Oct 25, 09:00 PT (`README.md`).

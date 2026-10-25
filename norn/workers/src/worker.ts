@@ -254,7 +254,7 @@ if (baselines.source) {
 }
 
 // The ERP change package on each released ECO (#72), checked again on every new ERP read. Only a
-// worker that reads the ERP builds packages; the connector's planner only reads.
+// worker that reads the ERP builds packages; its planner also saves the drafts (package.ts).
 if (baselines.source?.erp) {
   const { connection, settings } = baselines.source.erp;
   await subscribe(conn, [

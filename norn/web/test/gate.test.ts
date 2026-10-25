@@ -54,6 +54,20 @@ test('a package with unsupported changes reads as problems, never as nothing to 
   assert.equal(v.groups.length, 0);
 });
 
+test('a line Fern drafted links to the draft in ERPNext and names who submits it', () => {
+  const bom = { ...line('bom', 'New BOM for BW-5120-000', 'drafted'), enteredBy: 'manufacturing engineer', person: 'Owen Tillery', doctype: 'BOM', found: { doctype: 'BOM', name: 'BOM-BW-5120-000-006' } };
+  const je = { ...line('journal-entry', 'Scrap on hand', 'drafted'), doctype: 'Journal Entry', found: { doctype: 'Journal Entry', name: 'ACC-JV-2026-00007' } };
+  const lines = [line('standard-cost', 'New standard cost', 'to-enter'), bom, je];
+  const v = packageView(pkgRow({ packageJson: pkgJson({ erpUrl: 'http://127.0.0.1:8081/' }, lines), lines: 3, entered: 0, conflicts: 0 }));
+  const [b, j] = [v.groups[1].lines[0], v.groups[2].lines[0]];
+  assert.deepEqual([b.status, b.statusText], ['drafted', 'Draft in ERPNext']);
+  assert.deepEqual(b.draft, { doctype: 'BOM', name: 'BOM-BW-5120-000-006', url: 'http://127.0.0.1:8081/app/bom/BOM-BW-5120-000-006', waitingFor: 'Owen Tillery (manufacturing engineer)' });
+  assert.deepEqual(j.draft, { doctype: 'Journal Entry', name: 'ACC-JV-2026-00007', url: 'http://127.0.0.1:8081/app/journal-entry/ACC-JV-2026-00007', waitingFor: 'the cost accountant' });
+  assert.equal(v.groups[0].lines[0].draft, undefined);
+  assert.deepEqual(v.counts, { lines: 3, entered: 0, toEnter: 1, conflicts: 0, problems: 0, drafted: 2 });
+  assert.equal(v.headline, '0 of 3 lines entered, 2 drafted by Fern and waiting to be submitted, 1 to enter in ERPNext.');
+});
+
 test('problems from the package, its notes and the release are each said once', () => {
   const unsupported = ['labor hours 1 -> 2'];
   const out = packageProblems({ unsupported }, { problems: ['not in this package: labor hours 1 -> 2', 'A price row is in the way.'] }, { problems: ['A price row is in the way.', 'No account is mapped.'] });
@@ -69,7 +83,7 @@ test('lines are grouped by kind, each with its status, and the counts come from 
   assert.deepEqual(v.groups.map(g => [g.title, g.lines.length, g.entered]), [['Standard costs', 1, 1], ['Bills of materials', 2, 0], ['Journal entries', 1, 0]]);
   assert.deepEqual(v.groups[1].lines.map(l => [l.status, l.statusText]), [['to_enter', 'To enter in ERPNext'], ['conflict', 'Conflict: entered differently from the package']]);
   assert.equal(v.groups[0].lines[0].statusText, 'Entered');
-  assert.deepEqual(v.counts, { lines: 4, entered: 1, toEnter: 2, conflicts: 1, problems: 0 });
+  assert.deepEqual(v.counts, { lines: 4, entered: 1, toEnter: 2, conflicts: 1, problems: 0, drafted: 0 });
   assert.equal(v.health, 'conflict');
   assert.deepEqual(v.warnings, ['The cost applies from 2026-11-01.']);
   assert.equal(v.effects[0].costDelta, 3.5);

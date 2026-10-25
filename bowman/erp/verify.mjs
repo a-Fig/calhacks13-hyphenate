@@ -316,7 +316,7 @@ await step("4d. recost all BOMs (Administrator): enqueue_update_cost", async () 
 
 // ---- 5. Journal Entry --------------------------------------------------------------------------
 let je;
-await step("5. Journal Entry (Administrator creates it; Norn reads it and cannot submit or edit it)", async () => {
+await step("5. Journal Entry (Administrator creates it; Norn reads it and cannot submit it)", async () => {
   const r = await call("create Journal Entry (draft)", "admin", "POST", "/api/resource/Journal Entry", {
     body: {
       voucher_type: "Journal Entry",
@@ -335,7 +335,8 @@ await step("5. Journal Entry (Administrator creates it; Norn reads it and cannot
   const g = expect(await call("Norn reads the draft", "norn", "GET", `/api/resource/Journal Entry/${enc(je.name)}`), 200, "je read");
   console.log(`    docstatus ${g.body.data?.docstatus}, total_debit ${g.body.data?.total_debit}`);
   expect(await call("Norn tries to submit it (must be refused)", "norn", "POST", "/api/method/frappe.client.submit", { body: { doc: je } }), 403, "je submit refused");
-  expect(await call("Norn tries to edit it (must be refused)", "norn", "PUT", `/api/resource/Journal Entry/${enc(je.name)}`, { body: { user_remark: REMARK + " edited" } }), 403, "je edit refused");
+  // Since 2026-10-25 Norn may edit a draft journal entry (it drafts them, reversing #71), but never submit one.
+  expect(await call("Norn tries to submit it by update (must be refused)", "norn", "PUT", `/api/resource/Journal Entry/${enc(je.name)}`, { body: { docstatus: 1 } }), 403, "je submit by update refused");
   const a = (await norn.get(`/api/resource/Journal Entry/${enc(je.name)}`)).body.data;
   console.log(`    docstatus still ${a.docstatus}`);
 });
@@ -386,12 +387,14 @@ await step("7b. read access on every granted doctype (Norn)", async () => {
 });
 
 await step("7c. things Norn must not be able to do (every write)", async () => {
-  // Norn writes nothing to the ERP (issue #71): not the documents of a change package, and not the BOM tool calls either.
+  // Norn drafts BOMs and journal entries (Tyler, 2026-10-25, reversing #71) and does nothing else that changes the ERP:
+  // no submitted document, no edit of a submitted one, no price, no BOM tool call, no delete or cancel. Its drafts, and
+  // ERPNext refusing to let it submit them, are shown by prove-no-submit.ts.
   expect(await call("create an Item Price", "norn", "POST", "/api/resource/Item Price", { body: { item_code: P1, price_list: "Standard Cost", price_list_rate: 99, buying: 1, currency: "USD", valid_from: "2027-01-01" } }), 403, "item price create refused");
   expect(await call("close an Item Price row", "norn", "PUT", `/api/resource/Item Price/${enc(prices.P1a.name)}`, { body: { valid_upto: "2026-03-31" } }), 403, "item price edit refused");
-  expect(await call("create a BOM", "norn", "POST", "/api/resource/BOM", { body: bomBody(SUB, [[P1, 1]]) }), 403, "bom create refused");
+  expect(await call("create a submitted BOM", "norn", "POST", "/api/resource/BOM", { body: { ...bomBody(SUB, [[P1, 1]]), docstatus: 1 } }), 403, "bom submit on create refused");
   expect(await call("retire a BOM", "norn", "PUT", `/api/resource/BOM/${enc(bom.top2)}`, { body: { is_active: 0 } }), 403, "bom edit refused");
-  expect(await call("create a Journal Entry", "norn", "POST", "/api/resource/Journal Entry", { body: { voucher_type: "Journal Entry", company: COMPANY, posting_date: "2026-10-24", user_remark: REMARK, accounts: [{ account: "51900 - Inventory Shrinkage and Adjustments - BWA", debit_in_account_currency: 1 }, { account: "21210 - Accrued Expenses - BWA", credit_in_account_currency: 1 }] } }), 403, "je create refused");
+  expect(await call("create a submitted Journal Entry", "norn", "POST", "/api/resource/Journal Entry", { body: { docstatus: 1, voucher_type: "Journal Entry", company: COMPANY, posting_date: "2026-10-24", user_remark: REMARK, accounts: [{ account: "51900 - Inventory Shrinkage and Adjustments - BWA", debit_in_account_currency: 1 }, { account: "21210 - Accrued Expenses - BWA", credit_in_account_currency: 1 }] } }), 403, "je submit on create refused");
   expect(await call("enqueue_replace_bom", "norn", "POST", "/api/method/erpnext.manufacturing.doctype.bom_update_tool.bom_update_tool.enqueue_replace_bom", { body: { boms: { current_bom: bom.sub2, new_bom: bom.sub1 } } }), 403, "replace bom refused");
   expect(await call("create an Item", "norn", "POST", "/api/resource/Item", { body: { item_code: `${PFX}-NOPE`, item_name: "x", item_group: "Purchased Parts", stock_uom: "Nos" } }), 403, "item create refused");
   expect(await call("delete the submitted BOM", "norn", "DELETE", `/api/resource/BOM/${enc(bom.top1)}`), 403, "bom delete refused");

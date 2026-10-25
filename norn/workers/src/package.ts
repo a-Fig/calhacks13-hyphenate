@@ -2,11 +2,16 @@
 // the PLM has given its change order number (eco_release), the worker works out what the ECO changes
 // in the ERP from the ECR's last assessment (release.ts), has the ERPNext connector turn that into the
 // lines a person enters, and records the package with record_erp_package. On each new ERP read it
-// checks the package again, so each line shows whether it has been entered. Norn never writes to the
-// ERP (#71): the connector only reads.
+// checks the package again, so each line shows whether it has been entered.
+//
+// Fern drafts, people submit (Tyler, 2026-10-25, reversing #71): the planner also saves the package's
+// BOM versions and journal entries in ERPNext as unsubmitted drafts (connectors/erpnext/src/draft.ts),
+// then reads again so those lines show as `drafted`. It finds an existing draft by the ECO number and
+// the line before it saves, so a re-run or a restart never makes a second one. Fern's ERPNext role
+// cannot submit, cancel or delete; a person submits each draft.
 import type { DbConnection } from '@norn/bindings';
 import { costCheck, costCheckRows, type ChangeRequest, type CostCheckResult } from '../../checks/src/index.ts';
-import { buildErpChangePackage, type EcoRelease, type ErpChangePackage, type ErpnextConnection, type ErpnextSettings } from '../../connectors/erpnext/src/index.ts';
+import { buildErpChangePackage, draftErpChangePackage, type EcoRelease, type ErpChangePackage, type ErpnextConnection, type ErpnextSettings } from '../../connectors/erpnext/src/index.ts';
 import type { BaselineStore } from './baseline.ts';
 import type { Client } from './connect.ts';
 import { assumptionsOf, provenanceOf, type Inputs } from './impact.ts';
@@ -17,10 +22,19 @@ import { AbortedError } from './stages.ts';
 export type PlannedPackage = { packageJson: string; lines: number; entered: number; conflicts: number; problems: string[] };
 export type Planner = (release: EcoRelease) => Promise<PlannedPackage>;
 
-/** The connector's change package on the company's ERPNext (buildErpChangePackage). It reads; it never writes. */
+/**
+ * The connector's change package on the company's ERPNext (buildErpChangePackage), with its BOM versions and journal
+ * entries saved as drafts (draftErpChangePackage) unless the settings turn drafts off. A draft ERPNext refuses is a
+ * warning on the package; the line stays for a person.
+ */
 export function erpPlanner(connection: ErpnextConnection, settings: ErpnextSettings): Planner {
   return async release => {
-    const pkg = await buildErpChangePackage(connection, settings, release);
+    let pkg = await buildErpChangePackage(connection, settings, release);
+    if (settings.changePackage?.drafts !== false) {
+      const d = await draftErpChangePackage(connection, settings, pkg);
+      if (d.created.length) pkg = await buildErpChangePackage(connection, settings, release);
+      for (const f of d.failed) pkg.warnings.push(`Fern could not save ${f.lineId} as a draft in ERPNext: ${f.why}`);
+    }
     return { packageJson: JSON.stringify(pkg), lines: pkg.counts.total, entered: pkg.counts.entered, conflicts: pkg.counts.conflict, problems: pkg.problems };
   };
 }
@@ -154,7 +168,7 @@ export async function packageOnce(conn: DbConnection, R: Client['R'], baselines:
     // A release that changes nothing the ERP holds has an empty package: nothing to ask the ERP.
     const empty = !release.items.length && !release.bomChanges?.length && !release.journals?.length && !release.unsupported?.length;
     const planned: PlannedPackage = empty
-      ? { packageJson: JSON.stringify({ version: 1, release, lines: [], counts: { total: 0, entered: 0, toEnter: 0, conflict: 0 }, effects: [], warnings: [], problems: [] }), lines: 0, entered: 0, conflicts: 0, problems: [] }
+      ? { packageJson: JSON.stringify({ version: 1, release, lines: [], counts: { total: 0, entered: 0, toEnter: 0, conflict: 0, drafted: 0 }, effects: [], warnings: [], problems: [] }), lines: 0, entered: 0, conflicts: 0, problems: [] }
       : await planner(release);
     return { release, notes, planned };
   }
