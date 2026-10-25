@@ -128,6 +128,8 @@ try {
     if (r.status !== 'done') return;
     if (r.stage === 's1_bom_delta') mark('s1 BOM delta done');
     if (r.stage === 's2_cost') mark('s2 cost done');
+    if (r.stage === 's3_timeline') mark('s3 timeline done');
+    if (r.stage === 's4_supply') mark('s4 supply done');
   });
   db.agentEvent.onInsert((_c, e) => {
     if (!e.role.startsWith('level1-')) return;
