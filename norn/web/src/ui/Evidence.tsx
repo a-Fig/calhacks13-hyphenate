@@ -74,9 +74,9 @@ export function Legend({ counts }: { counts?: Record<Evidence, number> }) {
             <div className="nx-legend-copy">
               <div className="nx-legend-label">
                 <b>{EV[k].label}</b>
-                {counts && <span className="n" aria-label={`${counts[k]} items`}>{counts[k]}</span>}
+                {counts && <span className="n" aria-label={`${counts[k]} numbers and claims`}>{counts[k]}</span>}
               </div>
-              <span className="hint">{k === 'assumption' ? 'Assumed input' : EV[k].hint}</span>
+              <span className="hint">{EV[k].hint}</span>
             </div>
           </li>
         ))}

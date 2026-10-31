@@ -157,10 +157,7 @@ export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: numbe
               className="nx-tornado-row"
               onClick={() => why.open(d.id)}
             >
-              <span className="nx-tornado-heading">
-                <span className="nx-tornado-name"><Glyph ev={d.evidence} /><span>{d.label}</span></span>
-                <span className="nx-tornado-swing num">{usdK(swing)} swing</span>
-              </span>
+              <span className="nx-tornado-name"><Glyph ev={d.evidence} /><span>{d.label}</span></span>
               <svg viewBox={`0 0 ${W} 36`} preserveAspectRatio="none" aria-hidden="true">
                 {ticks.map(t => <line key={t} className="grid" x1={sx(t)} x2={sx(t)} y1={0} y2={36} />)}
                 {leftVal < base && <path className="bar" d={seg(bx, sx(leftVal), 7)} fill={color} />}
@@ -168,8 +165,9 @@ export function TornadoChart({ drivers, base }: { drivers: Driver[]; base: numbe
                 <line x1={bx} x2={bx} y1={0} y2={36} stroke="var(--fgColor-default)" strokeWidth="1.5" />
               </svg>
               <span className="nx-tornado-ends">
-                <span><span className="nx-fg-muted">{leftLab ?? 'Lower cost'}</span><b className="num">Net {usdK(leftVal)}</b></span>
-                <span><span className="nx-fg-muted">{rightLab ?? 'Higher cost'}</span><b className="num">Net {usdK(rightVal)}</b></span>
+                <span className="nx-tornado-lo"><span className="nx-fg-muted">{leftLab ?? 'Lower cost'}</span><b className="num">Net {usdK(leftVal)}</b></span>
+                <span className="nx-tornado-swing num">{usdK(swing)} swing</span>
+                <span className="nx-tornado-hi"><span className="nx-fg-muted">{rightLab ?? 'Higher cost'}</span><b className="num">Net {usdK(rightVal)}</b></span>
               </span>
               <span className="nx-tornado-evidence">{EV[d.evidence].label}</span>
             </button>
